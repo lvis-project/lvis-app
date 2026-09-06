@@ -24,7 +24,7 @@
  * module's static surface stays leaf-shaped.
  */
 import { statSync } from "node:fs";
-import { basename } from "node:path";
+import { basename, resolve } from "node:path";
 import { errorMessage } from "../shared/error-message.js";
 import type { ApprovalGate } from "../permissions/approval-gate.js";
 import type { PermissionManager } from "../permissions/permission-manager.js";
@@ -47,7 +47,8 @@ export const EXEC_LOCKED_EXIT_CODE = 75;
 /** Exit code for a turn that ended asking the operator a question. */
 const EXEC_INPUT_REQUIRED_EXIT_CODE = 2;
 
-const EXEC_FAILURE_EXIT_CODE = 1;
+/** Exit code for a turn that failed, or a boot that never reached the turn. */
+export const EXEC_FAILURE_EXIT_CODE = 1;
 
 /**
  * Stop reasons that mean the turn did not deliver an answer. `round-cap`,
@@ -97,6 +98,13 @@ export interface ExecDeps {
   readonly stdout: NodeJS.WritableStream;
   readonly stderr: NodeJS.WritableStream;
   readonly readStdin: () => Promise<string>;
+  /**
+   * Whether a directory is an authorized workspace project (the default
+   * workspace or one of `permissions.additionalDirectories`). The session
+   * layer silently re-roots an unauthorized project at the default workspace,
+   * which a headless run must refuse instead of quietly working elsewhere.
+   */
+  readonly isAuthorizedProjectRoot: (projectRoot: string) => boolean;
 }
 
 /**
@@ -130,16 +138,22 @@ function parseMaxRounds(raw: string): number | { error: string } {
   return value;
 }
 
-function parseCwd(raw: string): string | { error: string } {
+/**
+ * A relative `--exec-cwd` is the caller's, so it resolves against the launch
+ * directory — never against wherever the process has been re-anchored to.
+ */
+function parseCwd(raw: string, launchCwd: string | null): string | { error: string } {
   if (raw.length === 0) return usageError("--exec-cwd must name a directory");
+  if (launchCwd === null) return usageError("--exec-cwd needs --exec");
+  const path = resolve(launchCwd, raw);
   try {
-    if (!statSync(raw).isDirectory()) {
-      return usageError(`--exec-cwd is not a directory: ${raw}`);
+    if (!statSync(path).isDirectory()) {
+      return usageError(`--exec-cwd is not a directory: ${path}`);
     }
   } catch {
-    return usageError(`--exec-cwd does not exist: ${raw}`);
+    return usageError(`--exec-cwd does not exist: ${path}`);
   }
-  return raw;
+  return path;
 }
 
 /**
@@ -147,9 +161,15 @@ function parseCwd(raw: string): string | { error: string } {
  *
  * Returns `null` when this is an ordinary interactive launch, a `{ error }`
  * for a command line the host will not run, and otherwise the request.
+ *
+ * `launchCwd` is the directory the process was started from, captured by the
+ * caller BEFORE the workspace anchor moves the process to `~/.lvis/workspace`
+ * (and only for a headless launch — see `execModeRequested`); it is the
+ * session root when `--exec-cwd` is absent and the base of a relative one.
  */
 export function parseExecFlags(
   argv: readonly string[],
+  launchCwd: string | null,
 ): ExecRequest | { error: string } | null {
   let execRequested = false;
   let prompt: string | null = null;
@@ -173,7 +193,7 @@ export function parseExecFlags(
       continue;
     }
     if (arg.startsWith("--exec-cwd=")) {
-      const parsed = parseCwd(arg.slice("--exec-cwd=".length));
+      const parsed = parseCwd(arg.slice("--exec-cwd=".length), launchCwd);
       if (typeof parsed !== "string") return parsed;
       cwd = parsed;
       continue;
@@ -222,12 +242,17 @@ export function parseExecFlags(
     return usageError("--set-secret consumes stdin, so --exec needs an inline prompt");
   }
 
+  const sessionRoot = cwd ?? launchCwd;
+  if (execRequested && sessionRoot === null) {
+    return usageError("the launch directory was not captured for this run");
+  }
+
   return {
     secret: secretKey === null ? null : { key: secretKey },
-    turn: execRequested
+    turn: execRequested && sessionRoot !== null
       ? {
         prompt,
-        cwd: cwd ?? process.cwd(),
+        cwd: sessionRoot,
         approveMode,
         output,
         ...(maxRounds === undefined ? {} : { maxRounds }),
@@ -334,6 +359,13 @@ async function runTurnRequest(deps: ExecDeps, request: ExecTurnRequest): Promise
   const prompt = request.prompt ?? stripOneTrailingNewline(await deps.readStdin());
   if (prompt.trim().length === 0) {
     deps.stderr.write("exec: --exec read an empty prompt\n");
+    return EXEC_USAGE_EXIT_CODE;
+  }
+  if (!deps.isAuthorizedProjectRoot(request.cwd)) {
+    deps.stderr.write(
+      `exec: ${request.cwd} is not an authorized workspace project; add it to `
+      + "permissions.additionalDirectories in ~/.lvis/settings.json or run from the default workspace\n",
+    );
     return EXEC_USAGE_EXIT_CODE;
   }
   if (request.approveMode === "allow") permissionManager.setMode("allow");

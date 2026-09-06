@@ -6,10 +6,17 @@
  * as "off" would be indistinguishable from a run nobody configured, and a
  * benchmark would report a clean run with no trace behind it.
  */
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { pathToFileURL } from "node:url";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+
+import {
+  buildMainBoundaryBundle,
+  childBundleDir,
+  repositoryRoot,
+} from "../../../plugins/isolation/__tests__/child-entry-bundle.js";
 
 import {
   configureTracing,
@@ -145,5 +152,58 @@ describe("configureTracing", () => {
         attributes: { "lvis.decision.kind": "early_exit" },
       }),
     ]);
+  });
+});
+
+/**
+ * The shipped main bundle is a split ESM build, and a split chunk that wraps a
+ * CommonJS dependency exposes only `default`. The OpenTelemetry SDK ships as
+ * CommonJS, so `configureTracing` is exercised here through that exact boundary
+ * rather than through vitest's own loader, which resolves the packages natively
+ * and would pass while the packaged app throws at boot.
+ */
+describe("configureTracing through the shipped bundle boundary", () => {
+  const bundleDir = childBundleDir("tracing-bundle");
+  let bundled: typeof import("../tracing.js");
+
+  beforeAll(async () => {
+    await buildMainBoundaryBundle({
+      entryPoints: { tracing: join(repositoryRoot(), "src/engine/telemetry/tracing.ts") },
+      outdir: bundleDir,
+      splitting: true,
+    });
+    // The premise: the lazy `import()`s became split chunks. A static import
+    // would inline the SDK and this suite would prove nothing about the chunk.
+    expect(readdirSync(join(bundleDir, "chunks")).length).toBeGreaterThan(0);
+    bundled = (await import(
+      pathToFileURL(join(bundleDir, "tracing.mjs")).href
+    )) as typeof import("../tracing.js");
+  });
+
+  afterAll(() => {
+    rmSync(bundleDir, { recursive: true, force: true });
+  });
+
+  it("resolves the OpenTelemetry SDK from a split ESM chunk and writes a span", async () => {
+    const path = join(tempDir(), "spans.jsonl");
+    const handle = await bundled.configureTracing({ kind: "file", path }, "9.9.9-bundle");
+    expect(handle.enabled).toBe(true);
+    handle.tracer.startSpan("bundle-probe").end();
+    await handle.shutdown();
+
+    const lines = readFileSync(path, "utf8").trim().split("\n");
+    expect(lines).toHaveLength(1);
+    expect((JSON.parse(lines[0]) as { name: string }).name).toBe("bundle-probe");
+  });
+
+  it("constructs the OTLP exporter from its chunk", async () => {
+    // No collector is contacted: constructing the exporter is where a
+    // `default`-only chunk fails, and shutdown flushes nothing.
+    const handle = await bundled.configureTracing(
+      { kind: "otlp", url: "http://127.0.0.1:9/v1/traces" },
+      "9.9.9-bundle",
+    );
+    expect(handle.enabled).toBe(true);
+    await handle.shutdown();
   });
 });

@@ -199,6 +199,12 @@ export interface ConversationDeps {
   closeRationaleSession?: (sessionId: string) => void;
   /** See ConversationLoopDeps.sessionHeldElsewhere — supplied by the host that owns every loop. */
   sessionHeldElsewhere?: (sessionId: string) => boolean;
+  /**
+   * See ConversationLoopDeps.tracer. Declared here because these factories copy
+   * deps field by field: a key that is not named is a key that is dropped, and
+   * a caller's spread never trips the excess-property check that would say so.
+   */
+  tracer?: import("@opentelemetry/api").Tracer;
   /** Host-owned capability; defaults false when omitted. */
   supportsA2AParentDelivery?: boolean;
   memoryManager: MemoryManager;
@@ -287,6 +293,7 @@ export type RoutineConversationLoopDeps = Pick<
   | "pluginOperationIdentityProvider"
   | "llmFetch"
   | "networkFetch"
+  | "tracer"
   | "auditLogger"
   | "isDefaultProjectRoot"
   | "getDefaultProject"
@@ -360,6 +367,7 @@ export function createRoutineConversationLoop(
     auditLogger: deps.auditLogger,
     llmFetch: deps.llmFetch,
     networkFetch: deps.networkFetch,
+    ...(deps.tracer ? { tracer: deps.tracer } : {}),
     isDefaultProjectRoot: deps.isDefaultProjectRoot ?? isDefaultWorkspaceRoot,
     getDefaultProject: deps.getDefaultProject ?? defaultWorkspaceProject,
     authorizeProject: deps.authorizeProject ?? authorizeWorkspaceProjectRoot,
@@ -415,6 +423,7 @@ export type SideChatConversationLoopDeps = Pick<
   | "pluginOperationIdentityProvider"
   | "llmFetch"
   | "networkFetch"
+  | "tracer"
   | "rationaleCoordinatorFactory"
   | "closeRationaleSession"
   | "auditLogger"
@@ -480,6 +489,7 @@ export function createSideChatConversationLoop(
       : {}),
     llmFetch: deps.llmFetch,
     networkFetch: deps.networkFetch,
+    ...(deps.tracer ? { tracer: deps.tracer } : {}),
     subscriptionProviderFactory: deps.subscriptionProviderFactory,
     broadcastPermissionConfigChanged: deps.broadcastPermissionConfigChanged,
     isDefaultProjectRoot: deps.isDefaultProjectRoot ?? isDefaultWorkspaceRoot,
@@ -536,6 +546,7 @@ export function createConversationLoop(deps: ConversationDeps,
     rewireReviewerAgent: deps.rewireReviewerAgent,
     llmFetch: deps.llmFetch,
     networkFetch: deps.networkFetch,
+    ...(deps.tracer ? { tracer: deps.tracer } : {}),
     subscriptionProviderFactory: deps.subscriptionProviderFactory,
     sessionHeldElsewhere: deps.sessionHeldElsewhere,
   });

@@ -243,6 +243,7 @@ export async function wireConversation(
   const routineLoopDeps = {
     settingsService,
     systemPromptBuilder,
+    ...(ctx.tracing.enabled ? { tracer: ctx.tracing.tracer } : {}),
     inputClassifier,
     routeEngine,
     toolRegistry,
@@ -384,6 +385,7 @@ export async function wireConversation(
   });
   sideChatConversationLoop = createSideChatConversationLoop({
     settingsService,
+    ...(ctx.tracing.enabled ? { tracer: ctx.tracing.tracer } : {}),
     inputClassifier,
     routeEngine,
     toolRegistry,

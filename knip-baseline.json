@@ -464,11 +464,6 @@
     },
     {
       "type": "exports",
-      "file": "src/main/project-root-authorization.ts",
-      "name": "isAuthorizedWorkspaceProjectRoot"
-    },
-    {
-      "type": "exports",
       "file": "src/main/shutdown-timeout.ts",
       "name": "__resetShutdownTimeoutWarnLatchesForTest"
     },
