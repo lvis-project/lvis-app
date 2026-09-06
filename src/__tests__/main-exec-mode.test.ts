@@ -45,7 +45,7 @@ describe("main.ts — headless exec branch", () => {
     expect(mainSource).toMatch(
       /import\s*\{[^}]*\brunExecTurn\b[^}]*\}\s*from\s*"\.\/main\/exec-mode\.js"/,
     );
-    expect(mainSource).toContain("parseExecFlags(process.argv)");
+    expect(mainSource).toContain("parseExecFlags(process.argv, launchCwd)");
   });
 
   it("runs after setServices and before the workspace is opened", () => {

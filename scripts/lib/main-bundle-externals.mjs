@@ -58,4 +58,20 @@ export const MAIN_BUNDLE_EXTERNALS = [
   // resolve from node_modules normally. If either side of the pair is
   // dropped, the runtime vendor smoke (scripts/asrt-runtime-smoke.mjs) fails.
   "@anthropic-ai/sandbox-runtime",
+  // ── OpenTelemetry SDK — CommonJS behind a split ESM boundary ─────────
+  // `tracing.ts` loads the SDK lazily with `import()` so a run without
+  // LVIS_TELEMETRY never pays for it. The SDK packages ship CommonJS only,
+  // and a split ESM chunk that wraps a CommonJS module exposes just
+  // `default`: `NodeTracerProvider`, `resourceFromAttributes` and
+  // `OTLPTraceExporter` all read as undefined and the first packaged run
+  // with telemetry on threw at boot. External, they resolve through Node's
+  // own CommonJS interop — the same path vitest exercises. `@opentelemetry/api`
+  // rides along so the provider the SDK registers and the tracer the bundle
+  // reads share ONE copy of the API's global registry.
+  // (`src/engine/telemetry/__tests__/tracing.test.ts` bundles through this
+  // boundary and fails if any of these is dropped.)
+  "@opentelemetry/api",
+  "@opentelemetry/sdk-trace-node",
+  "@opentelemetry/resources",
+  "@opentelemetry/exporter-trace-otlp-http",
 ];

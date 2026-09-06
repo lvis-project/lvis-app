@@ -47,7 +47,8 @@ export const EXEC_LOCKED_EXIT_CODE = 75;
 /** Exit code for a turn that ended asking the operator a question. */
 const EXEC_INPUT_REQUIRED_EXIT_CODE = 2;
 
-const EXEC_FAILURE_EXIT_CODE = 1;
+/** Exit code for a turn that failed, or a boot that never reached the turn. */
+export const EXEC_FAILURE_EXIT_CODE = 1;
 
 /**
  * Stop reasons that mean the turn did not deliver an answer. `round-cap`,
@@ -147,9 +148,14 @@ function parseCwd(raw: string): string | { error: string } {
  *
  * Returns `null` when this is an ordinary interactive launch, a `{ error }`
  * for a command line the host will not run, and otherwise the request.
+ *
+ * `launchCwd` is the directory the process was started from, captured by the
+ * caller BEFORE the workspace anchor moves the process to `~/.lvis/workspace`;
+ * it is the session root when `--exec-cwd` is absent.
  */
 export function parseExecFlags(
   argv: readonly string[],
+  launchCwd: string,
 ): ExecRequest | { error: string } | null {
   let execRequested = false;
   let prompt: string | null = null;
@@ -227,7 +233,7 @@ export function parseExecFlags(
     turn: execRequested
       ? {
         prompt,
-        cwd: cwd ?? process.cwd(),
+        cwd: cwd ?? launchCwd,
         approveMode,
         output,
         ...(maxRounds === undefined ? {} : { maxRounds }),

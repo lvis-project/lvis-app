@@ -37,16 +37,28 @@ export function childBundleDir(cacheName: string): string {
   return join(repositoryRoot(), ".cache", cacheName);
 }
 
-/** Bundle `plugin-child-main.ts` into {@link childBundleDir} and name the entry. */
-export async function buildChildEntry(cacheName: string): Promise<string> {
-  const repoRoot = repositoryRoot();
-  const childEntryPath = join(childBundleDir(cacheName), "plugin-child-main.mjs");
+/**
+ * Bundle one main-process module the way the shipped build bundles it: the
+ * same external boundary, banner, format, platform and target. `splitting`
+ * matters for what a suite can prove — the shipped build splits, and a split
+ * ESM chunk exposes a CommonJS dependency differently from an inlined one.
+ */
+export async function buildMainBoundaryBundle(options: {
+  readonly entryPoints: Record<string, string>;
+  readonly outdir: string;
+  readonly splitting: boolean;
+}): Promise<void> {
   await build({
-    absWorkingDir: repoRoot,
-    entryPoints: [join(repoRoot, "src/plugins/isolation/plugin-child-main.ts")],
-    outfile: childEntryPath,
+    absWorkingDir: repositoryRoot(),
+    entryPoints: options.entryPoints,
+    outdir: options.outdir,
+    entryNames: "[name]",
+    // `.mjs` so the emitted entry is ESM wherever a suite copies or spawns it.
+    outExtension: { ".js": ".mjs" },
+    chunkNames: "chunks/[name]-[hash]",
     bundle: true,
     format: "esm",
+    splitting: options.splitting,
     platform: "node",
     target: ["node22"],
     external: [...MAIN_BUNDLE_EXTERNALS],
@@ -57,5 +69,17 @@ export async function buildChildEntry(cacheName: string): Promise<string> {
         + "const require = __r(import.meta.url);\n",
     },
   });
-  return childEntryPath;
+}
+
+/** Bundle `plugin-child-main.ts` into {@link childBundleDir} and name the entry. */
+export async function buildChildEntry(cacheName: string): Promise<string> {
+  const outdir = childBundleDir(cacheName);
+  await buildMainBoundaryBundle({
+    entryPoints: {
+      "plugin-child-main": join(repositoryRoot(), "src/plugins/isolation/plugin-child-main.ts"),
+    },
+    outdir,
+    splitting: false,
+  });
+  return join(outdir, "plugin-child-main.mjs");
 }

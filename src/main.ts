@@ -69,6 +69,7 @@ import { getLvisAppVersion } from "./shared/app-version.js";
 import { installNativeEditContextMenu } from "./main/native-edit-context-menu.js";
 import { handleLvisUri, lvisDevLog } from "./main/lvis-deep-link.js";
 import {
+  EXEC_FAILURE_EXIT_CODE,
   EXEC_LOCKED_EXIT_CODE,
   EXEC_USAGE_EXIT_CODE,
   parseExecFlags,
@@ -93,6 +94,10 @@ const log = createLogger("lvis");
 // Early boot environment — workspace cwd, plugin-asset protocol scheme, WSL/GPU
 // switches, app name/AppUserModelId, and packaged-env scrub.
 // MUST run before app.whenReady(); called here at module load.
+// The directory the process was started from. `runEarlyBootEnv()` re-anchors
+// the process to `~/.lvis/workspace` a line later, and a headless `--exec`
+// without `--exec-cwd` must work on the caller's directory, not the anchor.
+const launchCwd = process.cwd();
 runEarlyBootEnv();
 
 /**
@@ -122,7 +127,7 @@ const pluginSmokeIds = parsePluginSmokeFlag(process.argv);
 
 // `--exec` / `--set-secret`. Parsed at module load beside the smoke flag so a
 // malformed command line is already known when the branch below is reached.
-const execRequest = parseExecFlags(process.argv);
+const execRequest = parseExecFlags(process.argv, launchCwd);
 
 async function main() {
   // A malformed `--exec` / `--set-secret` command line is answered before a
@@ -610,6 +615,9 @@ if (!gotSingleInstanceLock) {
     installSideBrowserPartitionPolicy();
     void main().catch((error) => {
       log.error({ err: error }, "bootstrap failed");
+      // A headless run that never reached its turn must not exit 0: a runner
+      // would otherwise file an empty stream as a completed turn.
+      if (execRequest !== null) process.exitCode = EXEC_FAILURE_EXIT_CODE;
       app.quit();
     });
   });

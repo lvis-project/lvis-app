@@ -150,24 +150,26 @@ describe("execModeRequested", () => {
   });
 });
 
+const LAUNCH_CWD = "/launched/from/here";
+
 describe("parseExecFlags", () => {
   it("returns null for an ordinary launch", () => {
-    expect(parseExecFlags(["electron", "main.js"])).toBeNull();
+    expect(parseExecFlags(["electron", "main.js"], LAUNCH_CWD)).toBeNull();
   });
 
-  it("reads an inline prompt and defaults the rest", () => {
-    const request = expectRequest(parseExecFlags(["--exec=count to three"]));
+  it("reads an inline prompt and roots the session where the process was launched", () => {
+    const request = expectRequest(parseExecFlags(["--exec=count to three"], LAUNCH_CWD));
     expect(request.secret).toBeNull();
     expect(request.turn).toEqual({
       prompt: "count to three",
-      cwd: process.cwd(),
+      cwd: LAUNCH_CWD,
       approveMode: "default",
       output: "stream-json",
     });
   });
 
   it.each([["--exec"], ["--exec=-"]])("defers the prompt to stdin for %s", (flag) => {
-    expect(expectRequest(parseExecFlags([flag])).turn?.prompt).toBeNull();
+    expect(expectRequest(parseExecFlags([flag], LAUNCH_CWD)).turn?.prompt).toBeNull();
   });
 
   it("accepts every modifier", async () => {
@@ -179,7 +181,7 @@ describe("parseExecFlags", () => {
         "--exec-approve=allow",
         "--exec-output=json",
         "--exec-max-rounds=4",
-      ]));
+      ], LAUNCH_CWD));
       expect(request.turn).toEqual({
         prompt: "hi",
         cwd: dir,
@@ -193,7 +195,7 @@ describe("parseExecFlags", () => {
   });
 
   it("reads a secret key without a turn", () => {
-    const request = expectRequest(parseExecFlags(["--set-secret=llm.apiKey.claude"]));
+    const request = expectRequest(parseExecFlags(["--set-secret=llm.apiKey.claude"], LAUNCH_CWD));
     expect(request).toEqual({ secret: { key: "llm.apiKey.claude" }, turn: null });
   });
 
@@ -202,7 +204,7 @@ describe("parseExecFlags", () => {
     const file = join(dir, "not-a-dir");
     writeFileSync(file, "x");
     try {
-      expect(parseExecFlags(["--exec=hi", `--exec-cwd=${file}`]))
+      expect(parseExecFlags(["--exec=hi", `--exec-cwd=${file}`], LAUNCH_CWD))
         .toEqual({ error: expect.stringContaining("not a directory") });
     } finally {
       await cleanupTmpDir(dir);
@@ -221,11 +223,11 @@ describe("parseExecFlags", () => {
     [["--set-secret="], "empty key"],
     [["--exec", "--set-secret=k"], "consumes stdin"],
   ])("rejects %j", (argv, fragment) => {
-    expect(parseExecFlags(argv)).toEqual({ error: expect.stringContaining(fragment) });
+    expect(parseExecFlags(argv, LAUNCH_CWD)).toEqual({ error: expect.stringContaining(fragment) });
   });
 
   it("allows a secret beside an inline prompt", () => {
-    const request = expectRequest(parseExecFlags(["--exec=hi", "--set-secret=k"]));
+    const request = expectRequest(parseExecFlags(["--exec=hi", "--set-secret=k"], LAUNCH_CWD));
     expect(request.secret).toEqual({ key: "k" });
     expect(request.turn?.prompt).toBe("hi");
   });

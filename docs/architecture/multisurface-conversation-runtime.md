@@ -427,7 +427,8 @@ event union, with a sink that serialises instead of projecting to a renderer.
 
 ```text
 lvis --exec="<prompt>"              prompt inline; `--exec` or `--exec=-` reads stdin
-     [--exec-cwd=<dir>]             session project root (default: process cwd)
+     [--exec-cwd=<dir>]             session project root (default: the directory
+                                    the process was launched from)
      [--exec-approve=default|allow] permission mode for the run (default: default)
      [--exec-output=stream-json|json]  (default: stream-json)
      [--exec-max-rounds=<n>]        round budget for the turn
