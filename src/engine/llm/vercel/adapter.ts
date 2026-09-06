@@ -579,6 +579,9 @@ export class VercelUnifiedProvider implements LLMProvider {
         // Chat Completions puts token usage on a stream only when the request
         // asks for it (`stream_options.include_usage`); without this the turn
         // records zero provider tokens against every OpenAI-compatible server.
+        // Deliberately NOT gated by vendor class (unlike the vLLM-only body
+        // fields below): `stream_options` is part of the OpenAI Chat
+        // Completions schema itself, not a server extension.
         includeUsage: true,
         ...(this.customFetch ? { fetch: this.customFetch } : {}),
       });

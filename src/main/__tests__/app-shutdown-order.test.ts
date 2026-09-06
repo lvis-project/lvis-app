@@ -74,10 +74,14 @@ vi.mock("../managed-child-processes.js", () => ({
 vi.mock("../terminal/pty-manager.js", () => ({
   forceKillAllTerminalsForShutdown: () => forceKillAllTerminalsForShutdown(),
 }));
+// A test that exercises the timed-out branch flips this; the body is not run
+// then, exactly as a real deadline abandons a cleanup that never settles.
+let hardTimeoutFires = false;
 vi.mock("../shutdown-timeout.js", () => ({
   resolveShutdownCleanupTimeoutMs: (_settingMs?: number) => 5000,
   // Run the cleanup body with a never-aborted signal and report completion.
   runCleanupWithHardTimeout: async (fn: (signal: AbortSignal) => Promise<void>) => {
+    if (hardTimeoutFires) return { status: "timed-out" as const };
     try {
       await fn(new AbortController().signal);
       return { status: "completed" as const };
@@ -116,6 +120,24 @@ beforeEach(() => {
 });
 
 describe("runAppShutdownCleanup ordering (critic M1)", () => {
+  it("exits a timed-out cleanup with the code a headless run already chose", async () => {
+    getServices.mockReturnValue(makeServices());
+    vi.resetModules();
+    const { app } = await import("electron");
+    const { runAppShutdownCleanup } = await import("../app-shutdown.js");
+    const previous = process.exitCode;
+    process.exitCode = 2;
+    hardTimeoutFires = true;
+    try {
+      const outcome = await runAppShutdownCleanup({ reason: "before-quit", exitOnTimeout: true });
+      expect(outcome).toBe("timed-out");
+      expect(app.exit).toHaveBeenCalledWith(2);
+    } finally {
+      process.exitCode = previous;
+      hardTimeoutFires = false;
+    }
+  });
+
   // PR #1503 cross-PR check: the log-sink close (added on main after this file
   // was authored) must remain the LAST step on the happy path, coexisting with
   // unregisterAllGlobalShortcuts staying FIRST — the two orderings are

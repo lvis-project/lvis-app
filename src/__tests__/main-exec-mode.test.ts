@@ -95,8 +95,12 @@ describe("main.ts — headless exec branch", () => {
     const handler = mainSource.indexOf('app.on("will-quit"');
     expect(handler).toBeGreaterThanOrEqual(0);
     const body = mainSource.slice(handler, handler + 400);
-    expect(body).toContain("execRequest === null || process.exitCode === undefined");
-    expect(body).toMatch(/event\.preventDefault\(\);\s*app\.exit\(Number\(process\.exitCode\)\)/);
+    expect(body, "desktop launches keep Electron's own exit").toMatch(/execRequest === null/);
+    expect(body, "a run that chose no code keeps Electron's own exit").toMatch(
+      /typeof process\.exitCode !== "number"/,
+    );
+    expect(body, "the default quit must be replaced by the chosen code").toMatch(/event\.preventDefault\(\)/);
+    expect(body).toMatch(/app\.exit\(process\.exitCode\)/);
   });
 
   it("exits the lock-held case hard, before whenReady, with the retry code", () => {
@@ -117,7 +121,9 @@ describe("main.ts — headless exec branch", () => {
     const lockBranch = mainSource.match(/if \(!gotSingleInstanceLock\) \{[\s\S]*?\n\} else \{/);
     expect(lockBranch, "could not locate the single-instance branch").not.toBeNull();
     expect(lockBranch![0]).toContain("EXEC_LOCKED_EXIT_CODE");
-    expect(lockBranch![0]).toMatch(/process\.stderr\.write/);
+    // Synchronous on purpose: the branch hard-exits right after, and
+    // `process.stderr` is asynchronous on a macOS pipe.
+    expect(lockBranch![0]).toMatch(/writeSync\(\s*2,/);
   });
 
   it("keeps the plugin-smoke flag on its own path", () => {
