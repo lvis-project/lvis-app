@@ -52,6 +52,12 @@ export interface ReleasePrepInput {
   networkFetch: typeof fetch;
   /** Boot-configured tracing; its batched spans are flushed on quit. */
   tracing: TracingHandle;
+  /**
+   * Whether to start the app auto-updater. A headless launch passes `false`:
+   * the release check is a service connection the run never asked for, and
+   * nobody is there to act on what it finds.
+   */
+  startAutoUpdater: boolean;
 }
 
 /**
@@ -159,22 +165,24 @@ export function wireReleasePrep(input: ReleasePrepInput): ReleasePrepOutput {
       }
     });
 
-    const updater = createAutoUpdater({
-      mainWindow,
-      auditLogger: bootAuditLogger,
-      isEnabled: () => settingsService.get("updates")?.autoCheckEnabled ?? true,
-      getSkippedVersion: () => settingsService.get("updates")?.skippedVersion,
-      setSkippedVersion: async (version) => {
-        await settingsService.patch({
-          updates: {
-            ...settingsService.get("updates"),
-            skippedVersion: version,
-          },
-        });
-      },
-    });
-    updater.start();
-    autoUpdaterStop = updater.stop;
+    if (input.startAutoUpdater) {
+      const updater = createAutoUpdater({
+        mainWindow,
+        auditLogger: bootAuditLogger,
+        isEnabled: () => settingsService.get("updates")?.autoCheckEnabled ?? true,
+        getSkippedVersion: () => settingsService.get("updates")?.skippedVersion,
+        setSkippedVersion: async (version) => {
+          await settingsService.patch({
+            updates: {
+              ...settingsService.get("updates"),
+              skippedVersion: version,
+            },
+          });
+        },
+      });
+      updater.start();
+      autoUpdaterStop = updater.stop;
+    }
     const retainedTelemetry = telemetry;
     app.prependOnceListener("before-quit", () => {
       try { autoUpdaterStop?.(); } catch { /* noop */ }
@@ -185,7 +193,10 @@ export function wireReleasePrep(input: ReleasePrepInput): ReleasePrepOutput {
         log.warn("shutdown: telemetry final flush failed: %s", (err as Error).message);
       }
     });
-    log.info("boot: release prep wired (updater/crash/telemetry)");
+    log.info(
+      "boot: release prep wired (crash/telemetry%s)",
+      input.startAutoUpdater ? "/updater" : ", updater not started",
+    );
   } catch (err) {
     log.warn("boot: release prep init failed (non-fatal): %s", (err as Error).message);
   }

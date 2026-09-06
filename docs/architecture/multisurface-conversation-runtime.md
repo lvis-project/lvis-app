@@ -470,10 +470,21 @@ exit codes rather than worked around.
 secret is applied first and the prompt must be inline — both flags read the
 whole of stdin, so only one of them can have it.
 
+A headless boot opens **no service connection of its own**: the only egress a
+one-shot run produces is the model provider the turn talks to and whatever the
+tools it calls reach. `bootstrap()` takes the launch mode as an argument and
+derives all four consequences from that one fact — the marketplace catalog is
+not synced at boot, the whitelist / revocation / admission registries
+initialise from their disk cache, the release check is not started, and neither
+the plugin-update nor the announcement poll is scheduled. Plugin loading is
+untouched: the run still loads whatever the registry snapshot on disk holds.
+An interactive launch keeps every one of them.
+
 Implementation anchors:
 
 - `src/main/exec-mode.ts`
 - `src/main.ts`
+- `src/boot.ts` (`BootLaunch`)
 - `src/ipc/handlers/chat-stream.ts`
 
 ## Telemetry

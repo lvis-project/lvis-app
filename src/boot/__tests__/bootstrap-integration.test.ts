@@ -258,9 +258,27 @@ vi.mock("../../plugins/plugin-bundle-lifecycle.js", () => ({
   },
 }));
 
+// The three signed registries are mocked together: each one otherwise reaches
+// the public document CDN from a unit run, and the `online` flag boot hands
+// them is what the service-connection assertions below read.
 vi.mock("../steps/whitelist-bootstrap.js", () => ({
-  wireWhitelistRegistry: vi.fn(async () => {
+  wireWhitelistRegistry: vi.fn(async (input: { online?: boolean }) => {
+    h.captured["whitelistOnline"] = input.online;
     h.rec("whitelist");
+  }),
+}));
+
+vi.mock("../steps/revocation-bootstrap.js", () => ({
+  wireRevocationRegistry: vi.fn(async (input: { online?: boolean }) => {
+    h.captured["revocationOnline"] = input.online;
+    h.rec("revocation");
+  }),
+}));
+
+vi.mock("../steps/admission-bootstrap.js", () => ({
+  wireAdmissionRegistry: vi.fn(async (input: { online?: boolean }) => {
+    h.captured["admissionOnline"] = input.online;
+    h.rec("admission");
   }),
 }));
 
@@ -272,11 +290,14 @@ vi.mock("../steps/ipc-bridge.js", () => ({
 }));
 
 vi.mock("../steps/post-boot.js", () => ({
-  wireReleasePrep: vi.fn(() => ({
-    telemetry: { stop: vi.fn() },
-    pluginTelemetry: { stop: vi.fn() },
-    autoUpdaterStop: vi.fn(),
-  })),
+  wireReleasePrep: vi.fn((input: { startAutoUpdater: boolean }) => {
+    h.captured["startAutoUpdater"] = input.startAutoUpdater;
+    return {
+      telemetry: { stop: vi.fn() },
+      pluginTelemetry: { stop: vi.fn() },
+      autoUpdaterStop: vi.fn(),
+    };
+  }),
   wireUpdateCheck: vi.fn(),
   wireAnnouncementCheck: vi.fn(),
 }));
@@ -568,6 +589,8 @@ vi.mock("../../ipc/domains/permissions.js", () => ({
 }));
 
 import { bootstrap, type AppServices } from "../../boot.js";
+import { runManagedBootstrap } from "../managed-marketplace.js";
+import { wireAnnouncementCheck, wireUpdateCheck } from "../steps/post-boot.js";
 
 function fakeWindow() {
   return {
@@ -602,7 +625,12 @@ describe("bootstrap() integration lock", () => {
     savedSandboxEnv = process.env["LVIS_SANDBOX_ENABLED"];
     delete process.env["LVIS_SANDBOX_ENABLED"];
     const win = fakeWindow();
-    services = await bootstrap("/tmp/lvis-boot-test/project", win, () => win);
+    services = await bootstrap(
+      "/tmp/lvis-boot-test/project",
+      win,
+      () => win,
+      "interactive",
+    );
   }, 180_000);
 
   afterAll(() => {
@@ -869,5 +897,67 @@ describe("bootstrap() integration lock", () => {
     expect(subAgentOptions.parentDeps["pluginOperationIdentityProvider"]).toBe(
       mainDeps["pluginOperationIdentityProvider"],
     );
+  });
+
+  it("opens the host's own service connections (interactive launch is unchanged)", () => {
+    // The three signed registries resolve `online` from their own default, so
+    // boot passes nothing and the step keeps deciding.
+    expect(h.captured["whitelistOnline"]).toBeUndefined();
+    expect(h.captured["revocationOnline"]).toBeUndefined();
+    expect(h.captured["admissionOnline"]).toBeUndefined();
+    expect(vi.mocked(runManagedBootstrap)).toHaveBeenCalled();
+    expect(h.captured["startAutoUpdater"]).toBe(true);
+    expect(vi.mocked(wireUpdateCheck)).toHaveBeenCalled();
+    expect(vi.mocked(wireAnnouncementCheck)).toHaveBeenCalled();
+  });
+});
+
+/**
+ * A headless `--exec` boot opens no service connections of its own.
+ *
+ * The rule is one fact — the `launch` argument — and this suite is what proves
+ * all four consequences come off it: the marketplace catalog is not read, the
+ * three signed registries initialise from disk, the release check is not
+ * started, and neither marketplace poller is scheduled. The interactive boot
+ * above is the control; both run against the same mocked seams.
+ */
+describe("bootstrap() headless launch opens no service connections", () => {
+  let savedSandboxEnv: string | undefined;
+
+  beforeAll(async () => {
+    savedSandboxEnv = process.env["LVIS_SANDBOX_ENABLED"];
+    delete process.env["LVIS_SANDBOX_ENABLED"];
+    // The interactive boot above already called each of these; the assertions
+    // here are about what THIS boot does.
+    vi.mocked(runManagedBootstrap).mockClear();
+    vi.mocked(wireUpdateCheck).mockClear();
+    vi.mocked(wireAnnouncementCheck).mockClear();
+    const win = fakeWindow();
+    await bootstrap("/tmp/lvis-boot-test/project", win, () => win, "headless");
+  }, 180_000);
+
+  afterAll(() => {
+    if (savedSandboxEnv === undefined)
+      delete process.env["LVIS_SANDBOX_ENABLED"];
+    else process.env["LVIS_SANDBOX_ENABLED"] = savedSandboxEnv;
+  });
+
+  it("does not read the marketplace catalog at boot", () => {
+    expect(vi.mocked(runManagedBootstrap)).not.toHaveBeenCalled();
+  });
+
+  it("initialises the signed registries offline", () => {
+    expect(h.captured["whitelistOnline"]).toBe(false);
+    expect(h.captured["revocationOnline"]).toBe(false);
+    expect(h.captured["admissionOnline"]).toBe(false);
+  });
+
+  it("does not start the auto-updater", () => {
+    expect(h.captured["startAutoUpdater"]).toBe(false);
+  });
+
+  it("schedules neither marketplace poll", () => {
+    expect(vi.mocked(wireUpdateCheck)).not.toHaveBeenCalled();
+    expect(vi.mocked(wireAnnouncementCheck)).not.toHaveBeenCalled();
   });
 });

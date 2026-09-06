@@ -166,20 +166,47 @@ function readParentContextTurns(
 export type { AppServices } from "./boot/types.js";
 
 /**
+ * How this process was launched, and therefore whether anything is watching it.
+ *
+ * `"headless"` is the one-shot `--exec` / `--set-secret` run: it performs a
+ * single request and quits. Such a run opens NO service connections of its
+ * own — no marketplace catalog sync, no signed-registry refresh over the
+ * network, no release check, no polling — because nothing in the process can
+ * act on what those would return, and a run asked for one turn should not
+ * reach anything the turn did not ask for. Its only egress is the model
+ * provider the turn talks to and whatever the tools it calls reach. An
+ * `"interactive"` launch keeps every one of them.
+ */
+export type BootLaunch = "interactive" | "headless";
+
+/**
  * @param getMainWindow Live BrowserWindow getter — must read the current
  *   `main.ts` binding because Electron close+reopen replaces the window.
  *   Bootstrap-time consumers (e.g. plugin event bridge) take the resolved
  *   `mainWindow`; runtime consumers (e.g. routinesScheduler) take this getter.
- *   Defaults to a closure over `mainWindow` for callers that don't have a
- *   live reference, but those callers will silently lose IPC after window
- *   recreation.
+ * @param launch Whether this is an interactive launch or a headless one-shot
+ *   run — see {@link BootLaunch}. The single fact every service-connection
+ *   decision below is derived from.
  */
 export async function bootstrap(
   projectRoot: string,
   mainWindow: BrowserWindow,
-  getMainWindow: () => BrowserWindow | null = () => mainWindow,
+  getMainWindow: () => BrowserWindow | null,
+  launch: BootLaunch,
 ): Promise<AppServices> {
   log.info("boot: starting...");
+  const headless = launch === "headless";
+  if (headless) {
+    log.info(
+      "boot: headless launch — no catalog sync, registry refresh, release check or polling",
+    );
+  }
+  /**
+   * Offline override for the three signed registries. Spread rather than
+   * passed as a plain `online:` so an interactive launch still resolves the
+   * toggle exactly as it always has, from each step's own default.
+   */
+  const signedRegistryOffline = headless ? { online: false as const } : {};
   const ctx = createBootContext({ projectRoot, mainWindow, getMainWindow });
 
   // Before any provider exists, so the AI SDK integration is registered by the
@@ -509,6 +536,7 @@ export async function bootstrap(
   await wireWhitelistRegistry({
     bootAuditLogger: ctx.bootAuditLogger,
     networkFetch: ctx.singleHopNetworkFetch,
+    ...signedRegistryOffline,
   });
 
   // Load the plugin revocation registry BEFORE initPluginRuntime, same
@@ -520,6 +548,7 @@ export async function bootstrap(
   await wireRevocationRegistry({
     bootAuditLogger: ctx.bootAuditLogger,
     networkFetch: ctx.singleHopNetworkFetch,
+    ...signedRegistryOffline,
   });
 
   // Warm the admission catalog. Unlike the two registries above this is not an
@@ -529,6 +558,7 @@ export async function bootstrap(
   await wireAdmissionRegistry({
     bootAuditLogger: ctx.bootAuditLogger,
     networkFetch: ctx.singleHopNetworkFetch,
+    ...signedRegistryOffline,
   });
 
   // PermissionManager is built BEFORE initPluginRuntime
@@ -798,7 +828,12 @@ export async function bootstrap(
   // commits verified bytes/receipt/registry only: it never publishes or starts
   // a candidate. startPlugins() seals admission synchronously, waits for the
   // tail (including rollback), then loads the one committed registry snapshot.
-  const managedPreStartSync = runManagedBootstrap({
+  //
+  // A headless run skips the sync entirely: it is the boot-time reader of the
+  // marketplace catalog, and nothing about running one turn needs the managed
+  // set to be current. The plugins already on disk still load — this drops the
+  // network refresh, not the registry snapshot `startPlugins()` reads.
+  const managedPreStartSync = headless ? Promise.resolve() : runManagedBootstrap({
     pluginMarketplace: ctx.pluginMarketplace,
     ensurePluginStateReadyForInstall: (pluginId) =>
       ensurePluginStateReadyForInstall(pluginId, {
@@ -884,18 +919,24 @@ export async function bootstrap(
     bootAuditLogger: ctx.bootAuditLogger,
     networkFetch: ctx.singleHopNetworkFetch,
     tracing: ctx.tracing,
+    startAutoUpdater: !headless,
   });
-  wireUpdateCheck({
-    mainWindow,
-    settingsService,
-    marketplaceFetcher: ctx.marketplaceFetcher,
-    pluginPaths,
-  });
-  wireAnnouncementCheck({
-    getMainWindow,
-    settingsService,
-    marketplaceFetcher: ctx.marketplaceFetcher,
-  });
+  // Both pollers exist to push a banner at a renderer, and both read the
+  // marketplace to do it. A headless run has neither the renderer nor the
+  // lifetime, so it schedules neither.
+  if (!headless) {
+    wireUpdateCheck({
+      mainWindow,
+      settingsService,
+      marketplaceFetcher: ctx.marketplaceFetcher,
+      pluginPaths,
+    });
+    wireAnnouncementCheck({
+      getMainWindow,
+      settingsService,
+      marketplaceFetcher: ctx.marketplaceFetcher,
+    });
+  }
   ctx.telemetry = telemetry;
   ctx.pluginTelemetry = pluginTelemetry;
   ctx.autoUpdaterStop = autoUpdaterStop;
