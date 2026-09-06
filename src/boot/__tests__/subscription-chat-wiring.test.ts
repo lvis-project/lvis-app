@@ -74,6 +74,36 @@ function sharedLoopDeps() {
 }
 
 describe("subscription chat boot wiring", () => {
+  it("forwards the boot-configured tracer through every loop factory", () => {
+    // The factories copy deps by name. A tracer handed over as a spread key
+    // passed TypeScript and reached no loop — the packaged app wrote AI SDK
+    // spans with no `lvis.turn` parent while this suite stayed green.
+    const tracer = { startActiveSpan: vi.fn(), startSpan: vi.fn() };
+    const shared = sharedLoopDeps();
+
+    const main = createConversationLoop({
+      ...shared,
+      systemPromptBuilder: {},
+      routineEngine: {},
+      postTurnHookChain: {},
+      tracer,
+    } as unknown as Parameters<typeof createConversationLoop>[0]);
+    const side = createSideChatConversationLoop({
+      ...shared,
+      sideChatMemoryManager: makeConversationLoopMemoryManager(),
+      tracer,
+    } as unknown as Parameters<typeof createSideChatConversationLoop>[0]);
+    const routine = createRoutineConversationLoop({
+      ...shared,
+      systemPromptBuilder: {},
+      tracer,
+    } as unknown as Parameters<typeof createRoutineConversationLoop>[0]);
+
+    expect(main.deps.tracer).toBe(tracer);
+    expect(side.deps.tracer).toBe(tracer);
+    expect(routine.deps.tracer).toBe(tracer);
+  });
+
   beforeEach(() => {
     h.createSubscriptionLlmProvider.mockReset();
     h.createSubscriptionLlmProvider.mockImplementation((options: SubscriptionProviderFactoryOptions) =>
