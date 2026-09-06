@@ -1091,6 +1091,15 @@ const APPROVAL_ANSWERER_AUDIT_TOKENS = {
    * owner's button press may pass it; the renderer's IPC route cannot.
    */
   "platform-bridge": "platform-bridge",
+  /**
+   * The headless one-shot runner (`--exec`): no window, no owner, no dock. It
+   * answers every parked request with a deny so an unattended process cannot
+   * sit on the gate's timeout. Distinct from every token above for the reason
+   * the dimension exists — a reviewer must be able to tell "the owner declined
+   * this call" from "nobody was there and the host declined it on their
+   * behalf", and only this token can carry the second.
+   */
+  "headless-exec": "headless-exec",
 } as const;
 
 /**

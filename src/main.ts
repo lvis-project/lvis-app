@@ -69,6 +69,13 @@ import { getLvisAppVersion } from "./shared/app-version.js";
 import { installNativeEditContextMenu } from "./main/native-edit-context-menu.js";
 import { handleLvisUri, lvisDevLog } from "./main/lvis-deep-link.js";
 import {
+  EXEC_LOCKED_EXIT_CODE,
+  EXEC_USAGE_EXIT_CODE,
+  parseExecFlags,
+  readAllStdin,
+  runExecTurn,
+} from "./main/exec-mode.js";
+import {
   getMainWindow,
   getPendingLvisUri,
   getServices,
@@ -113,7 +120,19 @@ function parsePluginSmokeFlag(argv: readonly string[]): string[] | null {
 
 const pluginSmokeIds = parsePluginSmokeFlag(process.argv);
 
+// `--exec` / `--set-secret`. Parsed at module load beside the smoke flag so a
+// malformed command line is already known when the branch below is reached.
+const execRequest = parseExecFlags(process.argv);
+
 async function main() {
+  // A malformed `--exec` / `--set-secret` command line is answered before a
+  // window, a splash, or a service exists: there is nothing to boot for.
+  if (execRequest !== null && "error" in execRequest) {
+    process.stderr.write(`${execRequest.error}\n`);
+    process.exitCode = EXEC_USAGE_EXIT_CODE;
+    app.quit();
+    return;
+  }
   configureNativeWindowCoordinator({
     showOrCreateMainWindow,
     refreshNativeChrome: () => {
@@ -166,6 +185,31 @@ async function main() {
     }
     log.info(`all ${pluginSmokeIds.length} plugins initialized`);
     app.exit(0);
+    return;
+  }
+
+  // `--exec` / `--set-secret` are one-shot headless entry points: the process
+  // performs the request against the freshly booted service graph and quits
+  // without opening a workspace.
+  //
+  // `app.quit()` rather than `app.exit()` — unlike the smoke flag above, this
+  // run has WRITTEN things. The `before-quit` handler's runAppShutdownCleanup
+  // is what flushes the session transcript and the audit log, and a hard exit
+  // would drop exactly the record a benchmark run came to produce.
+  if (execRequest !== null) {
+    process.exitCode = await runExecTurn(
+      {
+        conversationLoop: services.conversationLoop,
+        permissionManager: services.conversationLoop.permissionManager,
+        approvalGate: services.approvalGate,
+        settingsService: services.settingsService,
+        stdout: process.stdout,
+        stderr: process.stderr,
+        readStdin: readAllStdin,
+      },
+      execRequest,
+    );
+    app.quit();
     return;
   }
 
@@ -518,6 +562,14 @@ app.on("open-url", (event, url) => {
 // Windows/Linux: URI delivered as argv of second instance
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 if (!gotSingleInstanceLock) {
+  // A headless run must never look like an empty successful turn: say why
+  // nothing happened and exit with a code a runner can retry on.
+  if (execRequest !== null) {
+    process.stderr.write(
+      "exec: another LVIS process holds the single-instance lock; quit it before running --exec\n",
+    );
+    process.exitCode = EXEC_LOCKED_EXIT_CODE;
+  }
   // We are NOT the primary instance — quit immediately and let the existing
   // primary handle the protocol URL via its `second-instance` listener.
   // Do NOT run bootstrap on this doomed process: pino-pretty's thread-stream
