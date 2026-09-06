@@ -153,6 +153,11 @@ function projectPlatformConversationEventToLegacyChatFrame(
       }));
     case "guidance.dropped":
       return streamFrame(streamChannel, withStreamId({ type: "guidance_dropped", text: event.text }));
+    case "loop.decision":
+      // The renderer draws conversations, not the loop's control flow, and the
+      // legacy frame vocabulary is the renderer's. Readers that want decisions
+      // read the platform events directly (`--exec --exec-output=stream-json`).
+      return undefined;
     case "suggestions.updated":
       return streamFrame(streamChannel, withStreamId({ type: "suggested_replies", reply: event.reply }));
     case "turn.completed":

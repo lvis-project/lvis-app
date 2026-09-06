@@ -361,6 +361,7 @@ export async function wireConversation(
     networkFetch: singleHopNetworkFetch,
     subscriptionProviderFactory,
     sessionHeldElsewhere: sessionHeldElsewhereFor(() => conversationLoop),
+    ...(ctx.tracing.enabled ? { tracer: ctx.tracing.tracer } : {}),
     ...rationaleBindings,
   });
 
@@ -473,6 +474,7 @@ export async function wireConversation(
       networkFetch: singleHopNetworkFetch,
       subscriptionProviderFactory,
       sessionHeldElsewhere: sessionHeldElsewhereFor(() => groupLoop),
+      ...(ctx.tracing.enabled ? { tracer: ctx.tracing.tracer } : {}),
       ...groupRationaleBindings,
     });
     groupLoops.set(chatGroupId, groupLoop);

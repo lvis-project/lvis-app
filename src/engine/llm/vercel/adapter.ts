@@ -458,6 +458,20 @@ export class VercelUnifiedProvider implements LLMProvider {
               }
             : {}),
           ...(headers ? { headers } : {}),
+          // v7 renamed the per-call option `experimental_telemetry` →
+          // `telemetry` (the old name survives as a deprecated alias).
+          //
+          // The SDK records prompts and completions on its spans by default.
+          // LVIS never does: the session transcript already holds them and it
+          // stays on the user's machine, while a span is written to a file or
+          // posted to a collector that may not be theirs. The tracer itself is
+          // registered globally by `engine/telemetry/tracing.ts`, so with
+          // telemetry off there is no integration and this option does nothing.
+          telemetry: {
+            recordInputs: false,
+            recordOutputs: false,
+            functionId: "lvis.turn",
+          },
         });
         // v7 renamed the full event stream `fullStream` → `stream`
         // (`fullStream` remains a deprecated alias). The local variable and

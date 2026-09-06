@@ -14,7 +14,7 @@ import { randomUUID } from "node:crypto";
  * implicit cross-method contracts stay on one object.
  */
 import type { ConversationLoop as LoopContext } from "../conversation-loop.js";
-import type { GuidanceInjectionSource, TurnCallbacks, TurnInputRequired, TurnStopReason, ToolScope } from "./types.js";
+import type { GuidanceInjectionSource, TurnCallbacks, TurnDecisionEvent, TurnInputRequired, TurnStopReason, ToolScope } from "./types.js";
 import type { GenericMessage, LLMProvider, LLMVendor, MessageMeta, TokenUsage, TokenUsageByModel, ToolCallBlock, ToolSchema } from "../llm/types.js";
 import type { ChatInputOrigin, RemoteControllerAuthority } from "../../shared/chat-origin.js";
 import type { PermissionReviewEvent } from "../../shared/permission-review-status.js";
@@ -178,6 +178,16 @@ export async function queryLoop(
       : model;
     const usageByModel: TokenUsageByModel[] = [];
     const subscriptionUsage = createSubscriptionUsageCollector();
+    // Report a branch the loop just took. Reporting can never change what the
+    // loop does, so a listener that throws is swallowed here rather than
+    // failing a turn that had already decided.
+    const decide = (event: TurnDecisionEvent): void => {
+      try {
+        callbacks?.onDecision?.(event);
+      } catch {
+        // Observation must not break the turn it observes.
+      }
+    };
     // Provider-as-oracle: tools the provider 400'd on (invalid_function_parameters)
     // and we dropped this turn. Turn-scoped — resets naturally each queryLoop call.
     const droppedToolSchemaNames = new Set<string>();
@@ -394,6 +404,15 @@ export async function queryLoop(
         log.warn(
           `queryLoop: EARLY-EXIT(round-cap) — assistantRoundsRun=${assistantRoundsRun} effectiveMaxRounds=${effectiveMaxRounds} totalToolCalls=${allToolCalls.length}`,
         );
+        decide({
+          kind: "early_exit",
+          branch: "round-cap",
+          data: {
+            assistantRoundsRun,
+            effectiveMaxRounds,
+            toolCalls: allToolCalls.length,
+          },
+        });
         callbacks?.onError?.(
           t("be_conversationLoop.roundCapError", { max: effectiveMaxRounds }),
         );
@@ -645,6 +664,12 @@ export async function queryLoop(
         log.warn(
           `queryLoop: EARLY-EXIT(context_error after token preflight) — round=${roundIndex} err="${(stream.errorMessage ?? "").slice(0, 100)}" (estimator drift suspected)`,
         );
+        decide({
+          kind: "early_exit",
+          branch: "context_error",
+          reason: "estimator-drift",
+          data: { round: roundIndex },
+        });
         // `stream.kind === "context_error"` 는 `stream-collector.ts` 의
         // `isContextLengthError(raw)` 가 *이미* true 를 판정한 신호 — 이
         // 분기 도달 raw 는 context-window 초과로 확정. TPM rate-limit raw
@@ -707,6 +732,20 @@ export async function queryLoop(
         if (
           rejectedTool &&
           !droppedToolSchemaNames.has(rejectedTool) &&
+          droppedToolSchemaNames.size >= MAX_TOOL_SCHEMA_DROPS_PER_TURN
+        ) {
+          decide({
+            kind: "tool_schema.drop",
+            branch: "ceiling",
+            data: {
+              dropped: droppedToolSchemaNames.size,
+              cap: MAX_TOOL_SCHEMA_DROPS_PER_TURN,
+            },
+          });
+        }
+        if (
+          rejectedTool &&
+          !droppedToolSchemaNames.has(rejectedTool) &&
           droppedToolSchemaNames.size < MAX_TOOL_SCHEMA_DROPS_PER_TURN
         ) {
           droppedToolSchemaNames.add(rejectedTool);
@@ -725,6 +764,15 @@ export async function queryLoop(
             assistantRoundIndex: roundIndex,
             toolName: rejectedTool,
             providerError: stream.providerError,
+          });
+          decide({
+            kind: "tool_schema.drop",
+            branch: "dropped",
+            reason: rejectedTool,
+            data: {
+              dropped: droppedToolSchemaNames.size,
+              remainingTools: toolSchemas.length,
+            },
           });
           // Retry the round with the offending tool removed. Does NOT count as
           // an assistant round (assistantRoundsRun is unchanged); the for-loop
@@ -782,6 +830,12 @@ export async function queryLoop(
         if (isContextLengthError(stream.userMessage)) {
           self.contextErrorPending = true;
         }
+        decide({
+          kind: "early_exit",
+          branch: "stream-error",
+          ...(stream.classification ? { reason: stream.classification } : {}),
+          data: { round: roundIndex },
+        });
         return withServingIdentity({ text: stream.userMessage, toolCalls: allToolCalls, usage: turnUsage, stopReason: "stream-error" });
       }
 
@@ -791,6 +845,11 @@ export async function queryLoop(
         log.info(
           `queryLoop: EARLY-EXIT(interrupted) — round=${roundIndex} priorTextLen=${(stream.text ?? "").length}`,
         );
+        decide({
+          kind: "early_exit",
+          branch: "interrupted",
+          data: { round: roundIndex, priorTextChars: (stream.text ?? "").length },
+        });
         // Strip suggested-replies block before persistence — otherwise raw
         // `<suggested_replies>` tags would land in ~/.lvis/sessions/*.jsonl
         // and be fed back to the LLM on every subsequent turn.
@@ -862,6 +921,32 @@ export async function queryLoop(
         continuationsRun < MAX_LENGTH_CONTINUATIONS &&
         assistantRoundsRun + 1 < effectiveMaxRounds &&
         madeProgress;
+
+      // The continuation branch only exists for a round the provider truncated
+      // with nothing left to run, so that is the only shape worth reporting;
+      // every other round never reached the question.
+      if (stopReason === "max_tokens" && pendingToolCalls.length === 0) {
+        decide({
+          kind: "length.continuation",
+          branch: willContinue ? "continue" : "stop",
+          ...(willContinue
+            ? {}
+            : {
+              reason: !supportsLengthContinuation
+                ? "unsupported-runtime"
+                : continuationsRun >= MAX_LENGTH_CONTINUATIONS
+                  ? "cap"
+                  : assistantRoundsRun + 1 >= effectiveMaxRounds
+                    ? "round-budget"
+                    : "no-progress",
+            }),
+          data: {
+            continuationsRun,
+            cap: MAX_LENGTH_CONTINUATIONS,
+            carryTextChars: mergedRawText.length,
+          },
+        });
+      }
 
       if (willContinue) {
         continuationCarryText = mergedRawText;
@@ -1074,6 +1159,9 @@ export async function queryLoop(
       // Snapshot the session-activation set so we can audit exactly the
       // disabled plugins this turn newly session-activated (one event each).
       const sessionActivatedBefore = new Set(self.sessionActivatedPluginIds);
+      const pluginExpansionsBefore = pluginExpansions;
+      const requestedPluginExpansions = interceptedMetaGate.approved
+        .filter((toolUse) => toolUse.name === REQUEST_PLUGIN_TOOL).length;
       const pluginOutcome = handleRequestPlugin(interceptedMetaGate.approved, {
         turnExpansions: pluginExpansions,
         sessionExpansions: self.sessionPluginExpansions,
@@ -1095,6 +1183,23 @@ export async function queryLoop(
       });
       pluginExpansions = pluginOutcome.nextTurnExpansions;
       self.sessionPluginExpansions = pluginOutcome.nextSessionExpansions;
+      if (requestedPluginExpansions > 0) {
+        const activatedPlugins = pluginOutcome.activatedPluginIds.length;
+        decide({
+          kind: "plugin.expansion",
+          branch: activatedPlugins > 0
+            ? "expanded"
+            : pluginExpansionsBefore >= MAX_PLUGIN_EXPANSION
+              ? "ceiling"
+              : "rejected",
+          data: {
+            requested: requestedPluginExpansions,
+            activated: activatedPlugins,
+            turnExpansions: pluginExpansions,
+            cap: MAX_PLUGIN_EXPANSION,
+          },
+        });
+      }
 
       // Audit each NEW session-scoped activation of a registry-DISABLED plugin.
       // This path never persists enabled state (setPluginEnabled is not called),
@@ -1165,6 +1270,10 @@ export async function queryLoop(
       let toolUsesForExecutor: ToolUseBlock[];
       let searchPromotedThisRound = false;
       const prevToolCountForSearch = toolSchemas.length;
+      const toolSearchesBefore = toolSearches;
+      const sessionToolSearchesBefore = self.sessionToolSearches;
+      const requestedToolSearches = pluginOutcome.remaining
+        .filter((toolUse) => toolUse.name === TOOL_SEARCH_TOOL).length;
       const searchOutcome = handleToolSearch(pluginOutcome.remaining, {
         turnSearches: toolSearches,
         sessionSearches: self.sessionToolSearches,
@@ -1187,6 +1296,24 @@ export async function queryLoop(
         toolSchemas = rebuildTurnToolSchemas();
       }
       const addedBySearch = Math.max(0, toolSchemas.length - prevToolCountForSearch);
+      if (requestedToolSearches > 0) {
+        decide({
+          kind: "tool_search",
+          branch: searchOutcome.promotedToolNames.length > 0
+            ? "promoted"
+            : toolSearchesBefore >= MAX_TOOL_SEARCH_PER_TURN ||
+              sessionToolSearchesBefore >= MAX_TOOL_SEARCH_PER_SESSION
+              ? "cap"
+              : "none",
+          data: {
+            requested: requestedToolSearches,
+            promoted: searchOutcome.promotedToolNames.length,
+            addedSchemas: addedBySearch,
+            turnSearches: toolSearches,
+            cap: MAX_TOOL_SEARCH_PER_TURN,
+          },
+        });
+      }
       for (const rr of searchOutcome.results) {
         const finalContent = !rr.is_error && rebuiltAfterSearch
           ? t("be_conversationLoop.searchToolLoaded", { content: rr.content, loadedCount: toolSchemas.length, added: addedBySearch })
@@ -1436,6 +1563,21 @@ export async function queryLoop(
         });
         return false;
       });
+      // What the loop decides here is the SHAPE of the batch it hands the
+      // executor; whether a batch's parallel-safe members actually overlap is
+      // the executor's segmentation, and the tool spans show it directly by
+      // their timestamps. Reporting the dispatch keeps the two claims separate.
+      if (toolUsesForExecutor.length > 0) {
+        decide({
+          kind: "tool_batch",
+          branch: executableToolUses.length > 1 ? "batched" : "single",
+          data: {
+            size: toolUsesForExecutor.length,
+            executable: executableToolUses.length,
+            replayBlocked: replayBlockedResultsById.size,
+          },
+        });
+      }
       const rationaleBatch = executableToolUses.length === 0
         ? {
             results: [],
@@ -1586,14 +1728,29 @@ export async function queryLoop(
       const microCompactFloor = Math.floor(
         runtimeContextBudget.preflight * MICRO_COMPACT_FLOOR_FACTOR,
       );
-      if (
-        microCompactFloor > 0 &&
-        (self.lastRoundInputProjection?.totalTokens ?? 0) >= microCompactFloor
-      ) {
+      const microCompactProjected = self.lastRoundInputProjection?.totalTokens ?? 0;
+      if (microCompactFloor > 0 && microCompactProjected < microCompactFloor) {
+        decide({
+          kind: "compact.micro",
+          branch: "floor-hold",
+          data: { floor: microCompactFloor, projected: microCompactProjected },
+        });
+      }
+      if (microCompactFloor > 0 && microCompactProjected >= microCompactFloor) {
         const { messages: afterMark, result: mr } = markStaleToolResults(
           self.history.getMessages(),
           { preserveRecentToolResults: INTRA_TURN_PRESERVE_RECENT_RESULTS },
         );
+        decide({
+          kind: "compact.micro",
+          branch: mr.marked ? "fired" : "nothing-stale",
+          data: {
+            floor: microCompactFloor,
+            projected: microCompactProjected,
+            marked: mr.markedCount,
+            freedChars: mr.freedCharsOnSerialize,
+          },
+        });
         if (mr.marked) {
           self.history.clear();
           self.history.restore(afterMark);
@@ -1620,6 +1777,16 @@ export async function queryLoop(
     // assistantRoundsRun stays under the cap. Same class as the assistantRounds
     // early-exit above: a budget-hit, not a natural end_turn — flag it so the
     // sub-agent runner marks the result incomplete.
+    decide({
+      kind: "early_exit",
+      branch: "round-cap",
+      reason: "loop-bound",
+      data: {
+        assistantRoundsRun,
+        effectiveMaxRounds,
+        toolCalls: allToolCalls.length,
+      },
+    });
     return withServingIdentity({ text: t("be_conversationLoop.toolRoundLimitExceeded"), toolCalls: allToolCalls, usage: turnUsage, stopReason: "round-cap" });
     } finally {
       rollbackPendingGuidance();
