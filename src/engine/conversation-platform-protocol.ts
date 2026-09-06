@@ -24,7 +24,7 @@ import {
 import type { ChatInputOrigin } from "../shared/chat-origin.js";
 import type { ToolCategory, ToolSource } from "../tools/types.js";
 import type { FallbackStatus } from "./llm/vercel/fallback-chain.js";
-import type { TurnCallbacks } from "./turn/types.js";
+import type { TurnCallbacks, TurnDecisionEvent } from "./turn/types.js";
 import {
   createConversationEventHub,
   type ConversationEventHub,
@@ -213,6 +213,16 @@ export type PlatformConversationEvent =
     readonly ownerDetail: { readonly messageId: string };
   }
   | { readonly kind: "guidance.dropped"; readonly text: string }
+  /**
+   * A branch the conversation loop took, at the point it took it. Carries the
+   * kind, the branch and the small numbers it turned on — never prompt text,
+   * tool input, or tool output — so a surface reading the stream can attribute
+   * an outcome to the path that produced it. Owner detail is empty for the
+   * same reason `guidance.dropped` needs none: there is nothing private in it.
+   * The shared projection still maps it to nothing: a remote observer watches
+   * a conversation, not the host's control flow.
+   */
+  | { readonly kind: "loop.decision"; readonly decision: TurnDecisionEvent }
   | { readonly kind: "suggestions.updated"; readonly reply: string | null }
   | { readonly kind: "turn.completed"; readonly route?: "command" }
   | {

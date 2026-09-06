@@ -17,6 +17,7 @@ import type { LLMProvider, StreamEvent, StreamTurnParams,
 import { ToolRegistry } from "../../tools/registry.js";
 import { createDynamicTool } from "../../tools/base.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
+import type { TurnDecisionEvent } from "../turn/types.js";
 
 /** Provider that records the tool names it was handed on each streamTurn call. */
 class ToolRecordingProvider implements LLMProvider {
@@ -108,6 +109,29 @@ describe("ConversationLoop — provider-as-oracle tool-schema guard (#1182)", ()
     );
     expect(provider.toolNamesPerCall[1]).toContain("good_tool");
     expect(provider.toolNamesPerCall[1]).not.toContain("bad_tool");
+  });
+
+  it("reports the drop as a loop decision naming the tool the provider rejected", async () => {
+    const provider = new ToolRecordingProvider([
+      [rejection("bad_tool")],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const loop = makeLoop(provider);
+    const decisions: TurnDecisionEvent[] = [];
+
+    await loop.runTurn("go", {
+      onDecision: (event) => { decisions.push(event); },
+    }, undefined, { inputOrigin: "user-keyboard" });
+
+    expect(decisions).toContainEqual(expect.objectContaining({
+      kind: "tool_schema.drop",
+      branch: "dropped",
+      reason: "bad_tool",
+      data: expect.objectContaining({ dropped: 1 }),
+    }));
   });
 
   it("does not loop forever when the same tool is reported again after being dropped", async () => {

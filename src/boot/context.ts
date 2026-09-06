@@ -80,6 +80,7 @@ import type { PluginBundleLifecycle } from "../plugins/plugin-bundle-lifecycle.j
 import type { PluginOperationGrantCoordinator } from "../permissions/plugin-operation-grant.js";
 import type { PluginOperationIdentityProvider } from "../tools/invocation-services.js";
 import type { SubscriptionChatRuntimeSelection } from "../shared/subscription-runtime.js";
+import type { TracingHandle } from "../engine/telemetry/tracing.js";
 
 type PluginPaths = ReturnType<typeof import("../plugins/plugin-paths.js").resolvePluginPaths>;
 type WorkBoardStorage = ReturnType<typeof import("../work-board/storage.js").createDirStorage>;
@@ -95,6 +96,14 @@ export class BootContext {
   declare readonly projectRoot: string;
   declare readonly mainWindow: BrowserWindow;
   declare readonly getMainWindow: () => BrowserWindow | null;
+
+  // ── Tracing (configureTracing) ─────────────────────────────────────────────
+  /**
+   * Always present, disabled unless `LVIS_TELEMETRY` names a sink. Held on the
+   * context so post-boot can flush it on quit and the conversation wiring can
+   * hand its tracer to the loops.
+   */
+  declare tracing: TracingHandle;
 
   // ── Network fetch surface (setupNetworkFetch) ──────────────────────────────
   declare networkFetch: typeof fetch;
@@ -264,6 +273,7 @@ const BOOT_CONTEXT_FIELDS = [
   "projectRoot",
   "mainWindow",
   "getMainWindow",
+  "tracing",
   "networkFetch",
   "singleHopNetworkFetch",
   "llmFetch",

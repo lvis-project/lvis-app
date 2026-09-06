@@ -11,8 +11,22 @@ import { randomUUID } from "node:crypto";
 // on. It IS the ConversationLoop instance: the class owns all turn state and
 // the extracted free functions read/write it through this alias.
 import type { ConversationLoop as LoopContext } from "../conversation-loop.js";
-import type { RunTurnOptions, TurnCallbacks, TurnResult, TurnStopReason } from "./types.js";
-
+import type {
+  RunTurnOptions,
+  TurnCallbacks,
+  TurnDecisionEvent,
+  TurnDecisionKind,
+  TurnResult,
+  TurnStopReason,
+} from "./types.js";
+import type { Span, Tracer } from "@opentelemetry/api";
+import { context as otelContext, SpanStatusCode, trace as otelTrace } from "@opentelemetry/api";
+import {
+  DECISION_EVENT_NAME,
+  decisionAttributes,
+  TOOL_SPAN_PREFIX,
+  TURN_SPAN_NAME,
+} from "../telemetry/tracing.js";
 import type { ChatInputOrigin } from "../../shared/chat-origin.js";
 import type { MessageMeta } from "../llm/types.js";
 import { queryLoop } from "./query-loop.js";
@@ -37,6 +51,36 @@ import { aggregateSubscriptionUsage } from "./subscription-usage-telemetry.js";
 import type { MemoryCaptureTaintReason } from "../../memory/memory-capture-service.js";
 
 const log = createLogger("lvis");
+
+/** The open turn span, the tracer that opens children under it, and those children. */
+interface TurnTrace {
+  readonly tracer: Tracer;
+  readonly span: Span;
+  /**
+   * Tool spans still open, keyed by tool-use id. A turn the user stops can
+   * leave a call with no `onToolEnd`, and a span that is never ended is a span
+   * that is never exported — so the turn's own exit closes what is left.
+   */
+  readonly toolSpans: Map<string, Span>;
+}
+
+/**
+ * A span event never carries prompt text, tool input, or tool output. The
+ * session transcript already holds those, it stays on the user's machine, and
+ * a trace does not: it is written to a file or posted to a collector the user
+ * may not own. Sizes and identifiers are what an exported span may say.
+ */
+function toolSpanEndAttributes(
+  result: string,
+  isError: boolean,
+  durationMs: number,
+): Record<string, string | number | boolean> {
+  return {
+    "lvis.tool.is_error": isError,
+    "lvis.tool.result_chars": result.length,
+    "lvis.tool.duration_ms": durationMs,
+  };
+}
 
 function commitsHostInjectedMessages(stopReason: TurnStopReason | undefined,
 ): boolean {
@@ -71,12 +115,59 @@ async function flushTranscript(self: LoopContext, reason: string): Promise<void>
 }
 
 
+/**
+ * Open the turn span, if boot configured a tracer, and run the turn inside it.
+ *
+ * `startActiveSpan` is what puts the span on the async context, so the AI SDK's
+ * own `invoke_agent` / `step` / `chat` spans nest under this one instead of
+ * landing at the root. With no tracer the inner function runs directly and no
+ * span object is ever created.
+ */
 export async function runTurn(
+  self: LoopContext,
+  input: string,
+  callbacks?: TurnCallbacks,
+  abortSignal?: AbortSignal,
+  options?: RunTurnOptions,
+): Promise<TurnResult> {
+  const tracer = self.deps.tracer;
+  if (!tracer) return runTurnInSpan(self, input, callbacks, abortSignal, options, null);
+  return tracer.startActiveSpan(
+    TURN_SPAN_NAME,
+    {
+      attributes: {
+        "lvis.session_id": options?.sessionIdOverride ?? self.sessionId,
+        "lvis.turn_id": randomUUID(),
+        "lvis.input_origin": options?.inputOrigin ?? "",
+      },
+    },
+    async (span) => {
+      const toolSpans = new Map<string, Span>();
+      try {
+        return await runTurnInSpan(self, input, callbacks, abortSignal, options, {
+          tracer,
+          span,
+          toolSpans,
+        });
+      } finally {
+        for (const toolSpan of toolSpans.values()) {
+          toolSpan.setAttribute("lvis.tool.unfinished", true);
+          toolSpan.end();
+        }
+        toolSpans.clear();
+        span.end();
+      }
+    },
+  );
+}
+
+async function runTurnInSpan(
   self: LoopContext,
     input: string,
     callbacks?: TurnCallbacks,
     abortSignal?: AbortSignal,
     options?: RunTurnOptions,
+    turnTrace?: TurnTrace | null,
   ): Promise<TurnResult> {
     const effectiveSessionId = options?.sessionIdOverride ?? self.sessionId;
     if (!options?.inputOrigin) {
@@ -261,11 +352,83 @@ export async function runTurn(
     let turnCumulativeToolMs = 0;
     const turnToolStarts = new Map<string, number>();
     const turnToolBreakdown = new Map<string, { count: number; ms: number }>();
+    const turnDecisionCounts = new Map<TurnDecisionKind, number>();
+    const recordDecision = (event: TurnDecisionEvent): void => {
+      turnDecisionCounts.set(event.kind, (turnDecisionCounts.get(event.kind) ?? 0) + 1);
+      turnTrace?.span.addEvent(DECISION_EVENT_NAME, decisionAttributes(event));
+      callbacks?.onDecision?.(event);
+    };
     const wrappedCallbacks: TurnCallbacks | undefined = callbacks
       ? {
           ...callbacks,
+          onDecision: recordDecision,
+          onCompactStarted: (info) => {
+            turnTrace?.span.addEvent("lvis.compact.preflight", {
+              "lvis.compact.trigger_source": info.triggerSource,
+              "lvis.compact.estimated_before": info.estimatedBefore,
+              "lvis.compact.preflight": info.preflight,
+            });
+            callbacks.onCompactStarted?.(info);
+          },
+          onCompactOccurred: (result) => {
+            turnTrace?.span.addEvent("lvis.compact.applied", {
+              "lvis.compact.removed_messages": result.removedMessages,
+              "lvis.compact.freed_tokens": result.freedTokens,
+              "lvis.compact.estimated_after": result.estimatedAfter,
+              ...(result.trigger ? { "lvis.compact.trigger": result.trigger } : {}),
+            });
+            callbacks.onCompactOccurred?.(result);
+          },
+          onGuidanceInjected: (text, row) => {
+            turnTrace?.span.addEvent("lvis.guidance.staged", {
+              "lvis.guidance.disposition": "applied",
+              "lvis.guidance.chars": text.length,
+            });
+            callbacks.onGuidanceInjected?.(text, row);
+          },
+          onGuidanceDropped: (text) => {
+            turnTrace?.span.addEvent("lvis.guidance.staged", {
+              "lvis.guidance.disposition": "dropped",
+              "lvis.guidance.chars": text.length,
+            });
+            callbacks.onGuidanceDropped?.(text);
+          },
+          onFallback: (from, to) => {
+            turnTrace?.span.addEvent("lvis.provider.fallback", {
+              "lvis.provider.from": from,
+              "lvis.provider.to": to,
+            });
+            callbacks.onFallback?.(from, to);
+          },
+          onError: (error, systemNotice, classifierCategory) => {
+            turnTrace?.span.setStatus({
+              code: SpanStatusCode.ERROR,
+              ...(systemNotice ? { message: systemNotice } : {}),
+            });
+            callbacks.onError?.(error, systemNotice, classifierCategory);
+          },
           onToolStart: (name, input, meta) => {
             turnToolStarts.set(meta.toolUseId, Date.now());
+            if (turnTrace) {
+              turnTrace.toolSpans.set(
+                meta.toolUseId,
+                turnTrace.tracer.startSpan(`${TOOL_SPAN_PREFIX}${name}`, {
+                  attributes: {
+                    "gen_ai.tool.name": name,
+                    "gen_ai.tool.call.id": meta.toolUseId,
+                    "lvis.tool.group_id": meta.groupId,
+                    ...(meta.source ? { "lvis.tool.source": meta.source } : {}),
+                    ...(meta.category ? { "lvis.tool.category": meta.category } : {}),
+                    ...(meta.pluginId ? { "lvis.tool.plugin_id": meta.pluginId } : {}),
+                  },
+                },
+                // The parent is named rather than taken from the ambient
+                // context: our own nesting must not depend on a context
+                // manager being installed. (One is, in production — that is
+                // what nests the AI SDK's spans — but this relation is ours.)
+                otelTrace.setSpan(otelContext.active(), turnTrace.span)),
+              );
+            }
             callbacks.onToolStart?.(name, input, meta);
           },
           onToolEnd: (name, result, isError, meta, uiPayload, durationMs) => {
@@ -286,6 +449,13 @@ export async function runTurn(
                   : 0;
             turnToolCount += 1;
             turnCumulativeToolMs += elapsed;
+            const toolSpan = turnTrace?.toolSpans.get(meta.toolUseId);
+            if (toolSpan) {
+              turnTrace?.toolSpans.delete(meta.toolUseId);
+              toolSpan.setAttributes(toolSpanEndAttributes(result, isError, elapsed));
+              if (isError) toolSpan.setStatus({ code: SpanStatusCode.ERROR });
+              toolSpan.end();
+            }
             const prev = turnToolBreakdown.get(name) ?? { count: 0, ms: 0 };
             turnToolBreakdown.set(name, {
               count: prev.count + 1,
@@ -694,6 +864,19 @@ export async function runTurn(
       result.stopReason !== "stream-error" &&
       typeof result.text === "string" &&
       result.text.trim().length > 0;
+    // Shape attributes are set for EVERY turn, including the ones whose summary
+    // is suppressed (interrupted, context error, stream error) — those are
+    // exactly the turns an attribution run needs to be able to see.
+    if (turnTrace) {
+      turnTrace.span.setAttributes({
+        "lvis.turn.tool_count": turnToolCount,
+        "lvis.turn.duration_ms": Math.max(0, Date.now() - turnStartedAt),
+        "lvis.turn.stop_reason": result.stopReason ?? "",
+      });
+      for (const [kind, count] of turnDecisionCounts) {
+        turnTrace.span.setAttribute(`lvis.decision.${kind}`, count);
+      }
+    }
     const billableTurnUsage = isSubscriptionRuntime ? undefined : result.usage;
     const billableUsageByModel = isSubscriptionRuntime ? [] : result.usageByModel;
     const subscriptionTurnUsage = isSubscriptionRuntime ? result.subscriptionUsage : [];
@@ -770,8 +953,19 @@ export async function runTurn(
         ...(subscriptionTurnUsage.length > 0
           ? { subscriptionUsage: subscriptionTurnUsage }
           : {}),
+        ...(turnDecisionCounts.size > 0
+          ? { decisionCounts: Object.fromEntries(turnDecisionCounts) }
+          : {}),
         ...(breakdown ? { breakdown } : {}),
       };
+      if (turnTrace) {
+        turnTrace.span.setAttributes({
+          "gen_ai.usage.input_tokens": billableTurnUsage?.inputTokens ?? 0,
+          "gen_ai.usage.output_tokens": turnTokensOut,
+          "gen_ai.usage.cache_read_input_tokens": turnCacheRead,
+          "lvis.usage.fresh_input_tokens": turnFreshInput,
+        });
+      }
       // Persist turn-aggregate stats onto the turn-final assistant message so
       // a reload reconstructs the same TokenCostBadge / TurnSummaryFooter
       // numbers without re-running the loop. historyToEntries reads this

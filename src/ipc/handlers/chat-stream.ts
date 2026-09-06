@@ -271,7 +271,7 @@ export async function runStreamedTurn(
             ...(truncatedDir === undefined ? {} : { truncatedDir }),
           },
         }),
-      onTurnSummary: ({ turnDurationMs, toolCount, cumulativeToolMs, tokensIn, freshInputTokens, tokensOut, cacheReadTokens, cacheWriteTokens, vendorProvider, vendorModel, usageByModel, subscriptionUsage, breakdown }) =>
+      onTurnSummary: ({ turnDurationMs, toolCount, cumulativeToolMs, tokensIn, freshInputTokens, tokensOut, cacheReadTokens, cacheWriteTokens, vendorProvider, vendorModel, usageByModel, subscriptionUsage, decisionCounts, breakdown }) =>
         send({
           kind: "usage.reported",
           ownerDetail: {
@@ -287,6 +287,7 @@ export async function runStreamedTurn(
             vendorModel,
             ...(usageByModel !== undefined ? { usageByModel } : {}),
             ...(subscriptionUsage !== undefined ? { subscriptionUsage } : {}),
+            ...(decisionCounts !== undefined ? { decisionCounts } : {}),
             ...(breakdown ? { breakdown } : {}),
           },
         }),
@@ -301,6 +302,7 @@ export async function runStreamedTurn(
         ownerDetail: { messageId: row.messageId },
       }),
       onGuidanceDropped: (text) => send({ kind: "guidance.dropped", text }),
+      onDecision: (decision) => send({ kind: "loop.decision", decision }),
     },
     options.abortSignal,
     {

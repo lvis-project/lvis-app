@@ -87,6 +87,8 @@ import { wireAnnouncementCheck, wireReleasePrep, wireUpdateCheck,
 import { migrateCanonicalization } from "./permissions/user-approval-store.js";
 import { reconcileWorkspaceRoots } from "./permissions/workspace-root-reconciler.js";
 import { createLogger } from "./lib/logger.js";
+import { configureTracing, parseTelemetrySpec } from "./engine/telemetry/tracing.js";
+import { getLvisAppVersion } from "./shared/app-version.js";
 import { ensureLvisHomePrivate, lvisHome } from "./shared/lvis-home.js";
 import {
   listLvisHomeDocUpgradeMarkers,
@@ -179,6 +181,13 @@ export async function bootstrap(
 ): Promise<AppServices> {
   log.info("boot: starting...");
   const ctx = createBootContext({ projectRoot, mainWindow, getMainWindow });
+
+  // Before any provider exists, so the AI SDK integration is registered by the
+  // time the first model is constructed. An unreadable spec leaves tracing off
+  // and is reported: a malformed environment variable must not stop the app.
+  const telemetrySpec = parseTelemetrySpec(process.env.LVIS_TELEMETRY);
+  if ("error" in telemetrySpec) log.error(`boot: ${telemetrySpec.error}`);
+  ctx.tracing = await configureTracing(telemetrySpec, getLvisAppVersion());
 
   await setupNetworkFetch(ctx);
 
@@ -874,6 +883,7 @@ export async function bootstrap(
     settingsService,
     bootAuditLogger: ctx.bootAuditLogger,
     networkFetch: ctx.singleHopNetworkFetch,
+    tracing: ctx.tracing,
   });
   wireUpdateCheck({
     mainWindow,

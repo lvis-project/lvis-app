@@ -79,6 +79,35 @@ interface GuidanceInjectionRow {
   source?: GuidanceInjectionSource;
 }
 
+/**
+ * The loop branches a turn's outcome can be attributed to. One kind per
+ * decision the loop makes on its own — a budget it hit, a recovery it chose,
+ * an exit it took — never per provider call.
+ */
+export type TurnDecisionKind =
+  | "tool_batch"
+  | "tool_schema.drop"
+  | "length.continuation"
+  | "tool_search"
+  | "plugin.expansion"
+  | "compact.micro"
+  | "early_exit";
+
+export interface TurnDecisionEvent {
+  kind: TurnDecisionKind;
+  /** Which way the branch went, in this kind's own vocabulary. */
+  branch: string;
+  /** Machine-stable cause, when the branch alone does not name it. */
+  reason?: string;
+  /**
+   * The small numbers the branch turned on — a batch size, a continuation
+   * index, a token floor. Never prompt text, tool input, or tool output: the
+   * transcript already holds those and this payload crosses process and
+   * export boundaries the transcript does not.
+   */
+  data?: Record<string, string | number | boolean>;
+}
+
 export interface TurnCallbacks {
   onReasoningDelta?: (text: string) => void;
   onTextDelta?: (text: string) => void;
@@ -172,6 +201,14 @@ export interface TurnCallbacks {
    * than the pre-redesign abort-and-restart behavior (critic MAJOR #3).
    */
   onGuidanceDropped?: (text: string) => void;
+  /**
+   * One branch the turn took, reported where the loop chose it. Observation
+   * only: the loop behaves identically whether or not anyone listens. It is
+   * what lets an outcome be attributed to the path that produced it — as a
+   * tracing span event, as a `loop.decision` conversation event, and as the
+   * per-kind counts on {@link TurnSummary}.
+   */
+  onDecision?: (event: TurnDecisionEvent) => void;
   /**
    * Turn aggregate footer (§ chat transcript per-turn footer) — fires once
    * after the turn fully resolves with cumulative wall-clock / step-count /
@@ -493,6 +530,12 @@ export interface ConversationLoopDeps {
    * ignores the machine's proxy configuration and its trust store.
    */
   networkFetch: typeof fetch;
+  /**
+   * Boot-configured tracer. Absent — the default — means no provider was
+   * registered and the turn creates no span objects at all; the loop's
+   * behaviour is the same either way.
+   */
+  tracer?: import("@opentelemetry/api").Tracer;
 }
 
 export interface RequestProjectionContext {

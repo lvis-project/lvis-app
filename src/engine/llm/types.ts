@@ -410,6 +410,14 @@ export interface TurnSummary {
   usageByModel?: TokenUsageByModel[];
   /** Non-billable subscription telemetry; never enters API-key pricing. */
   subscriptionUsage?: SubscriptionUsageTelemetry[];
+  /**
+   * How many times each loop branch fired this turn. Carried on the turn
+   * summary so the persisted transcript answers "which path produced this
+   * answer" without a tracing backend attached; omitted when the turn made
+   * no branch worth counting.
+   */
+  decisionCounts?: Partial<Record<
+    import("../turn/types.js").TurnDecisionKind, number>>;
   /** `{ count, ms }` per tool name; omitted when no tools ran. */
   breakdown?: Record<string, { count: number; ms: number }>;
 }

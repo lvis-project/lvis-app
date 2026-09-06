@@ -25,6 +25,7 @@ import { TOOL_SEARCH_TOOL_NAME } from "../../tools/registry.js";
 import { AuditLogger } from "../../audit/audit-logger.js";
 import { EAGER_TOOL_EXPOSURE_CEILING } from "../../shared/tool-exposure-policy.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
+import type { TurnDecisionEvent } from "../turn/types.js";
 
 type CapturedToolExposure = {
   loadedToolCount: number;
@@ -342,6 +343,40 @@ describe("ConversationLoop — deferral ceiling (#1176)", () => {
     expect(provider.observedToolNames[0]).toContain(TOOL_SEARCH_TOOL_NAME);
     // After tool_search the next round sees meeting_stop.
     expect(provider.observedToolNames[1]).toContain("meeting_stop");
+  });
+
+  it("reports the promotion as a loop decision so the round it bought is attributable", async () => {
+    const provider = new RecordingProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tu-1",
+          name: TOOL_SEARCH_TOOL_NAME,
+          input: { query: "meeting_stop" },
+        },
+        { type: "message_complete", stopReason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "완료" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const loop = makeLoop({
+      provider,
+      extraMeetingTools: EAGER_TOOL_EXPOSURE_CEILING,
+      headless: true,
+    });
+    const decisions: TurnDecisionEvent[] = [];
+
+    await loop.runTurn("회의 정리해줘", {
+      onDecision: (event) => { decisions.push(event); },
+    }, undefined, { inputOrigin: "user-keyboard" });
+
+    expect(decisions).toContainEqual(expect.objectContaining({
+      kind: "tool_search",
+      branch: "promoted",
+      data: expect.objectContaining({ requested: 1 }),
+    }));
   });
 
   it("does NOT count builtins toward the ceiling (eager just below it)", async () => {

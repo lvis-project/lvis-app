@@ -34,6 +34,7 @@ import { openFeatureNamespace } from "../../main/storage/feature-namespace.js";
 import { sendToWindow } from "../../ipc/safe-send.js";
 import { onEvent } from "../types.js";
 import { createLogger } from "../../lib/logger.js";
+import type { TracingHandle } from "../../engine/telemetry/tracing.js";
 import { CHANNELS } from "../../contract/app-contract.js";
 const log = createLogger("lvis");
 
@@ -49,6 +50,8 @@ export interface ReleasePrepInput {
   bootAuditLogger: AuditLogger;
   /** The host's outbound transport — both telemetry uploads run on it. */
   networkFetch: typeof fetch;
+  /** Boot-configured tracing; its batched spans are flushed on quit. */
+  tracing: TracingHandle;
 }
 
 /**
@@ -56,10 +59,21 @@ export interface ReleasePrepInput {
  * the auto-updater. All default-off or settings-driven. Non-fatal on error.
  */
 export function wireReleasePrep(input: ReleasePrepInput): ReleasePrepOutput {
-  const { mainWindow, settingsService, bootAuditLogger, networkFetch } = input;
+  const { mainWindow, settingsService, bootAuditLogger, networkFetch, tracing } = input;
   let telemetry: TelemetryService | undefined;
   let pluginTelemetry: PluginTelemetryClient | undefined;
   let autoUpdaterStop: (() => void) | undefined;
+
+  // Registered before the telemetry stack is built, not alongside it: the
+  // batch span processor holds finished spans, and a failure setting up
+  // something else must not be what loses the trace of the run.
+  if (tracing.enabled) {
+    app.prependOnceListener("before-quit", () => {
+      void tracing.shutdown().catch((err: unknown) => {
+        log.warn("shutdown: tracing flush failed: %s", (err as Error).message);
+      });
+    });
+  }
 
   try {
     startCrashReporter({
