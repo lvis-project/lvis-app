@@ -29,6 +29,14 @@ export interface CrashReporterDeps {
    */
   userDataPath: string;
   telemetry: TelemetrySettings;
+  /**
+   * Whether this launch may send a crash off the machine. A headless one-shot
+   * run passes `false`: local minidumps are still collected into the same
+   * LVIS-owned directory, but the upload endpoint and Sentry are discretionary
+   * egress a single unattended turn never asked for. It only ever subtracts —
+   * `true` leaves the user's own settings deciding, exactly as before.
+   */
+  remoteReporting: boolean;
   crashReporter?: {
     start: (opts: {
       submitURL?: string;
@@ -72,6 +80,7 @@ export function startCrashReporter(deps: CrashReporterDeps): CrashReporterHandle
   }
 
   const uploadEnabled =
+    deps.remoteReporting &&
     deps.telemetry.crashReportingEnabled === true &&
     typeof deps.telemetry.crashReportEndpoint === "string" &&
     deps.telemetry.crashReportEndpoint.length > 0;
@@ -99,7 +108,7 @@ export function startCrashReporter(deps: CrashReporterDeps): CrashReporterHandle
     ?? deps.telemetry.sentryDsn
     ?? "";
   let sentryActive = false;
-  if (dsn) {
+  if (deps.remoteReporting && dsn) {
     const sentry = (deps.sentryLoader ?? loadSentry)();
     if (sentry) {
       try {

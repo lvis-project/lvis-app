@@ -166,20 +166,57 @@ function readParentContextTurns(
 export type { AppServices } from "./boot/types.js";
 
 /**
+ * How this process was launched, and therefore whether anything is watching it.
+ *
+ * `"headless"` is the one-shot `--exec` / `--set-secret` run: it performs a
+ * single request and quits. Such a run opens no DISCRETIONARY service
+ * connection — no marketplace catalog sync, no admission warm-up, no release
+ * check, no polling, no telemetry — because nothing in the process can act on
+ * what any of them returns, and a run asked for one turn should not reach
+ * anything the turn did not ask for.
+ *
+ * The plugin trust chain is NOT discretionary and is refreshed on every
+ * launch. The whitelist gates plugin secret reads and fails CLOSED, so a
+ * headless-only host that never fetched it would lock itself out of its own
+ * secrets once the cached document aged out; the revocation list fails OPEN,
+ * so the same host would silently lose the plugin kill switch. Admission is
+ * the one signed document a headless run skips: it is consulted at install,
+ * and the install path re-checks freshness itself, so warming it at boot only
+ * ever saved the first install of a session a cold fetch.
+ *
+ * An `"interactive"` launch keeps every one of them.
+ */
+export type BootLaunch = "interactive" | "headless";
+
+/**
  * @param getMainWindow Live BrowserWindow getter — must read the current
  *   `main.ts` binding because Electron close+reopen replaces the window.
  *   Bootstrap-time consumers (e.g. plugin event bridge) take the resolved
  *   `mainWindow`; runtime consumers (e.g. routinesScheduler) take this getter.
- *   Defaults to a closure over `mainWindow` for callers that don't have a
- *   live reference, but those callers will silently lose IPC after window
- *   recreation.
+ * @param launch Whether this is an interactive launch or a headless one-shot
+ *   run — see {@link BootLaunch}. The single fact every service-connection
+ *   decision below is derived from.
  */
 export async function bootstrap(
   projectRoot: string,
   mainWindow: BrowserWindow,
-  getMainWindow: () => BrowserWindow | null = () => mainWindow,
+  getMainWindow: () => BrowserWindow | null,
+  launch: BootLaunch,
 ): Promise<AppServices> {
   log.info("boot: starting...");
+  const headless = launch === "headless";
+  if (headless) {
+    log.info(
+      "boot: headless launch — no catalog sync, admission warm-up, release check, polling or telemetry",
+    );
+  }
+  /**
+   * Offline override for the admission warm-up — the one signed document a
+   * headless run can skip (see {@link BootLaunch}). Spread rather than passed
+   * as a plain `online:` so an interactive launch still resolves the toggle
+   * exactly as it always has, from the step's own default.
+   */
+  const admissionOffline = headless ? { online: false as const } : {};
   const ctx = createBootContext({ projectRoot, mainWindow, getMainWindow });
 
   // Before any provider exists, so the AI SDK integration is registered by the
@@ -506,6 +543,9 @@ export async function bootstrap(
   // synchronously from `getSecret`; if the registry isn't initialized the
   // tier-3 check fails closed with `whitelist-unreachable`. Resolves on every
   // path (fresh, offline, cached) so a network blip never blocks boot.
+  // Fetched on every launch, headless included: the registry fails CLOSED, so
+  // a run that skipped it would deny its own plugins their secrets rather than
+  // save a request.
   await wireWhitelistRegistry({
     bootAuditLogger: ctx.bootAuditLogger,
     networkFetch: ctx.singleHopNetworkFetch,
@@ -517,6 +557,9 @@ export async function bootstrap(
   // (deferStart:true — see `startPlugins()` below) but must see a populated
   // registry the first time it runs. Resolves on every path (fresh, offline,
   // cached) — fail-open on a fetch failure, never blocks boot.
+  // Also fetched on every launch. This one fails OPEN, which is exactly why a
+  // headless run must not skip it: a stale or absent document revokes nothing,
+  // so skipping the refresh loses the kill switch silently.
   await wireRevocationRegistry({
     bootAuditLogger: ctx.bootAuditLogger,
     networkFetch: ctx.singleHopNetworkFetch,
@@ -529,6 +572,7 @@ export async function bootstrap(
   await wireAdmissionRegistry({
     bootAuditLogger: ctx.bootAuditLogger,
     networkFetch: ctx.singleHopNetworkFetch,
+    ...admissionOffline,
   });
 
   // PermissionManager is built BEFORE initPluginRuntime
@@ -798,27 +842,35 @@ export async function bootstrap(
   // commits verified bytes/receipt/registry only: it never publishes or starts
   // a candidate. startPlugins() seals admission synchronously, waits for the
   // tail (including rollback), then loads the one committed registry snapshot.
-  const managedPreStartSync = runManagedBootstrap({
-    pluginMarketplace: ctx.pluginMarketplace,
-    ensurePluginStateReadyForInstall: (pluginId) =>
-      ensurePluginStateReadyForInstall(pluginId, {
-        pluginMarketplace: ctx.pluginMarketplace,
-        ...pluginStateCleanupDeps,
-      }),
-    // The registry-entry cache, the uninstall telemetry track and every
-    // per-plugin `onEvent("plugin.uninstalled")` subscriber hang off this
-    // event; an enforced removal has to publish it like any other.
-    removeDelistedAdminInstall: (removal, commitRegistryRemoval) =>
-      removeQuiescentPluginResidualState(
-        { ...removal, installPluginId: removal.pluginId },
-        commitRegistryRemoval,
-        pluginStateCleanupDeps,
-      ),
-    mainWindow,
-    marketplace: ctx.settingsService.get("marketplace"),
-    mode: "pre-start-sync",
-    admitPreStartOperation,
-  });
+  //
+  // A headless run skips the sync entirely: it is the boot-time reader of the
+  // marketplace catalog, and nothing about running one turn needs the managed
+  // set to be current. The plugins already on disk still load — this drops the
+  // network refresh, not the registry snapshot `startPlugins()` reads.
+  let managedPreStartSync: Promise<void> = Promise.resolve();
+  if (!headless) {
+    managedPreStartSync = runManagedBootstrap({
+      pluginMarketplace: ctx.pluginMarketplace,
+      ensurePluginStateReadyForInstall: (pluginId) =>
+        ensurePluginStateReadyForInstall(pluginId, {
+          pluginMarketplace: ctx.pluginMarketplace,
+          ...pluginStateCleanupDeps,
+        }),
+      // The registry-entry cache, the uninstall telemetry track and every
+      // per-plugin `onEvent("plugin.uninstalled")` subscriber hang off this
+      // event; an enforced removal has to publish it like any other.
+      removeDelistedAdminInstall: (removal, commitRegistryRemoval) =>
+        removeQuiescentPluginResidualState(
+          { ...removal, installPluginId: removal.pluginId },
+          commitRegistryRemoval,
+          pluginStateCleanupDeps,
+        ),
+      mainWindow,
+      marketplace: ctx.settingsService.get("marketplace"),
+      mode: "pre-start-sync",
+      admitPreStartOperation,
+    });
+  }
   // §691: OS-level tool sandbox — decided exactly once here at boot, and
   // BEFORE startPlugins(): an out-of-process plugin's factory spawns its
   // confined child inside startAll(), and wrapWorkerCommand refuses to build
@@ -884,18 +936,24 @@ export async function bootstrap(
     bootAuditLogger: ctx.bootAuditLogger,
     networkFetch: ctx.singleHopNetworkFetch,
     tracing: ctx.tracing,
+    discretionaryEgress: !headless,
   });
-  wireUpdateCheck({
-    mainWindow,
-    settingsService,
-    marketplaceFetcher: ctx.marketplaceFetcher,
-    pluginPaths,
-  });
-  wireAnnouncementCheck({
-    getMainWindow,
-    settingsService,
-    marketplaceFetcher: ctx.marketplaceFetcher,
-  });
+  // Both pollers exist to push a banner at a renderer, and both read the
+  // marketplace to do it. A headless run has neither the renderer nor the
+  // lifetime, so it schedules neither.
+  if (!headless) {
+    wireUpdateCheck({
+      mainWindow,
+      settingsService,
+      marketplaceFetcher: ctx.marketplaceFetcher,
+      pluginPaths,
+    });
+    wireAnnouncementCheck({
+      getMainWindow,
+      settingsService,
+      marketplaceFetcher: ctx.marketplaceFetcher,
+    });
+  }
   ctx.telemetry = telemetry;
   ctx.pluginTelemetry = pluginTelemetry;
   ctx.autoUpdaterStop = autoUpdaterStop;

@@ -639,6 +639,7 @@ describe("crash-reporter", () => {
     const handle = startCrashReporter({
       userDataPath: userData,
       telemetry: { enabled: false, crashReportingEnabled: false },
+      remoteReporting: true,
       crashReporter: { start: (opts) => started.push(opts) },
       setCrashDumpsPath: (p) => pathsSet.push(p),
       sentryLoader: () => null
@@ -663,6 +664,7 @@ describe("crash-reporter", () => {
         crashReportingEnabled: true,
         crashReportEndpoint: "https://dumps.example.com/submit"
       },
+      remoteReporting: true,
       crashReporter: { start: (opts) => started.push(opts) },
       sentryLoader: () => null
     });
@@ -676,11 +678,40 @@ describe("crash-reporter", () => {
     const handle = startCrashReporter({
       userDataPath: userData,
       telemetry: { enabled: false, sentryDsn: "https://k@sentry.example/1" },
+      remoteReporting: true,
       crashReporter: { start: () => {} },
       sentryLoader: () => ({ init: ({ dsn }) => dsnSeen.push(dsn) })
     });
     expect(handle.sentryActive).toBe(true);
     expect(dsnSeen[0]).toContain("sentry.example");
+  });
+
+  it("keeps local dumps but sends nothing when the launch has no remote reporting", () => {
+    // A headless one-shot run. Both remote paths are opted IN through settings
+    // here, so the only thing that can be closing them is the launch itself.
+    const userData = createUserDataRoot();
+    const started: Array<{ uploadToServer?: boolean; submitURL?: string }> = [];
+    const pathsSet: string[] = [];
+    const dsnSeen: string[] = [];
+    const handle = startCrashReporter({
+      userDataPath: userData,
+      telemetry: {
+        enabled: true,
+        crashReportingEnabled: true,
+        crashReportEndpoint: "https://dumps.example.com/submit",
+        sentryDsn: "https://k@sentry.example/1",
+      },
+      remoteReporting: false,
+      crashReporter: { start: (opts) => started.push(opts) },
+      setCrashDumpsPath: (p) => pathsSet.push(p),
+      sentryLoader: () => ({ init: ({ dsn }) => dsnSeen.push(dsn) }),
+    });
+    expect(handle.started).toBe(true);
+    expect(pathsSet).toEqual([handle.dumpDir]);
+    expect(started[0]?.uploadToServer).toBe(false);
+    expect(started[0]?.submitURL).toBeUndefined();
+    expect(handle.sentryActive).toBe(false);
+    expect(dsnSeen).toEqual([]);
   });
 });
 

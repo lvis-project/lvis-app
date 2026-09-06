@@ -172,7 +172,14 @@ async function main() {
   // the wordmark matches what's actually happening rather than cycling
   // through a setInterval list. The fallback idle cycle inside the splash
   // still runs until the first explicit update lands.
-  const services = await bootstrap(projectRoot, getMainWindow()!, () => getMainWindow());
+  // `execRequest` is the single fact boot derives every service-connection
+  // decision from: a headless one-shot run opens none of its own.
+  const services = await bootstrap(
+    projectRoot,
+    getMainWindow()!,
+    () => getMainWindow(),
+    execRequest === null ? "interactive" : "headless",
+  );
   setServices(services);
 
   updateSplashStatus(t("be_main.splashOpeningWorkspace"));

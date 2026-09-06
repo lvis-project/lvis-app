@@ -52,11 +52,27 @@ export interface ReleasePrepInput {
   networkFetch: typeof fetch;
   /** Boot-configured tracing; its batched spans are flushed on quit. */
   tracing: TracingHandle;
+  /**
+   * Whether this launch may open the connections in here that nothing forces
+   * it to open: the release check, the two telemetry uploaders, and crash
+   * reporting off the machine. A headless one-shot run passes `false` — no
+   * operator can act on an update prompt or a consent prompt, and a run asked
+   * for one turn should not report on itself. Local crash minidumps are still
+   * collected either way; only their upload is discretionary.
+   *
+   * Every one of these is ALSO settings-driven, and this never widens that:
+   * `true` leaves each of them deciding exactly as before.
+   */
+  discretionaryEgress: boolean;
 }
 
 /**
  * Start crash reporter, anonymous telemetry, plugin-lifecycle telemetry, and
  * the auto-updater. All default-off or settings-driven. Non-fatal on error.
+ *
+ * A launch without discretionary egress keeps only the local half: crash
+ * minidumps still land in the LVIS-owned dump directory, and nothing else in
+ * here is constructed at all.
  */
 export function wireReleasePrep(input: ReleasePrepInput): ReleasePrepOutput {
   const { mainWindow, settingsService, bootAuditLogger, networkFetch, tracing } = input;
@@ -76,10 +92,17 @@ export function wireReleasePrep(input: ReleasePrepInput): ReleasePrepOutput {
   }
 
   try {
+    // Always started: this is the local minidump collector, and `remoteReporting`
+    // is what decides whether a dump may leave the machine.
     startCrashReporter({
       userDataPath: app.getPath("userData"),
       telemetry: settingsService.get("telemetry"),
+      remoteReporting: input.discretionaryEgress,
     });
+    if (!input.discretionaryEgress) {
+      log.info("boot: release prep wired (local crash dumps only)");
+      return { telemetry, pluginTelemetry, autoUpdaterStop };
+    }
     telemetry = new TelemetryService({
       settings: () => settingsService.get("telemetry"),
       appVersion: app.getVersion(),
