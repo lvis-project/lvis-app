@@ -59,32 +59,56 @@ const log = createLogger("lvis");
  * whose position relative to plugin shutdown, service disposal or the log sink
  * matters — belongs in {@link runAppShutdownCleanup}, not here.
  */
-const shutdownHooks: Array<{ readonly name: string; readonly stop: () => void }> = [];
+interface ShutdownHook {
+  readonly name: string;
+  readonly stop: () => void;
+}
+
+const shutdownHooks: ShutdownHook[] = [];
 let shutdownHooksRan = false;
 
+/** Run one hook, containing its failure so it cannot take the others with it. */
+function runShutdownHook(hook: ShutdownHook): void {
+  try {
+    hook.stop();
+  } catch (err) {
+    log.warn("shutdown hook failed (%s): %s", hook.name, errorMessage(err));
+  }
+}
+
+/**
+ * Register teardown to run when the app quits, or immediately if it already
+ * has.
+ *
+ * A quit can arrive while boot is still running: the registry drains, the
+ * ordered cleanup declines because no `AppServices` exists yet, the plugin
+ * runtime defers the quit to await its shutdown handlers, and the rest of boot
+ * keeps registering. Anything registered in that window belongs to a quit that
+ * has already passed its drain, so it runs on the spot rather than waiting for
+ * a second drain that never comes. Each hook still runs exactly once.
+ */
 export function registerShutdownHook(name: string, stop: () => void): void {
-  shutdownHooks.push({ name, stop });
+  const hook: ShutdownHook = { name, stop };
+  if (shutdownHooksRan) {
+    runShutdownHook(hook);
+    return;
+  }
+  shutdownHooks.push(hook);
 }
 
 /**
  * Run every registered hook once, before the ordered cleanup starts.
  *
  * Called from the one `before-quit` listener ahead of its own guards, because
- * these hooks used to be `prependOnceListener`s: they fired on every quit,
- * including one that arrives while boot is still running and no `AppServices`
- * has been published yet. A throwing hook is contained so the hooks after it
- * still run and the ordered cleanup still starts.
+ * these hooks held their own listeners before — mostly prepended ones, which
+ * fired ahead of that handler, and all of them fired on quits where the guards
+ * return early. A throwing hook is contained so the hooks after it still run
+ * and the ordered cleanup still starts.
  */
 export function runShutdownHooks(): void {
   if (shutdownHooksRan) return;
   shutdownHooksRan = true;
-  for (const hook of shutdownHooks) {
-    try {
-      hook.stop();
-    } catch (err) {
-      log.warn("shutdown hook failed (%s): %s", hook.name, errorMessage(err));
-    }
-  }
+  for (const hook of shutdownHooks) runShutdownHook(hook);
 }
 
 /**

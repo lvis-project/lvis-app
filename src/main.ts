@@ -767,8 +767,9 @@ app.on("will-quit", (event) => {
 // hook instead of a listener of its own, so this count does not grow with the
 // service graph and Electron's `App` never crosses Node's listener ceiling.
 app.on("before-quit", (event) => {
-  // Hooks run first and unconditionally — they were `prependOnceListener`s,
-  // which fired ahead of this handler and on quits that return early below.
+  // Hooks run first and unconditionally. Eight of them were prepended
+  // listeners, which fired ahead of this handler; all of them fired on quits
+  // where the guards below return early.
   runShutdownHooks();
   const appUpdateInstallRequested = isAppUpdateInstallRequested();
   if (isAppUpdateInstallPrepared()) return;

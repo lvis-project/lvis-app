@@ -269,6 +269,37 @@ describe("shutdown hooks", () => {
     expect(ran).toEqual(["first", "second"]);
   });
 
+  it("runs a hook registered after the drain immediately, and only once", async () => {
+    // Boot can still be registering while a quit is in flight: the drain has
+    // already happened, the ordered cleanup declined because AppServices did
+    // not exist yet, and the plugin runtime deferred the quit. A hook that
+    // arrives then belongs to a drain that has passed, and a second drain
+    // never comes — so it has to run on the spot.
+    vi.resetModules();
+    const { registerShutdownHook, runShutdownHooks } = await import("../app-shutdown.js");
+    runShutdownHooks();
+
+    const late = vi.fn();
+    registerShutdownHook("registered-after-drain", late);
+    expect(late).toHaveBeenCalledTimes(1);
+
+    runShutdownHooks();
+    expect(late).toHaveBeenCalledTimes(1);
+
+    // Same containment as the drain: a late hook that throws must not surface
+    // in the middle of the boot step that registered it.
+    expect(() =>
+      registerShutdownHook("late-and-throws", () => {
+        throw new Error("timer already gone");
+      }),
+    ).not.toThrow();
+    expect(logWarn).toHaveBeenCalledWith(
+      "shutdown hook failed (%s): %s",
+      "late-and-throws",
+      "timer already gone",
+    );
+  });
+
   it("contains a throwing hook so the ones after it still run", async () => {
     vi.resetModules();
     const { registerShutdownHook, runShutdownHooks } = await import("../app-shutdown.js");
@@ -335,6 +366,22 @@ describe("before-quit listener inventory", () => {
       .map((file) => relative(process.cwd(), file))
       .sort();
 
-    expect(found).toEqual([...ALLOWED_LISTENER_FILES.keys()].sort());
+    const allowed = [...ALLOWED_LISTENER_FILES.keys()].sort();
+    const why = [...ALLOWED_LISTENER_FILES]
+      .map(([file, reason]) => `  ${file} — ${reason}`)
+      .join("\n");
+    expect(
+      found,
+      [
+        "The set of files registering an Electron `before-quit` listener changed.",
+        "Allow-list (src/main/__tests__/app-shutdown-order.test.ts, ALLOWED_LISTENER_FILES):",
+        why,
+        "A new listener needs an entry here only when its teardown CANNOT be a",
+        "shutdown hook — it has to call event.preventDefault(), or its position",
+        "relative to another teardown step matters. Everything else belongs in",
+        "registerShutdownHook() (src/main/app-shutdown.ts), which shares the one",
+        "listener main.ts owns and keeps the App emitter under Node's ceiling.",
+      ].join("\n"),
+    ).toEqual(allowed);
   });
 });
