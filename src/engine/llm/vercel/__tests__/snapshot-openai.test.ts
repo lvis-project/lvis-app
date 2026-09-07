@@ -926,7 +926,65 @@ describe("VercelUnifiedProvider openai-compatible", () => {
           providerOptions: expect.objectContaining({
             "lvis-compat": {
               chat_template_kwargs: { enable_thinking: enableThinking },
+              // A budget only means something while thinking is on; with the
+              // switch off there are no reasoning tokens to limit.
+              ...(enableThinking ? { thinking_token_budget: 10_000 } : {}),
             },
+          }),
+        }),
+      );
+    }
+
+    vi.doUnmock("ai");
+    vi.doUnmock("@ai-sdk/openai-compatible");
+  });
+
+  it("forwards the configured reasoning budget, not just the on/off switch", async () => {
+    // Without this the reasoning control has two positions — none and
+    // unlimited — and a model that reasons by default can spend an entire
+    // generation deliberating and return an empty answer.
+    vi.resetModules();
+    const streamTextSpy = vi.fn(() => ({
+      stream: (async function* () {
+        yield {
+          type: "finish",
+          finishReason: "stop",
+          totalUsage: { inputTokens: 1, outputTokens: 1 },
+        };
+      })(),
+    }));
+    vi.doMock("ai", async () => {
+      const actual = await vi.importActual<typeof import("ai")>("ai");
+      return { ...actual, streamText: streamTextSpy };
+    });
+    vi.doMock("@ai-sdk/openai-compatible", () => ({
+      createOpenAICompatible: vi.fn(() => vi.fn(() => ({ __mock: "compat" }))),
+    }));
+
+    const { VercelUnifiedProvider } = await import("../adapter.js");
+    const provider = new VercelUnifiedProvider(
+      "openai-compatible",
+      "k",
+      "https://example.test/v1",
+    );
+
+    for (const thinkingBudgetTokens of [1024, 32_000]) {
+      streamTextSpy.mockClear();
+      await collect(
+        provider.streamTurn({
+          model: "qwen3.6",
+          systemPrompt: "sys",
+          messages: [{ role: "user", content: "hi" }],
+          enableThinking: true,
+          thinkingBudgetTokens,
+        }),
+      );
+      expect(streamTextSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          providerOptions: expect.objectContaining({
+            "lvis-compat": expect.objectContaining({
+              thinking_token_budget: thinkingBudgetTokens,
+            }),
           }),
         }),
       );
