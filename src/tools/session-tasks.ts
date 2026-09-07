@@ -15,7 +15,7 @@ import {
 import type { SessionTaskItem } from "../shared/session-tasks.js";
 import { t } from "../i18n/index.js";
 
-const ACTIONS = ["create", "add", "edit", "delete", "complete"] as const;
+const ACTIONS = ["create", "add", "edit", "delete", "complete", "list"] as const;
 type SessionTasksAction = (typeof ACTIONS)[number];
 
 const EDIT_STATUSES = ["pending", "in_progress"] as const;
@@ -158,6 +158,14 @@ export function createSessionTasksTool(store: SessionTasksStore): Tool {
               return noChange(`task ${index} is already completed`);
             }
             items = await store.complete(sessionId, index);
+            break;
+          }
+          // Re-reading the plan without changing it. Every other action mutates,
+          // so until now the only way to see the list again was to write to it —
+          // and `noChange` correctly refuses a write that changes nothing, which
+          // left no way at all. This is the read that pairs with that refusal.
+          case "list": {
+            items = store.list(sessionId);
             break;
           }
         }
