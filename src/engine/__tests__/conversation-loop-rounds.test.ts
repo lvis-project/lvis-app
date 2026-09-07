@@ -22,6 +22,7 @@ import type { SubscriptionRuntimeId } from "../../shared/subscription-runtime.js
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 import type { TurnDecisionEvent } from "../turn/types.js";
 import { genericToModelMessages } from "../llm/vercel/adapter.js";
+import { t } from "../../i18n/index.js";
 
 class FakeProvider implements LLMProvider {
   readonly vendor = "openai" as const;
@@ -1445,12 +1446,14 @@ describe("reasoning-only round is not a finished turn", () => {
     });
   });
 
-  it("puts the reasoning the re-prompt refers to on the wire, since no vendor maps `thought`", async () => {
-    // The committed assistant row holds the reasoning, but `thought` is mapped
-    // to no wire part and a row with neither text nor tool calls is dropped
-    // whole by the adapter. Quoting it inside the instruction is what makes the
-    // instruction actionable — assert against the REAL mapper, not the
-    // pre-adapter GenericMessage list.
+  it("replays the reasoning as an assistant turn so the wire keeps role alternation", async () => {
+    // The committed row carries the reasoning in `thought`, which no vendor
+    // maps onto the wire, and it has neither text nor tool calls, so the
+    // adapter drops it whole. Replaying the reasoning as the model's own prior
+    // turn is what puts it in front of the model AND keeps user/assistant
+    // alternation — a chat template that asserts alternation rejects the two
+    // consecutive user rows a bare instruction would leave behind. Assert
+    // against the REAL mapper, not the pre-adapter GenericMessage list.
     const provider = new RecordingPromptProvider([
       reasoningOnlyRound(REASONING),
       [
@@ -1465,14 +1468,21 @@ describe("reasoning-only round is not a finished turn", () => {
     });
 
     const wire = genericToModelMessages(provider.messages[1]!, "openai");
-    const last = wire[wire.length - 1]!;
-    expect(last.role).toBe("user");
-    expect(JSON.stringify(last.content)).toContain(REASONING);
+    expect(wire.map((message) => message.role)).toEqual([
+      "user", "assistant", "user",
+    ]);
+    // The dropped empty row leaves no trace: every row carries real content.
+    for (const message of wire) {
+      expect(JSON.stringify(message.content)).not.toBe("[]");
+    }
+    expect(JSON.stringify(wire[1]!.content)).toContain(REASONING);
+    expect(JSON.stringify(wire[2]!.content))
+      .toContain(t("be_conversationLoop.reasoningOnlyContinuePrompt"));
   });
 
-  it("carries only the tail of a long reasoning block", async () => {
+  it("replays only the tail of a long reasoning block", async () => {
     // A reasoning block ends on the action it decided; the earlier text is the
-    // deliberation that led there. Bounding the quote keeps a runaway block
+    // deliberation that led there. Bounding the replay keeps a runaway block
     // from pushing the round over the context budget it just came back under.
     const head = "H".repeat(5_000);
     const tail = " and finally I will run the installer.";
@@ -1490,17 +1500,17 @@ describe("reasoning-only round is not a finished turn", () => {
     });
 
     const secondRound = provider.messages[1]!;
-    const nudge = secondRound[secondRound.length - 1]!.content;
-    expect(nudge).toContain(tail);
-    // The prompt wrapper is small, so a 2,000-char cap on a 5,037-char thought
-    // must leave the message far below the un-truncated length.
-    expect(nudge.length).toBeLessThan(2_500);
-    expect(nudge).not.toContain(head);
+    const replay = secondRound[secondRound.length - 2]!;
+    expect(replay.role).toBe("assistant");
+    expect(replay.content).toContain(tail);
+    expect(replay.content).not.toContain(head);
+    expect(replay.content.length).toBe(2_000);
   });
 
-  it("sends the re-prompt on the wire only, never into persisted history", async () => {
+  it("sends both re-prompt rows on the wire only, never into persisted history", async () => {
+    const thought = "Let me verify the tokenizer.";
     const provider = new RecordingPromptProvider([
-      reasoningOnlyRound("Let me verify the tokenizer."),
+      reasoningOnlyRound(thought),
       [
         { type: "text_delta", text: "Verified." },
         { type: "message_complete", stopReason: "end_turn" },
@@ -1513,14 +1523,21 @@ describe("reasoning-only round is not a finished turn", () => {
     });
 
     const secondRound = provider.messages[1]!;
-    const nudge = secondRound[secondRound.length - 1]!;
-    expect(nudge.role).toBe("user");
-    // History never took it: a persisted host instruction would replay on
-    // every later turn as if the user had typed it.
-    expect(JSON.stringify(loop.getHistory().getMessages()))
-      .not.toContain("Let me verify the tokenizer.\n\nCarry out");
-    expect(JSON.stringify(loop.getHistory().getMessages()))
-      .not.toContain(nudge.content);
+    const [replay, instruction] = secondRound.slice(-2);
+    expect(replay!.role).toBe("assistant");
+    expect(instruction!.role).toBe("user");
+
+    // Neither row is persisted. A host instruction committed to history would
+    // replay on every later turn as if the user had typed it, and the replayed
+    // reasoning would become a second copy of a row history already holds.
+    const persisted = loop.getHistory().getMessages();
+    expect(JSON.stringify(persisted)).not.toContain(instruction!.content);
+    expect(persisted.filter((message) =>
+      message.role === "assistant" && message.content === thought)).toEqual([]);
+    // History keeps exactly one carrier of that reasoning: the `thought` field
+    // of the row the round actually committed.
+    expect(persisted.filter((message) => message.thought === thought))
+      .toHaveLength(1);
   });
 
   it("lets queued guidance win the end-turn boundary without spending the cap", async () => {
@@ -1556,7 +1573,8 @@ describe("reasoning-only round is not a finished turn", () => {
     const secondRoundText = JSON.stringify(provider.messages[1]!);
     expect(secondRoundText).toContain("use the other installer");
     // The first round's reasoning was never quoted into that round.
-    expect(secondRoundText).not.toContain(`${firstThought}\n\nCarry out`);
+    expect(secondRoundText)
+      .not.toContain(t("be_conversationLoop.reasoningOnlyContinuePrompt"));
     // Round 2 reasons only as well, and its re-prompt still reports 0 spent.
     expect(decisions.filter((event) =>
       event.kind === "reasoning_only.continuation")).toEqual([
