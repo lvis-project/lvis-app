@@ -77,6 +77,35 @@ const PARENT_UNLIMITED_ROUNDS = Number.MAX_SAFE_INTEGER;
  */
 const MAX_LENGTH_CONTINUATIONS = 3;
 /**
+ * Hard cap on reasoning-only re-prompts per turn. A round that ends `end_turn`
+ * with reasoning but no answer text and no tool call has not finished the turn:
+ * the reasoning names the next action the model meant to take, so returning
+ * there gives up before the model did. Two: the first re-prompt covers a model
+ * that narrated its next action and simply failed to emit it, the second covers
+ * one that answers the re-prompt with more reasoning. Past that the model is
+ * looping, and every attempt spends a round out of the same budget the real
+ * work needs. AND-ed with the caller-assigned round budget — either one
+ * tripping ends the turn exactly the way it ends without this branch.
+ */
+const MAX_REASONING_ONLY_NUDGES = 2;
+/**
+ * How much of an answer-less round's reasoning the next round replays as that
+ * round's assistant text.
+ *
+ * The replay is what puts the reasoning in front of the model at all: `thought`
+ * is mapped to no wire part on any vendor, and a row holding it with neither
+ * text nor tool calls is dropped whole rather than sent as an empty assistant
+ * turn. Dropping it also collapses the rows either side into two consecutive
+ * user turns, which a chat template that asserts role alternation rejects.
+ *
+ * The TAIL is the part that matters — a reasoning block ends on the action it
+ * decided, and the earlier text is the deliberation that led there. 2,000
+ * characters is roughly the last few paragraphs: enough to carry the decision
+ * and its immediate justification, small enough that a runaway reasoning block
+ * cannot push the round over the context budget it just came back under.
+ */
+const MAX_NUDGE_REASONING_CHARS = 2_000;
+/**
  * Defensive cap on provider-as-oracle tool drops per turn. Termination is
  * already guaranteed structurally (each drop strictly shrinks the finite tool
  * set and we only drop a tool the provider named AND that is still present),
@@ -334,6 +363,13 @@ export async function queryLoop(
     let continuationCarryText = "";
     let continuationCarryThought = "";
     let continuationPrefillText: string | undefined = undefined;
+    // Reasoning-only re-prompt state. `reasoningNudgePending` arms exactly one
+    // re-prompt for the NEXT round (see MAX_REASONING_ONLY_NUDGES); the round
+    // assembly consumes it and spends `reasoningNudgesRun`, the per-turn tally
+    // against the cap. The reasoning itself needs no carrying — the assembly
+    // replays it off the committed row.
+    let reasoningNudgesRun = 0;
+    let reasoningNudgePending = false;
     // C3(a): effective round budget. A host-assigned `maxRounds` (the sub-agent
     // runner, carrying the user's configured budget) is HONOURED exactly, above
     // the default too; narrowing it only shows up as an agent stopped mid-task.
@@ -591,15 +627,75 @@ export async function queryLoop(
 
       // ─── Stream attempt — token preflight 가 사전 압축 처리하므로 mid-loop retry 없음 ───
       const baseMessagesForRound = self.history.getMessages();
-      // finish_reason=length CONTINUATION: when continuing, append a WIRE-ONLY
-      // partial assistant turn (NOT persisted to history) as the final message.
-      // The openai-compatible adapter pairs this with continue_final_message so
-      // vLLM resumes it verbatim. For mid-<think> truncation the prefill text is
-      // `<think>\n…` (open, no closing tag) so the model finishes reasoning
-      // before answering; add_generation_prompt:false blocks a 2nd auto <think>.
-      const messagesForRound: GenericMessage[] = continuationPrefillText !== undefined ? [
-        ...baseMessagesForRound, { role: "assistant" as const, content: continuationPrefillText },
-      ] : baseMessagesForRound;
+      // Rows appended for THIS round only. None of them is persisted: history
+      // holds what the conversation said, and a host row committed there would
+      // replay on every later turn as if the user had typed it.
+      //
+      // The appended USER text is assembled into ONE row. A second consecutive
+      // user row is what a chat template that asserts role alternation rejects,
+      // so every host instruction for a round shares the single row rather than
+      // adding its own.
+      //
+      // Called exactly ONCE per round: it consumes the armed re-prompt and
+      // spends its cap, so a second call would charge the same instruction twice.
+      const assembleRoundMessages = (
+        base: GenericMessage[],
+      ): GenericMessage[] => {
+        // finish_reason=length CONTINUATION: a WIRE-ONLY partial assistant turn
+        // as the final message. The openai-compatible adapter pairs this with
+        // continue_final_message so vLLM resumes it verbatim. For mid-<think>
+        // truncation the prefill text is `<think>\n…` (open, no closing tag) so
+        // the model finishes reasoning before answering; add_generation_prompt:
+        // false blocks a 2nd auto <think>. It IS the last row by contract, so it
+        // never shares the round with an appended instruction.
+        if (continuationPrefillText !== undefined) {
+          return [
+            ...base,
+            { role: "assistant" as const, content: continuationPrefillText },
+          ];
+        }
+        const rows: GenericMessage[] = [...base];
+        // A round whose whole answer went into reasoning leaves an assistant row
+        // with no text and no tool calls. `thought` is mapped to no wire part on
+        // any vendor, so the adapter drops that row entirely — the model loses
+        // the reasoning, AND the rows either side of it collapse into two
+        // consecutive user turns. Replay the reasoning as the row's text on the
+        // wire: the model sees what it worked out, and alternation holds for
+        // whatever follows, the re-prompt below or a delivered guide alike.
+        // Bounded because a reasoning block ends on the action it decided.
+        for (let i = rows.length - 1; i >= 0; i--) {
+          const row = rows[i]!;
+          if (row.role !== "assistant") continue;
+          const thought = row.thought ?? "";
+          if (
+            row.content.trim().length === 0 &&
+            (row.toolCalls?.length ?? 0) === 0 &&
+            thought.trim().length > 0
+          ) {
+            rows[i] = {
+              role: "assistant",
+              content: thought.slice(-MAX_NUDGE_REASONING_CHARS),
+            };
+          }
+          break;
+        }
+        const appendedUserText: string[] = [];
+        if (reasoningNudgePending) {
+          // Spend the cap where the instruction reaches the wire, so a spend can
+          // never stand for an instruction the model was not actually sent.
+          reasoningNudgePending = false;
+          reasoningNudgesRun += 1;
+          appendedUserText.push(
+            t("be_conversationLoop.reasoningOnlyContinuePrompt"),
+          );
+        }
+        if (appendedUserText.length === 0) return rows;
+        return [
+          ...rows,
+          { role: "user" as const, content: appendedUserText.join("\n\n") },
+        ];
+      };
+      const messagesForRound = assembleRoundMessages(baseMessagesForRound);
       self.lastRoundInputProjection = self.projectProviderRequestInput({
         systemPrompt, messages: messagesForRound, toolSchemas,
         continuationPrefill: continuationPrefillText !== undefined,
@@ -1068,6 +1164,54 @@ export async function queryLoop(
             note: "extending turn — guide queued at end-turn boundary",
           });
           continue;
+        }
+        // A round that ended `end_turn` with reasoning but no answer text and no
+        // tool call is not a completed turn. Measured on an agentic run: the
+        // reasoning of such rounds states the next action in the first person
+        // ("I need to retry the installation") and the loop returned anyway, so
+        // the turn ended because the LOOP gave up, not the model. Re-prompt
+        // instead, bounded by MAX_REASONING_ONLY_NUDGES so a model that only
+        // ever reasons still terminates. A round with no text, no tool call AND
+        // no reasoning is genuinely empty and keeps today's behaviour: it falls
+        // through to the return below (which also warns when the stop reason was
+        // not `end_turn`).
+        const reasoningOnlyEnd =
+          stopReason === "end_turn" &&
+          pendingToolCalls.length === 0 &&
+          mergedText.trim().length === 0 &&
+          mergedThought.trim().length > 0;
+        if (reasoningOnlyEnd) {
+          const willNudge =
+            reasoningNudgesRun < MAX_REASONING_ONLY_NUDGES &&
+            assistantRoundsRun < effectiveMaxRounds;
+          decide({
+            kind: "reasoning_only.continuation",
+            branch: willNudge ? "continue" : "stop",
+            ...(willNudge
+              ? {}
+              : {
+                reason: reasoningNudgesRun >= MAX_REASONING_ONLY_NUDGES
+                  ? "cap"
+                  : "round-budget",
+              }),
+            data: {
+              nudgesRun: reasoningNudgesRun,
+              cap: MAX_REASONING_ONLY_NUDGES,
+              thoughtChars: mergedThought.length,
+            },
+          });
+          if (willNudge) {
+            // Arm the instruction only. The round that sends it replays this
+            // round's reasoning off the row just committed, so nothing about it
+            // has to be carried across the loop iteration.
+            reasoningNudgePending = true;
+            self.tracer.step("REASONING_ONLY_CONTINUATION", {
+              round: roundIndex,
+              nudgesRun: reasoningNudgesRun,
+              thoughtLen: mergedThought.length,
+            });
+            continue;
+          }
         }
         // EARLY-EXIT #4: turn 종료. 정상 케이스는 stopReason === "end_turn"
         // 또는 LLM 이 tool 없이 final 답을 내놓은 케이스. *비정상 silent

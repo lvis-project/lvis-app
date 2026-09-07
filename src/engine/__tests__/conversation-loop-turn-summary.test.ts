@@ -12,6 +12,10 @@ import { PostTurnHookChain } from "../../hooks/post-turn-hook-chain.js";
 import { FallbackProvider } from "../llm/vercel/fallback-chain.js";
 import { estimateRequestInputProjection } from "../request-input-projection.js";
 import { contextBudgetForCurrentRuntime } from "../turn/compaction.js";
+import {
+  A2A_INPUT_REQUIRED_CONTROL_KIND,
+  A2A_INPUT_REQUIRED_CONTROL_VERSION,
+} from "../../tools/agent-send.js";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -205,11 +209,43 @@ describe("ConversationLoop onTurnSummary", () => {
     expect(summary!.breakdown!["list_directory"].count).toBe(1);
   });
 
-  it("does not emit a summary for an empty/interrupted turn", async () => {
+  it("emits a summary for a turn whose only output was reasoning", async () => {
+    const toolRegistry = new ToolRegistry();
+    // Reasoning with no text and no tool call: the loop re-prompts twice, the
+    // model reasons every time, and the turn ends with empty text. Every round
+    // still spent tokens.
+    class AlwaysReasoningProvider implements LLMProvider {
+      readonly vendor = "openai" as const;
+      async *streamTurn(): AsyncIterable<StreamEvent> {
+        yield { type: "reasoning_delta", text: "I should retry the install." };
+        yield {
+          type: "message_complete", stopReason: "end_turn", usage: { inputTokens: 5, outputTokens: 7 },
+        };
+      }
+    }
+    const loop = createLoopWithRegistry(new AlwaysReasoningProvider(), toolRegistry);
+
+    const summaries: { tokensOut: number }[] = [];
+    const result = await loop.runTurn("질문", {
+      onTurnSummary: (s) => {
+        summaries.push(s);
+      },
+    }, undefined, { inputOrigin: "user-keyboard" },
+    );
+
+    // Empty final text is not a dropped turn here: the summary is the only
+    // record either the badge or cost accounting gets, and gating on text
+    // length reported the whole turn as zero usage on both surfaces.
+    expect(result.text).toBe("");
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]!.tokensOut).toBe(21); // 3 rounds x 7
+  });
+
+  it("does not emit a summary for a round the provider returned blank", async () => {
     const toolRegistry = new ToolRegistry();
     const provider = new FakeProvider([
       [
-        // No text — empty assistant response.
+        // No text, no reasoning, no tool call — nothing to attribute spend to.
         { type: "message_complete", stopReason: "end_turn", usage: { inputTokens: 5, outputTokens: 0 },
         },
       ],
@@ -224,9 +260,87 @@ describe("ConversationLoop onTurnSummary", () => {
     }, undefined, { inputOrigin: "user-keyboard" },
     );
 
-    // Turn produced no assistant text → footer suppressed (mirrors the
-    // notification-gate so dropped/aborted turns don't render footers).
     expect(calls).toBe(0);
+  });
+
+  it("does not emit a summary for an interrupted turn", async () => {
+    const toolRegistry = new ToolRegistry();
+    const controller = new AbortController();
+    const provider: LLMProvider = {
+      vendor: "openai",
+      async *streamTurn(): AsyncIterable<StreamEvent> {
+        yield { type: "text_delta", text: "partial" };
+        controller.abort();
+        yield {
+          type: "message_complete", stopReason: "end_turn", usage: { inputTokens: 5, outputTokens: 3 },
+        };
+      },
+    };
+    const loop = createLoopWithRegistry(provider, toolRegistry);
+
+    let calls = 0;
+    const result = await loop.runTurn("질문", {
+      onTurnSummary: () => {
+        calls += 1;
+      },
+    }, controller.signal, { inputOrigin: "user-keyboard" },
+    );
+
+    // An aborted turn carries partial-round stats, not a completed turn's, so
+    // the footer stays suppressed for it and for the two error stop reasons.
+    expect(result.stopReason).toBe("interrupted");
+    expect(calls).toBe(0);
+  });
+
+  it("keeps reporting usage for an input-required turn that answered before asking", async () => {
+    // `input-required` is not one of the suppressed stop reasons; it follows
+    // the same produced-an-answer rule every completed turn follows. Pinned so
+    // the A2A hand-off keeps its cost record.
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(createDynamicTool({
+      name: "agent_send",
+      description: "question sender",
+      source: "builtin",
+      category: "meta",
+      modelVisible: true,
+      decisionOverride: "always-allow-with-audit",
+      jsonSchema: { type: "object", properties: {} },
+      execute: async () => ({
+        output: "sent",
+        isError: false,
+        metadata: {
+          rawResult: {
+            kind: A2A_INPUT_REQUIRED_CONTROL_KIND,
+            version: A2A_INPUT_REQUIRED_CONTROL_VERSION,
+            reason: "question" as const,
+            prompt: "Which option?",
+          },
+        },
+      }),
+    }),
+    );
+    const provider = new FakeProvider([
+      [
+        { type: "text_delta", text: "I need one detail." },
+        { type: "tool_call", id: "send-question", name: "agent_send", input: {},
+        },
+        { type: "message_complete", stopReason: "tool_use", usage: { inputTokens: 11, outputTokens: 4 },
+        },
+      ],
+    ]);
+    const loop = createLoopWithRegistry(provider, toolRegistry);
+
+    const summaries: { tokensOut: number }[] = [];
+    const result = await loop.runTurn("질문", {
+      onTurnSummary: (s) => {
+        summaries.push(s);
+      },
+    }, undefined, { inputOrigin: "user-keyboard" },
+    );
+
+    expect(result.stopReason).toBe("input-required");
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]!.tokensOut).toBe(4);
   });
 
   it("persists turnSummary on the final post-summary save", async () => {

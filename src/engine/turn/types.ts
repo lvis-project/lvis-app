@@ -88,6 +88,7 @@ export type TurnDecisionKind =
   | "tool_batch"
   | "tool_schema.drop"
   | "length.continuation"
+  | "reasoning_only.continuation"
   | "tool_search"
   | "plugin.expansion"
   | "compact.micro"

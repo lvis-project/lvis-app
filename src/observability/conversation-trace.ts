@@ -23,6 +23,7 @@ export type TraceStepName =
   | "POST_TURN"             // 11. PostTurnHookChain.run
   | "GUIDANCE_INJECTED"     // out-of-band — mid-stream "guide" utterance consumed at round boundary
   | "LENGTH_CONTINUATION"   // out-of-band — finish_reason=length truncation -> continue partial answer verbatim (vLLM continue_final_message)
+  | "REASONING_ONLY_CONTINUATION" // out-of-band — end_turn round with reasoning but no answer and no tool call -> re-prompt for the action the reasoning named
   | "PREFLIGHT_GUARD"       // out-of-band — runPreflightGuard decision: fired / skipped / not-reached, and why
   | "COMPACTION_RESULT";    // out-of-band — outcome of an LLM compaction triggered by PREFLIGHT_GUARD: applied / noop / error
 

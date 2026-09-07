@@ -20,6 +20,13 @@ import { createSkillLoadTool } from "../../tools/skill-load.js";
 import { MCP_RESOURCE_FENCE_OPEN } from "../../shared/mcp-resource-bounds.js";
 import type { SubscriptionRuntimeId } from "../../shared/subscription-runtime.js";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
+import type { TurnCallbacks, TurnDecisionEvent } from "../turn/types.js";
+
+/** Derived so a widened callback union cannot drift from this file again. */
+type AssistantRoundStopReason =
+  Parameters<NonNullable<TurnCallbacks["onAssistantRound"]>>[0]["stopReason"];
+import { genericToModelMessages } from "../llm/vercel/adapter.js";
+import { t } from "../../i18n/index.js";
 
 class FakeProvider implements LLMProvider {
   readonly vendor = "openai" as const;
@@ -678,7 +685,7 @@ describe("ConversationLoop queryLoop", () => {
     (loop as { provider: LLMProvider | null }).provider = provider;
 
     const reasoningDeltas: string[] = [];
-    const rounds: Array<{ text: string; thought: string; stopReason: "end_turn" | "tool_use"; hasToolCalls: boolean;
+    const rounds: Array<{ text: string; thought: string; stopReason: AssistantRoundStopReason; hasToolCalls: boolean;
     }> = [];
     const toolEvents: Array<{ type: "start" | "end"; name: string }> = [];
 
@@ -1386,5 +1393,279 @@ describe("ConversationLoop queryLoop", () => {
     const [firstMessage] = withoutRuntimeMeta(loop.getHistory().getMessages());
     expect((firstMessage as { meta?: { displayText?: string } }).meta?.displayText)
       .toBeUndefined();
+  });
+});
+
+describe("reasoning-only round is not a finished turn", () => {
+  function createLoop(provider: LLMProvider): ConversationLoop {
+    const loop = new ConversationLoop({
+      settingsService: { get: () => fakeLlmSettings(), getSecret: () => "test-key" },
+      systemPromptBuilder: { build: () => "system" },
+      inputClassifier: new InputClassifier(),
+      routeEngine: new RouteEngine(),
+      toolRegistry: new ToolRegistry(),
+      memoryManager: { saveSession: () => {}, listSessions: () => [] },
+      disableSessionPersistence: true,
+    } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
+    (loop as { provider: LLMProvider | null }).provider = provider;
+    return loop;
+  }
+
+  const REASONING = "I need to retry the installation.";
+
+  function reasoningOnlyRound(thought: string): StreamEvent[] {
+    return [
+      { type: "reasoning_delta", text: thought },
+      { type: "message_complete", stopReason: "end_turn" },
+    ];
+  }
+
+  it("re-prompts a round that ended with reasoning but no text and no tool call", async () => {
+    // The measured shape: stopReason end_turn, empty visible text, no tool
+    // call, and reasoning that names the next action. Ending there is the loop
+    // giving up before the model did.
+    const provider = new RecordingPromptProvider([
+      reasoningOnlyRound(REASONING),
+      [
+        { type: "text_delta", text: "Reinstalled and verified." },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const loop = createLoop(provider);
+    const decisions: TurnDecisionEvent[] = [];
+
+    const result = await loop.runTurn(
+      "install it",
+      { onDecision: (event) => decisions.push(event) },
+      undefined,
+      { inputOrigin: "user-keyboard" },
+    );
+
+    expect(provider.messages).toHaveLength(2);
+    expect(result.text).toBe("Reinstalled and verified.");
+    expect(decisions).toContainEqual({
+      kind: "reasoning_only.continuation",
+      branch: "continue",
+      data: { nudgesRun: 0, cap: 2, thoughtChars: REASONING.length },
+    });
+  });
+
+  it("replays the reasoning as an assistant turn so the wire keeps role alternation", async () => {
+    // The committed row carries the reasoning in `thought`, which no vendor
+    // maps onto the wire, and it has neither text nor tool calls, so the
+    // adapter drops it whole. Replaying the reasoning as the model's own prior
+    // turn is what puts it in front of the model AND keeps user/assistant
+    // alternation — a chat template that asserts alternation rejects the two
+    // consecutive user rows a bare instruction would leave behind. Assert
+    // against the REAL mapper, not the pre-adapter GenericMessage list.
+    const provider = new RecordingPromptProvider([
+      reasoningOnlyRound(REASONING),
+      [
+        { type: "text_delta", text: "Reinstalled." },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const loop = createLoop(provider);
+
+    await loop.runTurn("install it", undefined, undefined, {
+      inputOrigin: "user-keyboard",
+    });
+
+    const wire = genericToModelMessages(provider.messages[1]!, "openai");
+    expect(wire.map((message) => message.role)).toEqual([
+      "user", "assistant", "user",
+    ]);
+    // The dropped empty row leaves no trace: every row carries real content.
+    for (const message of wire) {
+      expect(JSON.stringify(message.content)).not.toBe("[]");
+    }
+    expect(JSON.stringify(wire[1]!.content)).toContain(REASONING);
+    expect(JSON.stringify(wire[2]!.content))
+      .toContain(t("be_conversationLoop.reasoningOnlyContinuePrompt"));
+  });
+
+  it("replays only the tail of a long reasoning block", async () => {
+    // A reasoning block ends on the action it decided; the earlier text is the
+    // deliberation that led there. Bounding the replay keeps a runaway block
+    // from pushing the round over the context budget it just came back under.
+    const head = "H".repeat(5_000);
+    const tail = " and finally I will run the installer.";
+    const provider = new RecordingPromptProvider([
+      reasoningOnlyRound(head + tail),
+      [
+        { type: "text_delta", text: "Ran it." },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const loop = createLoop(provider);
+
+    await loop.runTurn("install it", undefined, undefined, {
+      inputOrigin: "user-keyboard",
+    });
+
+    const secondRound = provider.messages[1]!;
+    const replay = secondRound[secondRound.length - 2]!;
+    expect(replay.role).toBe("assistant");
+    expect(replay.content).toContain(tail);
+    expect(replay.content).not.toContain(head);
+    expect(replay.content.length).toBe(2_000);
+  });
+
+  it("keeps the replay and the instruction on the wire only", async () => {
+    const thought = "Let me verify the tokenizer.";
+    const provider = new RecordingPromptProvider([
+      reasoningOnlyRound(thought),
+      [
+        { type: "text_delta", text: "Verified." },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const loop = createLoop(provider);
+
+    await loop.runTurn("check it", undefined, undefined, {
+      inputOrigin: "user-keyboard",
+    });
+
+    const secondRound = provider.messages[1]!;
+    const [replay, instruction] = secondRound.slice(-2);
+    expect(replay!.role).toBe("assistant");
+    expect(replay!.content).toBe(thought);
+    expect(instruction!.role).toBe("user");
+
+    // The replay rewrites the row only for that request. History keeps the
+    // committed shape — reasoning in `thought`, no assistant text — and never
+    // takes the instruction, which would otherwise replay on every later turn
+    // as if the user had typed it.
+    const persisted = loop.getHistory().getMessages();
+    expect(JSON.stringify(persisted)).not.toContain(instruction!.content);
+    expect(persisted.filter((message) =>
+      message.role === "assistant" && message.content === thought)).toEqual([]);
+    expect(persisted.filter((message) =>
+      message.role === "assistant" && message.thought === thought))
+      .toHaveLength(1);
+  });
+
+  it("lets queued guidance win the end-turn boundary without spending the cap", async () => {
+    // Guidance queued while the round ran is itself a re-prompt, and the
+    // end-turn boundary hands the round to it before the reasoning-only branch
+    // is reached. Nothing is armed, so nothing is spent: the NEXT reasoning-only
+    // round still gets the full budget.
+    const firstThought = "First thought.";
+    const secondThought = "Second thought.";
+    const provider = new RecordingPromptProvider([
+      reasoningOnlyRound(firstThought),
+      reasoningOnlyRound(secondThought),
+      [
+        { type: "text_delta", text: "Done." },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const loop = createLoop(provider);
+    const decisions: TurnDecisionEvent[] = [];
+    // queueGuidance requires an in-flight turn; the loop sets this itself in
+    // production, and the test stands in for the IPC thread that queues mid-turn.
+    (loop as unknown as { currentAbortController: AbortController | null })
+      .currentAbortController = new AbortController();
+    loop.queueGuidance("use the other installer");
+
+    await loop.runTurn(
+      "install it",
+      { onDecision: (event) => decisions.push(event) },
+      undefined,
+      { inputOrigin: "user-keyboard" },
+    );
+
+    const secondRoundText = JSON.stringify(provider.messages[1]!);
+    expect(secondRoundText).toContain("use the other installer");
+    // The replay is not tied to the re-prompt: the guide alone would have left
+    // the dropped reasoning row collapsing its neighbours into two user turns.
+    const guidedWire = genericToModelMessages(provider.messages[1]!, "openai");
+    expect(guidedWire.map((message) => message.role)).toEqual([
+      "user", "assistant", "user",
+    ]);
+    for (const message of guidedWire) {
+      expect(JSON.stringify(message.content)).not.toBe("[]");
+    }
+    expect(JSON.stringify(guidedWire[1]!.content)).toContain(firstThought);
+    // The first round's reasoning was never quoted into that round.
+    expect(secondRoundText)
+      .not.toContain(t("be_conversationLoop.reasoningOnlyContinuePrompt"));
+    // Round 2 reasons only as well, and its re-prompt still reports 0 spent.
+    expect(decisions.filter((event) =>
+      event.kind === "reasoning_only.continuation")).toEqual([
+      expect.objectContaining({
+        branch: "continue",
+        data: expect.objectContaining({
+          nudgesRun: 0, thoughtChars: secondThought.length,
+        }),
+      }),
+    ]);
+    expect(JSON.stringify(provider.messages[2]!)).toContain(secondThought);
+  });
+
+  it("bounds the re-prompt so a model that only ever reasons still terminates", async () => {
+    const thought = "still thinking";
+    let calls = 0;
+    class AlwaysReasoningProvider implements LLMProvider {
+      readonly vendor = "openai" as const;
+      async *streamTurn(): AsyncIterable<StreamEvent> {
+        calls += 1;
+        yield { type: "reasoning_delta", text: thought };
+        yield { type: "message_complete", stopReason: "end_turn" };
+      }
+    }
+    const loop = createLoop(new AlwaysReasoningProvider());
+    const decisions: TurnDecisionEvent[] = [];
+
+    const result = await loop.runTurn(
+      "loop forever",
+      { onDecision: (event) => decisions.push(event) },
+      undefined,
+      { inputOrigin: "user-keyboard" },
+    );
+
+    // 1 initial round + 2 re-prompts, then the turn ends as it does today.
+    expect(calls).toBe(3);
+    expect(result.stopReason).toBe("end_turn");
+    expect(
+      decisions.filter(
+        (event) => event.kind === "reasoning_only.continuation"
+          && event.branch === "continue",
+      ),
+    ).toHaveLength(2);
+    expect(decisions).toContainEqual({
+      kind: "reasoning_only.continuation",
+      branch: "stop",
+      reason: "cap",
+      data: { nudgesRun: 2, cap: 2, thoughtChars: thought.length },
+    });
+  });
+
+  it("ends a genuinely empty round on the first attempt", async () => {
+    let calls = 0;
+    class EmptyProvider implements LLMProvider {
+      readonly vendor = "openai" as const;
+      async *streamTurn(): AsyncIterable<StreamEvent> {
+        calls += 1;
+        yield { type: "message_complete", stopReason: "end_turn" };
+      }
+    }
+    const loop = createLoop(new EmptyProvider());
+    const decisions: TurnDecisionEvent[] = [];
+
+    const result = await loop.runTurn(
+      "nothing",
+      { onDecision: (event) => decisions.push(event) },
+      undefined,
+      { inputOrigin: "user-keyboard" },
+    );
+
+    // No reasoning means nothing states what the model meant to do next, so
+    // there is nothing to re-prompt toward — unchanged behaviour.
+    expect(calls).toBe(1);
+    expect(result.text).toBe("");
+    expect(
+      decisions.filter((event) => event.kind === "reasoning_only.continuation"),
+    ).toEqual([]);
   });
 });
