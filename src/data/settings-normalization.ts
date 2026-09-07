@@ -1368,6 +1368,15 @@ export function normalizeChat(input: unknown): ChatSettings {
   if (typeof value.subAgentMaxRounds === "number" && Number.isFinite(value.subAgentMaxRounds)) {
     result.subAgentMaxRounds = Math.max(1, Math.floor(value.subAgentMaxRounds));
   }
+  // `0` is the OFF value and must survive, so this floors at 0 rather than 1.
+  // A fraction or a negative from a hand-edited settings.json reads as "off"
+  // instead of firing a notification on every round.
+  if (
+    typeof value.progressNudgeRounds === "number"
+    && Number.isFinite(value.progressNudgeRounds)
+  ) {
+    result.progressNudgeRounds = Math.max(0, Math.floor(value.progressNudgeRounds));
+  }
   return result;
 }
 

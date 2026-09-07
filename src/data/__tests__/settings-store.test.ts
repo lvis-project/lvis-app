@@ -1106,6 +1106,18 @@ describe("SettingsService LLM per-vendor patching", () => {
     await cleanupTmpDir(userDataPath);
   });
 
+  it("round-trips a per-vendor output ceiling through patch", async () => {
+    // The ceiling is the only brake on a runaway round, and it is configured
+    // rather than assumed — so it has to survive the write path a caller
+    // actually uses, not just the block normalizer.
+    const service = new SettingsService({ userDataPath });
+    await service.patch({
+      llm: { vendors: { "openai-compatible": { outputTokenLimit: 16_384 } } },
+    });
+    expect(service.get("llm").vendors["openai-compatible"]?.outputTokenLimit)
+      .toBe(16_384);
+  });
+
   it("fresh installs persist only default-visible provider blocks", () => {
     const service = new SettingsService({ userDataPath });
     const llm = service.get("llm");
@@ -2735,6 +2747,30 @@ describe("SettingsService chat normalization", () => {
     await s.patch({ chat: { ...s.get("chat"), subAgentMaxRounds: Number.NaN } });
     expect(s.get("chat").subAgentMaxRounds).toBe(
       DEFAULT_SETTINGS.chat.subAgentMaxRounds,
+    );
+  });
+
+  it("keeps 0 as the off value for the progress-notification cadence", async () => {
+    // Unlike the round budget above, 0 is meaningful here: it is how the
+    // notification is turned off, so it must not be raised to a minimum.
+    const s = new SettingsService({ userDataPath });
+    await s.patch({ chat: { ...s.get("chat"), progressNudgeRounds: 0 } });
+    expect(s.get("chat").progressNudgeRounds).toBe(0);
+  });
+
+  it("floors a fractional cadence and reads a negative one as off", async () => {
+    const s = new SettingsService({ userDataPath });
+    await s.patch({ chat: { ...s.get("chat"), progressNudgeRounds: 7.9 } });
+    expect(s.get("chat").progressNudgeRounds).toBe(7);
+    await s.patch({ chat: { ...s.get("chat"), progressNudgeRounds: -4 } });
+    expect(s.get("chat").progressNudgeRounds).toBe(0);
+  });
+
+  it("rejects a mistyped cadence rather than disabling the notification", async () => {
+    const s = new SettingsService({ userDataPath });
+    await s.patch({ chat: { ...s.get("chat"), progressNudgeRounds: "often" as never } });
+    expect(s.get("chat").progressNudgeRounds).toBe(
+      DEFAULT_SETTINGS.chat.progressNudgeRounds,
     );
   });
 });

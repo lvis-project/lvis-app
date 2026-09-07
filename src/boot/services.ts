@@ -14,6 +14,7 @@ import { DEFAULT_LOCALE, normalizeLocale, setLocale, tryLoadLocaleMessages,
 import { MemoryManager } from "../memory/memory-manager.js";
 import { MemoryCaptureService } from "../memory/memory-capture-service.js";
 import { getDefaultWorkspaceRoot } from "../main/default-workspace-root.js";
+import { execModeRequested } from "../main/exec-mode.js";
 import { InputClassifier } from "../core/input-classifier.js";
 import { RouteEngine } from "../core/route-engine.js";
 import { ToolRegistry } from "../tools/registry.js";
@@ -69,6 +70,17 @@ export interface CoreServices {
 export async function applyBootLocale(
   settingsService: Pick<SettingsService, "get">,
 ): Promise<void> {
+  // `appearance.language` is the language the app's SURFACES are drawn in, and
+  // a headless one-shot run draws none. What it does have is a system prompt
+  // assembled entirely through `t()`: under a non-English setting the model was
+  // handed a prompt in the machine's language and answered in it, regardless of
+  // what language the request on stdin was written in. Pinning the default here
+  // keeps the prompt neutral so the request decides; the per-run instruction
+  // that says so is in the system prompt's environment section.
+  if (execModeRequested(process.argv)) {
+    setLocale(DEFAULT_LOCALE);
+    return;
+  }
   const bootLocale = normalizeLocale(settingsService.get("appearance").language,
   );
   const loaded = await tryLoadLocaleMessages(bootLocale);

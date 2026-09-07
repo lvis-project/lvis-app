@@ -154,6 +154,21 @@ Important rules:
   the loops share the memory manager and the window-wide idle services. A
   closed tile releases its loop. See `docs/design/tiled-chat-groups.md`.
 
+A long turn is bounded from two directions, because neither the model nor the
+loop can see what the other knows. Each call carries the active vendor block's
+`outputTokenLimit` as the request's native output ceiling, so one round cannot
+generate until the provider's own maximum and spend the turn on a single call;
+it is unset by default, since the host knows no per-model ceiling and inventing
+one would truncate models it guessed low for, and an uncapped vendor is logged
+once. A capped call ends the same way a provider-capped one does — with
+`max_tokens` — and takes the same length-continuation path, so the cap adds no
+second truncation branch. From the other side, every `chat.progressNudgeRounds`
+assistant rounds (and early when tool errors pile up) the loop sends a
+wire-only progress notification carrying the round count, elapsed time and tool
+call/error totals, with one instruction: verify a completion claim by actually
+running something, or change approach. It is never written to history, because
+its numbers are true only for the round that sent it. `0` turns it off.
+
 ## Memory
 
 Memory is host-owned and project-aware. User preferences, long-term memories,

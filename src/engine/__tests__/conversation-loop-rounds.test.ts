@@ -27,6 +27,7 @@ type AssistantRoundStopReason =
   Parameters<NonNullable<TurnCallbacks["onAssistantRound"]>>[0]["stopReason"];
 import { genericToModelMessages } from "../llm/vercel/adapter.js";
 import { t } from "../../i18n/index.js";
+import { DEFAULT_SETTINGS } from "../../data/settings-defaults.js";
 
 class FakeProvider implements LLMProvider {
   readonly vendor = "openai" as const;
@@ -1667,5 +1668,214 @@ describe("reasoning-only round is not a finished turn", () => {
     expect(
       decisions.filter((event) => event.kind === "reasoning_only.continuation"),
     ).toEqual([]);
+  });
+});
+
+// ─── Output ceiling + progress notification ──────────────────────────────
+//
+// The two host-owned brakes on a runaway turn: a per-vendor output ceiling on
+// each call, and a periodic notification telling the model what it has spent.
+
+describe("ConversationLoop output ceiling", () => {
+  it("forwards the active vendor's outputTokenLimit to every chat round", async () => {
+    const provider = new RecordingPromptProvider([
+      [
+        { type: "text_delta", text: "done" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const loop = new ConversationLoop({
+      settingsService: {
+        get: () => fakeLlmSettings({ outputTokenLimit: 16_384 }),
+        getSecret: () => "test-key",
+      },
+      systemPromptBuilder: { build: () => "system" },
+      inputClassifier: new InputClassifier(),
+      routeEngine: new RouteEngine(),
+      toolRegistry: new ToolRegistry(),
+      memoryManager: { saveSession: () => {}, listSessions: () => [] },
+    } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
+    (loop as { provider: LLMProvider | null }).provider = provider;
+
+    await loop.runTurn("answer", undefined, undefined, { inputOrigin: "user-keyboard" });
+
+    expect(provider.params[0]?.outputTokenLimit).toBe(16_384);
+  });
+
+  it("sends no output ceiling when the vendor block declares none", async () => {
+    const provider = new RecordingPromptProvider([
+      [
+        { type: "text_delta", text: "done" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const loop = new ConversationLoop({
+      settingsService: { get: () => fakeLlmSettings(), getSecret: () => "test-key" },
+      systemPromptBuilder: { build: () => "system" },
+      inputClassifier: new InputClassifier(),
+      routeEngine: new RouteEngine(),
+      toolRegistry: new ToolRegistry(),
+      memoryManager: { saveSession: () => {}, listSessions: () => [] },
+    } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
+    (loop as { provider: LLMProvider | null }).provider = provider;
+
+    await loop.runTurn("answer", undefined, undefined, { inputOrigin: "user-keyboard" });
+
+    expect(provider.params[0]).not.toHaveProperty("outputTokenLimit");
+  });
+
+  // A host-capped call and a provider-capped one both come back as
+  // stopReason "max_tokens", so the cap must not create a second truncation
+  // path: the same length-continuation stitches the answer either way.
+  it("continues a host-capped round through the same length-continuation path", async () => {
+    const provider = new RecordingPromptProvider([
+      [
+        { type: "text_delta", text: "Part one " },
+        { type: "message_complete", stopReason: "max_tokens" },
+      ],
+      [
+        { type: "text_delta", text: "and part two." },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const loop = new ConversationLoop({
+      settingsService: {
+        get: () => fakeLlmSettings({ provider: "openai-compatible", outputTokenLimit: 128 }),
+        getSecret: () => "test-key",
+      },
+      systemPromptBuilder: { build: () => "system" },
+      inputClassifier: new InputClassifier(),
+      routeEngine: new RouteEngine(),
+      toolRegistry: new ToolRegistry(),
+      memoryManager: { saveSession: () => {}, listSessions: () => [] },
+    } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
+    (loop as { provider: LLMProvider | null }).provider = provider;
+
+    const decisions: Array<{ kind: string; branch: string }> = [];
+    const result = await loop.runTurn(
+      "write a long answer",
+      { onDecision: (event) => { decisions.push({ kind: event.kind, branch: event.branch }); } },
+      undefined,
+      { inputOrigin: "user-keyboard" },
+    );
+
+    expect(result.text).toBe("Part one and part two.");
+    expect(decisions).toContainEqual({ kind: "length.continuation", branch: "continue" });
+    // The ceiling rode along on the continuation round too.
+    expect(provider.params[1]?.outputTokenLimit).toBe(128);
+  });
+});
+
+describe("ConversationLoop progress notification", () => {
+  // The suite renders messages in Korean, so assertions match the first line
+  // of the rendered notification rather than English prose.
+  const NUDGE_HEADER = t("be_conversationLoop.progressNudge", {
+    round: 0, elapsedSeconds: 0, toolCalls: 0, toolErrors: 0,
+  }).split("\n")[0];
+
+  /** Settings stub whose `chat` block carries a progress-notification cadence. */
+  function settingsWithNudgeCadence(progressNudgeRounds: number) {
+    return {
+      get: (key: string) =>
+        key === "chat"
+          ? { ...DEFAULT_SETTINGS.chat, progressNudgeRounds }
+          : fakeLlmSettings(),
+      getSecret: () => "test-key",
+    };
+  }
+
+  /** A tool-calling turn long enough to cross a cadence of 2. */
+  function loopingProvider() {
+    const round = (id: string): StreamEvent[] => [
+      { type: "tool_call", id, name: "probe", input: {} },
+      { type: "message_complete", stopReason: "tool_use" },
+    ];
+    return new RecordingPromptProvider([
+      round("t1"),
+      round("t2"),
+      round("t3"),
+      [
+        { type: "text_delta", text: "done" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+  }
+
+  function probeRegistry() {
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(createDynamicTool({
+      name: "probe",
+      description: "Probe",
+      source: "builtin",
+      category: "read",
+      jsonSchema: { type: "object", properties: {} },
+      execute: async () => ({ output: "ok", isError: false }),
+    }));
+    return toolRegistry;
+  }
+
+  it("injects a wire-only notification on the cadence and records the decision", async () => {
+    const provider = loopingProvider();
+    const loop = new ConversationLoop({
+      settingsService: settingsWithNudgeCadence(2),
+      systemPromptBuilder: { build: () => "system" },
+      inputClassifier: new InputClassifier(),
+      routeEngine: new RouteEngine(),
+      toolRegistry: probeRegistry(),
+      memoryManager: { saveSession: () => {}, listSessions: () => [] },
+    } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
+    (loop as { provider: LLMProvider | null }).provider = provider;
+
+    const decisions: Array<{ kind: string; branch: string }> = [];
+    await loop.runTurn(
+      "keep working",
+      { onDecision: (event) => { decisions.push({ kind: event.kind, branch: event.branch }); } },
+      undefined,
+      { inputOrigin: "user-keyboard" },
+    );
+
+    expect(decisions).toContainEqual({ kind: "progress.nudge", branch: "cadence" });
+
+    // Round index 2 is the first multiple of the cadence, so its request — and
+    // no earlier one — ends with the notification.
+    const lastOf = (index: number) => {
+      const message = provider.messages[index]?.at(-1);
+      return message && message.role === "user" ? String(message.content) : "";
+    };
+    expect(lastOf(2)).toContain(NUDGE_HEADER);
+    expect(lastOf(0)).not.toContain(NUDGE_HEADER);
+    expect(lastOf(1)).not.toContain(NUDGE_HEADER);
+
+    // Wire-only: nothing about the notification reached the stored transcript.
+    const stored = loop.getHistory().getMessages()
+      .map((message) => String((message as { content?: unknown }).content ?? ""));
+    expect(stored.some((content) => content.includes(NUDGE_HEADER))).toBe(false);
+  });
+
+  it("injects nothing when the cadence is 0", async () => {
+    const provider = loopingProvider();
+    const loop = new ConversationLoop({
+      settingsService: settingsWithNudgeCadence(0),
+      systemPromptBuilder: { build: () => "system" },
+      inputClassifier: new InputClassifier(),
+      routeEngine: new RouteEngine(),
+      toolRegistry: probeRegistry(),
+      memoryManager: { saveSession: () => {}, listSessions: () => [] },
+    } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
+    (loop as { provider: LLMProvider | null }).provider = provider;
+
+    const decisions: string[] = [];
+    await loop.runTurn(
+      "keep working",
+      { onDecision: (event) => { decisions.push(event.kind); } },
+      undefined,
+      { inputOrigin: "user-keyboard" },
+    );
+
+    expect(decisions).not.toContain("progress.nudge");
+    const anyNudge = provider.messages.some((round) =>
+      round.some((message) => String((message as { content?: unknown }).content ?? "")
+        .includes(NUDGE_HEADER)));
+    expect(anyNudge).toBe(false);
   });
 });

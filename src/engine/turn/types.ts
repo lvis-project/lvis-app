@@ -92,6 +92,7 @@ export type TurnDecisionKind =
   | "tool_search"
   | "plugin.expansion"
   | "compact.micro"
+  | "progress.nudge"
   | "early_exit";
 
 export interface TurnDecisionEvent {

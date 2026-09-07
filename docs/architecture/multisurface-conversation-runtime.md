@@ -494,11 +494,23 @@ Plugin loading is untouched — the run still loads whatever the registry
 snapshot on disk holds, and what is dropped is the network refresh in front of
 it. An interactive launch keeps every one of them.
 
+One thing a headless run does **differently**, rather than skipping. The
+`appearance.language` setting names the language the app's surfaces are drawn
+in, and a one-shot run draws none — but the system prompt is assembled through
+the same message catalog, so under a non-English setting the model was handed a
+prompt written in the machine's language and answered in it whatever language
+the request on stdin was written in. A headless run therefore pins the default
+locale at boot, and its prompt carries an explicit rule to answer in the
+language of the request in place of the `Locale:` line an interactive prompt
+carries. An interactive launch is unchanged: there the setting really is a
+statement about the person reading the answer.
+
 Implementation anchors:
 
 - `src/main/exec-mode.ts`
 - `src/main.ts`
 - `src/boot.ts` (`BootLaunch`)
+- `src/boot/services.ts` (`applyBootLocale`)
 - `src/ipc/handlers/chat-stream.ts`
 
 ## Telemetry

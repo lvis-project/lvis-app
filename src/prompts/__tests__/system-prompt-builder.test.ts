@@ -10,12 +10,13 @@
  *   - sanitizeTitle() + setSessionTitle() whitespace-only → normalised to null
  *   - Section 8 (Rolling Summary Preamble) injected when preamble set, omitted otherwise
  */
-import { describe, it, expect, expectTypeOf, vi } from "vitest";
+import { afterEach, describe, it, expect, expectTypeOf, vi } from "vitest";
 
 import { SystemPromptBuilder, type SystemPromptBuilderDeps } from "../system-prompt-builder.js";
 import type { MemoryManager, PromptMemorySource } from "../../memory/memory-manager.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import { makePromptMemorySource, makeSystemPromptBuilder } from "./test-helpers.js";
+import { t } from "../../i18n/index.js";
 
 function makeMemoryBuilder(memoryIndex: string): SystemPromptBuilder {
   return new SystemPromptBuilder({
@@ -633,5 +634,39 @@ describe("SystemPromptBuilder — the memory contract is a type-level requiremen
     expectTypeOf<PromptMemorySource>().not.toHaveProperty("getUserPreferences");
     expectTypeOf<PromptMemorySource>().not.toHaveProperty("getMemoryIndex");
     expectTypeOf<PromptMemorySource>().not.toHaveProperty("getMemoryContext");
+  });
+});
+
+describe("SystemPromptBuilder — Completion Discipline", () => {
+  it("states that a completion claim has to be preceded by an execution", () => {
+    const prompt = makeSystemPromptBuilder().build();
+    expect(prompt).toContain(t("be_systemPromptBuilder.completionDiscipline"));
+  });
+});
+
+describe("SystemPromptBuilder — response language", () => {
+  const originalArgv = process.argv;
+  afterEach(() => {
+    process.argv = originalArgv;
+  });
+
+  it("names the host locale for an interactive launch", () => {
+    process.argv = ["electron", "."];
+    const prompt = makeSystemPromptBuilder().build();
+    expect(prompt).toContain(
+      `Locale: ${Intl.DateTimeFormat().resolvedOptions().locale}`,
+    );
+    expect(prompt).not.toContain(t("be_systemPromptBuilder.headlessResponseLanguage"));
+  });
+
+  it("replaces the host locale with a request-language rule for a headless run", () => {
+    // A one-shot run has no interactive user, so the machine's locale says
+    // nothing about who is reading the answer.
+    process.argv = ["electron", ".", "--exec", "do the task"];
+    const prompt = makeSystemPromptBuilder().build();
+    expect(prompt).toContain(t("be_systemPromptBuilder.headlessResponseLanguage"));
+    expect(prompt).not.toContain(
+      `Locale: ${Intl.DateTimeFormat().resolvedOptions().locale}`,
+    );
   });
 });

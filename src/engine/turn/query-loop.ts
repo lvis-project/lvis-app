@@ -115,6 +115,31 @@ const MAX_NUDGE_REASONING_CHARS = 2_000;
  */
 const MAX_TOOL_SCHEMA_DROPS_PER_TURN = 5;
 /**
+ * Vendors already reported as running chat rounds with no output ceiling.
+ *
+ * An uncapped round can generate until the provider's own maximum, which costs
+ * the whole turn's time on one call. The host declines to guess a per-model
+ * ceiling, so the only honest reaction is to say the ceiling is absent — once
+ * per vendor per process, because it is a configuration fact, not a per-round
+ * event, and repeating it per round would bury the runs that matter.
+ */
+const uncappedChatVendorsLogged = new Set<LLMVendor>();
+
+function noteUncappedChatVendor(vendor: LLMVendor): void {
+  if (uncappedChatVendorsLogged.has(vendor)) return;
+  uncappedChatVendorsLogged.add(vendor);
+  log.info(
+    `queryLoop: vendor "${vendor}" has no llm.vendors.${vendor}.outputTokenLimit — chat rounds run at the provider's own output maximum`,
+  );
+}
+/**
+ * Tool errors that have to pile up since the last progress notification before
+ * one fires ahead of the round cadence. Below this a couple of recoverable
+ * failures inside an otherwise healthy turn would trigger a notification the
+ * model has no use for.
+ */
+const PROGRESS_NUDGE_TOOL_ERROR_THRESHOLD = 3;
+/**
  * C3(a): per-round cap on the number of tool calls an assistant round can
  * issue. Pathological round-emitting many tool_use blocks at once would
  * otherwise execute every one before the maxRounds guard could intervene.
@@ -191,6 +216,9 @@ export async function queryLoop(
     const roundLlmSettings = subscriptionRuntime
       ? { streamSmoothing: llmSettings.streamSmoothing, enableThinking: false }
       : { ...activeBlock, streamSmoothing: llmSettings.streamSmoothing };
+    if (subscriptionRuntime === undefined && activeBlock.outputTokenLimit === undefined) {
+      noteUncappedChatVendor(llmSettings.provider);
+    }
     // Subscription transports receive an ordinary serialized prompt for every
     // LVIS round. Until a runtime exposes and proves a native assistant-prefill
     // continuation protocol, a max_tokens response must remain a partial
@@ -354,6 +382,16 @@ export async function queryLoop(
 
     // C3(a): assistant-round counter — used by the maxRounds break below.
     let assistantRoundsRun = 0;
+    // Progress-notification bookkeeping. These three numbers are the only thing
+    // the model is told about its own budget, so they are counted here rather
+    // than derived from history: history is compacted mid-turn and a compacted
+    // prefix would make a long turn look like a short one.
+    const turnStartedAtMs = Date.now();
+    let toolErrorsRun = 0;
+    let toolErrorsAtLastProgressNudge = 0;
+    // Cadence in assistant rounds; `0` disables the notification entirely.
+    const progressNudgeRounds =
+      self.deps.settingsService.get("chat").progressNudgeRounds;
     // finish_reason=length CONTINUATION carry. While a logical answer is being
     // continued across rounds we accumulate its raw text + reasoning here and
     // DEFER the history append + onAssistantRound until the chain terminates —
@@ -618,6 +656,33 @@ export async function queryLoop(
         delivery.historyMessage = historyMessage;
       }
 
+      // ─── Progress notification ──────────────────────────────────────────
+      // A long turn has no notion of its own budget: nothing in the transcript
+      // tells the model how many rounds it has spent, how long it has run, or
+      // how many of its tool calls failed. Runs that stop converging therefore
+      // keep announcing a next step until an external deadline cuts them off
+      // mid tool-call, and runs that are finished declare completion without
+      // ever executing the check that would prove it. This is the only thing in
+      // the turn that supplies those numbers and asks for either a real
+      // verification or a change of approach.
+      //
+      // It never enters history. The numbers are true only for the round they
+      // are sent in, so a persisted row would replay a stale round count into
+      // every later turn, draw as a user bubble on reload, and survive
+      // compaction as if the user had typed it.
+      //
+      // Decided here, SENT by assembleRoundMessages below — which is also where
+      // the decision is recorded and the bookkeeping is spent, so a recorded
+      // notification always corresponds to one the model was actually handed.
+      const progressNudgeBranch: "cadence" | "tool-errors" | null =
+        progressNudgeRounds === 0
+          ? null
+          : round > 0 && round % progressNudgeRounds === 0
+            ? "cadence"
+            : toolErrorsRun - toolErrorsAtLastProgressNudge >= PROGRESS_NUDGE_TOOL_ERROR_THRESHOLD
+              ? "tool-errors"
+              : null;
+
       const repaired = self.history.repairToolPairInvariant();
       if (repaired.removedMessages > 0 || repaired.removedToolCalls > 0) {
         log.warn(
@@ -689,6 +754,29 @@ export async function queryLoop(
             t("be_conversationLoop.reasoningOnlyContinuePrompt"),
           );
         }
+        // After the re-prompt: that one says what to do with THIS round, the
+        // notification says what the turn has spent so far. Spent here for the
+        // same reason the re-prompt is — this is where it reaches the wire.
+        if (progressNudgeBranch !== null) {
+          const elapsedSeconds = Math.round((Date.now() - turnStartedAtMs) / 1000);
+          appendedUserText.push(t("be_conversationLoop.progressNudge", {
+            round,
+            elapsedSeconds,
+            toolCalls: allToolCalls.length,
+            toolErrors: toolErrorsRun,
+          }));
+          decide({
+            kind: "progress.nudge",
+            branch: progressNudgeBranch,
+            data: {
+              round,
+              elapsedSeconds,
+              toolCalls: allToolCalls.length,
+              toolErrors: toolErrorsRun,
+            },
+          });
+          toolErrorsAtLastProgressNudge = toolErrorsRun;
+        }
         if (appendedUserText.length === 0) return rows;
         return [
           ...rows,
@@ -696,6 +784,16 @@ export async function queryLoop(
         ];
       };
       const messagesForRound = assembleRoundMessages(baseMessagesForRound);
+||||||| parent of cc386e9 (feat(turn): bound a runaway turn with an output ceiling and progress pressure)
+      // finish_reason=length CONTINUATION: when continuing, append a WIRE-ONLY
+      // partial assistant turn (NOT persisted to history) as the final message.
+      // The openai-compatible adapter pairs this with continue_final_message so
+      // vLLM resumes it verbatim. For mid-<think> truncation the prefill text is
+      // `<think>\n…` (open, no closing tag) so the model finishes reasoning
+      // before answering; add_generation_prompt:false blocks a 2nd auto <think>.
+      const messagesForRound: GenericMessage[] = continuationPrefillText !== undefined ? [
+        ...baseMessagesForRound, { role: "assistant" as const, content: continuationPrefillText },
+      ] : baseMessagesForRound;
       self.lastRoundInputProjection = self.projectProviderRequestInput({
         systemPrompt, messages: messagesForRound, toolSchemas,
         continuationPrefill: continuationPrefillText !== undefined,
@@ -1777,6 +1875,8 @@ export async function queryLoop(
           result: toolResults[i]?.content ?? "(missing)",
         });
       }
+
+      toolErrorsRun += toolResults.filter((tr) => tr.is_error === true).length;
 
       // tool_result 히스토리 append → loop back
       for (const tr of toolResults) {

@@ -263,3 +263,36 @@ describe("COPILOT_BASE_URL", () => {
     expect(COPILOT_BASE_URL).toBe("https://models.github.ai/inference");
   });
 });
+
+describe("getLlmVendorSettings output ceiling", () => {
+  it("carries a positive integer ceiling through unchanged", () => {
+    const block = getLlmVendorSettings(
+      { openai: { ...LLM_VENDOR_DEFAULTS.openai, outputTokenLimit: 16_384 } },
+      "openai",
+    );
+    expect(block.outputTokenLimit).toBe(16_384);
+  });
+
+  it("leaves the ceiling absent when nothing is stored", () => {
+    const block = getLlmVendorSettings(freshVendorBlocks(), "openai");
+    expect(block).not.toHaveProperty("outputTokenLimit");
+  });
+
+  it.each([0, -1, 12.5, Number.NaN, "16384"])(
+    "drops %p rather than passing an unusable ceiling to the transport",
+    (stored) => {
+      // The transport reads any non-positive or non-integer value as "no cap",
+      // so a value that survived here would look applied and do nothing.
+      const block = getLlmVendorSettings(
+        {
+          openai: {
+            ...LLM_VENDOR_DEFAULTS.openai,
+            outputTokenLimit: stored as never,
+          },
+        },
+        "openai",
+      );
+      expect(block).not.toHaveProperty("outputTokenLimit");
+    },
+  );
+});

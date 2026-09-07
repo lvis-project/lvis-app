@@ -19,6 +19,7 @@ import { lvisHome } from "../shared/lvis-home.js";
 import type { ProjectIdentity } from "../shared/project-identity.js";
 import { escapeHtml } from "../shared/escape-html.js";
 import { formatLocalIsoWithOffset, hostTimeZone } from "../shared/format-time.js";
+import { execModeRequested } from "../main/exec-mode.js";
 
 const log = createLogger("system-prompt");
 
@@ -576,6 +577,25 @@ export class SystemPromptBuilder {
       build: () => t("be_systemPromptBuilder.toolUseStrategy"),
     });
 
+    // ④-b Completion Discipline (static)
+    //
+    // Separate from Tool Use Strategy above, which governs how to GATHER
+    // information; this governs the one claim that ends a turn. Measured
+    // failure it answers: runs that declared the work done — "verified by
+    // review", "created and tested" — with no execution anywhere in their
+    // closing rounds. Nothing else in the prompt says a completion claim has a
+    // precondition, so the model was free to treat reading its own output as
+    // confirmation of it.
+    //
+    // id=4.6 sits between Tool Use Strategy (4.5) and Staged Origin Guidance,
+    // keeping the "how to work" block contiguous.
+    this.sources.push({
+      id: 4.6,
+      name: "Completion Discipline",
+      refresh: "static",
+      build: () => t("be_systemPromptBuilder.completionDiscipline"),
+    });
+
     // ④-c Staged Origin Guidance (per-turn, conditional)
     //
     // Emitted ONLY when this turn's text was placed by a non-user actor — a
@@ -1003,7 +1023,16 @@ export class SystemPromptBuilder {
           `User: ${userInfo().username}`,
           `LVIS Home: ${redactFsPath(lvisHome())}`,
           `Time: ${localIso} (${zone})`,
-          `Locale: ${Intl.DateTimeFormat().resolvedOptions().locale}`,
+          // The host locale is a statement about the PERSON at the keyboard, so
+          // it belongs in the prompt only while there is one. A headless
+          // one-shot run has no interactive user: its request arrives on stdin,
+          // frequently in a different language from the machine's, and naming
+          // the OS locale there had the model answer in the machine's language
+          // instead of the request's. The request itself is the only language
+          // signal that run has.
+          ...(execModeRequested(process.argv)
+            ? [t("be_systemPromptBuilder.headlessResponseLanguage")]
+            : [`Locale: ${Intl.DateTimeFormat().resolvedOptions().locale}`]),
           t("be_systemPromptBuilder.environmentDateTimeNote"),
           "</environment>",
         ].join("\n");

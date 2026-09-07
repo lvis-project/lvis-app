@@ -613,6 +613,19 @@ export interface LLMVendorSettings {
    * a request with 402 "requires more credits, or fewer max_tokens" when a
    * capped key cannot afford the model's full ceiling, so a credit-limited or
    * weekly-capped key cannot start ANY turn until this is set.
+   *
+   * It is also the only bound on a RUNAWAY round. A model that keeps generating
+   * until the provider's own maximum burns the whole turn on one call and
+   * returns `finish_reason: length`; the loop then continues that answer rather
+   * than treating it as finished, so an uncapped vendor pays the provider
+   * maximum before the loop can react. No number is assumed on the host's
+   * behalf: the host knows no per-model output ceiling for any vendor, and
+   * inventing one would silently truncate models it guessed low for. Unset
+   * therefore means uncapped, which the loop logs once per vendor.
+   *
+   * The transport clamps whatever is set to
+   * `MAX_BACKGROUND_OUTPUT_TOKEN_LIMIT`, so a larger value does not take
+   * effect as written.
    */
   outputTokenLimit?: number;
   baseUrl?: string;
@@ -823,6 +836,15 @@ export function getLlmVendorSettings(
       ? normalizeLlmVendorModel(vendor, stored.model)
       : defaults.model;
   const presetModels = normalizeLlmPresetModels(vendor, stored?.presetModels);
+  // A hand-edited `0`, fraction or negative would otherwise ride the `...stored`
+  // spread all the way to the transport, which reads any non-positive value as
+  // "no cap" — the setting would look applied and do nothing.
+  const outputTokenLimit =
+    typeof stored?.outputTokenLimit === "number"
+    && Number.isSafeInteger(stored.outputTokenLimit)
+    && stored.outputTokenLimit > 0
+      ? stored.outputTokenLimit
+      : undefined;
   const block: LLMVendorSettings = {
     ...defaults,
     ...stored,
@@ -839,6 +861,8 @@ export function getLlmVendorSettings(
   };
   if (presetModels) block.presetModels = presetModels;
   else delete block.presetModels;
+  if (outputTokenLimit !== undefined) block.outputTokenLimit = outputTokenLimit;
+  else delete block.outputTokenLimit;
   return block;
 }
 
