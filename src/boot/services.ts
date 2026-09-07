@@ -8,6 +8,7 @@
 import { app, session } from "electron";
 import type { BrowserWindow } from "electron";
 import { SettingsService } from "../data/settings-store.js";
+import { initPiiRedactionPolicy } from "../audit/dlp-filter.js";
 import { getIsPackaged } from "./dev-flags.js";
 import { DEFAULT_LOCALE, normalizeLocale, setLocale, tryLoadLocaleMessages,
 } from "../i18n/index.js";
@@ -66,6 +67,28 @@ export interface CoreServices {
   inputClassifier: InputClassifier;
   toolRegistry: ToolRegistry;
   routeEngine: RouteEngine;
+}
+
+/**
+ * Install the reader that every PII-masking surface consults for
+ * `privacy.piiRedactEnabled`.
+ *
+ * This belongs to the boot step that creates the settings service, not to the
+ * IPC layer: a headless `--exec` / `--set-secret` launch performs its turn
+ * against the freshly booted service graph and quits before any IPC handler is
+ * registered. Installed there, the reader would stay at its uninjected default
+ * on exactly the runs that produce audit records unattended, and a user who
+ * turned redaction on would get unmasked ones.
+ *
+ * The closure reads the setting at each masking call rather than capturing it,
+ * so flipping the toggle takes effect without a restart.
+ */
+export function applyBootPiiRedactionPolicy(
+  settingsService: Pick<SettingsService, "get">,
+): void {
+  initPiiRedactionPolicy(
+    () => settingsService.get("privacy")?.piiRedactEnabled === true,
+  );
 }
 
 export async function applyBootLocale(
@@ -144,6 +167,7 @@ export async function bootstrapCoreServices(mainWindow: BrowserWindow,
     secretPolicy: app.isPackaged ? "packaged" : "development",
   });
   await settingsService.migrateSecrets();
+  applyBootPiiRedactionPolicy(settingsService);
 
   // Set the main-process UI locale from persisted settings (or system-detected
   // locale on fresh install) so dialog titles, native menus, tray, and

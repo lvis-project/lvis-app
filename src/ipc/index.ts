@@ -47,7 +47,7 @@
  * exists in `src/` — those two invokes have no receiver. Recorded rather than
  * fixed here: giving them one is a behaviour change, not a rename.
  */
-import { initDlpAudit, initPiiRedactionPolicy } from "../audit/dlp-filter.js";
+import { initDlpAudit } from "../audit/dlp-filter.js";
 import { getIsPackaged } from "../boot/dev-flags.js";
 import { registerSettingsHandlers } from "./domains/settings.js";
 import { registerTourHandlers } from "./domains/tour.js";
@@ -120,11 +120,6 @@ export function registerIpcHandlers(
   // Resolve the session at each DLP hit: chat new/resume/fork can change the
   // loop's session after handlers have been registered.
   initDlpAudit(deps.auditLogger, () => deps.conversationLoop.getSessionId());
-  // Same reason to read late: the user can flip PII redaction mid-session, and
-  // the masking surfaces it governs must follow without a restart.
-  initPiiRedactionPolicy(
-    () => deps.settingsService.get("privacy")?.piiRedactEnabled === true,
-  );
 
   registerSettingsHandlers(deps);
   registerTourHandlers(deps);
