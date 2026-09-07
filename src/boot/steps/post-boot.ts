@@ -31,6 +31,7 @@ import { startCrashReporter } from "../../main/crash-reporter.js";
 import { TelemetryService } from "../../main/telemetry.js";
 import { PluginTelemetryClient, relocateDeviceUuid } from "../../telemetry/client.js";
 import { openFeatureNamespace } from "../../main/storage/feature-namespace.js";
+import { registerShutdownHook } from "../../main/app-shutdown.js";
 import { sendToWindow } from "../../ipc/safe-send.js";
 import { onEvent } from "../types.js";
 import { createLogger } from "../../lib/logger.js";
@@ -84,7 +85,7 @@ export function wireReleasePrep(input: ReleasePrepInput): ReleasePrepOutput {
   // batch span processor holds finished spans, and a failure setting up
   // something else must not be what loses the trace of the run.
   if (tracing.enabled) {
-    app.prependOnceListener("before-quit", () => {
+    registerShutdownHook("tracing-flush", () => {
       void tracing.shutdown().catch((err: unknown) => {
         log.warn("shutdown: tracing flush failed: %s", (err as Error).message);
       });
@@ -173,7 +174,7 @@ export function wireReleasePrep(input: ReleasePrepInput): ReleasePrepOutput {
       });
     });
 
-    app.prependOnceListener("before-quit", () => {
+    registerShutdownHook("plugin-telemetry-flush", () => {
       try {
         ptClient.stop();
         void ptClient.flush();
@@ -199,7 +200,7 @@ export function wireReleasePrep(input: ReleasePrepInput): ReleasePrepOutput {
     updater.start();
     autoUpdaterStop = updater.stop;
     const retainedTelemetry = telemetry;
-    app.prependOnceListener("before-quit", () => {
+    registerShutdownHook("auto-updater-and-telemetry-flush", () => {
       try { autoUpdaterStop?.(); } catch { /* noop */ }
       try {
         retainedTelemetry.stop();
@@ -277,7 +278,7 @@ export function wireUpdateCheck(input: UpdateCheckInput): void {
     updateCheckTimer.unref?.();
   }
 
-  app.prependOnceListener("before-quit", () => {
+  registerShutdownHook("plugin-update-check-timer", () => {
     if (updateCheckTimer) clearInterval(updateCheckTimer);
   });
 }
@@ -428,7 +429,7 @@ export function wireAnnouncementCheck(input: AnnouncementCheckInput): void {
     announcementTimer.unref?.();
   }
 
-  app.prependOnceListener("before-quit", () => {
+  registerShutdownHook("marketplace-announcement-timer", () => {
     if (announcementTimer) clearInterval(announcementTimer);
   });
 }

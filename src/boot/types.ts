@@ -304,7 +304,7 @@ export interface AppServices {
   registerPluginEventBridge?: (win: import("electron").BrowserWindow) => void;
   /**
    * Release-prep — anonymous telemetry service. Retained here so
-   * `before-quit` can run a final flush + stop() before the process exits
+   * the shutdown hook can run a final flush + stop() before the process exits
    * (otherwise queued events are lost on shutdown).
    */
   telemetry?: TelemetryService;

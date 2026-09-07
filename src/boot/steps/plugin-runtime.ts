@@ -19,6 +19,7 @@ import { mkdirSync } from "node:fs";
 import { installPluginPartitionPolicy } from "../../main/html-preview-partition.js";
 import { isAppUpdateInstallRequested } from "../../main/app-update-install-intent.js";
 import { isAppShutdownStarted } from "../../main/app-state.js";
+import { registerShutdownHook } from "../../main/app-shutdown.js";
 import { pluginPartitionName } from "../../shared/plugin-partition.js";
 import { onEvent as onHostEvent } from "../types.js";
 import { AuditLogger } from "../../audit/audit-logger.js";
@@ -328,6 +329,12 @@ export async function initPluginRuntime(
     })();
     return pluginShutdownPromise;
   };
+  // The second and last Electron `before-quit` listener the host installs, and
+  // deliberately not a shutdown hook: hooks are synchronous, and this one has
+  // to defer the quit. It covers the boot window only. Once `AppServices` is
+  // published the ordered cleanup in `main/app-shutdown.ts` runs these same
+  // handlers and `isAppShutdownStarted()` makes this a no-op; before that, the
+  // ordered cleanup returns "skipped" and nothing else would run them.
   app.once("before-quit", (event) => {
     if (isAppUpdateInstallRequested()) return;
     if (isAppShutdownStarted()) return;
@@ -502,7 +509,7 @@ export async function initPluginRuntime(
   // doesn't reach back into this registry; if the respond path is never hit
   // (renderer crash, plugin crash) the issuer entry would leak. We sweep on
   // a 1-minute cadence, dropping anything older than the gate timeout. The
-  // interval is cleared on `before-quit` to avoid keeping the process alive
+  // interval is cleared by a shutdown hook to avoid keeping the process alive
   // during shutdown.
   const APPROVAL_REGISTRY_PURGE_MAX_AGE_MS = 5 * 60 * 1000;
   const APPROVAL_REGISTRY_PURGE_INTERVAL_MS = 60 * 1000;
@@ -520,7 +527,7 @@ export async function initPluginRuntime(
   }, APPROVAL_REGISTRY_PURGE_INTERVAL_MS);
   // Don't keep the event loop alive solely for this housekeeping timer.
   approvalRegistryPurgeTimer.unref?.();
-  app.prependOnceListener("before-quit", () => {
+  registerShutdownHook("approval-issuer-registry-purge", () => {
     clearInterval(approvalRegistryPurgeTimer);
   });
 
@@ -625,7 +632,7 @@ export async function initPluginRuntime(
       );
     },
   });
-  app.prependOnceListener("before-quit", () => {
+  registerShutdownHook("plugin-dev-watcher", () => {
     pluginDevWatcher.stop();
   });
 

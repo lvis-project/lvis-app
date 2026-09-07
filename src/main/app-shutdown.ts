@@ -6,6 +6,10 @@
  * hard timeout so `app.quit()` can never hang indefinitely on a wedged
  * subsystem. Invoked from the `before-quit` orchestration that stays in
  * `src/main.ts`.
+ *
+ * It also owns the shutdown-hook registry that same orchestration drains
+ * first: teardown with no ordering requirement, collected here so no subsystem
+ * needs a `before-quit` listener of its own. See {@link registerShutdownHook}.
  */
 import { app } from "electron";
 import { createLogger, closeFileLogSink } from "../lib/logger.js";
@@ -37,6 +41,51 @@ import { peekFloatingDock } from "../boot/steps/plugin-runtime/host-api-factory.
 import { errorMessage } from "../shared/error-message.js";
 
 const log = createLogger("lvis");
+
+/**
+ * Teardown that needs nothing from the ordered pipeline below.
+ *
+ * A poller's `clearInterval`, a watcher's `stop()`, a batch exporter's final
+ * flush: each is independent of the others and of every ordered stage, and
+ * each used to take an Electron `before-quit` listener of its own. Node warns
+ * once an emitter passes ten listeners for one event, so a boot that wired
+ * enough subsystems printed `MaxListenersExceededWarning` on stderr — which a
+ * one-shot run hands straight to its caller as if something had leaked. They
+ * share the single listener `src/main.ts` owns instead, so the count no longer
+ * grows with the number of subsystems.
+ *
+ * Hooks are synchronous and run in registration order: nothing registered here
+ * may depend on anything else registered here. Ordered teardown — anything
+ * whose position relative to plugin shutdown, service disposal or the log sink
+ * matters — belongs in {@link runAppShutdownCleanup}, not here.
+ */
+const shutdownHooks: Array<{ readonly name: string; readonly stop: () => void }> = [];
+let shutdownHooksRan = false;
+
+export function registerShutdownHook(name: string, stop: () => void): void {
+  shutdownHooks.push({ name, stop });
+}
+
+/**
+ * Run every registered hook once, before the ordered cleanup starts.
+ *
+ * Called from the one `before-quit` listener ahead of its own guards, because
+ * these hooks used to be `prependOnceListener`s: they fired on every quit,
+ * including one that arrives while boot is still running and no `AppServices`
+ * has been published yet. A throwing hook is contained so the hooks after it
+ * still run and the ordered cleanup still starts.
+ */
+export function runShutdownHooks(): void {
+  if (shutdownHooksRan) return;
+  shutdownHooksRan = true;
+  for (const hook of shutdownHooks) {
+    try {
+      hook.stop();
+    } catch (err) {
+      log.warn("shutdown hook failed (%s): %s", hook.name, errorMessage(err));
+    }
+  }
+}
 
 /**
  * Drain the pino transport queue before `app.exit(0)` hard-terminates.
