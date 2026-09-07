@@ -876,6 +876,34 @@ describe("round-loop token preflight — a turn that grows its own context", () 
     expect(decisions).toContainEqual(
       expect.objectContaining({ kind: "compact.auto", branch: "fired" }),
     );
+    // Mid-turn the protected window has to be this turn's own tool rounds. On
+    // the user-turn floor the whole turn sits inside the protected region and
+    // the compactor reduces nothing, however far over the threshold it is.
+    expect(compactWithBoundary).toHaveBeenCalledWith(
+      expect.objectContaining({ preserveUnit: "tool-rounds" }),
+    );
+  });
+
+  it("leaves the turn-start guard on the between-turns preserve unit", async () => {
+    const sessionId = "6ad1f0be-7b2c-4a9e-8f31-2c4d7e9a0b58";
+    const history = makeHistoryExceedingEstimateThreshold(5_000);
+    const loop = new ConversationLoop(
+      makeDeps({
+        settingsService: makeSettings(true, "gpt-4o", "openai"),
+        memoryManager: makeMemoryManager(history, sessionId),
+        memoryReviewer: makeMemoryReviewer(),
+      }),
+    );
+    loop.resetAndResume(sessionId);
+    (loop as unknown as { provider: LLMProvider }).provider = new ToolLoopProvider(0);
+
+    await loop.runTurn("one more question", undefined, undefined, {
+      inputOrigin: "user-keyboard",
+    });
+
+    expect(compactWithBoundary).toHaveBeenCalledWith(
+      expect.not.objectContaining({ preserveUnit: expect.anything() }),
+    );
   });
 
   it("leaves the turn-start guard as the only compaction when the history arrives over the threshold", async () => {
@@ -925,6 +953,35 @@ describe("round-loop token preflight — a turn that grows its own context", () 
 
     expect(compactWithBoundary).not.toHaveBeenCalled();
     expect(decisions.filter((event) => event.kind === "compact.auto")).toEqual([]);
+  });
+
+  it("does not fire again on the next round when a compaction left the projection over the threshold", async () => {
+    // A compaction that reduced the history but not below the threshold used
+    // to re-arm at zero, so the very next round crossed and compacted again.
+    const { loop } = makeToolLoopSetup(1_200, 40);
+    const decisions: TurnDecisionEvent[] = [];
+    // Reduces by one message — real progress, still far over the threshold.
+    vi.mocked(compactWithBoundary).mockImplementation(async ({ messages }) => ({
+      status: CompressionStatus.SUMMARIZED,
+      boundary: makeSyntheticCompactResult(messages).boundary,
+      newHistory: messages.slice(1),
+      removedCount: 1,
+      estimatedAfter: 0,
+      truncatedCount: 0,
+    }));
+
+    await loop.runTurn(
+      "run the probe until you are done",
+      { onDecision: (event) => decisions.push(event) },
+      undefined,
+      { inputOrigin: "user-keyboard" },
+    );
+
+    const held = decisions.filter(
+      (event) => event.kind === "compact.auto" && event.branch === "rearm-hold",
+    ).length;
+    expect(vi.mocked(compactWithBoundary).mock.calls.length).toBeGreaterThan(0);
+    expect(held).toBeGreaterThan(0);
   });
 
   it("does not spend a compaction per round when compaction cannot reduce the history", async () => {

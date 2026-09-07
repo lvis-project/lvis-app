@@ -828,6 +828,87 @@ describe("ConversationLoop guidance queue + boundary inject", () => {
     expect(guidanceHistory).toHaveLength(1);
   });
 
+  it("rolls back a drained mid-turn guide after an applied-compaction clone", async () => {
+    // The window is real: the guide is appended at a round boundary and only
+    // committed when that round finishes, and the rate-limit recovery inside
+    // the round compacts in between. Identity-based removal leaves the row in
+    // history AND puts its entry back on the queue — injected twice.
+    const provider = new FakeProvider([
+      [
+        { type: "tool_call", id: "t1", name: "noop_tool", input: {} } as StreamEvent,
+        { type: "message_complete", stopReason: "tool_use" } as StreamEvent,
+      ],
+      [
+        { type: "error", error: "rate limited" } as StreamEvent,
+      ],
+    ]);
+    const loop = makeLoop(provider);
+    const dropped = vi.fn();
+    vi.spyOn(loop, "shouldAutoCompactForRateLimit").mockReturnValue(true);
+    vi.spyOn(loop, "runPreflightGuard").mockImplementation(async (_ctx, _signal, _cb, options) => {
+      // Only the rate-limit recovery, which runs after the row is in history.
+      if (options?.forceReason !== "rate-limit") return false;
+      cloneHistoryLikeAppliedCompaction(loop);
+      return true;
+    });
+    provider.beforeNextTurn = () => {
+      loop.queueGuidanceWithDisposition("guide across a compaction", { onDropped: dropped });
+    };
+
+    await loop.runTurn("start the agent turn", undefined, undefined, {
+      inputOrigin: "user-keyboard",
+    });
+
+    expect(
+      getHistory(loop).filter(
+        (message) =>
+          typeof message.content === "string" &&
+          message.content.includes("guide across a compaction"),
+      ),
+    ).toHaveLength(0);
+    expect(dropped).toHaveBeenCalledTimes(1);
+    expect(loop.guidanceQueue).toEqual([]);
+  });
+
+  it("runs one preflight on a round that both drained a guide and crossed the threshold", async () => {
+    // The guidance drain evaluates the guard before appending; the round-loop
+    // gate evaluates it again before the provider call. Both firing in one
+    // round spends two LLM compactions on a history the first just rewrote.
+    process.env.LVIS_DEV_PREFLIGHT_OVERRIDE = "1";
+    try {
+      const provider = new FakeProvider([
+        [
+          { type: "tool_call", id: "t1", name: "noop_tool", input: {} } as StreamEvent,
+          { type: "message_complete", stopReason: "tool_use" } as StreamEvent,
+        ],
+        [
+          { type: "text_delta", text: "done" } as StreamEvent,
+          { type: "message_complete", stopReason: "end_turn" } as StreamEvent,
+        ],
+      ]);
+      const loop = makeLoop(provider);
+      const intraTurnCalls: boolean[] = [];
+      vi.spyOn(loop, "runPreflightGuard").mockImplementation(async (_ctx, _signal, _cb, options) => {
+        intraTurnCalls.push(options?.intraTurn === true);
+        return false;
+      });
+      provider.beforeNextTurn = () => {
+        loop.queueGuidance("adjust course");
+      };
+
+      await loop.runTurn("start the agent turn", undefined, undefined, {
+        inputOrigin: "user-keyboard",
+      });
+
+      // A threshold of 1 token means the gate would fire on every round it is
+      // allowed to run. It stands down on the round the drain already covered.
+      expect(intraTurnCalls.filter(Boolean)).toHaveLength(0);
+      expect(intraTurnCalls.length).toBeGreaterThan(0);
+    } finally {
+      delete process.env.LVIS_DEV_PREFLIGHT_OVERRIDE;
+    }
+  });
+
   it("rolls back a failed agent-message input after an applied-compaction clone and retains one successful retry", async () => {
     const provider = new FakeProvider([
       [

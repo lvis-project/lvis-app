@@ -1112,10 +1112,23 @@ round loop 안에서도 매 provider 호출 직전에 다시 평가한다 (`src/
 Agent turn 은 자신의 tool result 로 컨텍스트를 수백 라운드 동안 키우므로,
 turn 시작 측정값 하나만으로는 임계치를 넘은 상태가 turn 끝까지 유지된다.
 평가는 해당 라운드가 이미 계산한 projection 을 그대로 쓰고, 압축은 동일한
-`runPreflightGuard` 경로를 통한다. 압축이 히스토리를 줄이지 못한 경우 (NOOP 등)
-projection 이 preflight 의 25% 만큼 더 증가하기 전까지 재시도하지 않는다 —
-그렇지 않으면 남은 모든 라운드가 LLM 압축 호출 하나씩을 소모한다.
+`runPreflightGuard` 경로를 통한다. 압축 후에도 임계치를 넘거나 (부분 감축) 아예 줄이지 못한 경우 (NOOP),
+압축 직후 projection 기준으로 preflight 의 25% 만큼 더 증가하기 전까지
+재시도하지 않는다 — 그렇지 않으면 남은 모든 라운드가 LLM 압축 호출 하나씩을
+소모한다. 같은 라운드에서 guidance drain 이 이미 guard 를 실행했다면 gate 는
+건너뛴다 (한 라운드에 압축 두 번 금지).
 결정은 `loop.decision` 의 `compact.auto` (fired / skipped / rearm-hold) 로 남는다.
+
+**Intra-turn preserve unit**: 라운드 루프에서 실행되는 압축은
+`preserveUnit: "tool-rounds"` 로 호출된다. 기본값인 user-turn floor
+(`findRecentTurnPreserveStart`) 는 "최근 N 개 user 메시지와 그 이후 전부" 를
+보호하는데, agent turn 은 자신의 user 메시지를 추가하지 않으므로 그 턴이 만든
+tool result 전부가 보호 영역에 들어간다 — 압축기는 아무것도 줄이지 못하고
+NOOP 만 반환한다 (실측: fresh session + 20 tool round → removed=0). 턴 내부에서는
+보호 단위를 그 턴의 assistant tool round 로 바꿔 (`findRecentToolRoundPreserveStart`)
+최근 K 라운드만 남기고 앞쪽 라운드를 요약 대상으로 넘긴다. tool_use/tool_result
+페어 무결성은 기존 boundary 조정 로직이 그대로 보장한다. 턴 사이 압축은 종전대로
+user turn 단위를 유지한다.
 
 **Context window 출처 (우선순위)**: preflight threshold 의 분모가 되는 context window 는
 `resolveModelContextWindow` (`src/shared/context-budget.ts`) 가 단일 결정한다.
@@ -1126,7 +1139,11 @@ projection 이 preflight 의 25% 만큼 더 증가하기 전까지 재시도하�
 게이트웨이가 229,376 을 보고한 모델을 ring 만 128K 로 표시하게 된다).
 (1) `llm.vendors.<vendor>.contextWindow` — 사용자가 명시한 값,
 (2) provider 가 `/v1/models` 에서 보고한 값 (`context_length` / `max_input_tokens` / `max_model_len`;
-    `max_output_tokens` 도 함께 보관된다),
+    `max_output_tokens` 도 함께 보관된다). 이 catalogue cache 는 종전에 설정 화면만
+    채웠기 때문에 창 없는 실행 (routine, sub-agent, headless evaluation) 은 이 단계에
+    도달할 수 없었다. 이제 (4) fallback 으로 떨어질 때 host 가 같은 요청을 route 당
+    1회 (`MODEL_LIST_REFRESH_TTL_MS` = 6시간, `fetchedAt` 기준) 배경으로 보내고
+    결과를 settings 에 기록한다 — 그 턴이 아니라 다음 예산 계산이 읽는다,
 (3) pricing 카탈로그 조회 (대소문자 무시),
 (4) 보수적 128K fallback — 이 경우 모델명과 선언해야 할 설정을 밝힌 경고를
     route 당 1회 남긴다. 어느 출처가 쓰였는지는 `PREFLIGHT_GUARD` trace 의

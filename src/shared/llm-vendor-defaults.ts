@@ -642,6 +642,12 @@ export interface LLMVendorSettings {
    * that reports nothing about its own limits leaves the host budgeting
    * compaction against the conservative 128K fallback — far too early for a
    * 229K-window deployment, and far too late for a 32K one.
+   *
+   * Deliberately not on the settings page. The provider's own `/models`
+   * handshake answers this for every endpoint that reports it, so a field
+   * would ask the user for a number the host can already obtain and would
+   * invite a wrong one. It stays an escape hatch for an endpoint that reports
+   * nothing, edited in `settings.json`.
    */
   contextWindow?: number;
   baseUrl?: string;

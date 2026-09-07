@@ -29,10 +29,14 @@ import { FALLBACK_PRICING } from "../../shared/pricing-data.js";
 import {
   getPreflightThreshold,
   getUsableContext,
+  llmRouteCatalogAddress,
   resolveContextWindowForRoute,
   resolveModelContextWindow,
   type ContextWindowSource,
+  type LlmRouteProviderPreset,
+  type LlmRouteSettings,
 } from "../../shared/context-budget.js";
+import { refreshRouteModelList } from "../llm/model-list.js";
 import type { SubscriptionChatRuntimeSelection } from "../../shared/subscription-runtime.js";
 
 const log = createLogger("lvis");
@@ -84,6 +88,33 @@ function warnFallbackContextWindowOnce(identity: string, model: string): void {
     `context budget: no context window known for model '${model}' — using the ${FALLBACK_PRICING.contextWindow}-token fallback. `
     + `Declare the endpoint's real capacity as llm.vendors.<vendor>.contextWindow, or sync the provider's model list so it can report one.`,
   );
+}
+
+/**
+ * Ask the route's endpoint what it serves, in the background.
+ *
+ * Reached only when nothing knew the model's window, so it costs one request
+ * per route per process and nothing at all on a route the catalog knows. The
+ * answer lands in settings and the NEXT budget reads it — this one is already
+ * committed to the fallback, which is the honest thing to budget against until
+ * a better number exists.
+ *
+ * Deliberately not awaited: this is on the path of every preflight evaluation,
+ * including one per round of a long turn, and a turn must not wait on a
+ * catalogue probe.
+ */
+function probeRouteModelListInBackground(
+  self: ConversationLoop,
+  llm: LlmRouteSettings,
+  presets: readonly LlmRouteProviderPreset[] | undefined,
+): void {
+  void refreshRouteModelList({
+    settingsService: self.deps.settingsService,
+    fetchOptions: { fetchImpl: self.deps.networkFetch },
+    address: llmRouteCatalogAddress(llm, presets),
+  }).catch((err: unknown) => {
+    log.debug(`model list probe failed: ${(err as Error).message}`);
+  });
 }
 
 function safeReportedContextBudget(
@@ -175,15 +206,17 @@ export function contextBudgetForCurrentRuntime(self: ConversationLoop): RuntimeC
   // The same resolution the renderer's context-fill ring divides by, off the
   // same settings. Engine and UI cannot disagree about the window because
   // neither of them decides it.
-  const route = resolveContextWindowForRoute(
-    llmSettings,
+  const installedProviderPresets =
     provider === "openai-compatible" && llmSettings.marketplaceProviderPresetId
       ? self.deps.settingsService.get("marketplace").installedProviderPresets
-      : undefined,
-  );
+      : undefined;
+  const route = resolveContextWindowForRoute(llmSettings, installedProviderPresets);
   const model = route.model;
   const identity = `${provider}/${model}`;
-  if (route.source === "fallback") warnFallbackContextWindowOnce(identity, model);
+  if (route.source === "fallback") {
+    warnFallbackContextWindowOnce(identity, model);
+    probeRouteModelListInBackground(self, llmSettings, installedProviderPresets);
+  }
   return {
     model,
     preflight: getModelPreflightThreshold(provider, model, route.contextWindow),
@@ -657,6 +690,11 @@ export async function runPreflightGuard(
         memoryReviewer,
         preserveRecentTokens,
         preserveRecentTurns: DEFAULT_PRESERVE_RECENT_TURNS,
+        // Mid-turn the protected window has to be measured in this turn's own
+        // tool rounds. Left on user turns it covers everything the turn
+        // appended, and the compactor returns NOOP however far over the
+        // threshold the turn has grown.
+        ...(options?.intraTurn ? { preserveUnit: "tool-rounds" as const } : {}),
         compactNum: self.compactNum + 1,
         sessionId: self.sessionId,
         preflightTokens: preflight,

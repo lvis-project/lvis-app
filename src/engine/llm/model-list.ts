@@ -16,6 +16,7 @@ import {
   marketplaceProviderPresetSecretKey,
   modelDiscoveryPolicyAllowsFetch,
   type MarketplaceInstalledProviderPreset,
+  type MarketplaceProviderModelDiscoveryPolicy,
 } from "../../shared/marketplace-package-assets.js";
 import {
   ensurePublicHttpUrl,
@@ -29,6 +30,11 @@ import {
 } from "./marketplace-provider-fetch.js";
 import { secretKeyFor } from "./provider-factory.js";
 import { errorMessageWithCauseCode } from "../../shared/error-message.js";
+import { llmModelListCacheKey } from "../../shared/llm-model-list.js";
+import type { LlmRouteCatalogAddress } from "../../shared/context-budget.js";
+import { createLogger } from "../../lib/logger.js";
+
+const log = createLogger("lvis");
 
 const DEFAULT_TIMEOUT_MS = 8_000;
 const DEFAULT_MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
@@ -761,4 +767,97 @@ export async function listLlmModelsFromSettings(
           : errorMessageWithCauseCode(err),
     };
   }
+}
+
+// ─── Host-side catalogue refresh ────────────────────────────────────────────
+
+/**
+ * How long a route's `/models` answer is trusted before the host asks again.
+ *
+ * The answer is a model's declared capacity, which changes when the operator
+ * redeploys, not minute to minute. Six hours keeps a long-running session on
+ * one probe while still picking up a redeploy the same day.
+ */
+export const MODEL_LIST_REFRESH_TTL_MS = 6 * 60 * 60 * 1000;
+
+/** Routes this process has already probed, so one miss is one request. */
+const modelListProbeAttempted = new Set<string>();
+
+/** Test seam — the probe set is process-wide and would leak between cases. */
+export function resetModelListProbeStateForTesting(): void {
+  modelListProbeAttempted.clear();
+}
+
+function modelListEntryIsFresh(
+  entry: { fetchedAt?: string } | undefined,
+  now: number,
+): boolean {
+  if (!entry?.fetchedAt) return false;
+  const fetchedAt = Date.parse(entry.fetchedAt);
+  if (!Number.isFinite(fetchedAt)) return false;
+  return now - fetchedAt < MODEL_LIST_REFRESH_TTL_MS;
+}
+
+/**
+ * Ask the active route's endpoint what it serves, and persist the answer.
+ *
+ * The catalogue cache used to be written only by the settings page, so a run
+ * with no window open — a scheduled routine, a sub-agent, a headless
+ * evaluation — could never reach the provider-reported context window and
+ * budgeted every one of its turns against the conservative fallback. This is
+ * the same request that page makes, issued from the process that owns the
+ * transport.
+ *
+ * Returns whether a fresh answer was stored. Never throws: a route whose
+ * endpoint is unreachable simply keeps the window it already had.
+ */
+export async function refreshRouteModelList(params: {
+  settingsService: SettingsService;
+  /** The same transport and guard seams the settings page's sync runs on. */
+  fetchOptions: LlmModelListFetchOptions;
+  address: LlmRouteCatalogAddress;
+  modelDiscoveryPolicy?: MarketplaceProviderModelDiscoveryPolicy;
+  now?: number;
+}): Promise<boolean> {
+  const { settingsService, fetchOptions, address } = params;
+  const now = params.now ?? Date.now();
+  const key = llmModelListCacheKey(address.vendor, address.baseUrl, address.credentialScope);
+  if (modelListProbeAttempted.has(key)) return false;
+  const cache = settingsService.get("llm").modelListCache ?? {};
+  if (modelListEntryIsFresh(cache[key], now)) return false;
+  modelListProbeAttempted.add(key);
+  log.info(
+    `model list: asking ${address.vendor} what it serves — no usable catalogue entry for this route`,
+  );
+  const result = await listLlmModelsFromSettings(
+    settingsService,
+    {
+      vendor: address.vendor,
+      ...(address.baseUrl ? { baseUrl: address.baseUrl } : {}),
+      ...(address.credentialScope ? { credentialScope: address.credentialScope } : {}),
+      ...(params.modelDiscoveryPolicy ? { modelDiscoveryPolicy: params.modelDiscoveryPolicy } : {}),
+    },
+    fetchOptions,
+  );
+  if (!result.ok) {
+    log.info(`model list: ${address.vendor} did not answer (${result.error})`);
+    return false;
+  }
+  await settingsService.patch({
+    llm: {
+      modelListCache: {
+        ...cache,
+        [key]: {
+          vendor: result.vendor,
+          ...(address.baseUrl ? { baseUrl: address.baseUrl } : {}),
+          ...(address.credentialScope ? { credentialScope: address.credentialScope } : {}),
+          endpoint: result.endpoint,
+          models: result.models,
+          ...(result.modelEntries ? { modelEntries: result.modelEntries } : {}),
+          fetchedAt: result.fetchedAt,
+        },
+      },
+    },
+  });
+  return true;
 }

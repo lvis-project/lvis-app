@@ -74,9 +74,26 @@ export interface ResolvedContextWindow {
   readonly source: ContextWindowSource;
 }
 
-/** A token count only counts as an answer when it is a usable positive integer. */
+/**
+ * The largest window a declared or reported value is believed at.
+ *
+ * Above this the number is far likelier to be a typo or a malformed field than
+ * a real deployment: an extra digit on 229,376 reads as 2,293,760, whose
+ * preflight threshold no conversation ever reaches, so compaction never runs
+ * again and the turn dies on a provider context error instead. The largest
+ * window the pricing catalog carries today is 2M, so this admits every real
+ * model while refusing an order of magnitude past it.
+ */
+export const MAX_CREDIBLE_CONTEXT_WINDOW = 4_000_000;
+
+/**
+ * A token count only counts as an answer when it is a usable positive integer
+ * within {@link MAX_CREDIBLE_CONTEXT_WINDOW}. Anything else is treated as
+ * absent, so the next source answers instead.
+ */
 function positiveTokenCount(value: number | undefined): number | undefined {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) return undefined;
+  if (value > MAX_CREDIBLE_CONTEXT_WINDOW) return undefined;
   return value;
 }
 
@@ -152,24 +169,49 @@ export interface RouteContextWindow extends ResolvedContextWindow {
  * keyed by the address the row actually synced, which for a marketplace preset
  * is the preset's own endpoint rather than the generic custom-provider block's.
  */
+/**
+ * Where a route's `/models` answer lives in the cache: the vendor, the address
+ * that row actually synced against, and the preset scope it synced under.
+ *
+ * Exported because a caller that wants to REFRESH that row has to name the
+ * same coordinates the reader looks it up by — key it differently and the
+ * refreshed answer is never found, so the probe repeats forever.
+ */
+export interface LlmRouteCatalogAddress {
+  readonly vendor: LLMVendor;
+  readonly baseUrl?: string;
+  readonly credentialScope?: string;
+}
+
+export function llmRouteCatalogAddress(
+  llm: LlmRouteSettings,
+  installedProviderPresets?: readonly LlmRouteProviderPreset[],
+): LlmRouteCatalogAddress {
+  const block = getLlmVendorSettings(llm.vendors, llm.provider);
+  const presetId = llm.provider === "openai-compatible"
+    ? llm.marketplaceProviderPresetId?.trim()
+    : undefined;
+  // A preset is a provider in its own right reached through the
+  // openai-compatible vendor: its catalogue synced against its own endpoint,
+  // not the generic custom-provider block's.
+  const preset = presetId
+    ? installedProviderPresets?.find((installed) => installed.providerId === presetId)
+    : undefined;
+  return {
+    vendor: llm.provider,
+    ...(preset?.baseUrl ?? block.baseUrl ? { baseUrl: preset?.baseUrl ?? block.baseUrl } : {}),
+    ...(presetId ? { credentialScope: presetId } : {}),
+  };
+}
+
 export function resolveContextWindowForRoute(
   llm: LlmRouteSettings,
   installedProviderPresets?: readonly LlmRouteProviderPreset[],
 ): RouteContextWindow {
   const model = activeLlmRouteModel(llm);
   const block = getLlmVendorSettings(llm.vendors, llm.provider);
-  const presetId = llm.provider === "openai-compatible"
-    ? llm.marketplaceProviderPresetId?.trim()
-    : undefined;
-  const preset = presetId
-    ? installedProviderPresets?.find((installed) => installed.providerId === presetId)
-    : undefined;
-  const entry = cachedModelListEntry(llm.modelListCache, {
-    vendor: llm.provider,
-    model,
-    baseUrl: preset?.baseUrl ?? block.baseUrl,
-    ...(presetId ? { credentialScope: presetId } : {}),
-  });
+  const address = llmRouteCatalogAddress(llm, installedProviderPresets);
+  const entry = cachedModelListEntry(llm.modelListCache, { ...address, model });
   const resolved = resolveModelContextWindow({
     vendor: llm.provider,
     model,

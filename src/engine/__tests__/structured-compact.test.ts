@@ -17,7 +17,7 @@ import {
   type CompactRecapReviewer,
 } from "../structured-compact.js";
 import type { GenericMessage } from "../llm/types.js";
-import { markStaleToolResults } from "../auto-compact.js";
+import { estimateMessagesTokens, markStaleToolResults } from "../auto-compact.js";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 let originalLvisHome: string | undefined;
@@ -906,5 +906,124 @@ describe("compactWithBoundary — oversize pre-pass measures WIRE cost, not raw"
     if (out?.role !== "assistant") throw new Error("expected assistant");
     expect(out.content.length).toBeLessThan(huge.length);
     expect(out.content).toContain("lines truncated, full content saved to");
+  });
+});
+
+// ─── preserveUnit: the agent turn that could not be compacted ──────────────
+
+/**
+ * One agent turn: a user question, then N rounds of (assistant tool call →
+ * tool result). No further user message, because the turn has not ended.
+ */
+function makeAgentTurnHistory(rounds: number, priorUserTurns = 0): GenericMessage[] {
+  const messages: GenericMessage[] = [];
+  for (let i = 0; i < priorUserTurns; i++) {
+    messages.push({ role: "user", content: `earlier question ${i}` });
+    messages.push({ role: "assistant", content: `earlier answer ${i}` });
+  }
+  messages.push({ role: "user", content: "index the repository and report" });
+  for (let i = 0; i < rounds; i++) {
+    messages.push({
+      role: "assistant",
+      content: "",
+      toolCalls: [{ id: `tu-${i}`, name: "probe", input: { n: i } }],
+    });
+    messages.push({
+      role: "tool_result",
+      content: `R${i} ${"x".repeat(4_000)}`,
+      toolUseId: `tu-${i}`,
+    });
+  }
+  return messages;
+}
+
+describe("compactWithBoundary — preserveUnit inside a long agent turn", () => {
+  const PREFLIGHT = 10_000;
+
+  it("cannot reduce a fresh session's agent turn while the floor counts user turns", async () => {
+    // The measured shape: nothing but this turn's own rounds. Every one of
+    // them sits after the only user message, so the user-turn floor protects
+    // the whole history and the compactor has nothing to summarize.
+    const messages = makeAgentTurnHistory(20);
+    expect(estimateMessagesTokens(messages)).toBeGreaterThan(PREFLIGHT);
+
+    const result = await compactWithBoundary({
+      messages,
+      memoryReviewer: makeMockReviewer([makeFullSummaryText()]),
+      preserveRecentTokens: 0,
+      sessionId: "test-sess",
+      preflightTokens: PREFLIGHT,
+      compactNum: 1,
+    });
+
+    expect(result.status).toBe("noop");
+    expect(result.removedCount).toBe(0);
+  });
+
+  it("reduces that same turn below the threshold when the floor counts tool rounds", async () => {
+    const messages = makeAgentTurnHistory(20);
+    const before = estimateMessagesTokens(messages);
+    expect(before).toBeGreaterThan(PREFLIGHT);
+
+    const result = await compactWithBoundary({
+      messages,
+      memoryReviewer: makeMockReviewer([makeFullSummaryText()]),
+      preserveRecentTokens: 0,
+      preserveUnit: "tool-rounds",
+      sessionId: "test-sess",
+      preflightTokens: PREFLIGHT,
+      compactNum: 1,
+    });
+
+    expect(result.removedCount).toBeGreaterThan(0);
+    expect(result.estimatedAfter).toBeLessThan(before);
+    expect(result.estimatedAfter).toBeLessThan(PREFLIGHT);
+    // The tail the model still needs to continue the turn survives verbatim,
+    // and it starts on a boundary the provider accepts.
+    expect(result.newHistory[0]?.meta?.compactBoundary).toBe(true);
+    expect(result.newHistory.at(-1)?.role).toBe("tool_result");
+  });
+
+  it("keeps tool_use and tool_result paired across the boundary it cuts", async () => {
+    const result = await compactWithBoundary({
+      messages: makeAgentTurnHistory(20),
+      memoryReviewer: makeMockReviewer([makeFullSummaryText()]),
+      preserveRecentTokens: 0,
+      preserveUnit: "tool-rounds",
+      sessionId: "test-sess",
+      preflightTokens: PREFLIGHT,
+      compactNum: 1,
+    });
+
+    // No tool_result may survive without the assistant tool call it answers:
+    // the provider rejects the whole request on a tool_use_id it cannot match.
+    const liveToolUseIds = new Set<string>();
+    for (const message of result.newHistory) {
+      if (message.role === "assistant") {
+        for (const call of message.toolCalls ?? []) liveToolUseIds.add(call.id);
+      }
+      if (message.role === "tool_result") {
+        expect(liveToolUseIds.has(message.toolUseId ?? "")).toBe(true);
+      }
+    }
+  });
+
+  it("still preserves whole user turns when the floor is left on user turns", async () => {
+    // The between-turns contract is unchanged: five prior questions and
+    // everything after them survive.
+    const result = await compactWithBoundary({
+      messages: makeAgentTurnHistory(20, 8),
+      memoryReviewer: makeMockReviewer([makeFullSummaryText()]),
+      preserveRecentTokens: 0,
+      sessionId: "test-sess",
+      preflightTokens: PREFLIGHT,
+      compactNum: 1,
+    });
+
+    // The last five completed user turns, exactly as between turns.
+    const preservedUserTurns = result.newHistory.filter(
+      (message) => message.role === "user" && message.meta?.compactBoundary !== true,
+    ).length;
+    expect(preservedUserTurns).toBe(5);
   });
 });

@@ -1,11 +1,16 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   listLlmModelsFromSettings,
   modelListEndpointFromBaseUrl,
+  MODEL_LIST_REFRESH_TTL_MS,
   parseStandardModelListEntries,
   parseStandardModelListResponse,
+  refreshRouteModelList,
+  resetModelListProbeStateForTesting,
 } from "../model-list.js";
 import { NetworkGuardError } from "../../../core/network-guard.js";
+import { llmModelListCacheKey } from "../../../shared/llm-model-list.js";
+import { resolveContextWindowForRoute } from "../../../shared/context-budget.js";
 import { marketplaceProviderPresetSecretKey } from "../../../shared/marketplace-package-assets.js";
 import { unusedNetworkFetch } from "../../../__tests__/support/network-fetch-stubs.js";
 
@@ -1105,5 +1110,147 @@ describe("LLM model list sync", () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+});
+
+describe("refreshRouteModelList — the catalogue a headless run can reach", () => {
+  const address = {
+    vendor: "openai-compatible" as const,
+    baseUrl: "https://models.invalid/v1",
+  };
+
+  function makeRefreshSettings(cache: Record<string, unknown> = {}) {
+    const patch = vi.fn(async (_partial: {
+      llm: { modelListCache: Record<string, { modelEntries?: Array<{ contextLength?: number }> }> };
+    }) => ({}));
+    const llm = {
+      provider: "openai-compatible",
+      vendors: {
+        "openai-compatible": {
+          model: "gateway-served",
+          baseUrl: "https://models.invalid/v1",
+          enableThinking: true,
+          thinkingBudgetTokens: 10_000,
+        },
+      },
+      streamSmoothing: "none",
+      fallbackChain: [],
+      modelListCache: cache,
+    };
+    return {
+      patch,
+      service: {
+        get: vi.fn((key: string) => (key === "llm" ? llm : {})),
+        getSecret: vi.fn(() => ""),
+        patch,
+      },
+    };
+  }
+
+  const servedCatalogue = () =>
+    vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          data: [{ id: "gateway-served", max_input_tokens: 229_376, max_output_tokens: 32_768 }],
+        }),
+        { status: 200 },
+      ),
+    ) as unknown as typeof fetch;
+
+  beforeEach(() => {
+    resetModelListProbeStateForTesting();
+  });
+
+  it("asks the endpoint and stores the answer where the reader looks for it", async () => {
+    // The cache used to be written only by the settings page, so a run with no
+    // window open — a routine, a sub-agent, an evaluation — could never reach
+    // the provider-reported window at all.
+    const { service, patch } = makeRefreshSettings();
+    const fetchImpl = servedCatalogue();
+
+    const stored = await refreshRouteModelList({
+      settingsService: service as never,
+      fetchOptions: guardedFetchOptions(fetchImpl),
+      address,
+    });
+
+    expect(stored).toBe(true);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const written = patch.mock.calls[0][0];
+    const key = llmModelListCacheKey("openai-compatible", "https://models.invalid/v1", "");
+    expect(written.llm.modelListCache[key]?.modelEntries?.[0]?.contextLength).toBe(229_376);
+    // The window the engine and the ring then read off that row.
+    expect(
+      resolveContextWindowForRoute({
+        provider: "openai-compatible",
+        vendors: {
+          "openai-compatible": {
+            model: "gateway-served",
+            baseUrl: "https://models.invalid/v1",
+            enableThinking: true,
+            thinkingBudgetTokens: 10_000,
+          },
+        },
+        modelListCache: written.llm.modelListCache as never,
+      }),
+    ).toMatchObject({ contextWindow: 229_376, source: "provider-reported" });
+  });
+
+  it("asks once per route, however many turns evaluate the budget", async () => {
+    const { service } = makeRefreshSettings();
+    const fetchImpl = servedCatalogue();
+
+    await refreshRouteModelList({ settingsService: service as never, fetchOptions: guardedFetchOptions(fetchImpl), address });
+    await refreshRouteModelList({ settingsService: service as never, fetchOptions: guardedFetchOptions(fetchImpl), address });
+    await refreshRouteModelList({ settingsService: service as never, fetchOptions: guardedFetchOptions(fetchImpl), address });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves a catalogue answer that is still within its lifetime alone", async () => {
+    const key = llmModelListCacheKey("openai-compatible", "https://models.invalid/v1", "");
+    const { service, patch } = makeRefreshSettings({
+      [key]: {
+        vendor: "openai-compatible",
+        endpoint: "https://models.invalid/v1/models",
+        models: ["gateway-served"],
+        fetchedAt: new Date(Date.now() - 60_000).toISOString(),
+      },
+    });
+    const fetchImpl = servedCatalogue();
+
+    expect(
+      await refreshRouteModelList({ settingsService: service as never, fetchOptions: guardedFetchOptions(fetchImpl), address }),
+    ).toBe(false);
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(patch).not.toHaveBeenCalled();
+  });
+
+  it("asks again once that answer is older than its lifetime", async () => {
+    const key = llmModelListCacheKey("openai-compatible", "https://models.invalid/v1", "");
+    const { service } = makeRefreshSettings({
+      [key]: {
+        vendor: "openai-compatible",
+        endpoint: "https://models.invalid/v1/models",
+        models: ["gateway-served"],
+        fetchedAt: new Date(Date.now() - MODEL_LIST_REFRESH_TTL_MS - 1_000).toISOString(),
+      },
+    });
+    const fetchImpl = servedCatalogue();
+
+    expect(
+      await refreshRouteModelList({ settingsService: service as never, fetchOptions: guardedFetchOptions(fetchImpl), address }),
+    ).toBe(true);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the window it has when the endpoint does not answer", async () => {
+    const { service, patch } = makeRefreshSettings();
+    const fetchImpl = vi.fn(async () => new Response("nope", { status: 503 })) as unknown as typeof fetch;
+
+    expect(
+      await refreshRouteModelList({ settingsService: service as never, fetchOptions: guardedFetchOptions(fetchImpl), address }),
+    ).toBe(false);
+    expect(patch).not.toHaveBeenCalled();
   });
 });

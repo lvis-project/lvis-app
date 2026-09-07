@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   getUsableContext,
   getPreflightThreshold,
+  llmRouteCatalogAddress,
+  MAX_CREDIBLE_CONTEXT_WINDOW,
   resolveContextWindowForRoute,
   resolveModelContextWindow,
 } from "../context-budget.js";
@@ -170,6 +172,36 @@ describe("resolveModelContextWindow — where the budget's denominator comes fro
     }
   });
 
+  it("refuses a window an order of magnitude past anything real", () => {
+    // A typo'd extra digit on 229,376 reads as 2,293,760, whose preflight
+    // threshold no conversation reaches: compaction would never run again and
+    // the turn would die on a provider context error instead.
+    for (const value of [MAX_CREDIBLE_CONTEXT_WINDOW + 1, 22_937_600, Number.MAX_SAFE_INTEGER]) {
+      expect(
+        resolveModelContextWindow({
+          vendor: "openai-compatible",
+          model: "a-model-no-catalog-knows",
+          configured: value,
+        }).source,
+      ).toBe("fallback");
+      expect(
+        resolveModelContextWindow({
+          vendor: "openai-compatible",
+          model: "a-model-no-catalog-knows",
+          reported: value,
+        }).source,
+      ).toBe("fallback");
+    }
+    // The largest real windows still pass.
+    expect(
+      resolveModelContextWindow({
+        vendor: "openai-compatible",
+        model: "a-model-no-catalog-knows",
+        configured: MAX_CREDIBLE_CONTEXT_WINDOW,
+      }),
+    ).toEqual({ contextWindow: MAX_CREDIBLE_CONTEXT_WINDOW, source: "vendor-setting" });
+  });
+
   it("treats a malformed provider-reported window as absent, not as an error", () => {
     expect(
       resolveModelContextWindow({
@@ -257,6 +289,33 @@ describe("resolveContextWindowForRoute — one answer for the engine and the rin
         { providerId: "provider-alpha", baseUrl: "https://preset.invalid/v1" },
       ]),
     ).toMatchObject({ contextWindow: 131_072, source: "provider-reported" });
+  });
+
+  it("finds the reported row whatever case the configured model id is spelled in", () => {
+    const settings = routeSettings({ reported: { contextLength: 131_072 } });
+    const cached = Object.values(settings.modelListCache)[0]!;
+    cached.modelEntries = [{ id: "A-Model-No-Catalog-Knows", contextLength: 131_072 }];
+    cached.models = ["A-Model-No-Catalog-Knows"];
+
+    expect(resolveContextWindowForRoute(settings)).toMatchObject({
+      contextWindow: 131_072,
+      source: "provider-reported",
+    });
+  });
+
+  it("names the same cache coordinates a refresh has to write back to", () => {
+    // A refresher that keys the row differently writes an answer the reader
+    // never finds, so the probe repeats forever.
+    expect(
+      llmRouteCatalogAddress(
+        routeSettings({ presetId: "provider-alpha", baseUrl: "https://preset.invalid/v1" }),
+        [{ providerId: "provider-alpha", baseUrl: "https://preset.invalid/v1" }],
+      ),
+    ).toEqual({
+      vendor: "openai-compatible",
+      baseUrl: "https://preset.invalid/v1",
+      credentialScope: "provider-alpha",
+    });
   });
 
   it("moves to the next source when the route has no handshake for the model", () => {

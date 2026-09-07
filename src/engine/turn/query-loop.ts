@@ -455,8 +455,12 @@ export async function queryLoop(
       const delivery = pendingGuidanceDelivery;
       if (!delivery) return;
       pendingGuidanceDelivery = null;
-      if (delivery.historyMessage) {
-        self.history.removeExact(delivery.historyMessage);
+      const injectionId = delivery.historyMessage?.meta?.hostInjectionId;
+      if (injectionId !== undefined) {
+        // NOT removeExact: a compaction between the append and this rollback
+        // replaces message object identities, and a row that survives rollback
+        // while its entry goes back on the queue is delivered twice.
+        self.history.removeByHostInjectionId(injectionId);
       }
       // Return the drained entries to the turn queue. runTurn's outer finally
       // clears the active controller first, then atomically drops this queue via
@@ -495,6 +499,10 @@ export async function queryLoop(
     const loopRoundBound = effectiveMaxRounds;
     try {
     for (let round = 0; round < loopRoundBound; round++) {
+      // Whether the guidance-injection guard already evaluated the preflight
+      // for THIS round. Reset per round, read by the round-loop gate below so
+      // one round never runs two compactions.
+      let preflightRanThisRound = false;
       // C3(a): hard guard between rounds — if we have already executed
       // `effectiveMaxRounds` assistant turns, stop cleanly and return the
       // last text. This is the loop-boundary defense for agent_spawn
@@ -629,6 +637,7 @@ export async function queryLoop(
         // well below the post-compact preserveRecent budget, so the
         // next round's prompt-assembly will fit.
         if (self.provider && !self.deps.disableSessionPersistence) {
+          preflightRanThisRound = true;
           const compacted = await self.runPreflightGuard(
             {
               systemPrompt,
@@ -861,6 +870,10 @@ export async function queryLoop(
         // Rewriting the history under it would hand the model a prefill that
         // no longer follows from what precedes it.
         continuationPrefillText === undefined &&
+        // A guidance round already ran the guard against this same history a
+        // few lines above. Running it twice in one round would spend a second
+        // LLM compaction on a history the first one just rewrote.
+        !preflightRanThisRound &&
         self.provider &&
         !self.deps.disableSessionPersistence &&
         runtimeContextBudget.preflight > 0
@@ -882,6 +895,10 @@ export async function queryLoop(
               },
               abortSignal,
               callbacks,
+              // Mid-turn: the compactor's protected window has to be this
+              // turn's own tool rounds, or it protects everything the turn
+              // appended and reduces nothing.
+              { intraTurn: true },
             );
             decide({
               kind: "compact.auto",
@@ -889,10 +906,6 @@ export async function queryLoop(
               data: { threshold: runtimeContextBudget.preflight, projected },
             });
             if (compacted) {
-              // A compaction that actually reduced the history re-arms
-              // immediately: the next crossing is a genuinely new one, and it
-              // takes real growth to get back over the threshold.
-              roundCompactArmedAbove = 0;
               systemPrompt = self.buildSystemPromptForScope(
                 scope,
                 stagedOrigin,
@@ -911,6 +924,14 @@ export async function queryLoop(
               }
               messagesForRound = assembleRoundMessages(self.history.getMessages());
               self.lastRoundInputProjection = projectRound(messagesForRound);
+              // Re-arm against what the compaction actually achieved, not
+              // against zero. A compaction that reduced the history but did
+              // not get back under the threshold would otherwise fire again on
+              // the very next round; measured from the post-compaction
+              // projection, a compaction that DID get back under re-arms as
+              // soon as the turn grows into the threshold again.
+              roundCompactArmedAbove =
+                self.lastRoundInputProjection.totalTokens + roundCompactRearmGrowth;
             } else {
               // A compaction that could not reduce anything leaves the
               // projection over the threshold, so an ungated retry would spend
