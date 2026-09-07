@@ -701,10 +701,12 @@ describe("shell-path-policy", () => {
 
     it("does not invent a file operand for `e`, which runs a command", () => {
       withRoot((root) => {
-        // `s///e` executes the pattern space; there is no filename after the flag,
-        // so nothing may be pushed as a path candidate.
-        expect(validateShellCommandPathPolicy(`sed 's/a/b/e' notes.txt`, root, root, []))
-          .toBeNull();
+        // `s///e` executes the pattern space; there is no filename after the
+        // flag, so nothing may be pushed as a PATH candidate. It is refused for
+        // the other reason instead — the text it will run is not knowable here.
+        const reason = validateShellCommandPathPolicy(`sed 's/a/b/e' notes.txt`, root, root, []);
+        expect(reason).toContain("Dynamic path");
+        expect(reason).not.toContain("Sandbox:");
       });
     });
   });
@@ -749,6 +751,56 @@ describe("shell-path-policy", () => {
     it("leaves a quoted `#` alone", () => {
       withRoot((root) => {
         expect(validateShellCommandPathPolicy(`grep '# /etc/shadow' notes.txt`, root, root, []))
+          .toBeNull();
+      });
+    });
+  });
+
+  describe("a sed script that executes", () => {
+    it("re-enters the command line `e` runs, instead of exempting it", () => {
+      withRoot((root) => {
+        // `e COMMAND` runs that line. Reading it as program text left the
+        // operand inside completely unexamined, and the whole script token
+        // resolved relative to the working directory, so it stayed inside the
+        // boundary.
+        expect(validateShellCommandPathPolicy(`sed '1e cat /tmp/outside/x.txt' notes.txt`, root, root, []))
+          .toContain("Sandbox:");
+        expect(validateShellCommandPathPolicy(`sed '1e cat /etc/shadow' notes.txt`, root, root, []))
+          .toContain("Sensitive path");
+      });
+    });
+
+    it("refuses a substitution that executes, because the text is not knowable yet", () => {
+      withRoot((root) => {
+        // The `e` flag runs the pattern space AFTER substitution, so there is
+        // no command line here to inspect.
+        for (const command of [
+          `sed 's/.*/cat /tmp/outside/x.txt/e' notes.txt`,
+          `sed 's/.*/cat \\/etc\\/shadow/e' notes.txt`,
+          `sed 's|a|b|e' notes.txt`,
+        ]) {
+          expect(validateShellCommandPathPolicy(command, root, root, [])).toContain("Dynamic path");
+        }
+      });
+    });
+
+    it("refuses a bare `e`, which runs the pattern space as it stands", () => {
+      withRoot((root) => {
+        expect(validateShellCommandPathPolicy(`sed 'e' notes.txt`, root, root, []))
+          .toContain("Dynamic path");
+      });
+    });
+
+    it("still allows an `e` command that reaches nothing", () => {
+      withRoot((root) => {
+        expect(validateShellCommandPathPolicy(`sed '1e echo hi' notes.txt`, root, root, [])).toBeNull();
+      });
+    });
+
+    it("still allows a substitution that does not execute", () => {
+      withRoot((root) => {
+        expect(validateShellCommandPathPolicy(`sed 's/a/b/' notes.txt`, root, root, [])).toBeNull();
+        expect(validateShellCommandPathPolicy(`sed -e 's/a/b/g' -e 's/c/d/' notes.txt`, root, root, []))
           .toBeNull();
       });
     });

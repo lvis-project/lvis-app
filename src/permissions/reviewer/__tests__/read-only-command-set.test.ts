@@ -65,29 +65,45 @@ describe("sed script file access", () => {
     expect(inspectSedScriptFileAccess(script)).toEqual({
       hasWriteOrExec: true,
       fileOperands: expected,
+      execCommands: [],
+      hasDynamicExec: false,
     });
   });
 
-  it("reports execution without inventing a filename", () => {
-    // `s///e` runs the pattern space as a command; nothing after it is a path.
-    expect(inspectSedScriptFileAccess("s/a/b/e")).toEqual({
+  it("returns the command line `e` runs, so the caller can inspect it", () => {
+    expect(inspectSedScriptFileAccess("1e cat /tmp/outside/x.txt")).toEqual({
       hasWriteOrExec: true,
       fileOperands: [],
+      execCommands: ["cat /tmp/outside/x.txt"],
+      hasDynamicExec: false,
     });
-    expect(inspectSedScriptFileAccess("e")).toEqual({
-      hasWriteOrExec: true,
-      fileOperands: [],
-    });
+  });
+
+  it("reports execution it cannot read without inventing a command", () => {
+    // The `e` flag runs the pattern space AFTER substitution, and a bare `e`
+    // runs it as it stands. Neither text exists in the script.
+    for (const script of ["s/a/b/e", "e", "s|a|b|e"]) {
+      expect(inspectSedScriptFileAccess(script)).toEqual({
+        hasWriteOrExec: true,
+        fileOperands: [],
+        execCommands: [],
+        hasDynamicExec: true,
+      });
+    }
   });
 
   it("finds no file access in an address or a delimiter that looks like one", () => {
     expect(inspectSedScriptFileAccess("/^class/p")).toEqual({
       hasWriteOrExec: false,
       fileOperands: [],
+      execCommands: [],
+      hasDynamicExec: false,
     });
     expect(inspectSedScriptFileAccess("s|a|b|")).toEqual({
       hasWriteOrExec: false,
       fileOperands: [],
+      execCommands: [],
+      hasDynamicExec: false,
     });
   });
 });

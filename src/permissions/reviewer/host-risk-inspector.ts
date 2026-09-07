@@ -723,10 +723,25 @@ export interface SedScriptFileAccess {
   hasWriteOrExec: boolean;
   /** Files the script names, verbatim, in script order. */
   fileOperands: string[];
+  /**
+   * Command lines the script runs with `e COMMAND`, verbatim, in script order.
+   * Like a file operand the command runs to end of line, so it is a span, not a
+   * word.
+   */
+  execCommands: string[];
+  /**
+   * True when the script executes text that only exists at run time: `s///e`
+   * runs the pattern space AFTER substitution, and a bare `e` runs the pattern
+   * space as it stands. Neither can be read here, so a caller that needs to
+   * know what will run has to refuse rather than inspect.
+   */
+  hasDynamicExec: boolean;
 }
 
 export function inspectSedScriptFileAccess(script: string): SedScriptFileAccess {
   const fileOperands: string[] = [];
+  const execCommands: string[] = [];
+  let hasDynamicExec = false;
   let hasWriteOrExec = false;
   let i = 0;
   while (i < script.length) {
@@ -757,14 +772,22 @@ export function inspectSedScriptFileAccess(script: string): SedScriptFileAccess 
       continue;
     }
     if (command === "e") {
-      // `e` runs a COMMAND, not a file, so there is no path to recover.
+      // `e COMMAND` runs that command line; a bare `e` runs the pattern space,
+      // which is only known once sed is running.
       hasWriteOrExec = true;
-      i = skipToSedLineEnd(script, i + 1);
+      const end = skipToSedLineEnd(script, i + 1);
+      const executed = script.slice(i + 1, end).replace(/[\r\n]+$/, "").trim();
+      if (executed.length > 0) execCommands.push(executed);
+      else hasDynamicExec = true;
+      i = end;
       continue;
     }
     if (command === "s") {
       const result = parseSedSubstitute(script, i);
       if (result.mutating) hasWriteOrExec = true;
+      // `s///e` executes the pattern space after the substitution has been
+      // applied, so the text that runs does not exist in this script.
+      if (result.mutating && !result.writesFile) hasDynamicExec = true;
       i = result.writesFile
         ? takeSedFileOperand(script, result.next, fileOperands)
         : result.next;
@@ -773,7 +796,7 @@ export function inspectSedScriptFileAccess(script: string): SedScriptFileAccess 
 
     i = skipToNextSedCommand(script, i + 1);
   }
-  return { hasWriteOrExec, fileOperands };
+  return { hasWriteOrExec, fileOperands, execCommands, hasDynamicExec };
 }
 
 /**

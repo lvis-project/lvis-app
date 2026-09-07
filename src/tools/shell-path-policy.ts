@@ -145,6 +145,10 @@ function findViolationInCommand(
   if (dynamicPathComposition) {
     return { kind: "dynamic-path", reason: dynamicPathComposition };
   }
+  const dynamicExecution = findDynamicExecutionOperand(command);
+  if (dynamicExecution) {
+    return { kind: "dynamic-path", reason: dynamicExecution };
+  }
   // `$(…)` and backticks hold COMMANDS, so their operands are checked by
   // running this whole policy over the substitution body. Without this pass the
   // body was only ever read as path text: `$(wc -l < /tmp/x)` reported an
@@ -677,6 +681,17 @@ interface OperandSlotClassification {
    * no other way.
    */
   extraCandidates: readonly string[];
+  /**
+   * Command lines carried INSIDE an operand that is otherwise program text —
+   * today `sed`'s `e COMMAND`. They are re-entered through the whole policy the
+   * same way a `sh -c` payload is.
+   */
+  nestedCommands: readonly string[];
+  /**
+   * Set when an operand executes text that cannot be read before running, so
+   * there is nothing to inspect and the call has to be refused instead.
+   */
+  dynamicExecution: string | null;
 }
 
 /**
@@ -689,7 +704,9 @@ interface OperandSlotClassification {
 function classifyOperandSlots(argv: readonly string[]): OperandSlotClassification {
   const skip = new Set<number>();
   const extraCandidates: string[] = [];
-  const empty = { nonPathIndices: skip, extraCandidates };
+  const nestedCommands: string[] = [];
+  let dynamicExecution: string | null = null;
+  const empty = { nonPathIndices: skip, extraCandidates, nestedCommands, dynamicExecution };
   const verbIndex = leadingKeywordCount(argv);
   const head = argv[verbIndex];
   if (head === undefined) return empty;
@@ -720,6 +737,15 @@ function classifyOperandSlots(argv: readonly string[]): OperandSlotClassificatio
     // any boundary.
     if (isSed) {
       const sedAccess = inspectSedScriptFileAccess(value);
+      // `e COMMAND` runs a command line this policy can read, so it is
+      // re-entered rather than exempted — the same treatment `sh -c` gets.
+      nestedCommands.push(...sedAccess.execCommands);
+      if (sedAccess.hasDynamicExec && dynamicExecution === null) {
+        dynamicExecution =
+          `Dynamic path: \`sed\` script \`${value}\` executes text that only exists while sed runs ` +
+          "(`s///e`, or `e` with no command, run the pattern space), so the paths it uses cannot be " +
+          "checked beforehand. Put the command in the shell call itself instead.";
+      }
       if (sedAccess.hasWriteOrExec) {
         extraCandidates.push(...sedAccess.fileOperands);
         return false;
@@ -765,7 +791,7 @@ function classifyOperandSlots(argv: readonly string[]): OperandSlotClassificatio
       programTaken = true;
     }
   }
-  return { nonPathIndices: skip, extraCandidates };
+  return { nonPathIndices: skip, extraCandidates, nestedCommands, dynamicExecution };
 }
 
 /**
@@ -796,6 +822,11 @@ function extractNestedShellCommands(command: string): string[] {
     const verbIndex = leadingKeywordCount(leaf.argv);
     const head = leaf.argv[verbIndex];
     if (head === undefined) continue;
+    // A command line can also be carried INSIDE an operand rather than as an
+    // option value — `sed '1e cat /etc/shadow'`. The slot classifier is what
+    // reads those operands, so it hands them over rather than a second reader
+    // of sed grammar being written here.
+    nested.push(...classifyOperandSlots(leaf.argv).nestedCommands);
     const spec = NON_PATH_OPERAND_SPECS.get(stripCommandPath(head).toLowerCase());
     const options = spec?.nestedCommandOptions;
     if (!options) continue;
@@ -807,6 +838,23 @@ function extractNestedShellCommands(command: string): string[] {
     }
   }
   return nested;
+}
+
+/**
+ * The reason an operand executes text that cannot be read before running, or
+ * null. The `e` flag on a substitution runs the pattern space AFTER the
+ * substitution has been applied, and a bare `e` command runs it as it stands.
+ * Unlike `sed '1e cat …'` there is no command line to re-enter, so the only
+ * honest answer is to refuse.
+ */
+function findDynamicExecutionOperand(command: string): string | null {
+  const { leaves, parseError } = tokenizeShell(command);
+  if (parseError) return null;
+  for (const leaf of leaves) {
+    const { dynamicExecution } = classifyOperandSlots(leaf.argv);
+    if (dynamicExecution) return dynamicExecution;
+  }
+  return null;
 }
 
 /**
