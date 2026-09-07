@@ -151,6 +151,9 @@ vi.mock("../conversation.js", () => ({
       getVisibilityDenyRules: vi.fn(() => []),
       setBroadcastUserApprovalHit: vi.fn(),
       setBroadcastConfigChanged: vi.fn(),
+      // Boot pushes the Layer 1 read fence in from the settings file on every
+      // reviewer re-wire, so a stub that omits it fails the whole bootstrap.
+      setBlockReadsOutsideWorkingDirectories: vi.fn(),
     };
   }),
   createPostTurnHookChain: vi.fn(() => ({ postTurnHookChain: {} })),

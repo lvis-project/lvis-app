@@ -222,6 +222,14 @@ export function canonicalizePathForMatch(rawPath: string): string {
 
 **Default (computed at runtime):** `process.cwd()` ∪ `~/.lvis/` *minus* Layer 0 deny 경로 (즉 `~/.lvis/secrets/` 는 allowed dir 안에 있어도 Layer 0 deny 가 우선).
 
+**Read/write 비대칭 (SOT: `permissions/allowed-directories.ts` 의 `pathEffectIsConfined`):** 이 디렉토리 목록은 에이전트가 *무엇을 바꿀 수 있는가* 를 정한다. 쓰기와 명령 실행 — `write_file`/`edit_file`, redirect target, `tee`/`dd`/`cp`/`mv`/`rm`/`mkdir`/`chmod`/`sed -i`, mutating 재귀 순회 (`find -delete`, `find -exec`, `cp -r`, `tar`) — 는 예전과 똑같이 이 목록 안으로 confine 하고, 목록 밖이면 directory-scope 승인을 요청한다. 반면 *읽기* — `read_file`, `glob_files`/`list_files`/`grep_files`, 그리고 read-only shell leaf (`ls /`, `find / -name x`, `grep -r p /usr`, `cat /etc/hosts`, `stat`, `du`, `head`, `wc`) — 는 이 목록을 아예 참조하지 않고 파일시스템 어디든 도달한다. 읽기의 경계는 Layer 0 sensitive-path deny-list 하나뿐이며, 그 목록은 이 변경으로 바뀌지 않았다 (`~/.ssh`, `~/.aws`, credentials 파일은 읽기도 계속 거부). 근거: 디렉토리 목록으로 "무엇을 볼 수 있는가" 에 답하면 사용자가 이미 넘겨준 기계에서 `ls /` 가 거부된다 — 실제로 그랬고, 모델은 우회 경로를 찾느라 라운드를 소모했다.
+
+Shell leaf 의 read/write 판정은 risk classifier 의 verb table (`permissions/reviewer/host-risk-inspector.ts` 의 `isReadOnlyShellLeaf`) 하나에서만 나온다. path containment 쪽에 두 번째 verb table 을 두지 않는다 — 두 분류기가 같은 명령을 다르게 읽으면 한쪽이 검사하지 않는 틈이 생긴다. 단 `cd` 의 목적지는 read verb 임에도 **write 로 취급**한다: `cd` 는 이후 모든 leaf 의 상대 경로가 resolve 되는 기준 디렉토리를 바꾸고, bare filename (`rm passwd`) 은 path candidate 가 아니라 어느 layer 도 보지 못하기 때문이다. 밖을 읽어야 하는 호출은 절대 경로 (`cat /etc/hosts`) 로 이름을 대면 되고 그건 허용된다.
+
+**Setting — `permissions.blockReadsOutsideWorkingDirectories`** (기본 `false`, UI 없음, `~/.lvis/settings.json` 직접 편집): `true` 로 두면 읽기도 다시 `additionalDirectories` 안으로 fence 하여 비대칭 이전의 대칭 경계로 되돌린다. UI 를 두지 않는 이유는 이것이 배포 단위 posture 이지 프로젝트별 선호가 아니고, 이 스위치가 안전 기능처럼 보이지만 실제로 비밀을 못 읽게 하는 것은 Layer 0 deny-list 이지 이 키가 아니기 때문이다. Boot 와 이후 모든 `settings:update` 에서 `PermissionManager.setBlockReadsOutsideWorkingDirectories()` 로 push 되며, 값이 바뀌면 `policyGeneration` 이 증가해 이전 fence 아래에서 나온 reviewer verdict 가 재사용되지 않는다.
+
+**Audit:** 목록 밖 읽기가 허용된 경우는 dialog 도 grant 도 남기지 않으므로 Layer 1 `AuditAllow` row 에 `policyRule: "path-scope/read-anywhere"` 로 기록한다 (사용자 승인으로 열린 grant 는 대신 `grantLifetime` 을 갖는다 — 둘은 상호배타적이다).
+
 **Auto-suggest (security review 강화):**
 1. **Leaf parent only** — 경로 `~/Documents/old-project/notes/today/foo.md` 가 N≥3 회 참조 시 *바로 위 디렉토리* (`today/`) 만 제안. 절대 common-prefix 의 가장 넓은 디렉토리 (`~/Documents/`) 를 제안 안 함.
 2. **Re-typed confirmation** — "디렉토리 영구 추가" 클릭 시 디렉토리 이름 직접 다시 입력 modal (phishing 차단)
@@ -712,7 +720,7 @@ compat/fallback surface 는 제외하고, host/app/plugin contract 는 다음 �
 - Native file tools Phase 1: `read_file`, `list_files`, `glob_files`, `grep_files`, `write_file`, `edit_file`
 - Native tools Phase 2: `apply_patch`, `move_file`, `delete_file`, `powershell`
 - Authority-sensitive tool approval identity: tools may publish `approvalCacheKey(input, ctx)` so allow/deny rules bind to the exact capability scope, not only the tool name. `routine_schedule` keys include the normalized routine plugin scope, shell tools key command+cwd, and write-capable native file tools key canonical target path(s) so one approval cannot authorize unrelated plugin scope, shell command, or filesystem target.
-- Native tools receive `ToolExecutionContext.allowedDirectories` from the executor and use that single scope for internal sandbox checks. `permissions.additionalDirectories` therefore affects Layer 1 and tool-local validation identically.
+- Native tools receive `ToolExecutionContext.allowedDirectories` from the executor and use that single scope for internal sandbox checks. `permissions.additionalDirectories` therefore affects Layer 1 and tool-local validation identically. The tool-local check takes the same effect argument as Layer 1 (`FileTool.ensureAllowed(path, ctx, effect)`) and asks the same `pathEffectIsConfined` predicate, so a read the permission layer admitted cannot be refused again at execute time.
 - `glob_files` and `grep_files` scan within the bounded traversal budget, then apply include/content filtering before the user-visible result limit so late valid matches are not skipped by early non-matching files.
 - Per-tool allow/deny audit decisions and hook quarantine events are double-written to the HMAC-chained permission audit channel while the general telemetry channel remains during parity verification.
 - `src/lib/glob-matcher.ts` is the shared minimatch-subset implementation for Layer 0 sensitive paths and native file glob/include matching.

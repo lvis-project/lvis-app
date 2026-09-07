@@ -217,10 +217,29 @@ describe("policy denials carry their guidance through to the tool result", () =>
   });
 
   it("tells the model that the filesystem root can never be authorized", async () => {
-    const result = await runUnattended("ls /");
+    // A WRITE at the root. `ls /` only reads it, and a read is bounded by the
+    // sensitive-path deny-list rather than by the directory list, so it never
+    // reaches a grant request to be told the root is not grantable.
+    const result = await runUnattended("chmod u+w /");
     expect(result.isError).toBe(true);
     expect(result.ran).toBe(false);
     expect(result.content).toContain("[디렉토리 정책 차단]");
     expect(result.content).toContain("allowed-directories/not-grantable");
+  });
+
+  it("says, on a write refusal, that reading outside those directories is still allowed", async () => {
+    const result = await runUnattended("chmod u+w /var/tmp/lvis-denial-guidance-outside/x");
+    expect(result.isError).toBe(true);
+    // Without this sentence the directory list reads as the answer to "what may
+    // I touch", and a model that just had a write refused stops issuing the
+    // wide reads the host does admit.
+    // The suite runs in the Korean locale, like the bracketed prefixes above.
+    expect(result.content).toContain("쓰기와 명령 실행에만 적용됩니다");
+  });
+
+  it("lets the read the same guidance describes actually run", async () => {
+    const result = await runUnattended("cat /etc/hosts");
+    expect(result.isError).toBe(false);
+    expect(result.ran).toBe(true);
   });
 });

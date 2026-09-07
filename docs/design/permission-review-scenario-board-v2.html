@@ -79,7 +79,7 @@
     <section class="grid" aria-label="Permission scenarios">
       <article class="scenario"><h2><span class="tag green">S1</span>Default workspace read</h2><p>Read inside the workspace is allowed without approval and still leaves audit context.</p></article>
       <article class="scenario"><h2><span class="tag amber">S2</span>Strict read asks</h2><p>Strict mode asks for reads without invoking the reviewer.</p></article>
-      <article class="scenario"><h2><span class="tag amber">S3</span>Out-of-directory read</h2><p>Reads outside the allowed directory switch to directory-scope approval.</p></article>
+      <article class="scenario"><h2><span class="tag amber">S3</span>Out-of-directory write</h2><p>Writes outside the allowed directory switch to directory-scope approval. A read of the same path is admitted without one — the directory list bounds what may be changed, and the sensitive-path deny-list bounds what may be seen.</p></article>
       <article class="scenario"><h2><span class="tag green">S4</span>Auto-review LOW mutation</h2><p>Low-risk foreground mutation can run inline with reviewer and audit disclosure.</p></article>
       <article class="scenario"><h2><span class="tag amber">S5</span>Auto-review MED mutation</h2><p>Medium foreground mutation routes to the non-modal approval dock; the user remains the authority.</p></article>
       <article class="scenario"><h2><span class="tag red">S6</span>Auto-review HIGH shell</h2><p>High-risk shell or deletion routes to approval and deny-once blocks execution.</p></article>

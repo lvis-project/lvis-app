@@ -97,20 +97,32 @@ export class AuditWriter {
   }
 
   /**
-   * Emit an `AuditAllow` row when the user resolves an out-of-allowed-dir
-   * approval (allow-once / allow-session / allow-always) — or when
-   * `propagateGrantScope` had to degrade a session-intent grant to turn
-   * scope because the session callback was unwired. Decoupled from
-   * `auditToolCall` so the per-tool audit row can stay focused on
-   * execution outcome while the directory-grant decision lives in a
-   * dedicated forensic row tied to the dialog click.
+   * Emit the Layer-1 `AuditAllow` row for a directory decision, whichever of
+   * the two ways it was reached.
+   *
+   * `grantLifetime` is the USER path: the person resolved an out-of-allowed-dir
+   * approval (allow-once / allow-session / allow-always), or
+   * `propagateGrantScope` degraded a session-intent grant to turn scope because
+   * the session callback was unwired.
+   *
+   * `policyRule` is the POLICY path: nobody was asked, and a rule admitted the
+   * path — today a read reaching outside the authorized directories, which the
+   * host does not confine. That admission produces no dialog and no grant, so
+   * this row is the only place the decision is recorded; without it the audit
+   * would show the wide read as indistinguishable from a call that stayed
+   * inside the boundary.
+   *
+   * Exactly one of the two is passed. Both paths stay decoupled from
+   * `auditToolCall` so the per-tool row keeps reporting execution outcome while
+   * the directory decision lives in its own forensic row.
    */
   async auditPermissionGrant(args: {
     toolName: string;
     source: ToolSource;
     category: ToolCategory;
     directory: string;
-    grantLifetime: "turn" | "session" | "always" | "degraded-to-turn";
+    grantLifetime?: "turn" | "session" | "always" | "degraded-to-turn";
+    policyRule?: string;
     permissionContext?: ToolPermissionContext;
     audit?: ToolExecutionAuditMetadata;
   }): Promise<void> {
@@ -129,7 +141,8 @@ export class AuditWriter {
       category: args.category,
       directory: args.directory,
       directoryAllowed: true,
-      grantLifetime: args.grantLifetime,
+      ...(args.grantLifetime !== undefined ? { grantLifetime: args.grantLifetime } : {}),
+      ...(args.policyRule !== undefined ? { policyRule: args.policyRule } : {}),
       layer: 1,
       ...(args.audit?.toolUseId !== undefined ? { toolUseId: args.audit.toolUseId } : {}),
       ...(args.audit?.executionPlan !== undefined ? { executionPlan: args.audit.executionPlan } : {}),
@@ -144,7 +157,7 @@ export class AuditWriter {
       log.warn(
         "permission grant audit append failed for %s (%s): %s",
         args.toolName,
-        args.grantLifetime,
+        args.grantLifetime ?? args.policyRule,
         errorMessage(err),
       );
     }

@@ -21,7 +21,7 @@ import type {
   ToolCategory,
 } from "./types.js";
 import { trustFromSource } from "./types.js";
-import { PermissionManager, isTailnetControllerP1BlockedTool, type PermissionCheckResult } from "../permissions/permission-manager.js";
+import { PermissionManager, isTailnetControllerP1BlockedTool, requiredTier, type PermissionCheckResult } from "../permissions/permission-manager.js";
 import {
   isRemoteControllerAuthorityCurrent,
   remoteControllerOriginOf,
@@ -134,6 +134,19 @@ const log = createLogger("executor");
 const DENIAL_GUIDANCE_DIRECTORY_LIMIT = 8;
 
 /**
+ * Rule id stamped on the Layer 1 audit row for a read admitted outside the
+ * authorized directories.
+ *
+ * Same `<control>/<verdict>` shape as the denial rule ids
+ * (`allowed-directories/denied`, `shell-path-policy/sandbox-boundary`) so a log
+ * reader filters allow and deny rows of the same control the same way. It names
+ * the RULE, not the setting: `blockReadsOutsideWorkingDirectories` being off is
+ * why the rule applies, and a row that named the setting would read as a
+ * configuration dump rather than a decision.
+ */
+const READ_ANYWHERE_AUDIT_RULE = "path-scope/read-anywhere";
+
+/**
  * The sentences appended to every host policy refusal — the four bracketed
  * block kinds (`Directory policy blocked`, `Shell path policy blocked`,
  * `Bash AST blocked`, `Sensitive path blocked`) plus the headless directory
@@ -163,6 +176,16 @@ export function buildPolicyDenialGuidance(input: {
   alternative: PolicyDenialAlternative;
   allowedDirectories: readonly string[];
   filesystemRootReference?: boolean;
+  /**
+   * Say, on a scope refusal, that only writes and execution are confined.
+   *
+   * Without it the directory list reads as the answer to "what may I touch",
+   * and a model that just had a write refused concludes it cannot read out
+   * there either — so it stops issuing the wide reads the host does admit. Set
+   * only where the refusal was a scope verdict and reads are in fact unfenced;
+   * saying it while `blockReadsOutsideWorkingDirectories` is on would be false.
+   */
+  readsUnfenced?: boolean;
 }): string {
   const sentences: string[] = [];
   sentences.push(
@@ -192,6 +215,9 @@ export function buildPolicyDenialGuidance(input: {
             directories: remaining > 0 ? `${named.join(", ")}, …(+${remaining})` : named.join(", "),
           }),
     );
+    if (input.readsUnfenced) {
+      sentences.push(t("be_executor.denialReadsNotConfined"));
+    }
   }
   return ` ${sentences.join(" ")}`;
 }
@@ -417,6 +443,13 @@ export async function runToolInvocation(
     source = tool.source;
     trust = trustFromSource(source);
     let invocationCategory = resolveInvocationCategory(tool, toolUse.input);
+    // Layer 1's read fence, read once per invocation from the wired policy
+    // holder rather than per path operand. `=== true` rather than `?? false`
+    // because the question is "did a wired PermissionManager ask for reads to
+    // be re-fenced": with none wired there is no policy asking for it, which is
+    // also the setting's shipped value.
+    const blockReadsOutsideWorkingDirectories =
+      services.permissionManager?.getBlockReadsOutsideWorkingDirectories() === true;
     meta.source = source;
     meta.category = invocationCategory;
     if (tool.pluginId) meta.pluginId = tool.pluginId;
@@ -1015,6 +1048,7 @@ export async function runToolInvocation(
             retry: "never",
             alternative: "retarget-under-authorized-directory",
             allowedDirectories: invocationAllowedScope.directories,
+            readsUnfenced: !blockReadsOutsideWorkingDirectories,
             filesystemRootReference: isFilesystemRootPath(outOfAllowedTarget.canonicalPath),
           });
         const durationMs = Date.now() - startTime;
@@ -1181,6 +1215,7 @@ export async function runToolInvocation(
               retry: "grant",
               alternative: "retarget-under-authorized-directory",
               allowedDirectories: invocationAllowedScope.directories,
+              readsUnfenced: !blockReadsOutsideWorkingDirectories,
             });
           const durationMs = Date.now() - startTime;
           emitToolStart(callbacks, toolUse.name, finalInput, meta);
@@ -1295,6 +1330,7 @@ export async function runToolInvocation(
             retry: "grant",
             alternative: "retarget-under-authorized-directory",
             allowedDirectories: invocationAllowedScope.directories,
+            readsUnfenced: !blockReadsOutsideWorkingDirectories,
           });
         const durationMs = Date.now() - startTime;
         log.warn(msg);
@@ -1398,6 +1434,7 @@ export async function runToolInvocation(
           finalInput,
           executionCwd,
           invocationRuntimeAllowedDirectories,
+          blockReadsOutsideWorkingDirectories,
         );
         if (!shellPathViolation) break;
 
@@ -1443,6 +1480,7 @@ export async function runToolInvocation(
                 ? "path-never-readable"
                 : "restructure-command",
             allowedDirectories: invocationAllowedScope.directories,
+            readsUnfenced: !blockReadsOutsideWorkingDirectories,
           });
         const durationMs = Date.now() - startTime;
         const blockedPermission: PermissionCheckResult = {
@@ -1528,9 +1566,18 @@ export async function runToolInvocation(
     // / out-of-allowed". Static call so this runs even when no
     // PermissionManager instance is wired (the Layer 0/1 hard-block and
     // out-of-directory prompt are not gated on `services.permissionManager`).
+    //
+    // The effect these targets carry comes from the invocation's category via
+    // `requiredTier`, the same mapping that decides which grant tier covers a
+    // call, so "what counts as a read" is answered once for grants and for
+    // containment. Only `read` maps to a read effect; `write`, `shell`,
+    // `network` and `meta` are all write-equivalent here.
+    const pathEffect = requiredTier(invocationCategory);
     const sensitiveTarget = PermissionManager.checkPathScope({
       canonicalTargets,
       allowedDirectories: invocationAllowedScope.directories,
+      effect: pathEffect,
+      blockReadsOutsideWorkingDirectories,
     }).sensitiveHit;
     const targetFilePath = canonicalTargets[0]?.filePath;
     const sensitivePathPattern = sensitiveTarget?.pattern ?? null;
@@ -1602,11 +1649,30 @@ export async function runToolInvocation(
         // Re-run the Layer 1 predicate each iteration: applyApprovedDirectory
         // widens `invocationAllowedScope` after a grant, so the scope must be
         // re-supplied to PermissionManager.checkPathScope (SOT V2).
-        const outOfAllowedTarget = PermissionManager.checkPathScope({
+        const pathScope = PermissionManager.checkPathScope({
           canonicalTargets,
           allowedDirectories: invocationAllowedScope.directories,
-        }).outOfAllowed;
-        if (!outOfAllowedTarget) break;
+          effect: pathEffect,
+          blockReadsOutsideWorkingDirectories,
+        });
+        const outOfAllowedTarget = pathScope.outOfAllowed;
+        if (!outOfAllowedTarget) {
+          // A read the directory list would have refused leaves no prompt and
+          // no grant behind it, so the audit row is the only record that the
+          // asymmetry — not a user authorization — is what admitted it.
+          if (pathScope.readOutsideScope) {
+            await services.auditWriter.auditPermissionGrant({
+              toolName: toolUse.name,
+              source,
+              category: invocationCategory,
+              directory: pathScope.readOutsideScope.filePath,
+              policyRule: READ_ANYWHERE_AUDIT_RULE,
+              permissionContext: invocationPermissionContext,
+              audit: currentAuditMetadata(finalInput),
+            });
+          }
+          break;
+        }
         const dirLayerResult: PermissionCheckResult = {
           decision: "ask",
           reason: `out-of-allowed-dir: ${outOfAllowedTarget.filePath} (not in additionalDirectories)`,
@@ -1717,6 +1783,7 @@ export async function runToolInvocation(
       trust,
       invocationCategory,
       declaredCategoryForEffectShadow,
+      blockReadsOutsideWorkingDirectories,
       finalInput,
       sessionId,
       invocationPermissionContext,

@@ -42,7 +42,7 @@ import {
   canonicalizePathForMatch,
   caseFoldForMatch,
 } from "./sensitive-paths.js";
-import { isPathAllowed } from "./allowed-directories.js";
+import { isPathAllowedForEffect, type PathEffect } from "./allowed-directories.js";
 import { errorMessage } from "../shared/error-message.js";
 import type { ExecutionMode } from "../shared/permission-mode.js";
 
@@ -453,6 +453,7 @@ export class PermissionManager {
    * decide whether to set `reviewer.route='foreground-auto'`.
    */
   private interactiveAutoApprove: ReviewerInteractiveAutoApprove = "off";
+  private blockReadsOutsideWorkingDirectories = false;
   private policyGeneration = 0;
   /** Optional broadcast for memory-hit auto-approve disclosure. */
   private broadcastUserApprovalHit: ((payload: UserApprovalHitPayload) => void) | null = null;
@@ -600,8 +601,8 @@ export class PermissionManager {
    * Layer 1 (allowed-directories) path-scope predicates over a set of
    * already-canonicalized targets. This is the single source of truth for the
    * path-scope predicate: the executor calls this instead of invoking
-   * `isSensitivePath` / `isPathAllowed` inline, so "is this path sensitive /
-   * out-of-directory" is answered in one place.
+   * `isSensitivePath` / `isPathAllowedForEffect` inline, so "is this path
+   * sensitive / out-of-directory for this effect" is answered in one place.
    *
    * Predicate ONLY (behavior-neutral move from `executor.ts`). It returns raw
    * hits, NOT a {@link PermissionCheckResult}: the executor still owns the
@@ -622,15 +623,32 @@ export class PermissionManager {
    *
    *  - `sensitiveHit`: the first target matching a Layer 0 sensitive-path
    *    pattern, or `null`.
-   *  - `outOfAllowed`: the first target NOT covered by `allowedDirectories`,
-   *    or `null`.
+   *  - `outOfAllowed`: the first target the effect-aware Layer 1 predicate
+   *    refuses, or `null`. For a read under the shipped policy this is always
+   *    `null` — reads are bounded by Layer 0, not by a directory list.
+   *  - `readOutsideScope`: the first target a READ reached only because reads
+   *    are unfenced — i.e. one `outOfAllowed` would have named had the effect
+   *    been a write. Always `null` for a write, and `null` when reads are
+   *    re-fenced (then the target lands in `outOfAllowed` instead). It exists
+   *    so the admission is auditable: a wide read leaves no prompt and no
+   *    grant, so without this the only trace of the decision would be its
+   *    absence.
    */
   static checkPathScope(args: {
     canonicalTargets: readonly { filePath: string; canonicalPath: string }[];
     allowedDirectories: readonly string[];
+    /**
+     * What the invocation will DO with these targets. A `read` is bounded by
+     * Layer 0 alone unless the user re-fences reads; a `write` is confined to
+     * `allowedDirectories` exactly as it always was.
+     */
+    effect: PathEffect;
+    /** The user setting that re-fences reads. */
+    blockReadsOutsideWorkingDirectories: boolean;
   }): {
     sensitiveHit: { filePath: string; pattern: string } | null;
     outOfAllowed: { filePath: string; canonicalPath: string } | null;
+    readOutsideScope: { filePath: string; canonicalPath: string } | null;
   } {
     let sensitiveHit: { filePath: string; pattern: string } | null = null;
     for (const target of args.canonicalTargets) {
@@ -640,14 +658,29 @@ export class PermissionManager {
         break;
       }
     }
+    const scope = {
+      directories: args.allowedDirectories,
+      blockReadsOutsideWorkingDirectories: args.blockReadsOutsideWorkingDirectories,
+    };
     let outOfAllowed: { filePath: string; canonicalPath: string } | null = null;
+    let readOutsideScope: { filePath: string; canonicalPath: string } | null = null;
     for (const target of args.canonicalTargets) {
-      if (!isPathAllowed(target.canonicalPath, { directories: args.allowedDirectories })) {
+      if (!isPathAllowedForEffect(target.canonicalPath, scope, args.effect)) {
         outOfAllowed = { filePath: target.filePath, canonicalPath: target.canonicalPath };
         break;
       }
+      // The same target asked as a write. When the two answers differ, the
+      // directory list did refuse this path and only the read/write asymmetry
+      // admitted it — which is the fact the audit row records.
+      if (
+        readOutsideScope === null &&
+        args.effect === "read" &&
+        !isPathAllowedForEffect(target.canonicalPath, scope, "write")
+      ) {
+        readOutsideScope = { filePath: target.filePath, canonicalPath: target.canonicalPath };
+      }
     }
-    return { sensitiveHit, outOfAllowed };
+    return { sensitiveHit, outOfAllowed, readOutsideScope };
   }
 
   /**
@@ -663,6 +696,23 @@ export class PermissionManager {
 
   getInteractiveAutoApprove(): ReviewerInteractiveAutoApprove {
     return this.interactiveAutoApprove;
+  }
+
+  /**
+   * Re-fence read-tier path operands to the allowed directories.
+   *
+   * Boot reads `permissions.blockReadsOutsideWorkingDirectories` from
+   * `~/.lvis/settings.json` and pushes it here, the same way the reviewer's
+   * interactive policy arrives, so the enforcement path never re-reads the
+   * file per tool call. It ships OFF: a read reaches any path Layer 0 permits.
+   */
+  setBlockReadsOutsideWorkingDirectories(value: boolean): void {
+    if (this.blockReadsOutsideWorkingDirectories !== value) this.policyGeneration += 1;
+    this.blockReadsOutsideWorkingDirectories = value;
+  }
+
+  getBlockReadsOutsideWorkingDirectories(): boolean {
+    return this.blockReadsOutsideWorkingDirectories;
   }
 
   /**

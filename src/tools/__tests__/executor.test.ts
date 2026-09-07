@@ -18,7 +18,7 @@
  */
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
-import { existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve as pathResolve } from "node:path";
 
@@ -28,7 +28,7 @@ import { userPermissionContext } from "./tool-context-fixture.js";
 import { ToolRegistry } from "../registry.js";
 import { createDynamicTool, type Tool } from "../base.js";
 import { BashTool, PowerShellTool } from "../shell-tools.js";
-import { ReadFileTool } from "../file-tools.js";
+import { ReadFileTool, WriteFileTool } from "../file-tools.js";
 import { PermissionManager } from "../../permissions/permission-manager.js";
 import {
   ApprovalGate,
@@ -109,6 +109,41 @@ function makeReadFileTool(
     category: "read",
     pathFields: ["path"],
     isReadOnly: () => true,
+    jsonSchema: {
+      type: "object",
+      properties: { path: { type: "string" } },
+      required: ["path"],
+    },
+    execute: async (rawInput) => {
+      const value = await executeSpy(rawInput);
+      return { output: String(value), isError: false };
+    },
+  });
+}
+
+/**
+ * The write-tier sibling of {@link makeReadFileTool}, same shape and same
+ * `pathFields`.
+ *
+ * Layer 1 confines writes and no longer confines reads, so the
+ * out-of-allowed-dir dialog is something a WRITE reaches. Cases that are about
+ * that dialog — how it is signed, what it carries, what each choice grants —
+ * use this tool; the read tool pointed at the same path is admitted with no
+ * prompt at all, which has its own case rather than being left implicit in why
+ * these stopped dispatching.
+ */
+function makeWriteFileTool(
+  // Typed as the call signature rather than as a bare `Mock`, which is not
+  // callable under this tsconfig; a `vi.fn` still satisfies it.
+  executeSpy: (input: unknown) => unknown,
+): Tool {
+  return createDynamicTool({
+    name: "write_file",
+    description: "Writes a file.",
+    source: "builtin",
+    category: "write",
+    pathFields: ["path"],
+    isReadOnly: () => false,
     jsonSchema: {
       type: "object",
       properties: { path: { type: "string" } },
@@ -568,7 +603,9 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
       );
 
       const result = await executor.executeAll(
-        [{ id: "tu-headless-outdir", name: "bash", input: { command: `cat ${outsideFile}`, timeoutSeconds: 1 } }],
+        // A write verb, so the operand is confined; `cat` on the same file is
+        // admitted with no queue entry, which is a separate case below.
+        [{ id: "tu-headless-outdir", name: "bash", input: { command: `chmod u+w ${outsideFile}`, timeoutSeconds: 1 } }],
         { sessionId: "sess-headless-outdir", permissionContext: userPermissionContext({ headless: true, trustOrigin: "llm-tool-arg" }) },
       );
 
@@ -2833,7 +2870,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
   it("path outside cwd + ~/.lvis dispatches out-of-allowed-dir approval (interactive)", async () => {
     const executeSpy = vi.fn(async () => "ok");
     const registry = new ToolRegistry();
-    registry.register(makeReadFileTool(executeSpy));
+    registry.register(makeWriteFileTool(executeSpy));
 
     const wc = makeMockWebContents();
     const gate = new ApprovalGate(wc as never);
@@ -2844,7 +2881,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
     const callPromise = executor.executeAll(
       [{
         id: "tu-l1-2",
-        name: "read_file",
+        name: "write_file",
         input: { path: "/var/tmp/some-random-area/file.txt" },
       }],
       { sessionId: "sess-l1-out", permissionContext: userPermissionContext() },
@@ -2883,7 +2920,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
   it("out-of-allowed-dir confirm nobody answers ends when the turn is stopped", async () => {
     const executeSpy = vi.fn(async () => "ok");
     const registry = new ToolRegistry();
-    registry.register(makeReadFileTool(executeSpy));
+    registry.register(makeWriteFileTool(executeSpy));
 
     const wc = makeMockWebContents();
     // A one-second wait rather than the five-minute default: a Stop that only
@@ -2897,7 +2934,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
     const callPromise = executor.executeAll(
       [{
         id: "tu-l1-stop",
-        name: "read_file",
+        name: "write_file",
         input: { path: "/var/tmp/parked-area/notes.md" },
       }],
       {
@@ -2930,7 +2967,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
   it("user grants out-of-allowed-dir → tool proceeds to Step 3", async () => {
     const executeSpy = vi.fn(async () => "ok");
     const registry = new ToolRegistry();
-    registry.register(makeReadFileTool(executeSpy));
+    registry.register(makeWriteFileTool(executeSpy));
 
     const wc = makeMockWebContents();
     const gate = new ApprovalGate(wc as never);
@@ -2939,7 +2976,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
     const callPromise = executor.executeAll(
       [{
         id: "tu-l1-3",
-        name: "read_file",
+        name: "write_file",
         input: { path: "/var/tmp/elsewhere/notes.md" },
       }],
       { sessionId: "sess-l1-allow", permissionContext: userPermissionContext() },
@@ -2961,7 +2998,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
   it("allow-always resolves the central workspace lifecycle lazily and persists through it", async () => {
     const executeSpy = vi.fn(async () => "ok");
     const registry = new ToolRegistry();
-    registry.register(makeReadFileTool(executeSpy));
+    registry.register(makeWriteFileTool(executeSpy));
     const wc = makeMockWebContents();
     const gate = new ApprovalGate(wc as never);
     const allowDirectory = vi.fn(async (root: string) => [root]);
@@ -2984,7 +3021,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
     const callPromise = executor.executeAll(
       [{
         id: "tu-l1-allow-always-lifecycle",
-        name: "read_file",
+        name: "write_file",
         input: { path: "/var/tmp/persisted-scope/notes.md" },
       }],
       {
@@ -3029,7 +3066,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
     try {
       const executeSpy = vi.fn(async () => "ok");
       const registry = new ToolRegistry();
-      registry.register(makeReadFileTool(executeSpy));
+      registry.register(makeWriteFileTool(executeSpy));
       const wc = makeMockWebContents();
       const gate = new ApprovalGate(wc as never);
       const executor = new ToolExecutor(
@@ -3045,7 +3082,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
       const callPromise = executor.executeAll(
         [{
           id: "tu-l1-allow-always-no-lifecycle",
-          name: "read_file",
+          name: "write_file",
           input: { path: "/var/tmp/unwired-persisted-scope/notes.md" },
         }],
         {
@@ -3083,7 +3120,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
   it("allow-once → invokes onTurnDirectoryGrant with the request path (turn-scope grant propagation)", async () => {
     const executeSpy = vi.fn(async () => "ok");
     const registry = new ToolRegistry();
-    registry.register(makeReadFileTool(executeSpy));
+    registry.register(makeWriteFileTool(executeSpy));
 
     const wc = makeMockWebContents();
     const gate = new ApprovalGate(wc as never);
@@ -3094,7 +3131,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
     const callPromise = executor.executeAll(
       [{
         id: "tu-l1-allow-once-cb",
-        name: "read_file",
+        name: "write_file",
         input: { path: "/var/tmp/turn-scope/notes.md" },
       }],
       {
@@ -3122,7 +3159,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
   it("allow-session → invokes onSessionDirectoryGrant with suggestedParent (session-scope widening)", async () => {
     const executeSpy = vi.fn(async () => "ok");
     const registry = new ToolRegistry();
-    registry.register(makeReadFileTool(executeSpy));
+    registry.register(makeWriteFileTool(executeSpy));
 
     const wc = makeMockWebContents();
     const gate = new ApprovalGate(wc as never);
@@ -3133,7 +3170,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
     const callPromise = executor.executeAll(
       [{
         id: "tu-l1-allow-session-cb",
-        name: "read_file",
+        name: "write_file",
         input: { path: "/var/tmp/session-scope/proj/notes.md" },
       }],
       {
@@ -3247,24 +3284,67 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
     }
   });
 
-  it("user grants out-of-allowed-dir → native file tool receives the same invocation scope", async () => {
-    const outside = mkdtempSync(join(tmpdir(), "lvis-executor-native-scope-"));
+  /**
+   * The asymmetry end to end, on the real native file tools rather than on a
+   * stand-in: the same directory, one path, two tiers.
+   */
+  it("native read_file outside the workspace runs with no directory prompt", async () => {
+    const outside = mkdtempSync(join(tmpdir(), "lvis-executor-native-read-"));
     try {
       const target = join(outside, "notes.md");
-      writeFileSync(target, "outside approved\n", "utf8");
+      writeFileSync(target, "outside readable\n", "utf8");
       const registry = new ToolRegistry();
       registry.register(new ReadFileTool());
+      // Same manager wiring as the re-fenced sibling below, so the only thing
+      // that differs between the two cases is the read fence itself.
+      const permissions = new PermissionManager(
+        join(outside, "nonexistent-permissions.json"),
+      );
+      permissions.setMode("allow");
 
       const wc = makeMockWebContents();
       const gate = new ApprovalGate(wc as never);
-      const executor = new ToolExecutor(registry, undefined, undefined, undefined, gate);
+      const executor = new ToolExecutor(registry, undefined, permissions, undefined, gate);
 
-      const callPromise = executor.executeAll(
-        [{ id: "tu-l1-native-scope", name: "read_file", input: { path: target } }],
-        { sessionId: "sess-l1-native-scope", permissionContext: userPermissionContext() },
+      const results = await executor.executeAll(
+        [{ id: "tu-l1-native-read", name: "read_file", input: { path: target } }],
+        { sessionId: "sess-l1-native-read", permissionContext: userPermissionContext() },
       );
 
-      const sent = await waitForApprovalPayload<{ id: string; nonce: string; hmac: string }>(wc);
+      expect(sentApprovalCards(wc)).toHaveLength(0);
+      expect(results[0].is_error).toBeUndefined();
+      expect(results[0].content).toContain("outside readable");
+    } finally {
+      await cleanupTmpDir(outside);
+    }
+  });
+
+  it("native read_file outside the workspace asks again once reads are re-fenced", async () => {
+    const outside = mkdtempSync(join(tmpdir(), "lvis-executor-native-read-fenced-"));
+    try {
+      const target = join(outside, "notes.md");
+      writeFileSync(target, "outside readable\n", "utf8");
+      const registry = new ToolRegistry();
+      registry.register(new ReadFileTool());
+      const permissions = new PermissionManager(
+        join(outside, "nonexistent-permissions.json"),
+      );
+      permissions.setMode("allow");
+      permissions.setBlockReadsOutsideWorkingDirectories(true);
+
+      const wc = makeMockWebContents();
+      const gate = new ApprovalGate(wc as never);
+      const executor = new ToolExecutor(registry, undefined, permissions, undefined, gate);
+
+      const callPromise = executor.executeAll(
+        [{ id: "tu-l1-native-read-fenced", name: "read_file", input: { path: target } }],
+        { sessionId: "sess-l1-native-read-fenced", permissionContext: userPermissionContext() },
+      );
+
+      const sent = await waitForApprovalPayload<{
+        id: string; nonce: string; hmac: string; kind?: string;
+      }>(wc);
+      expect(sent.kind).toBe("out-of-allowed-dir");
       gate.resolve(sent.id, {
         requestId: sent.id,
         choice: "allow-once",
@@ -3273,9 +3353,41 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
       });
 
       const results = await callPromise;
-      expect(results[0].content).toContain("outside approved");
       expect(results[0].is_error).toBeUndefined();
-      expect(readFileSync(target, "utf8")).toBe("outside approved\n");
+      expect(results[0].content).toContain("outside readable");
+    } finally {
+      await cleanupTmpDir(outside);
+    }
+  });
+
+  it("native write_file outside the workspace is refused until the user grants the directory", async () => {
+    const outside = mkdtempSync(join(tmpdir(), "lvis-executor-native-write-"));
+    try {
+      const target = join(outside, "written.md");
+      const registry = new ToolRegistry();
+      registry.register(new WriteFileTool());
+
+      const wc = makeMockWebContents();
+      const gate = new ApprovalGate(wc as never);
+      const executor = new ToolExecutor(registry, undefined, undefined, undefined, gate);
+
+      const denied = executor.executeAll(
+        [{ id: "tu-l1-native-write-deny", name: "write_file", input: { path: target, content: "nope" } }],
+        { sessionId: "sess-l1-native-write", permissionContext: userPermissionContext() },
+      );
+      const askDeny = await waitForApprovalPayload<{
+        id: string; nonce: string; hmac: string; kind?: string;
+      }>(wc);
+      expect(askDeny.kind).toBe("out-of-allowed-dir");
+      gate.resolve(askDeny.id, {
+        requestId: askDeny.id,
+        choice: "deny-once",
+        nonce: askDeny.nonce,
+        hmac: askDeny.hmac,
+      });
+      const deniedResults = await denied;
+      expect(deniedResults[0].is_error).toBe(true);
+      expect(existsSync(target)).toBe(false);
     } finally {
       await cleanupTmpDir(outside);
     }
@@ -3295,7 +3407,9 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
       const executor = new ToolExecutor(registry, undefined, undefined, undefined, gate);
 
       const callPromise = executor.executeAll(
-        [{ id: "tu-l1-shell-deny", name: "bash", input: { command: `cat ${target}`, timeoutSeconds: 1 } }],
+        // `chmod` is a write verb, so its operand is confined; `cat` on the same
+        // path is admitted with no dialog and could not exercise this path.
+        [{ id: "tu-l1-shell-deny", name: "bash", input: { command: `chmod u+w ${target}`, timeoutSeconds: 1 } }],
         { sessionId: "sess-l1-shell-deny", permissionContext: userPermissionContext() },
       );
 
@@ -3341,7 +3455,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
       const executor = new ToolExecutor(registry, undefined, undefined, undefined, gate);
 
       const callPromise = executor.executeAll(
-        [{ id: "tu-l1-shell-allow", name: "bash", input: { command: `cat ${target}`, timeoutSeconds: 5 } }],
+        [{ id: "tu-l1-shell-allow", name: "bash", input: { command: `chmod u+w ${target} && cat ${target}`, timeoutSeconds: 5 } }],
         { sessionId: "sess-l1-shell-allow", permissionContext: userPermissionContext() },
       );
 
@@ -3386,7 +3500,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
       const executor = new ToolExecutor(registry, undefined, undefined, undefined, gate);
 
       const callPromise = executor.executeAll(
-        [{ id: "tu-l1-shell-null-device", name: "bash", input: { command: `test -e ${target} >/dev/null && cat ${target}`, timeoutSeconds: 1 } }],
+        [{ id: "tu-l1-shell-null-device", name: "bash", input: { command: `test -e ${target} >/dev/null && chmod u+w ${target} && cat ${target}`, timeoutSeconds: 1 } }],
         { sessionId: "sess-l1-shell-null-device", permissionContext: userPermissionContext() },
       );
 
@@ -3429,7 +3543,8 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
     const executor = new ToolExecutor(registry, undefined, undefined, undefined, gate);
 
     const results = await executor.executeAll(
-      [{ id: "tu-l1-shell-root", name: "bash", input: { command: "cat /", timeoutSeconds: 1 } }],
+      // A write at the root: `cat /` only READS it, and a read is not confined.
+      [{ id: "tu-l1-shell-root", name: "bash", input: { command: "chmod u+w /", timeoutSeconds: 1 } }],
       { sessionId: "sess-l1-shell-root", permissionContext: userPermissionContext() },
     );
 
@@ -3493,7 +3608,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
   it("headless mode + out-of-allowed-dir → fail-closed when reviewer is not wired", async () => {
     const executeSpy = vi.fn(async () => "ok");
     const registry = new ToolRegistry();
-    registry.register(makeReadFileTool(executeSpy));
+    registry.register(makeWriteFileTool(executeSpy));
     const wc = makeMockWebContents();
     const gate = new ApprovalGate(wc as never);
     const executor = new ToolExecutor(registry, undefined, undefined, undefined, gate);
@@ -3501,7 +3616,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
     const results = await executor.executeAll(
       [{
         id: "tu-l1-4",
-        name: "read_file",
+        name: "write_file",
         input: { path: "/var/tmp/headless-area/data.txt" },
       }],
       {
@@ -3853,7 +3968,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
   it("filesystem root additionalDirectories is sanitized and does not grant access", async () => {
     const executeSpy = vi.fn(async () => "ok");
     const registry = new ToolRegistry();
-    registry.register(makeReadFileTool(executeSpy));
+    registry.register(makeWriteFileTool(executeSpy));
     const wc = makeMockWebContents();
     const gate = new ApprovalGate(wc as never);
     const executor = new ToolExecutor(registry, undefined, undefined, undefined, gate);
@@ -3861,7 +3976,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
     const callPromise = executor.executeAll(
       [{
         id: "tu-l1-root-extra",
-        name: "read_file",
+        name: "write_file",
         input: { path: "/var/tmp/root-extra-should-not-grant/foo.md" },
       }],
       {
@@ -4040,9 +4155,12 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
       name: "plugin_scan",
       description: "Scan folder",
       source: "builtin",
-      category: "read",
+      // Write-tier: the claim is that `pathFields` is what the executor reads
+      // the target out of, and the only tier Layer 1 still confines is the one
+      // that can prove it by producing a dialog.
+      category: "write",
       pathFields: ["folder"],
-      isReadOnly: () => true,
+      isReadOnly: () => false,
       jsonSchema: {
         type: "object",
         properties: { folder: { type: "string" } },
@@ -4095,9 +4213,10 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
       description: "Scan nested target",
       source: "plugin",
       pluginId: "nested-plugin",
-      category: "read",
+      // Write-tier, for the reason on `plugin_scan` above.
+      category: "write",
       pathFields: ["target.path"],
-      isReadOnly: () => true,
+      isReadOnly: () => false,
       jsonSchema: {
         type: "object",
         properties: {
@@ -4930,6 +5049,11 @@ describe("ToolExecutor — Tailnet controller local one-shot boundary", () => {
       "/tmp/nonexistent-tailnet-directory-permissions.json",
     );
     permissions.setMode("allow");
+    // Reads are re-fenced for this pair, which is what puts a READ-ONLY tool in
+    // front of the directory-confirm ask at all. The claim under test is about
+    // the ask's `isReadOnly` marker — whether a remote authority pins it — and
+    // that only means something on a tool that is genuinely read-only.
+    permissions.setBlockReadsOutsideWorkingDirectories(true);
     const requestAndWait = vi.fn(async (request: { id: string }) => ({
       requestId: request.id,
       choice: "deny-once" as const,
@@ -4974,6 +5098,11 @@ describe("ToolExecutor — Tailnet controller local one-shot boundary", () => {
       "/tmp/nonexistent-local-directory-permissions.json",
     );
     permissions.setMode("allow");
+    // Reads are re-fenced for this pair, which is what puts a READ-ONLY tool in
+    // front of the directory-confirm ask at all. The claim under test is about
+    // the ask's `isReadOnly` marker — whether a remote authority pins it — and
+    // that only means something on a tool that is genuinely read-only.
+    permissions.setBlockReadsOutsideWorkingDirectories(true);
     const requestAndWait = vi.fn(async (request: { id: string }) => ({
       requestId: request.id,
       choice: "deny-once" as const,
@@ -5070,7 +5199,7 @@ describe("ToolExecutor — Tailnet controller local one-shot boundary", () => {
     // on the other.
     const executeSpy = vi.fn(async () => "ok");
     const registry = new ToolRegistry();
-    registry.register(makeReadFileTool(executeSpy));
+    registry.register(makeWriteFileTool(executeSpy));
     const wc = makeMockWebContents();
     const auditLogger = { log: vi.fn() };
     const gate = new ApprovalGate(
@@ -5090,7 +5219,7 @@ describe("ToolExecutor — Tailnet controller local one-shot boundary", () => {
     const callPromise = executor.executeAll(
       [{
         id: "tu-remote-dir",
-        name: "read_file",
+        name: "write_file",
         input: { path: "/var/tmp/some-random-area/file.txt" },
       }],
       { sessionId: "sess-remote-dir", permissionContext: tailnetContext() },

@@ -222,6 +222,22 @@ export interface ReviewerSettingsBlock {
 
 export interface PermissionSettingsBlock {
   additionalDirectories: string[];
+  /**
+   * Re-fence READ-tier path operands to `additionalDirectories` ∪ the host
+   * defaults, the way every effect was fenced before the read/write asymmetry.
+   *
+   * Ships `false`. A read then reaches any path the Layer 0 deny-list permits,
+   * which is what the reference agent hosts do: a directory list answers "what
+   * may this agent CHANGE", and answering "what may it LOOK AT" with the same
+   * list refused `ls /` on a machine the user had already handed over.
+   *
+   * Deliberately has NO settings UI. Reads-anywhere is the host's posture, not
+   * a per-project preference, and a control that fences reads back would read
+   * as a safety feature while removing none: the deny-list, not this key, is
+   * what keeps a secret unreadable. It stays hand-editable in
+   * `~/.lvis/settings.json` for a deployment that must fence reads anyway.
+   */
+  blockReadsOutsideWorkingDirectories: boolean;
   pendingWorkspaceRootRemovals: PendingWorkspaceRootRemoval[];
   reviewer: ReviewerSettingsBlock;
 }
@@ -359,6 +375,12 @@ const PARENT_ADJUDICATION_MODEL_SOURCES: ReadonlySet<ParentAdjudicationModelSour
 const DEFAULT_FILE: PermissionSettingsFile = {
   permissions: {
     additionalDirectories: [],
+    // Also the value an UNREADABLE file falls back to, and deliberately not
+    // the fenced one. The deny-shape this file owes on a fault is "no
+    // directory was granted", and that is `additionalDirectories: []` above.
+    // Reads are bounded by Layer 0, which does not live in this file, so
+    // fencing them here would withdraw no protection a fault put at risk.
+    blockReadsOutsideWorkingDirectories: false,
     pendingWorkspaceRootRemovals: [],
     reviewer: { ...DEFAULT_REVIEWER },
   },
@@ -609,6 +631,7 @@ export function normalizePermissionSettings(
   return {
     permissions: {
       additionalDirectories: dirs,
+      blockReadsOutsideWorkingDirectories: perm.blockReadsOutsideWorkingDirectories === true,
       pendingWorkspaceRootRemovals,
       reviewer: normalizeReviewerBlock(perm.reviewer),
     },

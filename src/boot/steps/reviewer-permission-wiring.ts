@@ -24,6 +24,7 @@ import {
 } from "../../shared/llm-vendor-defaults.js";
 import { marketplaceProviderPresetSecretKey } from "../../shared/marketplace-package-assets.js";
 import { LlmReviewerProviderAdapter, wireReviewerAgent } from "./reviewer-wiring.js";
+import { readPermissionSettings } from "../../permissions/permission-settings-store.js";
 import type { ParentAdjudicationTarget } from "../../permissions/parent-adjudicator.js";
 import {
   bindManifestIntegrityAudit,
@@ -180,6 +181,16 @@ export function wireReviewerAndPermissions(ctx: BootContext): void {
     };
   };
   const rewireReviewerAgent = (): void => {
+    // Layer 1's read fence, re-read from `~/.lvis/settings.json` on every
+    // re-wire. This runs at boot and again on `settings:update`, which is the
+    // only moment the value can have changed: the key has no UI, so it moves
+    // when someone edits the file, and a hand edit reaches the host through the
+    // same reload as every other permission setting. The setter bumps
+    // `policyGeneration`, so a change invalidates reviewer verdicts decided
+    // under the previous fence rather than letting them be replayed.
+    permissionManager.setBlockReadsOutsideWorkingDirectories(
+      readPermissionSettings().permissions.blockReadsOutsideWorkingDirectories,
+    );
     const reviewerResult = wireReviewerAgent({
       permissionManager,
       networkFetch: singleHopNetworkFetch,

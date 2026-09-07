@@ -182,6 +182,68 @@ export function isPathAllowed(
 }
 
 /**
+ * What a path operand is about to be used FOR. Layer 1 confines the two
+ * asymmetrically: a write or an execution changes the machine and stays inside
+ * the authorized directories, while a read only observes it and is bounded by
+ * the Layer 0 deny-list alone.
+ */
+export type PathEffect = "read" | "write";
+
+/**
+ * The Layer 1 scope plus the one user setting that changes its shape.
+ *
+ * `blockReadsOutsideWorkingDirectories` restores the pre-asymmetry behaviour:
+ * every effect is confined to `directories`. It ships OFF, so a read reaches
+ * anywhere the Layer 0 deny-list permits.
+ */
+export interface PathScopePolicy {
+  readonly directories: readonly string[];
+  readonly blockReadsOutsideWorkingDirectories: boolean;
+}
+
+/**
+ * Does the directory boundary answer this effect at all?
+ *
+ * This is the ONE statement of the read/write asymmetry. Two enforcement paths
+ * apply it against two different boundary predicates — the tool path scope asks
+ * {@link isPathAllowed}, the shell path policy asks `validateSandboxPath` — and
+ * writing "a read is not confined" separately in each is how the two would come
+ * to disagree about `ls /`. Both ask this instead and then run their own
+ * boundary only when it says yes.
+ *
+ * A read is answered `false` (not confined) without consulting any directory
+ * list, deliberately. The read boundary is Layer 0 (`isSensitivePath`), which
+ * runs first in both paths and is unaffected; a directory list is the WRITE
+ * boundary, and answering a read with it is what refused `ls /`.
+ */
+export function pathEffectIsConfined(
+  effect: PathEffect,
+  blockReadsOutsideWorkingDirectories: boolean,
+): boolean {
+  return effect === "write" || blockReadsOutsideWorkingDirectories;
+}
+
+/**
+ * Layer 1, asked with the effect the operand carries.
+ *
+ * Every caller that used to ask {@link isPathAllowed} for an enforcement
+ * decision over a tool's declared path fields asks this instead, so "reads are
+ * not confined" is a property of the predicate rather than a branch each call
+ * site remembers to write.
+ *
+ * `canonicalPath` still obeys the frozen-canonical contract of
+ * {@link isPathAllowed}.
+ */
+export function isPathAllowedForEffect(
+  canonicalPath: string,
+  scope: PathScopePolicy,
+  effect: PathEffect,
+): boolean {
+  if (!pathEffectIsConfined(effect, scope.blockReadsOutsideWorkingDirectories)) return true;
+  return isPathAllowed(canonicalPath, scope);
+}
+
+/**
  * Pick the grant scope to auto-suggest in the "out-of-allowed-dir" approval
  * dialog (§3 Layer 1 M3 strengthening).
  *

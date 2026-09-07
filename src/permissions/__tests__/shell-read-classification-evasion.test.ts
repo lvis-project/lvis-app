@@ -21,6 +21,16 @@ import { join } from "node:path";
 
 import { inspectHostRisk, isReadOnlyCommand } from "../reviewer/host-risk-inspector.js";
 import { findShellPathPolicyViolation } from "../../tools/shell-path-policy.js";
+
+/**
+ * The shipped `permissions.blockReadsOutsideWorkingDirectories` — off, so reads
+ * are bounded by the Layer 0 deny-list rather than by the directory boundary.
+ *
+ * Every payload below is either a Layer 0 path or a leaf the verb tables
+ * classify as writing, so the asymmetry does not reach any of them: each is
+ * refused for the same reason under either setting.
+ */
+const READS_WIDE = false;
 import { shellPathPolicyViolation } from "../../tools/pipeline/path-extraction.js";
 import { canonicalizePathForMatch } from "../sensitive-paths.js";
 
@@ -54,6 +64,7 @@ describe("evasion: a second command-bearing field carries the payload", () => {
         { command: "cat ./notes.txt", script: `cat ${AUTHORIZED_KEYS}` },
         root,
         [],
+        READS_WIDE,
       ),
     ).toMatchObject({ kind: "sensitive-path" });
   });
@@ -89,14 +100,14 @@ describe("evasion: an env assignment selects the interpreter", () => {
     // credential operand — either way the control now runs on a command that
     // used to be waved through as read.
     expect(
-      findShellPathPolicyViolation(`LESSOPEN='|/bin/sh %s' cat ${AUTHORIZED_KEYS}`, root, root, []),
+      findShellPathPolicyViolation(`LESSOPEN='|/bin/sh %s' cat ${AUTHORIZED_KEYS}`, root, root, [], READS_WIDE),
     ).not.toBeNull();
     expect(
-      findShellPathPolicyViolation(`LESSOPEN=/bin/sh cat ${AUTHORIZED_KEYS}`, root, root, []),
+      findShellPathPolicyViolation(`LESSOPEN=/bin/sh cat ${AUTHORIZED_KEYS}`, root, root, [], READS_WIDE),
     ).not.toBeNull();
     // Without the assignment the same operand is the sensitive-path block.
     expect(
-      findShellPathPolicyViolation(`cat ${AUTHORIZED_KEYS}`, root, root, []),
+      findShellPathPolicyViolation(`cat ${AUTHORIZED_KEYS}`, root, root, [], READS_WIDE),
     ).toMatchObject({ kind: "sensitive-path" });
   });
 });
@@ -124,7 +135,7 @@ describe("evasion: a read-only git subcommand carries a writing flag", () => {
   it("runs path containment on the git write flag", () => {
     const root = sandboxRoot();
     expect(
-      findShellPathPolicyViolation(`git diff --output=${AUTHORIZED_KEYS}`, root, root, []),
+      findShellPathPolicyViolation(`git diff --output=${AUTHORIZED_KEYS}`, root, root, [], READS_WIDE),
     ).toMatchObject({ kind: "sensitive-path" });
   });
 });
@@ -141,7 +152,7 @@ describe("evasion: a glued short flag hides the write target", () => {
 
   it("path containment resolves the glued value as the real target, not a relative path", () => {
     const root = sandboxRoot();
-    expect(findShellPathPolicyViolation(command, root, root, [])).toMatchObject({
+    expect(findShellPathPolicyViolation(command, root, root, [], READS_WIDE)).toMatchObject({
       kind: "sensitive-path",
       // A violation reports the path in the canonical match form the policy
       // compares with — identical to the platform form on POSIX, drive-folded
@@ -155,7 +166,7 @@ describe("evasion: a glued short flag hides the write target", () => {
     // out-of-bounds.
     const outside = join(homedir(), "Documents", "exfil.txt");
     expect(
-      findShellPathPolicyViolation(`sort -o${outside} f`, root, root, []),
+      findShellPathPolicyViolation(`sort -o${outside} f`, root, root, [], READS_WIDE),
     ).toMatchObject({ kind: "sandbox-boundary", path: canonicalizePathForMatch(outside) });
   });
 
@@ -189,7 +200,7 @@ describe("evasion: mutating/exec forms missing from allow-listed verbs", () => {
     // — the point is that the rule now RUNS for this payload at all, where a
     // `read` verdict used to skip the whole policy.
     expect(
-      findShellPathPolicyViolation(`find . -fprint0 ${AUTHORIZED_KEYS}`, root, root, []),
+      findShellPathPolicyViolation(`find . -fprint0 ${AUTHORIZED_KEYS}`, root, root, [], READS_WIDE),
     ).toMatchObject({ kind: "recursive-traversal" });
   });
 });

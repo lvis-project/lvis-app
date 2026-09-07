@@ -15,6 +15,8 @@ import {
 } from "node:path";
 import {
   isPathAllowed,
+  isPathAllowedForEffect,
+  pathEffectIsConfined,
   pickClosestParent,
   validateDirectoryAddition,
   sanitizeAllowedDirectories,
@@ -110,6 +112,62 @@ describe("isPathAllowed — prefix match", () => {
     const b = fold("/Users/example/work/b");
     const childOfB = fold("/Users/example/work/b/file.ts");
     expect(isPathAllowed(childOfB, { directories: [a, b] })).toBe(true);
+  });
+});
+
+describe("isPathAllowedForEffect — reads are wide, writes stay confined", () => {
+  const dir = fold("/Users/example/work/proj");
+  const inside = fold("/Users/example/work/proj/src/index.ts");
+  const outside = fold("/var/tmp/random-area/file.txt");
+  const wide = { directories: [dir], blockReadsOutsideWorkingDirectories: false };
+  const fenced = { directories: [dir], blockReadsOutsideWorkingDirectories: true };
+
+  it("admits a read outside the directories", () => {
+    expect(isPathAllowedForEffect(outside, wide, "read")).toBe(true);
+  });
+
+  it("refuses a write outside the directories", () => {
+    expect(isPathAllowedForEffect(outside, wide, "write")).toBe(false);
+  });
+
+  it("refuses a read outside once the user re-fences reads", () => {
+    expect(isPathAllowedForEffect(outside, fenced, "read")).toBe(false);
+  });
+
+  it("admits both effects inside the directories", () => {
+    expect(isPathAllowedForEffect(inside, wide, "read")).toBe(true);
+    expect(isPathAllowedForEffect(inside, wide, "write")).toBe(true);
+    expect(isPathAllowedForEffect(inside, fenced, "read")).toBe(true);
+  });
+
+  // An empty directory list is deny-by-default for a write, and stays so: the
+  // asymmetry widens what a READ may reach, and cannot grant a write anything.
+  it("keeps deny-by-default for a write with no directories granted", () => {
+    const none = { directories: [], blockReadsOutsideWorkingDirectories: false };
+    expect(isPathAllowedForEffect(outside, none, "write")).toBe(false);
+    expect(isPathAllowedForEffect(outside, none, "read")).toBe(true);
+  });
+
+  // A read is admitted without the directory list ever being consulted, so an
+  // empty `canonicalPath` — which `isPathAllowed` denies — is admitted too.
+  // Nothing enforces on this: a path the caller could not resolve never
+  // reaches the predicate, and Layer 0 runs before it in both callers.
+  it("does not consult the path at all for an unfenced read", () => {
+    expect(isPathAllowedForEffect("", wide, "read")).toBe(true);
+    expect(isPathAllowed("", wide)).toBe(false);
+  });
+});
+
+// The one statement of the asymmetry both enforcement paths ask. The tool path
+// scope runs it against `isPathAllowed` and the shell path policy against
+// `validateSandboxPath`; a second copy is how the two would come to disagree
+// about `ls /`.
+describe("pathEffectIsConfined", () => {
+  it("confines writes always and reads only when re-fenced", () => {
+    expect(pathEffectIsConfined("write", false)).toBe(true);
+    expect(pathEffectIsConfined("write", true)).toBe(true);
+    expect(pathEffectIsConfined("read", false)).toBe(false);
+    expect(pathEffectIsConfined("read", true)).toBe(true);
   });
 });
 

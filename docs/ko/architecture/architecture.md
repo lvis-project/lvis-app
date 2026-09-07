@@ -1665,7 +1665,7 @@ flowchart TB
     INPUT["Origin classify (§9):<br/>user-keyboard / plugin-emitted / llm-tool-arg / file-content"]
 
     INPUT --> L0["Layer 0 — Sensitive paths<br/>(deny-list, frozen-canonical realpath)"]
-    L0 --> L1["Layer 1 — Path policy<br/>(additionalDirectories allow-list)"]
+    L0 --> L1["Layer 1 — Path policy<br/>(additionalDirectories allow-list, writes/exec only)"]
     L1 --> L2["Layer 2 — Action<br/>(allow / ask / deny + denyReasons[])"]
     L2 --> L3["Layer 3 — Category × Source × Mode<br/>(read/write/shell/network/meta)"]
     L3 --> L4["Layer 4 — Subscription scope<br/>(routine.scope discriminated union)"]
@@ -1686,7 +1686,7 @@ flowchart TB
 | Layer | 책임 | Spec § | 주요 산출물 |
 | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- | ------------------------------------------------------ |
 | 0 | OS / 사용자 자격증명 / LVIS 자체 보호 경로 deny-list. realpath 기반 frozen-canonical (TOCTOU 차단). | §3 Layer 0 | `src/permissions/sensitive-paths.ts` |
-| 1 | `additionalDirectories` allow-list + auto-suggest (leaf parent only, re-typed confirm, adjacency warning). | §3 Layer 1 | `src/permissions/allowed-directories.ts` |
+| 1 | `additionalDirectories` allow-list — 쓰기/실행만 confine, 읽기는 Layer 0 deny-list 만으로 경계 (`blockReadsOutsideWorkingDirectories` 로 되돌림) + auto-suggest (leaf parent only, re-typed confirm, adjacency warning). | §3 Layer 1 | `src/permissions/allowed-directories.ts` |
 | 2 | Action 결정 (`allow / ask / deny`) + `denyReasons[]` 수집. `confirm` 은 `ask` 의 sub-variant — auto mode 도 silent skip 금지. | §3 Layer 2 | `PermissionCheckResult.denyReasons` |
 | 3 | 5-axis category × source × mode 매트릭스. Open-Closed `ToolCategoryRegistry`. | §3 Layer 3 | `src/permissions/category-registry.ts` |
 | 4 | Routine 의 `scope.pluginIds` discriminated union (`deny-all` / `allow` / `inherit`). Boot 시 `inherit` 은 active set 으로 normalize. | §3 Layer 4 | `routine.scope.*` |

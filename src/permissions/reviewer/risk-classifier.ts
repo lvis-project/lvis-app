@@ -503,10 +503,19 @@ function extractDeclaredPaths(ctx: ToolInvocationContext): string[] {
 /**
  * Dir-containment check: does `path` start with any allowed dir?
  *
- * Delegates to {@link isPathAllowed}, the ENFORCED Layer-1 predicate
- * (`PermissionManager.checkPathScope`). The reviewer must answer
- * "is this inside the authorized scope" exactly as enforcement does, or a
- * verdict is computed about a containment the enforcer disagrees with.
+ * Delegates to {@link isPathAllowed}, the same prefix predicate the ENFORCED
+ * Layer-1 check is built on (`PermissionManager.checkPathScope`), so the
+ * reviewer and the enforcer never disagree about which directory a path sits
+ * in — a verdict computed against a different geometry is a verdict about a
+ * containment nobody enforces.
+ *
+ * Deliberately NOT effect-aware, where enforcement is. Enforcement exempts a
+ * READ from this boundary entirely; the reviewer keeps asking the plain
+ * geometric question for both effects, because reaching outside the authorized
+ * directories is a risk signal whether or not the host admits it, and this lane
+ * produces a risk level rather than a decision. Muting the signal for reads
+ * would hide the widest reach an agent can make from the only component whose
+ * job is to notice it.
  *
  * The inputs MUST already be canonicalized
  * ({@link canonicalizePathForMatch}). Layer 1 canonicalizes allowed dirs

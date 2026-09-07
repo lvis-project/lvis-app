@@ -1,13 +1,38 @@
-import { mkdtempSync, realpathSync } from "node:fs";
+import { mkdtempSync, realpathSync, symlinkSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 import {
-  validateShellCommandPathPolicy,
+  validateShellCommandPathPolicy as validateShellCommandPathPolicyWithFence,
   validateShellWorkingDirectory,
 } from "../shell-path-policy.js";
+
+/**
+ * The policy under its SHIPPED configuration unless a case says otherwise.
+ *
+ * `permissions.blockReadsOutsideWorkingDirectories` ships OFF: a read operand
+ * is bounded by the Layer 0 deny-list alone, while writes and command execution
+ * stay confined to `sandboxRoot ∪ extraAllowedDirectories`. Passing `true`
+ * re-fences reads and restores the symmetric boundary, which is the only
+ * configuration under which a read-only operand outside the root is refused.
+ */
+function validateShellCommandPathPolicy(
+  command: string,
+  cwd: string,
+  sandboxRoot: string,
+  extraAllowedDirectories: readonly string[],
+  blockReadsOutsideWorkingDirectories = false,
+): string | null {
+  return validateShellCommandPathPolicyWithFence(
+    command,
+    cwd,
+    sandboxRoot,
+    extraAllowedDirectories,
+    blockReadsOutsideWorkingDirectories,
+  );
+}
 
 describe("shell-path-policy", () => {
   const roots: string[] = [];
@@ -33,7 +58,7 @@ describe("shell-path-policy", () => {
   it("rejects path operands outside the sandbox", () => {
     withRoot((root) => {
       const outside = realpathSync(tmpdir());
-      const result = validateShellCommandPathPolicy(`cat ${outside}/lvis-outside.txt`, root, root, []);
+      const result = validateShellCommandPathPolicy(`cp ./staged ${outside}/lvis-outside.txt`, root, root, []);
       expect(result).toContain("Sandbox:");
     });
   });
@@ -75,27 +100,54 @@ describe("shell-path-policy", () => {
     });
   });
 
-  it("rejects recursive traversal commands even without explicit path operands", () => {
+  /**
+   * The traversal rule is now about the EFFECT of the walk, not about walking.
+   *
+   * An unbounded walk that copies, archives or deletes per hit reaches files no
+   * operand names, and that is what the rule exists to refuse. A walk that only
+   * prints paths reaches nothing the host does not already let a read reach, so
+   * refusing `find / -name x` and `grep -r p /usr` was refusing exactly the
+   * reads the shipped policy admits. Both halves are pinned here.
+   */
+  it("rejects a recursive traversal that MUTATES what it finds", () => {
     withRoot((root) => {
-      expect(validateShellCommandPathPolicy("find . -type f", root, root, [])).toContain("recursive");
+      expect(validateShellCommandPathPolicy("find . -name x -delete", root, root, [])).toContain("recursive");
+      expect(validateShellCommandPathPolicy("find . -name x -exec rm {} ;", root, root, [])).toContain("recursive");
+      expect(validateShellCommandPathPolicy("cp -r ./src ./dst", root, root, [])).toContain("recursive");
+      expect(validateShellCommandPathPolicy("tar -cf ./a.tar ./src", root, root, [])).toContain("recursive");
     });
   });
 
-  it("rejects recursive grep flags", () => {
+  it("admits a read-only recursive traversal, including one rooted at `/`", () => {
     withRoot((root) => {
-      expect(validateShellCommandPathPolicy("grep -r needle ./src", root, root, [])).toContain("recursive");
+      for (const command of [
+        "find . -type f",
+        "find / -name x",
+        "grep -r needle ./src",
+        "grep -r foo /usr",
+        "ls -laR ./src",
+        "rg needle /usr",
+        "ls /",
+      ]) {
+        expect(validateShellCommandPathPolicy(command, root, root, [])).toBeNull();
+      }
     });
   });
 
-  it("rejects combined recursive ls flags", () => {
+  it("refuses the read-only traversals again once reads are re-fenced", () => {
     withRoot((root) => {
-      expect(validateShellCommandPathPolicy("ls -laR ./src", root, root, [])).toContain("recursive");
+      expect(validateShellCommandPathPolicy("find . -type f", root, root, [], true)).toContain("recursive");
+      expect(validateShellCommandPathPolicy("grep -r needle ./src", root, root, [], true)).toContain("recursive");
+      expect(validateShellCommandPathPolicy("ls -laR ./src", root, root, [], true)).toContain("recursive");
     });
   });
 
+  // The four message cases below run with reads re-fenced: that is now the only
+  // configuration in which a read-only traversal is refused at all, and the
+  // message is what the refusal says, not when it fires.
   it("`find` block message points at glob_files / list_files and tells the caller to keep the original target path", () => {
     withRoot((root) => {
-      const msg = validateShellCommandPathPolicy("find /tmp/foo -type f", root, root, ["/tmp/foo"]);
+      const msg = validateShellCommandPathPolicy("find /tmp/foo -type f", root, root, ["/tmp/foo"], true);
       expect(msg).toContain("find");
       expect(msg).toContain("glob_files");
       expect(msg).toContain("list_files");
@@ -107,7 +159,7 @@ describe("shell-path-policy", () => {
 
   it("`rg` block message points at grep_files and preserves the path", () => {
     withRoot((root) => {
-      const msg = validateShellCommandPathPolicy("rg pattern /tmp/foo", root, root, ["/tmp/foo"]);
+      const msg = validateShellCommandPathPolicy("rg pattern /tmp/foo", root, root, ["/tmp/foo"], true);
       expect(msg).toContain("grep_files");
       expect(msg).toContain("원래 target path 를 그대로 유지");
     });
@@ -115,7 +167,7 @@ describe("shell-path-policy", () => {
 
   it("flag-based `grep -r` block message includes the LVIS alternative + preserve-path hint", () => {
     withRoot((root) => {
-      const msg = validateShellCommandPathPolicy("grep -r needle ./src", root, root, []);
+      const msg = validateShellCommandPathPolicy("grep -r needle ./src", root, root, [], true);
       expect(msg).toContain("grep_files");
       expect(msg).toContain("원래 target path 를 그대로 유지");
     });
@@ -123,7 +175,7 @@ describe("shell-path-policy", () => {
 
   it("recursive commands without a mapped LVIS alternative still get the preserve-path fallback hint", () => {
     withRoot((root) => {
-      const msg = validateShellCommandPathPolicy("ls -R ./src", root, root, []);
+      const msg = validateShellCommandPathPolicy("ls -R ./src", root, root, [], true);
       // `ls` has no mapped LVIS alternative (only the explicit flag-set is blocked),
       // so the fallback guidance must still nudge the caller to keep the target path.
       expect(msg).toContain("원래 target path 를 그대로 유지");
@@ -469,9 +521,13 @@ describe("shell-path-policy", () => {
 
     it("checks a bare path handed to a grep pattern slot", () => {
       withRoot((root) => {
-        expect(validateShellCommandPathPolicy("grep -- /etc/passwd notes.txt", root, root, []))
+        // Re-fenced, because the claim is about the SLOT — that a bare path in
+        // the pattern position is still read as an operand — and `grep` is a
+        // read verb, so under the shipped policy the operand is seen and then
+        // admitted. Fencing reads is what makes "seen" observable here.
+        expect(validateShellCommandPathPolicy("grep -- /etc/passwd notes.txt", root, root, [], true))
           .toContain("Sandbox:");
-        expect(validateShellCommandPathPolicy("grep --regexp=/etc/passwd notes.txt", root, root, []))
+        expect(validateShellCommandPathPolicy("grep --regexp=/etc/passwd notes.txt", root, root, [], true))
           .toContain("Sandbox:");
         // A pattern that is not path-shaped keeps its exemption.
         expect(validateShellCommandPathPolicy("grep needle notes.txt", root, root, []))
@@ -532,10 +588,19 @@ describe("shell-path-policy", () => {
       withRoot((root) => {
         // The payload is a command line this policy can parse, so the operand
         // inside it is judged rather than hidden behind "that slot holds code".
-        expect(validateShellCommandPathPolicy("sh -c 'cat /etc/passwd'", root, root, []))
+        // A WRITE inside the payload is refused under the shipped policy…
+        expect(validateShellCommandPathPolicy("sh -c 'echo hi > /etc/x'", root, root, []))
           .toContain("Sandbox:");
+        // …a Layer 0 path inside it is refused whatever the effect…
         expect(validateShellCommandPathPolicy(`bash -c "cat /etc/shadow"`, root, root, []))
           .toContain("Sensitive path:");
+        // …and a read inside it is admitted, the same as the bare command.
+        expect(validateShellCommandPathPolicy("sh -c 'cat /etc/hosts'", root, root, []))
+          .toBeNull();
+        // Re-fenced, the read operand inside the payload is refused, which is
+        // what shows the payload was parsed rather than exempted as code.
+        expect(validateShellCommandPathPolicy("sh -c 'cat /etc/passwd'", root, root, [], true))
+          .toContain("Sandbox:");
         expect(validateShellCommandPathPolicy("sh -c 'cat ./notes.txt'", root, root, []))
           .toBeNull();
       });
@@ -576,7 +641,7 @@ describe("shell-path-policy", () => {
         expect(validateShellCommandPathPolicy(`for f in a; do cd "$f"; cat notes.txt; done`, root, root, []))
           .toContain("cannot be resolved before running");
         // A background `&` ends a command just as `&&` does.
-        expect(validateShellCommandPathPolicy("ls & find . -name x", root, root, []))
+        expect(validateShellCommandPathPolicy("ls & find . -name x", root, root, [], true))
           .toContain("recursive shell filesystem traversal");
         expect(validateShellCommandPathPolicy("ls & cp -r ./a ./b", root, root, []))
           .toContain("recursive shell filesystem traversal");
@@ -592,6 +657,8 @@ describe("shell-path-policy", () => {
         // three run the same payload: `-lc` clusters the flag with `-l`, and an
         // attached value arrives as one word because the tokenizer has already
         // removed the quotes by then.
+        // Re-fenced: the payload carries a READ, so the refusal that proves the
+        // form was parsed only exists once reads are confined again.
         for (const command of [
           "sh -c 'cat /etc/passwd'",
           "bash -lc 'cat /etc/passwd'",
@@ -599,7 +666,7 @@ describe("shell-path-policy", () => {
           `sh -c"cat /etc/passwd"`,
           "for f in a; do sh -c 'cat /etc/passwd'; done",
         ]) {
-          expect(validateShellCommandPathPolicy(command, root, root, []))
+          expect(validateShellCommandPathPolicy(command, root, root, [], true))
             .toContain("Sandbox:");
         }
         // A payload that stays inside the boundary still passes.
@@ -632,6 +699,129 @@ describe("shell-path-policy", () => {
     });
   });
 
+
+  /**
+   * The read/write asymmetry, one row per command shape, asserted in BOTH
+   * setting states.
+   *
+   * Reading it as a table is the point: the same file (`/etc/x`) is admitted or
+   * refused depending only on what the leaf carrying it does, and the second
+   * column shows that `blockReadsOutsideWorkingDirectories` restores the
+   * symmetric boundary the host had before.
+   */
+  describe("read/write asymmetry — differential table", () => {
+    /** `null` = admitted; a string = the fragment the refusal must contain. */
+    type Verdict = string | null;
+    const ROWS: readonly { label: string; command: string; wide: Verdict; fenced: Verdict }[] = [
+      // ── Reads: wide by default, confined once re-fenced ────────────
+      { label: "ls /", command: "ls /", wide: null, fenced: "Sandbox:" },
+      { label: "find / -name x", command: "find / -name x", wide: null, fenced: "recursive" },
+      { label: "grep -r foo /usr", command: "grep -r foo /usr", wide: null, fenced: "recursive" },
+      { label: "cat /etc/hosts", command: "cat /etc/hosts", wide: null, fenced: "Sandbox:" },
+      { label: "stat /etc/hosts", command: "stat /etc/hosts", wide: null, fenced: "Sandbox:" },
+      { label: "du /usr", command: "du /usr", wide: null, fenced: "Sandbox:" },
+      { label: "head /etc/hosts", command: "head /etc/hosts", wide: null, fenced: "Sandbox:" },
+      { label: "wc -l /etc/hosts", command: "wc -l /etc/hosts", wide: null, fenced: "Sandbox:" },
+      // A nested command line is re-entered and judged, so its payload gets the
+      // same answer the bare command would.
+      { label: "sh -c reading outside", command: "sh -c 'cat /etc/hosts'", wide: null, fenced: "Sandbox:" },
+      // An input redirect source is a read, so a read leaf reaches one outside.
+      { label: "input redirect into a read leaf", command: "wc -l < /etc/hosts", wide: null, fenced: "Sandbox:" },
+      // …but a WRITE leaf's input source stays confined. The flat scan behind
+      // the per-leaf walk attributes a candidate to its whole SEGMENT, and a
+      // segment that writes confines every path in it. That is the conservative
+      // direction — it can only refuse a command the leaf walk had admitted,
+      // never admit one it refused — so it is left as is rather than taught to
+      // re-derive per-operand effects the leaf walk already has.
+      { label: "input redirect into a write leaf", command: "xargs rm < /etc/list", wide: "/etc/list", fenced: "/etc/list" },
+
+      // ── Layer 0: unchanged by the asymmetry, refused in both states ──
+      { label: "cat ~/.ssh/id_rsa", command: "cat ~/.ssh/id_rsa", wide: "Sensitive path:", fenced: "Sensitive path:" },
+
+      // ── Writes and execution: confined in both states ──────────────
+      // The redirect TARGET is the write here; `/etc/hosts` on the left is a
+      // read and is admitted, which is why the refusal names `/tmp/out`.
+      { label: "read piped into an outside write target", command: "cat /etc/hosts > /tmp/out", wide: "/tmp/out", fenced: "/etc/hosts" },
+      { label: "tee", command: "tee /etc/x", wide: "Sandbox:", fenced: "Sandbox:" },
+      { label: "dd", command: "dd if=/dev/zero of=/etc/x", wide: "Sandbox:", fenced: "Sandbox:" },
+      { label: "sed -i", command: "sed -i s/a/b/ /etc/x", wide: "Sandbox:", fenced: "Sandbox:" },
+      { label: "sed s///w", command: "sed 's/a/b/w /etc/x' in", wide: "Sandbox:", fenced: "Sandbox:" },
+      { label: "find -delete", command: "find / -delete", wide: "recursive", fenced: "recursive" },
+      { label: "find -exec", command: "find / -exec rm {} ;", wide: "recursive", fenced: "recursive" },
+      { label: "sh -c writing outside", command: "sh -c 'echo hi > /etc/x'", wide: "Sandbox:", fenced: "Sandbox:" },
+      { label: "mkdir", command: "mkdir /etc/x", wide: "Sandbox:", fenced: "Sandbox:" },
+      { label: "chmod", command: "chmod 777 /etc/x", wide: "Sandbox:", fenced: "Sandbox:" },
+      { label: "cp into outside", command: "cp ./a /etc/x", wide: "Sandbox:", fenced: "Sandbox:" },
+      // Every operand of a write verb is confined, the source included: `cp`
+      // opens both, and nothing in the argv says which one it will create.
+      { label: "cp from outside", command: "cp /etc/hosts /tmp/x", wide: "/etc/hosts", fenced: "/etc/hosts" },
+
+      // ── Compound: judged per leaf, not on whichever verb came first ──
+      { label: "read leaf then write leaf", command: "ls /; rm -rf /opt/x", wide: "/opt/x", fenced: "Sandbox:" },
+    ];
+
+    it.each(ROWS)("$label — reads wide", ({ command, wide }) => {
+      withRoot((root) => {
+        const result = validateShellCommandPathPolicy(command, root, root, []);
+        if (wide === null) expect(result).toBeNull();
+        else expect(result).toContain(wide);
+      });
+    });
+
+    it.each(ROWS)("$label — reads re-fenced", ({ command, fenced }) => {
+      withRoot((root) => {
+        const result = validateShellCommandPathPolicy(command, root, root, [], true);
+        if (fenced === null) expect(result).toBeNull();
+        else expect(result).toContain(fenced);
+      });
+    });
+
+    it("admits the whole command once the write target's directory is granted", () => {
+      withRoot((root) => {
+        const grant = realpathSync(mkdtempSync(join(tmpdir(), "lvis-grant-")));
+        roots.push(grant);
+        // The read half was never the obstacle; granting the directory the
+        // WRITE lands in is what clears the command.
+        expect(validateShellCommandPathPolicy(`cat /etc/hosts > ${grant}/out`, root, root, [grant]))
+          .toBeNull();
+      });
+    });
+
+    it("refuses a write that reaches outside through a symlink inside a granted directory", () => {
+      withRoot((root) => {
+        const grant = realpathSync(mkdtempSync(join(tmpdir(), "lvis-grant-")));
+        roots.push(grant);
+        symlinkSync("/etc", join(grant, "to-etc"));
+        // Canonicalization resolves the link before the boundary compare, so
+        // the grant covers the directory and not what it points at.
+        expect(validateShellCommandPathPolicy(`echo hi > ${grant}/to-etc/x`, root, root, [grant]))
+          .toContain("Sandbox:");
+        // …and the read through the same link is admitted, which is the whole
+        // asymmetry in one pair of assertions.
+        expect(validateShellCommandPathPolicy(`cat ${grant}/to-etc/hosts`, root, root, [grant]))
+          .toBeNull();
+      });
+    });
+
+    /**
+     * A gap this change does NOT close, recorded so it is not mistaken for one
+     * of the admissions above.
+     *
+     * awk's program is a single quoted token exempted as program text, so the
+     * filename inside `print > "/etc/x"` is not an operand any scan here sees —
+     * before this change as much as after (the re-fenced column agrees). What
+     * contains it is the risk classifier: `awk` is deliberately absent from the
+     * read-only verb set, so every awk call escalates to an approval instead of
+     * being answered by containment alone.
+     */
+    it("does not reach a path inside an awk program, in either state", () => {
+      withRoot((root) => {
+        expect(validateShellCommandPathPolicy(`awk '{print > "/etc/x"}' in`, root, root, [])).toBeNull();
+        expect(validateShellCommandPathPolicy(`awk '{print > "/etc/x"}' in`, root, root, [], true)).toBeNull();
+      });
+    });
+  });
+
   it("keeps the cwd-aware leaf walk intact across the new segment boundary", () => {
     withRoot((root) => {
       expect(validateShellCommandPathPolicy(`cd /tmp && cat ../../etc/passwd`, root, root, []))
@@ -645,7 +835,7 @@ describe("shell-path-policy", () => {
       // stopped; the `cp -r` behind it was never classified.
       expect(validateShellCommandPathPolicy(`mkdir -p ./novnc && cp -r ./share/novnc/. ./novnc/`, root, root, []))
         .toContain("recursive shell filesystem traversal");
-      expect(validateShellCommandPathPolicy(`ls -la . && find . -name ".git" -type d`, root, root, []))
+      expect(validateShellCommandPathPolicy(`ls -la . && find . -name ".git" -type d`, root, root, [], true))
         .toContain("recursive shell filesystem traversal");
     });
   });
@@ -662,7 +852,9 @@ describe("shell-path-policy", () => {
   it("leaves an unterminated heredoc exactly as it was", () => {
     withRoot((root) => {
       // No terminator line: redaction is a no-op, so the body is still scanned.
-      const command = "cat <<'EOF'\ncat /etc/passwd";
+      // The body carries a WRITE, so the refusal that proves the body was still
+      // scanned does not depend on how reads are fenced.
+      const command = "cat <<'EOF'\ncp ./staged /etc/passwd";
       expect(validateShellCommandPathPolicy(command, root, root, [])).toContain("Sandbox:");
     });
   });
@@ -734,7 +926,7 @@ describe("shell-path-policy", () => {
       withRoot((root) => {
         // This one goes through splitCommandSegments rather than the leaf scan,
         // which was blinded by the same unbalanced quote.
-        expect(validateShellCommandPathPolicy(`ls # don't\nfind . -name x`, root, root, []))
+        expect(validateShellCommandPathPolicy(`ls # don't\nfind . -name x`, root, root, [], true))
           .toContain("recursive shell filesystem traversal");
       });
     });
@@ -743,7 +935,10 @@ describe("shell-path-policy", () => {
       withRoot((root) => {
         // `a#b` is a filename, not a comment: bash starts a comment only where a
         // word could start.
-        expect(validateShellCommandPathPolicy(`cat /etc/shadow#backup`, root, root, []))
+        // `/etc/shadow#backup` is not the Layer 0 path `/etc/shadow`, so the
+        // only thing that can refuse it is the boundary — and a `cat` operand
+        // reaches the boundary only with reads re-fenced.
+        expect(validateShellCommandPathPolicy(`cat /etc/shadow#backup`, root, root, [], true))
           .not.toBeNull();
       });
     });
@@ -763,7 +958,9 @@ describe("shell-path-policy", () => {
         // operand inside completely unexamined, and the whole script token
         // resolved relative to the working directory, so it stayed inside the
         // boundary.
-        expect(validateShellCommandPathPolicy(`sed '1e cat /tmp/outside/x.txt' notes.txt`, root, root, []))
+        // Re-fenced for the read payload; the Layer 0 payload below needs no
+        // fence, and together they show the line was re-entered as a command.
+        expect(validateShellCommandPathPolicy(`sed '1e cat /tmp/outside/x.txt' notes.txt`, root, root, [], true))
           .toContain("Sandbox:");
         expect(validateShellCommandPathPolicy(`sed '1e cat /etc/shadow' notes.txt`, root, root, []))
           .toContain("Sensitive path");
