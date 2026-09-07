@@ -1140,7 +1140,11 @@ describe("refreshRouteModelList — the catalogue a headless run can reach", () 
     return {
       patch,
       service: {
-        get: vi.fn((key: string) => (key === "llm" ? llm : {})),
+        // A snapshot per read, the way the real service hands out settings —
+        // a caller that holds one across an await is holding stale data.
+        get: vi.fn((key: string) =>
+          key === "llm" ? { ...llm, modelListCache: { ...cache } } : {},
+        ),
         getSecret: vi.fn(() => ""),
         patch,
       },
@@ -1242,6 +1246,72 @@ describe("refreshRouteModelList — the catalogue a headless run can reach", () 
       await refreshRouteModelList({ settingsService: service as never, fetchOptions: guardedFetchOptions(fetchImpl), address }),
     ).toBe(true);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not ask a preset that declares it has nothing to answer with", async () => {
+    // A static or manually configured preset is saying its endpoint does not
+    // serve /models. The settings page refuses that sync; a background probe
+    // that skipped the check would send the preset's credential scope to an
+    // endpoint the user declared off limits.
+    const { service, patch } = makeRefreshSettings();
+    const fetchImpl = servedCatalogue();
+
+    for (const policy of ["static", "manual"] as const) {
+      expect(
+        await refreshRouteModelList({
+          settingsService: service as never,
+          fetchOptions: guardedFetchOptions(fetchImpl),
+          address,
+          modelDiscoveryPolicy: policy,
+        }),
+      ).toBe(false);
+    }
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(patch).not.toHaveBeenCalled();
+
+    // And the refusal did not burn the route's one probe: a preset later
+    // switched to discovery is asked normally.
+    expect(
+      await refreshRouteModelList({
+        settingsService: service as never,
+        fetchOptions: guardedFetchOptions(fetchImpl),
+        address,
+      }),
+    ).toBe(true);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("merges its answer into the cache as it stands after the round trip", async () => {
+    // `patch` shallow-merges one settings block, and the request above takes
+    // seconds. Writing back the cache this call started with would erase a row
+    // the settings page synced while it was waiting.
+    const otherKey = llmModelListCacheKey("openai", "", "");
+    const cache: Record<string, unknown> = {};
+    const { service, patch } = makeRefreshSettings(cache);
+    const fetchImpl = vi.fn(async () => {
+      // A concurrent sync lands mid-flight.
+      cache[otherKey] = {
+        vendor: "openai",
+        endpoint: "https://api.openai.com/v1/models",
+        models: ["gpt-5.4-mini"],
+        fetchedAt: new Date().toISOString(),
+      };
+      return new Response(
+        JSON.stringify({ data: [{ id: "gateway-served", max_input_tokens: 229_376 }] }),
+        { status: 200 },
+      );
+    }) as unknown as typeof fetch;
+
+    await refreshRouteModelList({
+      settingsService: service as never,
+      fetchOptions: guardedFetchOptions(fetchImpl),
+      address,
+    });
+
+    const written = patch.mock.calls[0][0];
+    expect(Object.keys(written.llm.modelListCache).sort()).toEqual(
+      [otherKey, llmModelListCacheKey("openai-compatible", "https://models.invalid/v1", "")].sort(),
+    );
   });
 
   it("keeps the window it has when the endpoint does not answer", async () => {

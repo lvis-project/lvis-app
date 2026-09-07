@@ -984,6 +984,35 @@ describe("compactWithBoundary — preserveUnit inside a long agent turn", () => 
     expect(result.newHistory.at(-1)?.role).toBe("tool_result");
   });
 
+  it("keeps the question this turn is answering, even when it falls behind the cut", async () => {
+    // The floor counts tool rounds, so a long turn's cut lands far past the
+    // user's question. Dropping it leaves the model executing an instruction
+    // it can no longer read — the summary paraphrases it at best.
+    const question = "index the repository and report";
+    const result = await compactWithBoundary({
+      messages: makeAgentTurnHistory(20, 2),
+      memoryReviewer: makeMockReviewer([makeFullSummaryText()]),
+      preserveRecentTokens: 0,
+      preserveUnit: "tool-rounds",
+      sessionId: "test-sess",
+      preflightTokens: PREFLIGHT,
+      compactNum: 1,
+    });
+
+    const verbatim = result.newHistory.filter(
+      (m) => m.role === "user" && m.content === question,
+    );
+    expect(verbatim).toHaveLength(1);
+    // It is pinned at the head of what survived, right after the summary, so
+    // the preserved rounds still read as answers to it.
+    expect(result.newHistory[0]?.meta?.compactBoundary).toBe(true);
+    expect(result.newHistory[1]?.content).toBe(question);
+    // Only the current question is pinned — the earlier turns still compact.
+    expect(
+      result.newHistory.some((m) => m.role === "user" && m.content === "earlier question 0"),
+    ).toBe(false);
+  });
+
   it("keeps tool_use and tool_result paired across the boundary it cuts", async () => {
     const result = await compactWithBoundary({
       messages: makeAgentTurnHistory(20),

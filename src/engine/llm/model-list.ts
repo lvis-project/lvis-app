@@ -821,10 +821,14 @@ export async function refreshRouteModelList(params: {
 }): Promise<boolean> {
   const { settingsService, fetchOptions, address } = params;
   const now = params.now ?? Date.now();
+  // A preset that declares a static or manually configured model list is
+  // saying it does not answer /models. Checked before anything is spent:
+  // burning the probe slot for a route that must never be probed would also
+  // hide a later policy change.
+  if (!modelDiscoveryPolicyAllowsFetch(params.modelDiscoveryPolicy)) return false;
   const key = llmModelListCacheKey(address.vendor, address.baseUrl, address.credentialScope);
   if (modelListProbeAttempted.has(key)) return false;
-  const cache = settingsService.get("llm").modelListCache ?? {};
-  if (modelListEntryIsFresh(cache[key], now)) return false;
+  if (modelListEntryIsFresh(settingsService.get("llm").modelListCache?.[key], now)) return false;
   modelListProbeAttempted.add(key);
   log.info(
     `model list: asking ${address.vendor} what it serves — no usable catalogue entry for this route`,
@@ -843,6 +847,11 @@ export async function refreshRouteModelList(params: {
     log.info(`model list: ${address.vendor} did not answer (${result.error})`);
     return false;
   }
+  // Re-read: the network round trip above is seconds long, and the settings
+  // page may have synced another route in the meantime. `patch` shallow-merges
+  // one block, so writing the cache this call started with would erase whatever
+  // landed while it was waiting.
+  const cache = settingsService.get("llm").modelListCache ?? {};
   await settingsService.patch({
     llm: {
       modelListCache: {

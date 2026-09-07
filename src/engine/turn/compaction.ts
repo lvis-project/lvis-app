@@ -108,10 +108,18 @@ function probeRouteModelListInBackground(
   llm: LlmRouteSettings,
   presets: readonly LlmRouteProviderPreset[] | undefined,
 ): void {
+  const address = llmRouteCatalogAddress(llm, presets);
+  // A preset's declared discovery policy governs whether its endpoint may be
+  // asked at all. Passing it through is what keeps this probe from doing what
+  // the settings page refuses to do for the same route.
+  const policy = address.credentialScope
+    ? presets?.find((preset) => preset.providerId === address.credentialScope)?.modelDiscoveryPolicy
+    : undefined;
   void refreshRouteModelList({
     settingsService: self.deps.settingsService,
     fetchOptions: { fetchImpl: self.deps.networkFetch },
-    address: llmRouteCatalogAddress(llm, presets),
+    address,
+    ...(policy ? { modelDiscoveryPolicy: policy } : {}),
   }).catch((err: unknown) => {
     log.debug(`model list probe failed: ${(err as Error).message}`);
   });

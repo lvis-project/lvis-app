@@ -23,6 +23,7 @@ import {
   type LLMVendorSettingsMap,
 } from "./llm-vendor-defaults.js";
 import { cachedModelListEntry, type LlmModelListCache } from "./llm-model-list.js";
+import type { MarketplaceProviderModelDiscoveryPolicy } from "./marketplace-package-assets.js";
 
 /**
  * Reserve buffer for output + safety, return the *usable* portion of the
@@ -142,6 +143,12 @@ export interface LlmRouteSettings {
 export interface LlmRouteProviderPreset {
   readonly providerId: string;
   readonly baseUrl: string;
+  /**
+   * Whether the preset discovers its models or declares them. A caller that
+   * refreshes the catalogue has to honour this: a preset declaring a static or
+   * manual list is saying its endpoint must not be probed.
+   */
+  readonly modelDiscoveryPolicy?: MarketplaceProviderModelDiscoveryPolicy;
 }
 
 export interface RouteContextWindow extends ResolvedContextWindow {

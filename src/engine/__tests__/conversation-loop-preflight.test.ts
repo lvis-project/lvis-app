@@ -447,6 +447,11 @@ describe("queryLoop — rate-limit reactive compact", () => {
     );
 
     expect(compactWithBoundary).toHaveBeenCalledTimes(1);
+    // Recovery runs inside the turn, so the preserve floor has to count tool
+    // rounds. Counting user turns pins the whole turn and compacts nothing.
+    expect(compactWithBoundary).toHaveBeenCalledWith(
+      expect.objectContaining({ preserveUnit: "tool-rounds" }),
+    );
     expect(compactStartedCb).toHaveBeenCalledWith(
       expect.objectContaining({ triggerSource: "rate-limit" }),
     );

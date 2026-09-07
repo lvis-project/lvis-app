@@ -1134,7 +1134,10 @@ export async function queryLoop(
             },
             abortSignal,
             callbacks,
-            { forceReason: "rate-limit" },
+            // Also mid-turn: without this the compactor protects everything
+            // the turn appended and recovers nothing, which is the whole
+            // reason the recovery was attempted.
+            { forceReason: "rate-limit", intraTurn: true },
           );
           if (compacted) {
             const recoveredMessage = self.rateLimitCompactMessage(stream);
