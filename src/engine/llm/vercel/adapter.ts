@@ -73,11 +73,24 @@ export type VercelVendor = LLMVendor;
  * openai-compatible model derives `providerOptionsName` from this (the part
  * before the first "."), and forwards any *unknown* keys under
  * `providerOptions[name]` straight into the HTTP request body. We use that
- * passthrough to ship vLLM's `chat_template_kwargs` per request. Keep the
- * createOpenAICompatible `name` and the providerOptions key in lockstep via
- * this single constant — a drift would silently drop the thinking toggle.
+ * passthrough to ship vLLM's `chat_template_kwargs` per request. This
+ * constant is the `name`; the key those options travel under is derived
+ * from it just below.
  */
 const OPENAI_COMPAT_PROVIDER_NAME = "lvis-compat";
+/**
+ * The key those per-request options actually travel under. The SDK looks up
+ * `providerOptions` by the camelCase form of the provider name first and only
+ * falls back to the name verbatim, emitting a deprecation warning when it has
+ * to. Deriving the key from the name with the SDK's own rule keeps the two in
+ * lockstep through a rename, which the literal spelling would not: drift here
+ * is silent, and what it drops is the thinking toggle and the reasoning
+ * budget.
+ */
+const OPENAI_COMPAT_PROVIDER_OPTIONS_KEY = OPENAI_COMPAT_PROVIDER_NAME.replace(
+  /[_-]([a-z])/g,
+  (_match, letter: string) => letter.toUpperCase(),
+);
 // Tool-name aliases applied ONLY on the OpenAI Responses wire. Keep this to
 // HOST builtins (tool_search) — never alias a plugin/MCP tool here. The
 // provider-as-oracle guard (engine/llm/rejected-tool-schema.ts) drops a
@@ -370,7 +383,7 @@ export class VercelUnifiedProvider implements LLMProvider {
         }
         providerOptions = {
           ...(providerOptions ?? {}),
-          [OPENAI_COMPAT_PROVIDER_NAME]: compatOptions,
+          [OPENAI_COMPAT_PROVIDER_OPTIONS_KEY]: compatOptions,
         };
       }
 
