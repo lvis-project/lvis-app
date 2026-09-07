@@ -979,7 +979,7 @@ describe("ConversationLoop queryLoop", () => {
         async function* raw() {
           for (const part of parts) yield part;
         }
-        yield* fullStreamToStreamEvent(raw());
+        yield* fullStreamToStreamEvent(raw(), this.vendor);
       }
     }
 
