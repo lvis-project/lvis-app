@@ -93,6 +93,11 @@ export type TurnDecisionKind =
   | "plugin.expansion"
   | "compact.micro"
   | "progress.nudge"
+  // The round-loop preflight gate: real same-session compaction attempted
+  // between rounds because the turn's own growth crossed the threshold.
+  // `compact.micro` is a different thing — it stubs stale tool results on the
+  // wire and never calls a model.
+  | "compact.auto"
   | "early_exit";
 
 export interface TurnDecisionEvent {

@@ -136,6 +136,22 @@ describe("engine pricing with a price correction", () => {
     expect(lookupPricingOptional("claude", "claude-sonnet-4-6")?.inputPer1M).toBe(3);
   });
 
+  it("matches a catalog entry whatever case the model id is spelled in", () => {
+    // A model id reaches this table from a provider catalogue or from what the
+    // user typed into a settings row. Neither is obliged to spell it the way
+    // the table does, and a case-only miss silently drops the model to the
+    // conservative fallback window.
+    expect(lookupPricingOptional("openai-compatible", "qwen3.6-35b-a3b-nvfp4")?.contextWindow)
+      .toBe(262_144);
+    expect(lookupPricingOptional("claude", "CLAUDE-SONNET-4-6")?.inputPer1M).toBe(3);
+    // Prefix matching (date-suffixed snapshots) folds case too.
+    expect(lookupPricingOptional("openai-compatible", "QWEN3.6-35B-A3B-NVFP4-2026-01-01")?.contextWindow)
+      .toBe(262_144);
+    // A genuinely different model still misses — folding case is not fuzzy
+    // matching.
+    expect(lookupPricingOptional("openai-compatible", "qwen3.8-27b-nvfp4")).toBeUndefined();
+  });
+
   // Regression lock — issue #900. Pre-fix values were stale (mini/nano
   // contextWindow registered as 1.05M while official is 400K; pricing
   // 2-6x off across the family). Pin exact values so a future drift is

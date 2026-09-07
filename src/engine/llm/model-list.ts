@@ -473,10 +473,18 @@ function modelEntryFromRow(row: unknown): LlmModelListEntry | null {
   const provider = optionalString(record.provider) ?? optionalString(record.publisher);
   const ownedBy = optionalString(record.owned_by);
   const description = optionalString(record.description) ?? optionalString(record.summary);
+  // Catalogues name the prompt ceiling differently: an OpenRouter-shaped row
+  // uses `context_length`, a LiteLLM gateway reports `max_input_tokens`, and
+  // vLLM reports `max_model_len`. All three answer the same question. A row
+  // carrying none of them leaves the window to the next source.
   const contextLength = optionalNumber(record.context_length)
     ?? optionalNumber(record.contextLength)
     ?? optionalNumber(topProvider?.context_length)
-    ?? optionalNumber(limits?.max_input_tokens);
+    ?? optionalNumber(limits?.max_input_tokens)
+    ?? optionalNumber(record.max_input_tokens)
+    ?? optionalNumber(record.max_model_len);
+  const maxOutputTokens = optionalNumber(record.max_output_tokens)
+    ?? optionalNumber(limits?.max_output_tokens);
   const inputModalities = optionalStringArray(architecture?.input_modalities)
     ?? optionalStringArray(record.supported_input_modalities);
   const outputModalities = optionalStringArray(architecture?.output_modalities)
@@ -489,6 +497,7 @@ function modelEntryFromRow(row: unknown): LlmModelListEntry | null {
     ...(ownedBy ? { ownedBy } : {}),
     ...(description ? { description } : {}),
     ...(contextLength !== undefined ? { contextLength } : {}),
+    ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
     ...(inputModalities ? { inputModalities } : {}),
     ...(outputModalities ? { outputModalities } : {}),
     ...(supportedParameters ? { supportedParameters } : {}),

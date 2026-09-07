@@ -1107,6 +1107,26 @@ LLM 호출을 차단하고 `compactWithBoundary` 를 동기 실행한 뒤 같은
 진행한다. Threshold 는 model context window 의 보수적 비율이며 semantic/time 휴리스틱이
 아니라 _토큰_ 만 측정한다.
 
+**라운드 루프 내부 재평가**: 같은 preflight 조건을 turn 시작 시점뿐 아니라
+round loop 안에서도 매 provider 호출 직전에 다시 평가한다 (`src/engine/turn/query-loop.ts`).
+Agent turn 은 자신의 tool result 로 컨텍스트를 수백 라운드 동안 키우므로,
+turn 시작 측정값 하나만으로는 임계치를 넘은 상태가 turn 끝까지 유지된다.
+평가는 해당 라운드가 이미 계산한 projection 을 그대로 쓰고, 압축은 동일한
+`runPreflightGuard` 경로를 통한다. 압축이 히스토리를 줄이지 못한 경우 (NOOP 등)
+projection 이 preflight 의 25% 만큼 더 증가하기 전까지 재시도하지 않는다 —
+그렇지 않으면 남은 모든 라운드가 LLM 압축 호출 하나씩을 소모한다.
+결정은 `loop.decision` 의 `compact.auto` (fired / skipped / rearm-hold) 로 남는다.
+
+**Context window 출처 (우선순위)**: preflight threshold 의 분모가 되는 context window 는
+`resolveModelContextWindow` (`src/shared/context-budget.ts`) 가 단일 결정한다.
+(1) `llm.vendors.<vendor>.contextWindow` — 사용자가 명시한 값,
+(2) provider 가 `/v1/models` 에서 보고한 값 (`context_length` / `max_input_tokens` / `max_model_len`;
+    `max_output_tokens` 도 함께 보관된다),
+(3) pricing 카탈로그 조회 (대소문자 무시),
+(4) 보수적 128K fallback — 이 경우 모델명과 선언해야 할 설정을 밝힌 경고를
+    route 당 1회 남긴다. 어느 출처가 쓰였는지는 `PREFLIGHT_GUARD` trace 의
+    `contextWindowSource` 에 기록된다.
+
 **LLM Compact (boundary-marked)**: `compactWithBoundary` 는 rolling summary 를 생성해
 다음 턴의 system prompt 에 preamble 로 prepend 한다. 같은 sessionId 안에서
 `kind: "checkpoint"` ChatEntry 가 history 에 append 되어 checkpoint anchor 역할을 한다.

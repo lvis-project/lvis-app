@@ -4,8 +4,12 @@
 
 import type { GenericMessage, LLMVendor } from "./llm/types.js";
 import { serializeMessageForEstimation } from "./llm/types.js";
-import { lookupPricing, effectiveContextWindow } from "../shared/pricing-data.js";
-import { getUsableContext, getPreflightThreshold } from "../shared/context-budget.js";
+import { lookupPricing } from "../shared/pricing-data.js";
+import {
+  getUsableContext,
+  getPreflightThreshold,
+  resolveModelContextWindow,
+} from "../shared/context-budget.js";
 import { buildToolResultStrippedStub, buildToolResultTruncatedStub } from "../shared/tool-result-stub.js";
 import {
   estimateMultimodalTokenOverhead,
@@ -29,19 +33,31 @@ export { countHangul, estimateTokens } from "../shared/token-estimate.js";
 // pricing and context-window data share one maintained source.
 
 /**
+ * A context window a caller already resolved from a source that outranks the
+ * pricing catalog — an explicit vendor setting, or the provider's own
+ * `/v1/models` report. Omit both fields to ask the catalog.
+ */
+export type ContextWindowInputs = {
+  configured?: number;
+  reported?: number;
+};
+
+/**
  * Model identifier → effective context window in tokens.
  *
  * "Effective" because the adapter auto-sends the `context-1m-2025-08-07`
  * beta header for any Claude model with `contextWindow1MBeta` set
  * (`engine/llm/vercel/adapter.ts`), so the beta value is what the model
- * actually delivers. {@link effectiveContextWindow} resolves this for us.
- *
- * Unknown models fall back to `FALLBACK_PRICING.contextWindow` (128K) via
- * `lookupPricing`. The lookup itself supports prefix matching for
- * date-suffixed snapshots.
+ * actually delivers. {@link resolveModelContextWindow} owns that, together
+ * with the two inputs that outrank the catalog and the conservative 128K
+ * fallback for a model nothing knows.
  */
-export function getModelContextWindow(vendor: LLMVendor, model: string): number {
-  return effectiveContextWindow(lookupPricing(vendor, model));
+export function getModelContextWindow(
+  vendor: LLMVendor,
+  model: string,
+  inputs?: ContextWindowInputs,
+): number {
+  return resolveModelContextWindow({ vendor, model, ...inputs }).contextWindow;
 }
 
 /**
@@ -52,19 +68,27 @@ export function getModelContextWindow(vendor: LLMVendor, model: string): number 
  * Use this for compact decisions and any UI ring that should hit 100% at the
  * compact threshold rather than at the raw context window.
  */
-export function getModelUsableContext(vendor: LLMVendor, model: string): number {
-  return getUsableContext(getModelContextWindow(vendor, model));
+export function getModelUsableContext(
+  vendor: LLMVendor,
+  model: string,
+  inputs?: ContextWindowInputs,
+): number {
+  return getUsableContext(getModelContextWindow(vendor, model, inputs));
 }
 
 
 
 
-export function getModelPreflightThreshold(vendor: LLMVendor, model: string): number {
+export function getModelPreflightThreshold(
+  vendor: LLMVendor,
+  model: string,
+  inputs?: ContextWindowInputs,
+): number {
   // Priority: runtime override (UI slider) > env var (LVIS_DEV_PREFLIGHT_OVERRIDE) > computed.
   if (_runtimePreflightOverride !== null) return _runtimePreflightOverride;
   const devOverride = readDevPreflightOverride();
   if (devOverride !== null) return devOverride;
-  const windowThreshold = getPreflightThreshold(getModelContextWindow(vendor, model));
+  const windowThreshold = getPreflightThreshold(getModelContextWindow(vendor, model, inputs));
 
 
   const pricing = lookupPricing(vendor, model);
@@ -85,10 +109,14 @@ export type PreflightThresholdSource =
  * model's context window, a TPM cap, or a UI/env override — without
  * duplicating the threshold math itself.
  */
-export function getModelPreflightThresholdSource(vendor: LLMVendor, model: string): PreflightThresholdSource {
+export function getModelPreflightThresholdSource(
+  vendor: LLMVendor,
+  model: string,
+  inputs?: ContextWindowInputs,
+): PreflightThresholdSource {
   if (_runtimePreflightOverride !== null) return "runtime-override";
   if (readDevPreflightOverride() !== null) return "dev-env-override";
-  const windowThreshold = getPreflightThreshold(getModelContextWindow(vendor, model));
+  const windowThreshold = getPreflightThreshold(getModelContextWindow(vendor, model, inputs));
   const pricing = lookupPricing(vendor, model);
   if (typeof pricing.tpmDefault === "number" && pricing.tpmDefault > 0) {
     const tpmThreshold = Math.floor(pricing.tpmDefault * 0.8);

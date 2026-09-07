@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { getUsableContext, getPreflightThreshold } from "../context-budget.js";
+import {
+  getUsableContext,
+  getPreflightThreshold,
+  resolveModelContextWindow,
+} from "../context-budget.js";
+import { FALLBACK_PRICING } from "../pricing-data.js";
 
 describe("getUsableContext — LVIS tier-fixed reservations", () => {
   it("64K → 37K usable (27K reserved for output-heavy small models)", () => {
@@ -93,5 +98,82 @@ describe("getPreflightThreshold — token preflight trigger", () => {
       const ratio = getPreflightThreshold(ctx) / getUsableContext(ctx);
       expect(ratio).toBe(0.8);
     }
+  });
+});
+
+describe("resolveModelContextWindow — where the budget's denominator comes from", () => {
+  it("takes the vendor block's declared window over everything else", () => {
+    const resolved = resolveModelContextWindow({
+      vendor: "claude",
+      model: "claude-sonnet-4-5",
+      configured: 300_000,
+      reported: 229_376,
+    });
+
+    expect(resolved).toEqual({ contextWindow: 300_000, source: "vendor-setting" });
+  });
+
+  it("takes what the provider reported when nothing was declared", () => {
+    const resolved = resolveModelContextWindow({
+      vendor: "openai-compatible",
+      model: "a-model-no-catalog-knows",
+      reported: 229_376,
+    });
+
+    expect(resolved).toEqual({ contextWindow: 229_376, source: "provider-reported" });
+  });
+
+  it("reads the pricing catalog when neither input is present", () => {
+    const resolved = resolveModelContextWindow({
+      vendor: "openai-compatible",
+      model: "Qwen3.6-35B-A3B-NVFP4",
+    });
+
+    expect(resolved).toEqual({ contextWindow: 262_144, source: "pricing-catalog" });
+  });
+
+  it("matches the catalog entry whatever case the served id is spelled in", () => {
+    const resolved = resolveModelContextWindow({
+      vendor: "openai-compatible",
+      model: "qwen3.6-35b-a3b-nvfp4",
+    });
+
+    expect(resolved).toEqual({ contextWindow: 262_144, source: "pricing-catalog" });
+  });
+
+  it("names the fallback as a fallback so a caller can report the guess", () => {
+    const resolved = resolveModelContextWindow({
+      vendor: "openai-compatible",
+      model: "a-model-no-catalog-knows",
+    });
+
+    expect(resolved).toEqual({
+      contextWindow: FALLBACK_PRICING.contextWindow,
+      source: "fallback",
+    });
+  });
+
+  it("treats a malformed or non-positive declared window as not declared", () => {
+    // A stored 0 that survived would zero the preflight threshold and switch
+    // auto-compaction off for the route entirely.
+    for (const configured of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(
+        resolveModelContextWindow({
+          vendor: "openai-compatible",
+          model: "a-model-no-catalog-knows",
+          configured,
+        }).source,
+      ).toBe("fallback");
+    }
+  });
+
+  it("treats a malformed provider-reported window as absent, not as an error", () => {
+    expect(
+      resolveModelContextWindow({
+        vendor: "openai-compatible",
+        model: "a-model-no-catalog-knows",
+        reported: 0,
+      }),
+    ).toEqual({ contextWindow: FALLBACK_PRICING.contextWindow, source: "fallback" });
   });
 });

@@ -10,10 +10,13 @@
  * - disableSessionPersistence → preflight skipped
  * - threshold values: 80% of usable model context
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { afterEach, describe, it, expect, vi, beforeEach } from "vitest";
 import { makeHistoryExceedingEstimateThreshold } from "./conversation-loop-test-helpers.js";
 import { ConversationLoop } from "../conversation-loop.js";
 import type { GenericMessage, LLMProvider, StreamEvent } from "../llm/types.js";
+import type { TurnDecisionEvent } from "../turn/types.js";
+import { ToolRegistry } from "../../tools/registry.js";
+import { createDynamicTool } from "../../tools/base.js";
 import { getModelPreflightThreshold, estimateMessagesTokens } from "../auto-compact.js";
 import { estimateRequestInputProjection } from "../request-input-projection.js";
 import {
@@ -771,5 +774,183 @@ describe("getPreflightThreshold — 80% usable-context trigger", () => {
   it("128K context threshold is 80% of 98K usable = 78.4K", () => {
     const threshold = getModelPreflightThreshold("openai", "gpt-4o");
     expect(threshold).toBe(78_400);
+  });
+});
+
+/**
+ * A turn that grows its own context past the threshold.
+ *
+ * The turn-start guard measures the history the user's message arrives with.
+ * An agent turn then appends its own tool results for as many rounds as it
+ * runs, and nothing re-measured that growth: the projection could cross the
+ * threshold at round three and stay over for every round after it.
+ */
+class ToolLoopProvider implements LLMProvider {
+  readonly vendor = "openai" as const;
+  roundsStarted = 0;
+
+  constructor(private readonly toolRounds: number) {}
+
+  async *streamTurn(): AsyncIterable<StreamEvent> {
+    const round = this.roundsStarted++;
+    if (round < this.toolRounds) {
+      yield { type: "tool_call", id: `tu-${round}`, name: "probe", input: { n: round } };
+      yield { type: "message_complete", stopReason: "tool_use" };
+      return;
+    }
+    yield { type: "text_delta", text: "done" };
+    yield { type: "message_complete", stopReason: "end_turn" };
+  }
+}
+
+function makeProbeRegistry(resultChars: number) {
+  const registry = new ToolRegistry();
+  registry.register(
+    createDynamicTool({
+      name: "probe",
+      description: "returns a sizeable result",
+      source: "builtin",
+      category: "read",
+      isReadOnly: () => true,
+      jsonSchema: { type: "object", properties: { n: { type: "number" } } },
+      execute: async () => ({ output: "R".repeat(resultChars), isError: false }),
+    }),
+  );
+  return registry;
+}
+
+function makeToolLoopSetup(resultChars: number, toolRounds: number) {
+  const sessionId = "5c1f0f6d-0f0a-4a1e-9a3f-0b7cb6f2b1de";
+  const provider = new ToolLoopProvider(toolRounds);
+  const loop = new ConversationLoop(
+    makeDeps({
+      settingsService: makeSettings(true, "gpt-4o", "openai"),
+      memoryManager: makeMemoryManager([], sessionId),
+      memoryReviewer: makeMemoryReviewer(),
+      toolRegistry: makeProbeRegistry(resultChars) as unknown as ReturnType<typeof makeDeps>["toolRegistry"],
+    }),
+  );
+  loop.resetAndResume(sessionId);
+  (loop as unknown as { provider: LLMProvider }).provider = provider;
+  return { loop, provider };
+}
+
+describe("round-loop token preflight — a turn that grows its own context", () => {
+  beforeEach(() => {
+    // A small threshold stands in for a full context window: the gate reads the
+    // same `getModelPreflightThreshold` the turn-start guard does.
+    process.env.LVIS_DEV_PREFLIGHT_OVERRIDE = "5000";
+    vi.mocked(compactWithBoundary).mockImplementation(
+      async ({ messages }) => makeSyntheticCompactResult(messages),
+    );
+  });
+  afterEach(() => {
+    delete process.env.LVIS_DEV_PREFLIGHT_OVERRIDE;
+    vi.mocked(compactWithBoundary).mockReset();
+  });
+
+  it("compacts mid-turn once the accumulated tool results cross the threshold", async () => {
+    // ~1,500 tokens of tool result per round (kept under MAX_TOOL_RESULT_TOKENS
+    // so the result reaches the wire whole) against a 5,000-token threshold:
+    // the turn starts well under and crosses partway through.
+    const { loop, provider } = makeToolLoopSetup(6_000, 8);
+    const decisions: TurnDecisionEvent[] = [];
+    const roundsWhenCompacted: number[] = [];
+    vi.mocked(compactWithBoundary).mockImplementation(async ({ messages }) => {
+      roundsWhenCompacted.push(provider.roundsStarted);
+      return makeSyntheticCompactResult(messages);
+    });
+
+    await loop.runTurn(
+      "run the probe until you are done",
+      { onDecision: (event) => decisions.push(event) },
+      undefined,
+      { inputOrigin: "user-keyboard" },
+    );
+
+    expect(compactWithBoundary).toHaveBeenCalled();
+    // Not at turn start: the turn began with an empty history and a short
+    // question, so the only thing that could have crossed the threshold is the
+    // turn's own tool output.
+    expect(roundsWhenCompacted[0]).toBeGreaterThan(0);
+    expect(decisions).toContainEqual(
+      expect.objectContaining({ kind: "compact.auto", branch: "fired" }),
+    );
+  });
+
+  it("leaves the turn-start guard as the only compaction when the history arrives over the threshold", async () => {
+    // The round-loop gate skips the turn's first provider call precisely
+    // because the turn-start guard already measured that request. A turn that
+    // was already over must still compact exactly once, before round 0.
+    const sessionId = "0f2b7a63-1a26-4f0e-9c1e-6a1a6a2b31c7";
+    const history = makeHistoryExceedingEstimateThreshold(5_000);
+    const provider = new ToolLoopProvider(0);
+    const roundsWhenCompacted: number[] = [];
+    vi.mocked(compactWithBoundary).mockImplementation(async ({ messages }) => {
+      roundsWhenCompacted.push(provider.roundsStarted);
+      return makeSyntheticCompactResult(messages);
+    });
+    const loop = new ConversationLoop(
+      makeDeps({
+        settingsService: makeSettings(true, "gpt-4o", "openai"),
+        memoryManager: makeMemoryManager(history, sessionId),
+        memoryReviewer: makeMemoryReviewer(),
+      }),
+    );
+    loop.resetAndResume(sessionId);
+    (loop as unknown as { provider: LLMProvider }).provider = provider;
+    const decisions: TurnDecisionEvent[] = [];
+
+    await loop.runTurn(
+      "one more question",
+      { onDecision: (event) => decisions.push(event) },
+      undefined,
+      { inputOrigin: "user-keyboard" },
+    );
+
+    expect(roundsWhenCompacted).toEqual([0]);
+    expect(decisions.filter((event) => event.kind === "compact.auto")).toEqual([]);
+  });
+
+  it("leaves a turn that stays under the threshold alone", async () => {
+    const { loop } = makeToolLoopSetup(200, 6);
+    const decisions: TurnDecisionEvent[] = [];
+
+    await loop.runTurn(
+      "run the probe until you are done",
+      { onDecision: (event) => decisions.push(event) },
+      undefined,
+      { inputOrigin: "user-keyboard" },
+    );
+
+    expect(compactWithBoundary).not.toHaveBeenCalled();
+    expect(decisions.filter((event) => event.kind === "compact.auto")).toEqual([]);
+  });
+
+  it("does not spend a compaction per round when compaction cannot reduce the history", async () => {
+    // NOOP is the shape of "there was nothing left to summarize": the
+    // projection stays over the threshold, so an ungated gate would spend an
+    // LLM compaction on every remaining round of the turn.
+    const { loop } = makeToolLoopSetup(1_200, 40);
+    const decisions: TurnDecisionEvent[] = [];
+    vi.mocked(compactWithBoundary).mockImplementation(
+      async ({ messages }) => makeSyntheticNoopResult(messages),
+    );
+
+    await loop.runTurn(
+      "run the probe until you are done",
+      { onDecision: (event) => decisions.push(event) },
+      undefined,
+      { inputOrigin: "user-keyboard" },
+    );
+
+    const attempts = vi.mocked(compactWithBoundary).mock.calls.length;
+    const held = decisions.filter(
+      (event) => event.kind === "compact.auto" && event.branch === "rearm-hold",
+    ).length;
+    expect(attempts).toBeGreaterThan(0);
+    // Rounds where the threshold was crossed and the gate declined anyway,
+    // because nothing had grown enough for a boundary to cut differently.
+    expect(held).toBeGreaterThan(0);
   });
 });

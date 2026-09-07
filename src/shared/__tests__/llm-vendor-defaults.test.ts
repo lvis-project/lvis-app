@@ -13,6 +13,7 @@ import {
   freshAllVendorBlocks,
   freshVendorBlocks,
   getLlmVendorSettings,
+  type LLMVendorSettings,
   isApiKeyOptionalLlmVendor,
   isDefaultVisibleLLMVendor,
   isMarketplaceEligibleLLMVendor,
@@ -231,6 +232,33 @@ describe("LLM vendor defaults", () => {
     const block = getLlmVendorSettings(freshVendorBlocks(), "groq");
     expect(block.model).toBe(LLM_VENDOR_DEFAULTS.groq.model);
     expect(block.enableThinking).toBe(true);
+  });
+
+  it("carries a declared contextWindow through, and leaves it unset by default", () => {
+    const declared = getLlmVendorSettings(
+      { "openai-compatible": { ...LLM_VENDOR_DEFAULTS["openai-compatible"], contextWindow: 229_376 } },
+      "openai-compatible",
+    );
+    expect(declared.contextWindow).toBe(229_376);
+    expect(getLlmVendorSettings(freshVendorBlocks(), "openai-compatible").contextWindow)
+      .toBeUndefined();
+  });
+
+  it("drops a stored contextWindow that is not a usable positive integer", () => {
+    // A surviving 0 would zero the preflight threshold and switch
+    // auto-compaction off for the route without saying so anywhere.
+    for (const stored of [0, -1, 4.5, Number.NaN, "229376", null]) {
+      const block = getLlmVendorSettings(
+        {
+          "openai-compatible": {
+            ...LLM_VENDOR_DEFAULTS["openai-compatible"],
+            contextWindow: stored,
+          } as unknown as LLMVendorSettings,
+        },
+        "openai-compatible",
+      );
+      expect(block.contextWindow, `stored ${String(stored)} must not survive`).toBeUndefined();
+    }
   });
 
   it("includes each provider's default model in its dropdown options", () => {

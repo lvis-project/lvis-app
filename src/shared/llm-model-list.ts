@@ -42,7 +42,19 @@ export type LlmModelListEntry = {
   provider?: string;
   ownedBy?: string;
   description?: string;
+  /**
+   * The largest prompt this model accepts, as the provider reports it. The
+   * host budgets compaction against this when the model is not in the pricing
+   * catalog, so a self-hosted or gateway-served model is no longer stuck with
+   * the conservative fallback window.
+   */
   contextLength?: number;
+  /**
+   * The largest completion this model will produce, as the provider reports
+   * it. Carried beside the window for a caller that needs an output ceiling;
+   * nothing enforces a limit from it yet.
+   */
+  maxOutputTokens?: number;
   inputModalities?: string[];
   outputModalities?: string[];
   supportedParameters?: string[];
@@ -72,6 +84,29 @@ export function llmModelListCacheKey(
   credentialScope?: string,
 ): string {
   return `${vendor.trim()}\n${baseUrl?.trim() ?? ""}\n${credentialScope?.trim() ?? ""}`;
+}
+
+/**
+ * The catalogue row a route's model was last reported under, when that route's
+ * `/models` handshake is in the cache and named this model.
+ *
+ * `undefined` covers every "the provider never told us" case — no handshake for
+ * this endpoint, a handshake that predates entry metadata, or a catalogue that
+ * does not list the configured model. Callers treat that as an absent input and
+ * ask the next source, never as an error.
+ */
+export function cachedModelListEntry(
+  cache: LlmModelListCache | undefined,
+  params: {
+    vendor: string;
+    model: string;
+    baseUrl?: string;
+    credentialScope?: string;
+  },
+): LlmModelListEntry | undefined {
+  if (!cache || !params.model) return undefined;
+  const key = llmModelListCacheKey(params.vendor, params.baseUrl, params.credentialScope);
+  return cache[key]?.modelEntries?.find((row) => row.id === params.model);
 }
 
 export type LlmModelListError =

@@ -840,8 +840,12 @@ async function runTurnInSpan(
     // safety-net flush is only needed for turns that never reached this point.
     transcriptPersistedAfterLoop = true;
 
-    // Same-session compact checkpoints run inside `runPreflightGuard`.
-    // No post-turn hook is needed; the next user turn re-evaluates token usage.
+    // Same-session compact checkpoints run inside `runPreflightGuard`, which a
+    // turn evaluates here at its start and again in the round loop before every
+    // provider call after the first (`query-loop.ts`). No post-turn hook is
+    // needed: waiting for the next user turn to re-evaluate token usage was the
+    // gap that let a long agent turn run hundreds of rounds over the threshold
+    // without ever compacting.
 
     // Turn aggregate footer — see TurnCallbacks.onTurnSummary doc above.
     // Tokens come from the LLM provider's usage report (Vercel AI SDK

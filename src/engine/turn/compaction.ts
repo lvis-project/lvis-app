@@ -7,7 +7,7 @@
  * this-shaped param — all mutable compaction state stays on the instance.
  */
 import type { ConversationLoop } from "../conversation-loop.js";
-import type { GenericMessage, MessageMeta } from "../llm/types.js";
+import type { GenericMessage, LLMVendor, MessageMeta } from "../llm/types.js";
 import type {
   CompactTriggerSource,
   PreflightGuardOptions,
@@ -21,12 +21,20 @@ import {
   getModelPreflightThreshold,
   getModelPreflightThresholdSource,
   getModelUsableContext,
+  type ContextWindowInputs,
   type PreflightThresholdSource,
 } from "../auto-compact.js";
 import { t } from "../../i18n/index.js";
 import { createLogger } from "../../lib/logger.js";
-import { activeLlmRouteModel } from "../../shared/llm-vendor-defaults.js";
-import { getPreflightThreshold, getUsableContext } from "../../shared/context-budget.js";
+import { activeLlmRouteModel, getLlmVendorSettings } from "../../shared/llm-vendor-defaults.js";
+import { cachedModelListEntry } from "../../shared/llm-model-list.js";
+import { FALLBACK_PRICING } from "../../shared/pricing-data.js";
+import {
+  getPreflightThreshold,
+  getUsableContext,
+  resolveModelContextWindow,
+  type ContextWindowSource,
+} from "../../shared/context-budget.js";
 import type { SubscriptionChatRuntimeSelection } from "../../shared/subscription-runtime.js";
 
 const log = createLogger("lvis");
@@ -49,6 +57,77 @@ interface RuntimeContextBudget {
   readonly identity: string;
   /** Observability only — which input the preflight threshold came from. */
   readonly thresholdSource: PreflightThresholdSource | "subscription-fallback" | "reported-context-window";
+  /**
+   * Observability only — which input the CONTEXT WINDOW behind that threshold
+   * came from. `fallback` says the whole budget rests on a guess.
+   */
+  readonly contextWindowSource: ContextWindowSource | "subscription-fallback";
+  /**
+   * The provider's own ceiling on a completion for this model, when it
+   * reported one. Carried so an output cap has a number to read; the budget
+   * math here does not use it.
+   */
+  readonly maxOutputTokens?: number;
+}
+
+/**
+ * Warn once per route about a budget resting on the fallback window.
+ *
+ * Once, because this is read on every preflight evaluation and the round-loop
+ * gate evaluates it every round — a per-evaluation warning would bury the log
+ * of a long agent turn under thousands of identical lines.
+ */
+const fallbackContextWindowWarned = new Set<string>();
+
+function warnFallbackContextWindowOnce(identity: string, model: string): void {
+  if (fallbackContextWindowWarned.has(identity)) return;
+  fallbackContextWindowWarned.add(identity);
+  log.warn(
+    `context budget: no context window known for model '${model}' — using the ${FALLBACK_PRICING.contextWindow}-token fallback. `
+    + `Declare the endpoint's real capacity as llm.vendors.<vendor>.contextWindow, or sync the provider's model list so it can report one.`,
+  );
+}
+
+/**
+ * The two inputs that outrank the pricing catalog for the active API-key route:
+ * what the user declared on the vendor block, and what the provider said about
+ * this model in its own `/models` handshake.
+ *
+ * The reported half is an external value. A route with no handshake in the
+ * cache, a handshake that predates entry metadata, or a catalogue that does not
+ * list the configured model all yield `undefined` here, which simply moves the
+ * question to the next source.
+ */
+function contextWindowInputsForRoute(
+  self: ConversationLoop,
+  provider: LLMVendor,
+  model: string,
+): { inputs: ContextWindowInputs; maxOutputTokens?: number } {
+  const llm = self.deps.settingsService.get("llm");
+  const block = getLlmVendorSettings(llm.vendors, provider);
+  const presetId = provider === "openai-compatible"
+    ? llm.marketplaceProviderPresetId?.trim()
+    : undefined;
+  const preset = presetId
+    ? (self.deps.settingsService.get("marketplace").installedProviderPresets ?? [])
+      .find((installed) => installed.providerId === presetId)
+    : undefined;
+  // The cache is keyed by the address the settings row actually synced, which
+  // for a preset is the preset's own endpoint rather than the generic
+  // custom-provider block's.
+  const entry = cachedModelListEntry(llm.modelListCache, {
+    vendor: provider,
+    model,
+    baseUrl: preset?.baseUrl ?? block.baseUrl,
+    ...(presetId ? { credentialScope: presetId } : {}),
+  });
+  return {
+    inputs: {
+      ...(block.contextWindow !== undefined ? { configured: block.contextWindow } : {}),
+      ...(entry?.contextLength !== undefined ? { reported: entry.contextLength } : {}),
+    },
+    ...(entry?.maxOutputTokens !== undefined ? { maxOutputTokens: entry.maxOutputTokens } : {}),
+  };
 }
 
 function safeReportedContextBudget(
@@ -92,10 +171,12 @@ export function contextBudgetForCurrentRuntime(self: ConversationLoop): RuntimeC
           usableContext: SUBSCRIPTION_FALLBACK_USABLE_CONTEXT,
           identity: `subscription:codex/${model}`,
           thresholdSource: "subscription-fallback",
+          contextWindowSource: "subscription-fallback",
         };
       }
       // Codex catalog model IDs are OpenAI model IDs, but remain isolated from
       // the user's inactive API-key configuration and pricing accounting.
+      const catalogWindow = resolveModelContextWindow({ vendor: "openai", model });
       const catalogPreflight = getModelPreflightThreshold("openai", model);
       const catalogUsableContext = getModelUsableContext("openai", model);
       const reported = self.lastReportedSubscriptionContextWindow;
@@ -120,6 +201,7 @@ export function contextBudgetForCurrentRuntime(self: ConversationLoop): RuntimeC
         thresholdSource: reportedIsTighter
           ? "reported-context-window"
           : getModelPreflightThresholdSource("openai", model),
+        contextWindowSource: reportedIsTighter ? "provider-reported" : catalogWindow.source,
       };
     }
     return {
@@ -128,18 +210,25 @@ export function contextBudgetForCurrentRuntime(self: ConversationLoop): RuntimeC
       usableContext: SUBSCRIPTION_FALLBACK_USABLE_CONTEXT,
       identity: `subscription:${subscriptionRuntime.provider}/${model}`,
       thresholdSource: "subscription-fallback",
+      contextWindowSource: "subscription-fallback",
     };
   }
 
   const llmSettings = self.deps.settingsService.get("llm");
   const provider = llmSettings.provider;
   const model = activeLlmRouteModel(llmSettings);
+  const identity = `${provider}/${model}`;
+  const { inputs, maxOutputTokens } = contextWindowInputsForRoute(self, provider, model);
+  const window = resolveModelContextWindow({ vendor: provider, model, ...inputs });
+  if (window.source === "fallback") warnFallbackContextWindowOnce(identity, model);
   return {
     model,
-    preflight: getModelPreflightThreshold(provider, model),
-    usableContext: getModelUsableContext(provider, model),
-    identity: `${provider}/${model}`,
-    thresholdSource: getModelPreflightThresholdSource(provider, model),
+    preflight: getModelPreflightThreshold(provider, model, inputs),
+    usableContext: getModelUsableContext(provider, model, inputs),
+    identity,
+    thresholdSource: getModelPreflightThresholdSource(provider, model, inputs),
+    contextWindowSource: window.source,
+    ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
   };
 }
 
@@ -515,10 +604,10 @@ export async function runPreflightGuard(
       return false;
     }
 
-    const { preflight, identity, thresholdSource } = contextBudgetForCurrentRuntime(self);
+    const { preflight, identity, thresholdSource, contextWindowSource } = contextBudgetForCurrentRuntime(self);
     if (!forceRecover && !forceRateLimit && preflight <= 0) {
       tracePreflightGuard(self, "skipped", "invalid-preflight-threshold", {
-        threshold: preflight, thresholdSource, model: identity,
+        threshold: preflight, thresholdSource, contextWindowSource, model: identity,
       });
       return false;
     }
@@ -538,7 +627,7 @@ export async function runPreflightGuard(
       : estimated;
     if (!forceRecover && !forceRateLimit && estimated < preflight && contextTokensIn < preflight) {
       tracePreflightGuard(self, "not-reached", "below-threshold", {
-        threshold: preflight, thresholdSource, model: identity, estimated, contextTokensIn,
+        threshold: preflight, thresholdSource, contextWindowSource, model: identity, estimated, contextTokensIn,
       });
       return false;
     }
@@ -550,7 +639,7 @@ export async function runPreflightGuard(
           ? "estimate"
           : "context-tokens";
     tracePreflightGuard(self, "fired", triggerSource, {
-      threshold: preflight, thresholdSource, model: identity, estimated, contextTokensIn,
+      threshold: preflight, thresholdSource, contextWindowSource, model: identity, estimated, contextTokensIn,
     });
 
     self.isCompacting = true;

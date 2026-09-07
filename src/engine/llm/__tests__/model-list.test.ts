@@ -79,6 +79,55 @@ describe("LLM model list sync", () => {
     ).toEqual(["openai/gpt-5.4", "google/gemini-2.5-flash:free"]);
   });
 
+  it("reads the prompt ceiling a gateway or a self-hosted server reports", () => {
+    // A LiteLLM gateway answers with max_input_tokens/max_output_tokens; vLLM
+    // answers with max_model_len. Both name the same limit the host budgets
+    // compaction against, and reading neither leaves a served model on the
+    // conservative fallback window.
+    expect(
+      parseStandardModelListEntries({
+        object: "list",
+        data: [
+          { id: "gateway-served", max_input_tokens: 229_376, max_output_tokens: 32_768 },
+          { id: "self-hosted-served", max_model_len: 131_072 },
+          { id: "nested-limits", limits: { max_input_tokens: 65_536, max_output_tokens: 8_192 } },
+          { id: "says-nothing" },
+        ],
+      }),
+    ).toEqual([
+      { id: "gateway-served", contextLength: 229_376, maxOutputTokens: 32_768 },
+      { id: "self-hosted-served", contextLength: 131_072 },
+      { id: "nested-limits", contextLength: 65_536, maxOutputTokens: 8_192 },
+      { id: "says-nothing" },
+    ]);
+  });
+
+  it("prefers an explicit context_length over the gateway aliases for it", () => {
+    expect(
+      parseStandardModelListEntries({
+        object: "list",
+        data: [{ id: "both", context_length: 200_000, max_input_tokens: 128_000 }],
+      }),
+    ).toEqual([{ id: "both", contextLength: 200_000 }]);
+  });
+
+  it("ignores a malformed reported limit rather than budgeting against it", () => {
+    expect(
+      parseStandardModelListEntries({
+        object: "list",
+        data: [
+          { id: "negative", max_input_tokens: -1 },
+          { id: "not-a-number", max_model_len: "131072" },
+          { id: "bad-output", max_input_tokens: 1_000, max_output_tokens: -8 },
+        ],
+      }),
+    ).toEqual([
+      { id: "negative" },
+      { id: "not-a-number" },
+      { id: "bad-output", contextLength: 1_000 },
+    ]);
+  });
+
   it("preserves extended model metadata from OpenRouter-compatible model lists", () => {
     expect(
       parseStandardModelListEntries({

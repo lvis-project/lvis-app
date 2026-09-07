@@ -262,6 +262,12 @@ export function lookupPricing(
  * Use this when the caller needs to distinguish "known model" from
  * "unknown / not in catalog" (e.g., disabling cost-mode toggles in UI when
  * pricing is genuinely unavailable rather than zero-by-fallback).
+ *
+ * Matching ignores case. A model id reaches this table from a provider
+ * catalogue or from what the user typed into a settings row, and neither is
+ * obliged to spell the id the way this table happens to spell it — a gateway
+ * that serves the same weights under a lower-cased id would otherwise miss
+ * every entry and silently inherit the conservative fallback window.
  */
 export function lookupPricingOptional(
   vendor: string,
@@ -271,9 +277,14 @@ export function lookupPricingOptional(
   const vendorTable = table[vendor] ?? {};
   const exact = vendorTable[model];
   if (exact) return exact;
+  const needle = model.toLowerCase();
   let bestKey: string | undefined;
   for (const key of Object.keys(vendorTable)) {
-    if (model.startsWith(key) && (bestKey === undefined || key.length > bestKey.length)) {
+    const candidate = key.toLowerCase();
+    // An exact (case-folded) hit is already the longest possible prefix, so
+    // nothing later in the table can beat it.
+    if (candidate === needle) return vendorTable[key];
+    if (needle.startsWith(candidate) && (bestKey === undefined || key.length > bestKey.length)) {
       bestKey = key;
     }
   }
