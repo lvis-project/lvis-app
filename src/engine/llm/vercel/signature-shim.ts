@@ -25,6 +25,10 @@ const log = createLogger("signature-shim");
  * part. Returns null (and logs a warning) if the signature is missing — the
  * thinking block must then be skipped in the next-turn echo, since Anthropic
  * rejects thinking blocks without verbatim signatures.
+ *
+ * Ask this only about parts from the Anthropic wire. No other provider sets a
+ * signature, so asking about theirs turns the warning into a per-block
+ * certainty and it stops carrying information.
  */
 export function extractSignatureSafely(
   reasoningPart: unknown,
@@ -35,7 +39,7 @@ export function extractSignatureSafely(
   if (typeof sig !== "string" || sig.length === 0) {
     // eslint-disable-next-line no-console
     log.warn(
-      "reasoning block missing signature — skipping (#12433 edge case)",
+      "reasoning block missing signature — skipping the verbatim echo",
     );
     return null;
   }

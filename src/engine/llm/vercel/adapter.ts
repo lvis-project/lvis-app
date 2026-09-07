@@ -505,7 +505,7 @@ export class VercelUnifiedProvider implements LLMProvider {
         return;
       }
 
-      const streamEvents = fullStreamToStreamEvent(fullStream);
+      const streamEvents = fullStreamToStreamEvent(fullStream, slot);
       const restoredEvents = useOpenAIResponsesAliases
         ? restoreStreamEventsFromOpenAIResponses(streamEvents)
         : streamEvents;
@@ -948,6 +948,7 @@ type StreamUsageRaw = {
 
 export async function* fullStreamToStreamEvent(
   stream: AsyncIterable<AnyStreamPart>,
+  vendor: VercelVendor,
 ): AsyncIterable<StreamEvent> {
   let hasToolCalls = false;
 
@@ -1001,11 +1002,19 @@ export async function* fullStreamToStreamEvent(
         }
         const thinking = reasoningBuffers.get(id) ?? "";
         reasoningBuffers.delete(id);
-        const signature = extractSignatureSafely(part);
-        if (signature !== null) {
-          thinkingBlocks.push({ thinking, signature });
+        // A signed thinking block is an Anthropic construct: only that wire
+        // attaches a signature, and only that wire requires the verbatim echo
+        // (genericToModelMessages already drops thinkingBlocks for every other
+        // vendor). Asking the shim about a part that never carried a signature
+        // made it warn on every reasoning block of every other model, which
+        // buried the one case the shim exists to surface.
+        if (vendor === "claude") {
+          const signature = extractSignatureSafely(part);
+          if (signature !== null) {
+            thinkingBlocks.push({ thinking, signature });
+          }
+          // Missing-signature case: log-and-skip (already logged inside shim).
         }
-        // Missing-signature case: log-and-skip (already logged inside shim).
         break;
       }
       case "tool-call": {

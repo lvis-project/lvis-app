@@ -213,6 +213,7 @@ describe("fullStreamToStreamEvent — tool-call input normalisation", () => {
           { type: "tool-call", toolCallId: "tu-1", toolName: "bash", input },
           finish,
         ]),
+        "claude",
       ),
     );
     const call = events.find((e) => e.type === "tool_call");
