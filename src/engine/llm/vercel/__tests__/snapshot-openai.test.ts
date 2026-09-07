@@ -1300,11 +1300,14 @@ describe("VercelUnifiedProvider — sampling params removed (CTRL simplification
     expect("seed" in args).toBe(false);
   });
 
-  it("maps and clamps a host-owned outputTokenLimit to AI SDK maxOutputTokens", async () => {
+  it("maps a host-owned outputTokenLimit to AI SDK maxOutputTokens verbatim", async () => {
+    // No transport ceiling: the transport cannot tell a user-configured chat
+    // ceiling from a plugin's, so a bound here would impose the plugin-sized
+    // one on chat. The background bound is applied by the caller that owns it.
     const args = await runAndCaptureStreamTextArgs(
       "openai", "gpt-4.1", MAX_BACKGROUND_OUTPUT_TOKEN_LIMIT * 2,
     );
-    expect(args.maxOutputTokens).toBe(MAX_BACKGROUND_OUTPUT_TOKEN_LIMIT);
+    expect(args.maxOutputTokens).toBe(MAX_BACKGROUND_OUTPUT_TOKEN_LIMIT * 2);
     expect("outputTokenLimit" in args).toBe(false);
   });
 });

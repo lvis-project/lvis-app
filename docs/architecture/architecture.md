@@ -154,6 +154,35 @@ Important rules:
   the loops share the memory manager and the window-wide idle services. A
   closed tile releases its loop. See `docs/design/tiled-chat-groups.md`.
 
+A long turn is bounded from two directions, because neither the model nor the
+loop can see what the other knows. Each call carries the active vendor block's
+`outputTokenLimit` as the request's native output ceiling, so one round cannot
+generate until the provider's own maximum and spend the turn on a single call;
+it is unset by default, since the host knows no per-model ceiling and inventing
+one would truncate models it guessed low for, and an uncapped vendor is logged
+once. What is set is what is sent: the plugin-sized background bound belongs to
+the `generateText` callers that own it and is not imposed on chat. A capped call
+ends the same way a provider-capped one does — with `max_tokens` — and takes the
+same length-continuation path, so the cap adds no second truncation branch. From
+the other side, every `chat.progressNudgeRounds` assistant rounds (and early when
+tool errors pile up) the loop sends a wire-only progress notification carrying
+the round count, elapsed time and tool call/error totals, with one instruction:
+verify a completion claim by actually running something, or change approach. The
+cadence counts assistant rounds, not loop iterations — schema-drop retries and
+length continuations reuse the iteration without advancing the round — so a
+notification always falls on an ordinary round and never on a continuation,
+whose request must end with the assistant prefill. It is never written to
+history, because its numbers are true only for the round that sent it; the
+`progress.nudge` decision is where the cause is recorded instead. `0` turns it
+off.
+
+It reaches the wire through the round's single assembly point, alongside the
+reasoning-only re-prompt: every host instruction for a round shares ONE appended
+user row, because a second consecutive user row is what a chat template
+asserting role alternation rejects. The assembly point is also where each
+instruction's bookkeeping is spent, so a recorded notification always
+corresponds to one the model was actually handed.
+
 ## Memory
 
 Memory is host-owned and project-aware. User preferences, long-term memories,

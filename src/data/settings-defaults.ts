@@ -41,6 +41,11 @@ export const DEFAULT_SETTINGS: AppSettings = {
     // rounds than a single-file lookup, and guessing wrong shows up as an
     // agent that stops mid-investigation with partial output.
     subAgentMaxRounds: SUBAGENT_MAX_ROUNDS_DEFAULT,
+    // Assistant rounds between host progress notifications inside one turn.
+    // Ten is short enough that a run which stopped converging is told so while
+    // it still has budget to change approach, and long enough that a normal
+    // three-or-four-round turn never sees one. `0` turns them off.
+    progressNudgeRounds: 10,
   },
   a2aRemote: {
     routeControlBaseUrl: "",

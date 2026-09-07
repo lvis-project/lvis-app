@@ -242,6 +242,28 @@ export interface ChatSettings {
    * Settings is the number that runs.
    */
   subAgentMaxRounds: number;
+  /**
+   * How many assistant rounds pass between host progress notifications inside
+   * one turn. `0` turns them off.
+   *
+   * A long agentic turn has no notion of its own budget: the model cannot see
+   * how many rounds it has spent, how long it has run, or how many of its tool
+   * calls failed, so a run that is not converging keeps announcing a next step
+   * until an external deadline cuts it off mid tool-call. The notification
+   * supplies exactly those three numbers plus one instruction, and is the only
+   * thing in the turn that can say "this approach is not working".
+   *
+   * The notification itself is wire-only and is never written to the session,
+   * because its numbers are true only for the round that sent it. The visible
+   * consequence is that a reloaded transcript can show the model answering it —
+   * "I have run N rounds, so let me verify" — with no row explaining why; the
+   * `progress.nudge` decision on the turn is where the cause is recorded.
+   *
+   * There is deliberately no Settings control. The cadence is a policy knob for
+   * benchmark and evaluation runs rather than a preference a user forms while
+   * chatting, and a control implies a choice worth making mid-conversation.
+   */
+  progressNudgeRounds: number;
 }
 
 export interface A2ARemoteTargetSettings {

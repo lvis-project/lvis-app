@@ -14,6 +14,7 @@ import { basename, join } from "node:path";
 import {
   EXEC_USAGE_EXIT_CODE,
   execModeRequested,
+  execTurnRequested,
   parseExecFlags,
   runExecTurn,
   type ExecDeps,
@@ -149,6 +150,26 @@ describe("execModeRequested", () => {
     ["--executable"],
   ])("is false for %s alone", (flag) => {
     expect(execModeRequested(["electron", "main.js", flag])).toBe(false);
+  });
+});
+
+describe("execTurnRequested", () => {
+  it.each([["--exec"], ["--exec=say hi"], ["--exec=-"]])(
+    "is true for %s",
+    (flag) => {
+      expect(execTurnRequested(["electron", "main.js", flag])).toBe(true);
+    },
+  );
+
+  it.each([
+    ["--set-secret"],
+    ["--set-secret=llm.apiKey.claude"],
+    ["--exec-cwd=/tmp"],
+    ["--executable"],
+  ])("is false for %s alone", (flag) => {
+    // The secret writer is headless but runs no model and builds no prompt, so
+    // it is not a turn — the two questions have to stay separable.
+    expect(execTurnRequested(["electron", "main.js", flag])).toBe(false);
   });
 });
 
