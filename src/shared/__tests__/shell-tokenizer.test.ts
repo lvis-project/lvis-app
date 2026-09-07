@@ -234,3 +234,45 @@ describe("tokenizeShell — heredoc bodies are not commands", () => {
     expect(leaves[0]!.hasInputRedirect).toBe(true);
   });
 });
+
+describe("redactHeredocBodies — comments", () => {
+  it("does not open a heredoc from a `<<` inside a comment", () => {
+    // bash runs line 2 here; treating the comment's `<<'X'` as a real opener
+    // deleted line 2 from every caller's view of the command.
+    const command = "echo hi # <<'X'\ncat /etc/shadow\nX";
+    expect(redactHeredocBodies(command)).toBe(command);
+  });
+
+  it("ignores a `<<` in a whole-line comment and in a `<<-` comment", () => {
+    const whole = "# <<'X'\ncat /etc/shadow\nX";
+    expect(redactHeredocBodies(whole)).toBe(whole);
+    const dash = "echo hi # <<-'X'\ncat /etc/shadow\nX";
+    expect(redactHeredocBodies(dash)).toBe(dash);
+  });
+
+  it("treats a mid-token `#` as text, not as a comment", () => {
+    // A URL fragment is part of the argument. If this started a comment, the
+    // heredoc that follows would stop being redacted.
+    const command = "curl http://example.test/x#frag <<'A'\nbody\nA\nls";
+    expect(redactHeredocBodies(command)).toBe("curl http://example.test/x#frag <<'A'\nls");
+  });
+
+  it("still consumes a body for a heredoc opened before a trailing comment", () => {
+    const command = "cat <<'A' # note\nbody\nA\nls";
+    expect(redactHeredocBodies(command)).toBe("cat <<'A' # note\nls");
+  });
+});
+
+describe("tokenizeShell — input redirect sources", () => {
+  it("reports the source of a `<` redirect", () => {
+    const { leaves } = tokenizeShell("tr -d x < ./key");
+    expect(leaves[0]!.inputRedirectTargets).toEqual(["./key"]);
+    expect(leaves[0]!.argv).toEqual(["tr", "-d", "x"]);
+  });
+
+  it("does not report a heredoc delimiter as a file", () => {
+    const { leaves } = tokenizeShell("cat <<'EOF'\nbody\nEOF");
+    expect(leaves[0]!.hasInputRedirect).toBe(true);
+    expect(leaves[0]!.inputRedirectTargets).toEqual([]);
+  });
+});

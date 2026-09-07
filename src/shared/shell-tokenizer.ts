@@ -54,6 +54,16 @@ export interface ShellLeaf {
    * write, but they reach a file the argv-path check cannot see, so a
    * default-strict caller may still choose to treat the leaf as non-read. */
   hasInputRedirect: boolean;
+  /**
+   * Sources named by input redirects (`< file`). Reported for the same reason
+   * {@link redirectTargets} is: a containment check has to see every file the
+   * leaf reaches, and `tr -d x < ~/.ssh/id_rsa` names that file nowhere else.
+   * The source word was previously consumed and discarded, which left a flat
+   * whole-command scan as the only layer able to see it.
+   *
+   * A heredoc's delimiter word is NOT collected — it names no file.
+   */
+  inputRedirectTargets: string[];
   /** True when the leaf contained `$(...)` or backtick command substitution. */
   hasCommandSubstitution: boolean;
   /** True when the leaf contained `<(...)` or `>(...)` process substitution. */
@@ -179,6 +189,24 @@ export function tokenizeShell(command: string): TokenizeResult {
  * NOT a relaxation of the read/write classifier: `<<` is an input redirect, and
  * {@link ShellLeaf.hasInputRedirect} on the consuming leaf already makes the
  * whole command non-read regardless of what the body says.
+ *
+ * WHAT DEPENDS ON THAT LAST CLAIM. This runs inside {@link tokenizeShell}, so
+ * BOTH of the tokenizer's callers stop seeing heredoc bodies: the leaf guard in
+ * `src/main/bash-ast-validator.ts` and the read verdict in
+ * `src/permissions/reviewer/host-risk-inspector.ts`. Neither loses coverage
+ * today — the AST validator also matches its dangerous-command patterns against
+ * the RAW command string, which still contains the body (`sh <<'EOF'` carrying
+ * `rm -rf /` is refused by the raw-string layer, not the leaf guard), and the
+ * read verdict fails closed on `hasInputRedirect` before it ever looks at what
+ * the body says. Both of those are load-bearing for this redaction being safe.
+ * If either is ever narrowed — the raw-string patterns replaced by leaf-only
+ * matching, or `hasInputRedirect` stopped being disqualifying — a heredoc body
+ * becomes unexamined and this function has to grow a way to hand the body back.
+ *
+ * A `#` comment is honoured, and that is a security property rather than a
+ * nicety: a `<<'X'` written inside a comment opens no heredoc in bash, so
+ * treating it as one would erase every following line up to `X` from the scan
+ * while the shell went on running those lines.
  */
 export function redactHeredocBodies(command: string): string {
   if (!command.includes("<<")) return command;
@@ -215,6 +243,18 @@ export function redactHeredocBodies(command: string): string {
       i = close + 1;
       continue;
     }
+    // A `#` that starts a word begins a comment that runs to end of line. The
+    // preceding-character test is what separates it from a `#` INSIDE a word,
+    // where it is ordinary text — `curl http://example.test/x#frag` is one
+    // argument, not a comment. The newline is left for the loop below, so a
+    // heredoc opened earlier on this line still gets its body consumed.
+    if (ch === "#" && startsShellComment(command, i)) {
+      const newline = command.indexOf("\n", i);
+      const end = newline === -1 ? n : newline;
+      out += command.slice(i, end);
+      i = end;
+      continue;
+    }
     // `<<` heredoc, but NOT `<<<` (a here-STRING, whose operand is one word on
     // the same line and therefore has no body to remove).
     if (ch === "<" && command[i + 1] === "<" && command[i + 2] !== "<") {
@@ -244,6 +284,18 @@ export function redactHeredocBodies(command: string): string {
     i += 1;
   }
   return out;
+}
+
+/**
+ * True when the `#` at `index` begins a comment rather than sitting inside a
+ * word. Bash starts a comment only where a word could start: at the beginning
+ * of the input, or after whitespace or one of the operators that end a word.
+ */
+function startsShellComment(command: string, index: number): boolean {
+  if (index === 0) return true;
+  const previous = command[index - 1]!;
+  return previous === " " || previous === "\t" || previous === "\n" || previous === "\r"
+    || previous === ";" || previous === "&" || previous === "|" || previous === "(";
 }
 
 /**
@@ -640,6 +692,7 @@ function buildLeaf(raw: RawLeaf): ShellLeaf {
   const argvWords: string[] = [];
   const argvWordsExpandable: boolean[] = [];
   const redirectTargets: string[] = [];
+  const inputRedirectTargets: string[] = [];
   let hasOutputRedirect = false;
   let hasInputRedirect = false;
   let hasCommandSubstitution = false;
@@ -665,9 +718,14 @@ function buildLeaf(raw: RawLeaf): ShellLeaf {
         }
       } else {
         hasInputRedirect = true;
-        // Input redirects: consume the source word so it is not mistaken for argv.
+        // Input redirects: consume the source word so it is not mistaken for
+        // argv, and REPORT it. Consuming it silently made the file unreachable
+        // to any caller reading leaves — `tr -d x < key` names it nowhere else.
+        // A heredoc's delimiter is not a file, so it is consumed but not
+        // reported.
         const src = words[i + 1];
         if (src && !src.isRedirectOperator) {
+          if (w.value !== "<<") inputRedirectTargets.push(src.value);
           if (src.hasCommandSubstitution) hasCommandSubstitution = true;
           if (src.hasProcessSubstitution) hasProcessSubstitution = true;
           i += 1;
@@ -687,6 +745,7 @@ function buildLeaf(raw: RawLeaf): ShellLeaf {
     // construction rather than by a second pass that could drift from it.
     argvHasExpandableDollar: argvWordsExpandable.slice(argvStart),
     redirectTargets,
+    inputRedirectTargets,
     hasOutputRedirect,
     hasInputRedirect,
     hasCommandSubstitution,

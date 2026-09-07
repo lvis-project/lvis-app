@@ -9,6 +9,7 @@ import {
   caseFoldForMatch,
   isSensitivePath,
 } from "../permissions/sensitive-paths.js";
+import { sedScriptHasWriteOrExec } from "../permissions/reviewer/host-risk-inspector.js";
 import { errorMessage } from "../shared/error-message.js";
 import { expandLeadingTilde } from "../shared/home-tilde.js";
 
@@ -259,12 +260,17 @@ function findCwdAwareLeafViolation(
 
   let current = cwd;
   for (const leaf of leaves) {
-    // Redirect targets are always files, whatever the verb is, so they are
-    // never eligible for the non-path-operand skip below.
-    const nonPathArgv = nonPathOperandIndices(leaf.argv);
+    // Redirect targets on BOTH sides are files whatever the verb is, so they
+    // are never eligible for the non-path-operand skip. Input sources matter as
+    // much as output ones: `tr -d x < key` reaches a file that appears in no
+    // argv position at all.
+    const slots = classifyOperandSlots(leaf.argv);
+    const nonPathArgv = slots.nonPathIndices;
     const operands = [
       ...leaf.argv.filter((_, index) => !nonPathArgv.has(index)),
+      ...slots.extraCandidates,
       ...leaf.redirectTargets,
+      ...leaf.inputRedirectTargets,
     ];
     // `/`-only basename reduction, matching the risk classifier — the two must
     // agree on what verb a leaf runs. A Windows-style `C:\\tools\\cd` is not
@@ -489,23 +495,37 @@ interface NonPathOperandSpec {
   firstPositionalIsProgram?: true;
   /** Options that supply the program elsewhere, freeing the first positional to be a path again. */
   programSuppliedBy?: ReadonlySet<string>;
-  /** True when the command opens no operand at all — every argument is data. */
-  everyArgumentIsData?: true;
+  /**
+   * Decline the exemption when the value is a BARE path — one word, shaped like
+   * a path. Set for slots whose value the command will open or execute if it
+   * happens to be one: `sh -c /etc/evil.sh` runs that file, and a grep pattern
+   * that is a lone path is the same string a filename operand would be.
+   *
+   * NOT set for `sed`/`awk`, where a lone `/…/` is address or regex syntax and
+   * declining would refuse `sed -e '/^class/p'`. Their real file access is
+   * covered instead by {@link sedScriptHasWriteOrExec} and, for awk, by awk
+   * being excluded from the read-only verb set so every call is reviewed.
+   */
+  declineBarePathValue?: true;
 }
 
 const INTERPRETER_CODE_OPTIONS = new Set(["-c", "--command", "-e", "--eval", "-E", "--exec"]);
 /** perl/ruby cluster options ending in `e` take the program as the next word (`-ne`, `-lpe`). */
 const PERL_CLUSTERED_CODE_OPTION = /^-[A-Za-z]*[eE]$/;
 
-const NON_PATH_OPERAND_SPECS: ReadonlyMap<string, NonPathOperandSpec> = new Map([
+const NON_PATH_OPERAND_SPECS: ReadonlyMap<string, NonPathOperandSpec> = new Map<string, NonPathOperandSpec>([
   // Interpreters: `-c`/`-e` carry a program in the language, not a path.
   ...(["python", "python2", "python3", "node", "deno", "bun", "php", "sh", "bash", "zsh",
     "dash", "ksh", "osascript", "lua", "rscript", "r"] as const)
-    .map((verb) => [verb, { valueOptions: INTERPRETER_CODE_OPTIONS }] as const),
+    .map((verb) => [verb, {
+      valueOptions: INTERPRETER_CODE_OPTIONS,
+      declineBarePathValue: true,
+    }] as [string, NonPathOperandSpec]),
   ...(["perl", "ruby"] as const).map((verb) => [verb, {
     valueOptions: INTERPRETER_CODE_OPTIONS,
     clusteredCodeOption: PERL_CLUSTERED_CODE_OPTION,
-  }] as const),
+    declineBarePathValue: true,
+  }] as [string, NonPathOperandSpec]),
   // awk: the program is the first positional unless `-f` names a program FILE
   // (which is a path, and stays one). `-v`/`-F` carry assignments and field
   // separators.
@@ -515,12 +535,12 @@ const NON_PATH_OPERAND_SPECS: ReadonlyMap<string, NonPathOperandSpec> = new Map(
   ...(["awk", "gawk", "mawk", "nawk"] as const).map((verb) => [verb, {
     valueOptions: new Set(["-F", "--field-separator", "--source"]),
     pathValueOptions: new Set(["-v", "--assign", "-f", "--file"]),
-    firstPositionalIsProgram: true as const,
+    firstPositionalIsProgram: true,
     programSuppliedBy: new Set(["-f", "--file", "--source"]),
-  }] as const),
+  }] as [string, NonPathOperandSpec]),
   ["sed", {
     valueOptions: new Set(["-e", "--expression"]),
-    firstPositionalIsProgram: true as const,
+    firstPositionalIsProgram: true,
     programSuppliedBy: new Set(["-e", "--expression", "-f", "--file"]),
   }],
   // grep-family: the first positional is the PATTERN; `--include`/`--exclude`
@@ -531,28 +551,30 @@ const NON_PATH_OPERAND_SPECS: ReadonlyMap<string, NonPathOperandSpec> = new Map(
       "-e", "--regexp", "-g", "--glob",
       "--include", "--exclude", "--include-dir", "--exclude-dir",
     ]),
-    firstPositionalIsProgram: true as const,
+    firstPositionalIsProgram: true,
     programSuppliedBy: new Set(["-e", "--regexp", "-f", "--file"]),
-  }] as const),
+    declineBarePathValue: true,
+  }] as [string, NonPathOperandSpec]),
   ["curl", { valueOptions: new Set(["-w", "--write-out", "-H", "--header"]) }],
   // Only `-subj`. openssl's passphrase options accept a `file:` source, so
   // their values can name a path and stay checked.
   ["openssl", { valueOptions: new Set(["-subj"]) }],
-  // echo and tr never open an operand — echo writes its arguments to stdout, tr
-  // maps character sets and reads only stdin. A redirect target beside them is
-  // a separate operand and is still checked.
-  ["echo", { everyArgumentIsData: true }],
-  ["tr", { everyArgumentIsData: true }],
+  // `echo` and `tr` are deliberately ABSENT, though neither opens an operand
+  // itself. Their arguments become the NEXT process's operands across a pipe or
+  // a substitution — `echo /etc/shadow | xargs cat` opens the file `echo` only
+  // printed — and this policy cannot see where a stream ends up. Exempting them
+  // bought one measured command and cost that whole class.
   // printf's first positional is the FORMAT string; the arguments it formats
-  // follow it and are checked normally.
-  ["printf", { firstPositionalIsProgram: true }],
+  // follow it and are checked normally. A format that is a bare path is
+  // declined for the same pipe reason.
+  ["printf", { firstPositionalIsProgram: true, declineBarePathValue: true }],
   // Format-string options. A format carries `%` placeholders and `\n` escapes,
   // and the `\` is enough to make the token look like a Windows path.
   ["stat", { valueOptions: new Set(["-c", "--format", "--printf"]) }],
   ["dpkg-query", { valueOptions: new Set(["-f", "--showformat"]) }],
   ...(["identify", "convert", "magick"] as const).map((verb) => [verb, {
     valueOptions: new Set(["-format"]),
-  }] as const),
+  }] as [string, NonPathOperandSpec]),
 ]);
 
 /**
@@ -569,14 +591,30 @@ const LEADING_SHELL_KEYWORDS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Indices in `argv` (`argv[0]` is the head verb) that hold code, a pattern or a
- * format rather than a path.
+ * The result of reading a leaf's argument vector for path-operand purposes.
+ */
+interface OperandSlotClassification {
+  /** Indices in `argv` that hold code, a pattern or a format rather than a path. */
+  nonPathIndices: ReadonlySet<number>;
+  /**
+   * Paths recovered from INSIDE an operand that is otherwise not one. A sed
+   * script is a single token, so the filename in `1r /etc/shadow` is reachable
+   * no other way.
+   */
+  extraCandidates: readonly string[];
+}
+
+/**
+ * Read `argv` (`argv[0]` is the head verb) and say which slots are not paths,
+ * plus any path recovered from inside one that is not.
  *
  * `--` ends option parsing, so everything after it is positional — which is how
  * `grep -- -pattern file` keeps naming its file.
  */
-function nonPathOperandIndices(argv: readonly string[]): ReadonlySet<number> {
+function classifyOperandSlots(argv: readonly string[]): OperandSlotClassification {
   const skip = new Set<number>();
+  const extraCandidates: string[] = [];
+  const empty = { nonPathIndices: skip, extraCandidates };
   let verbIndex = 0;
   while (
     verbIndex < argv.length
@@ -585,13 +623,38 @@ function nonPathOperandIndices(argv: readonly string[]): ReadonlySet<number> {
     verbIndex += 1;
   }
   const head = argv[verbIndex];
-  if (head === undefined) return skip;
-  const spec = NON_PATH_OPERAND_SPECS.get(stripCommandPath(head).toLowerCase());
-  if (!spec) return skip;
-  if (spec.everyArgumentIsData) {
-    for (let i = verbIndex + 1; i < argv.length; i += 1) skip.add(i);
-    return skip;
-  }
+  if (head === undefined) return empty;
+  const verb = stripCommandPath(head).toLowerCase();
+  const spec = NON_PATH_OPERAND_SPECS.get(verb);
+  if (!spec) return empty;
+  const isSed = verb === "sed";
+
+  /**
+   * Decide one candidate exemption. Returns false — meaning "keep checking this
+   * as a path" — for a value the command would open or execute even though the
+   * slot usually holds code.
+   */
+  const exempts = (value: string): boolean => {
+    // `@` is the "contents of this file" sigil several of these options accept
+    // (`curl -w @format`); a value wearing it names a path.
+    if (isFileSigilValue(value)) return false;
+    // A one-word value shaped like a path IS one for slots that execute or open
+    // what they are given: `sh -c /etc/evil.sh` runs that file.
+    if (spec.declineBarePathValue && isBarePathValue(value)) return false;
+    // A sed script with a file-access command letter (`r R w W`, `s///w`,
+    // `s///e`) reads or writes the operand after the letter. The letters are
+    // recognised by the host's own sed scanner rather than a second copy of it;
+    // the operand is then recovered by word-splitting, which is safe here
+    // BECAUSE the scanner already said this script touches files.
+    if (isSed && sedScriptHasWriteOrExec(value)) {
+      for (const word of value.split(/\s+/)) {
+        if (word.length > 0) extraCandidates.push(word);
+      }
+      return false;
+    }
+    return true;
+  };
+
   let programTaken = spec.firstPositionalIsProgram !== true;
   let optionsEnded = false;
   for (let i = verbIndex + 1; i < argv.length; i += 1) {
@@ -615,24 +678,34 @@ function nonPathOperandIndices(argv: readonly string[]): ReadonlySet<number> {
       if (!carriesCode) continue;
       if (equals > 0) {
         // `--opt=value` — the value never becomes its own token.
-        if (!isFileSigilValue(token.slice(equals + 1))) skip.add(i);
+        if (exempts(token.slice(equals + 1))) skip.add(i);
         continue;
       }
       if (i + 1 < argv.length) {
-        // `@` is the "read this from a file" sigil several of these options
-        // accept (`curl -w @format`). A value wearing it names a path, so the
-        // exemption does not apply to it.
-        if (!isFileSigilValue(argv[i + 1]!)) skip.add(i + 1);
+        if (exempts(argv[i + 1]!)) skip.add(i + 1);
         i += 1;
       }
       continue;
     }
     if (!programTaken) {
-      skip.add(i);
+      if (exempts(token)) skip.add(i);
       programTaken = true;
     }
   }
-  return skip;
+  return { nonPathIndices: skip, extraCandidates };
+}
+
+/**
+ * True when a value is a lone word shaped like a path — no whitespace, and
+ * path-shaped as a whole.
+ *
+ * The whitespace test is what keeps a real program out of this: `python3 -c
+ * "import os; print(os.sep)"` and `sed -n '/a b/,/c d/p'` are prose with a
+ * slash in them, while `/etc/evil.sh` is a filename and nothing else.
+ */
+function isBarePathValue(value: string): boolean {
+  const trimmed = value.trim();
+  return trimmed.length > 0 && !/\s/.test(trimmed) && hasPathShape(trimmed);
 }
 
 /** True when a value carries the `@`-prefixed "contents of this file" sigil. */
@@ -894,11 +967,14 @@ function extractPathCandidates(command: string): string[] {
   for (const segment of splitCommandSegments(command)) {
     const tokens = tokenizeCommand(segment);
     const headIndex = tokens.findIndex((token) => !isAssignmentToken(token));
-    const nonPath = headIndex < 0
+    const slots = headIndex < 0 ? undefined : classifyOperandSlots(tokens.slice(headIndex));
+    const nonPath = slots === undefined
       ? new Set<number>()
-      : new Set(
-          [...nonPathOperandIndices(tokens.slice(headIndex))].map((index) => index + headIndex),
-        );
+      : new Set([...slots.nonPathIndices].map((index) => index + headIndex));
+    for (const part of slots?.extraCandidates ?? []) {
+      const normalized = normalizeCandidate(part);
+      if (normalized && looksLikePath(normalized)) candidates.push(normalized);
+    }
     for (let i = 0; i < tokens.length; i += 1) {
       if (nonPath.has(i)) continue;
       for (const part of splitCandidateParts(tokens[i]!)) {

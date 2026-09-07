@@ -698,7 +698,17 @@ function hasMutatingSedProgram(args: readonly string[]): boolean {
   return expressionExpected;
 }
 
-function sedScriptHasWriteOrExec(script: string): boolean {
+/**
+ * True when a sed SCRIPT contains a command that reaches the filesystem or a
+ * shell: `r`/`R` read a file in, `w`/`W` write one out, `e` and the `s///e`
+ * flag execute, and `s///w` writes.
+ *
+ * Exported because the shell path policy needs the same answer before it may
+ * treat a sed script as inert program text, and a second implementation of a
+ * sed-command scanner would be a second opinion about what `1r /etc/shadow`
+ * means. One walker, two callers.
+ */
+export function sedScriptHasWriteOrExec(script: string): boolean {
   let i = 0;
   while (i < script.length) {
     i = skipSedSeparators(script, i);

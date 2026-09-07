@@ -231,7 +231,6 @@ describe("shell-path-policy", () => {
     { label: "quoted heredoc body with a division slash", command: "python3 - <<'EOF'\nnstep = int(2.0 / 0.002)\nprint(nstep)\nEOF" },
     { label: "quoted heredoc body with a comment slash", command: "cat > ./t.js <<'EOF'\n// spawn the child\nconst p = 1;\nEOF" },
     { label: "quoted heredoc body naming a traversal verb", command: "python3 - <<'EOF'\n# find a cert that verifies the host\nprint('ok')\nEOF" },
-    { label: "loop keyword in front of the verb", command: `for d in a b; do echo "=== $d/log ==="; done` },
     { label: "identify format string", command: `identify -format "%w %h %b\\n" ./a.jpg` },
     { label: "dpkg-query format string", command: `dpkg-query -W -f '\${Package} \${Version}\\n'` },
   ];
@@ -313,10 +312,17 @@ describe("shell-path-policy", () => {
     withRoot((root) => {
       // The substitution's output is the operand; what it will name is unknown
       // until the shell runs it, so calling it "a command we inspected" would
-      // hand `cat` an unchecked path.
+      // hand `cat` an unchecked path. Two layers refuse these now — the
+      // recursive pass reads the substitution as a command and judges the path
+      // inside it, and the shape rule refuses the operand for being a
+      // substitution at all — so the assertion is on the refusal, not on which
+      // of them spoke first.
       expect(validateShellCommandPathPolicy(`cat $(echo /etc/passwd)`, root, root, []))
-        .toContain("unresolved command substitution");
+        .not.toBeNull();
       expect(validateShellCommandPathPolicy("cat `echo /etc/passwd`", root, root, []))
+        .not.toBeNull();
+      // With a body that names no path, only the shape rule can speak.
+      expect(validateShellCommandPathPolicy("cat `whoami`", root, root, []))
         .toContain("unresolved command substitution");
     });
   });
@@ -367,6 +373,120 @@ describe("shell-path-policy", () => {
         .toContain("Sensitive path:");
       expect(validateShellCommandPathPolicy(`curl --write-out=@${key} https://example.test/`, root, root, []))
         .toContain("Sensitive path:");
+    });
+  });
+
+  /**
+   * Bypasses found by a differential security review of this change, each
+   * asserted on the exact string that got through. All of them were DENY on
+   * main and became ALLOW under an earlier revision of the exemptions; the
+   * shapes they exploit are the reason the rules below them look the way they
+   * do.
+   */
+  describe("closed bypasses", () => {
+    it("does not let a `#`-commented heredoc opener erase the lines after it", () => {
+      withRoot((root) => {
+        // bash never opens a heredoc here — the `<<'X'` is inside a comment — so
+        // line 2 really runs. Treating it as a heredoc deleted line 2 from the
+        // scan entirely.
+        expect(validateShellCommandPathPolicy("echo hi # <<'X'\ncat /etc/shadow\nX", root, root, []))
+          .toContain("Sensitive path:");
+        expect(validateShellCommandPathPolicy("# <<'X'\ncat /etc/shadow\nX", root, root, []))
+          .toContain("Sensitive path:");
+        expect(validateShellCommandPathPolicy("echo hi # <<-'X'\ncat /etc/shadow\nX", root, root, []))
+          .toContain("Sensitive path:");
+      });
+    });
+
+    it("still treats a mid-token `#` as text, not as a comment", () => {
+      withRoot((root) => {
+        // A URL fragment is one argument. If `#` were a comment anywhere, the
+        // rest of the command would stop being scanned.
+        expect(validateShellCommandPathPolicy("curl http://example.test/x#frag", root, root, []))
+          .toBeNull();
+        expect(validateShellCommandPathPolicy("cat ./a#b.txt /etc/shadow", root, root, []))
+          .toContain("Sensitive path:");
+      });
+    });
+
+    it("checks the source of an input redirect, which appears in no argv slot", () => {
+      withRoot((root) => {
+        const key = join(homedir(), ".ssh", "id_rsa");
+        expect(validateShellCommandPathPolicy(`tr -d x < ${key}`, root, root, []))
+          .toContain("Sensitive path:");
+        expect(validateShellCommandPathPolicy("echo x < /etc/shadow", root, root, []))
+          .toContain("Sensitive path:");
+        expect(validateShellCommandPathPolicy("cat < /etc/shadow", root, root, []))
+          .toContain("Sensitive path:");
+      });
+    });
+
+    it("checks echo and tr arguments, which become the next process's operands", () => {
+      withRoot((root) => {
+        const key = join(homedir(), ".ssh", "id_rsa");
+        // echo opens nothing itself. What it prints is opened one pipe later,
+        // and this policy cannot follow a stream to its consumer.
+        expect(validateShellCommandPathPolicy("echo /etc/shadow | xargs cat", root, root, []))
+          .toContain("Sensitive path:");
+        expect(validateShellCommandPathPolicy(`echo ${key} | xargs cat`, root, root, []))
+          .toContain("Sensitive path:");
+        expect(validateShellCommandPathPolicy("LC_ALL=C echo /etc/shadow", root, root, []))
+          .toContain("Sensitive path:");
+        expect(validateShellCommandPathPolicy("for f in a; do echo /etc/shadow; done", root, root, []))
+          .toContain("Sensitive path:");
+        expect(validateShellCommandPathPolicy("tr a b > /etc/passwd", root, root, []))
+          .toContain("Sandbox:");
+      });
+    });
+
+    it("recovers the file operand from a sed script that reads or writes one", () => {
+      withRoot((root) => {
+        // `r R w W`, `s///w` and `s///e` reach the filesystem from inside what
+        // otherwise looks like inert program text.
+        expect(validateShellCommandPathPolicy("sed '1r /etc/shadow' notes.txt", root, root, []))
+          .toContain("Sensitive path:");
+        expect(validateShellCommandPathPolicy("sed '1R /etc/shadow' notes.txt", root, root, []))
+          .toContain("Sensitive path:");
+        expect(validateShellCommandPathPolicy("sed -e '/x/W /etc/cron.d/x' notes.txt", root, root, []))
+          .toContain("Sandbox:");
+        expect(validateShellCommandPathPolicy("sed 's/a/b/w /etc/cron.d/x' notes.txt", root, root, []))
+          .toContain("Sandbox:");
+      });
+    });
+
+    it("checks a bare path handed to a code slot, which the command executes", () => {
+      withRoot((root) => {
+        expect(validateShellCommandPathPolicy("sh -c /etc/evil.sh", root, root, []))
+          .toContain("Sandbox:");
+        expect(validateShellCommandPathPolicy("bash --command=/etc/evil.sh", root, root, []))
+          .toContain("Sandbox:");
+        expect(validateShellCommandPathPolicy("node --eval=/etc/passwd", root, root, []))
+          .toContain("Sandbox:");
+        expect(validateShellCommandPathPolicy("python3 -c=/etc/passwd", root, root, []))
+          .toContain("Sandbox:");
+      });
+    });
+
+    it("checks a bare path handed to a grep pattern slot", () => {
+      withRoot((root) => {
+        expect(validateShellCommandPathPolicy("grep -- /etc/passwd notes.txt", root, root, []))
+          .toContain("Sandbox:");
+        expect(validateShellCommandPathPolicy("grep --regexp=/etc/passwd notes.txt", root, root, []))
+          .toContain("Sandbox:");
+        // A pattern that is not path-shaped keeps its exemption.
+        expect(validateShellCommandPathPolicy("grep needle notes.txt", root, root, []))
+          .toBeNull();
+      });
+    });
+
+    it("keeps echo arguments refused even when they only look like a path", () => {
+      withRoot((root) => {
+        // The cost of the rule above: echo data carrying an unexpanded variable
+        // is refused as a dynamic path, exactly as main refused it. Exempting
+        // echo bought this one shape and cost the whole pipe class.
+        expect(validateShellCommandPathPolicy(`for d in a b; do echo "=== $d/log ==="; done`, root, root, []))
+          .toContain("unresolved shell variable");
+      });
     });
   });
 
