@@ -1119,6 +1119,11 @@ projection 이 preflight 의 25% 만큼 더 증가하기 전까지 재시도하�
 
 **Context window 출처 (우선순위)**: preflight threshold 의 분모가 되는 context window 는
 `resolveModelContextWindow` (`src/shared/context-budget.ts`) 가 단일 결정한다.
+활성 route 의 값은 `resolveContextWindowForRoute` 가 settings snapshot 하나에서
+읽어내며, 엔진의 compaction 예산과 렌더러의 context-fill ring (`useContextBudget`)
+이 **같은 숫자**를 쓴다. Ring 은 이 값을 IPC settings snapshot 을 통해 전달받아
+`getUsableContext` 만 적용하고, 창 크기를 스스로 다시 조회하지 않는다 (두 번 조회하면
+게이트웨이가 229,376 을 보고한 모델을 ring 만 128K 로 표시하게 된다).
 (1) `llm.vendors.<vendor>.contextWindow` — 사용자가 명시한 값,
 (2) provider 가 `/v1/models` 에서 보고한 값 (`context_length` / `max_input_tokens` / `max_model_len`;
     `max_output_tokens` 도 함께 보관된다),

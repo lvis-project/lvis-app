@@ -9,6 +9,9 @@ import { describe, expect, it } from "vitest";
 import { renderHook } from "@testing-library/react";
 import { estimateOutgoingUserMessageTokens } from "../../../../shared/multimodal-token-estimate.js";
 import { useContextBudget } from "../use-context-budget.js";
+import { FALLBACK_PRICING } from "../../../../shared/pricing-data.js";
+import { getUsableContext, resolveContextWindowForRoute } from "../../../../shared/context-budget.js";
+import { freshAllVendorBlocks } from "../../../../shared/llm-vendor-defaults.js";
 
 describe("useContextBudget — effectiveBudget (Issue #912)", () => {
   it("uses turn_summary.tokensIn as the context-fill SOT", () => {
@@ -25,6 +28,7 @@ describe("useContextBudget — effectiveBudget (Issue #912)", () => {
             tokensOut: 4_000,
           },
         ],
+        contextWindow: 400_000,
         llmVendor: "azure-foundry",
         llmModel: "gpt-5.4-mini",
       }),
@@ -53,6 +57,7 @@ describe("useContextBudget — effectiveBudget (Issue #912)", () => {
             source: "compact-estimate",
           },
         ],
+        contextWindow: 400_000,
         llmVendor: "azure-foundry",
         llmModel: "gpt-5.4-mini",
       }),
@@ -76,6 +81,7 @@ describe("useContextBudget — effectiveBudget (Issue #912)", () => {
     const { result } = renderHook(() =>
       useContextBudget({
         entries: [{ kind: "context_usage", tokensIn: 42_000, source: "compact-estimate" }],
+        contextWindow: 400_000,
         llmVendor: "azure-foundry",
         llmModel: "gpt-5.4-mini",
         draftTokenEstimate,
@@ -87,7 +93,7 @@ describe("useContextBudget — effectiveBudget (Issue #912)", () => {
   it("uses tpmLimit when smaller than contextBudget (nano)", () => {
     // gpt-5.4-nano: contextWindow=400K, tpmDefault=200K → effectiveBudget=200K
     const { result } = renderHook(() =>
-      useContextBudget({ entries: [], llmVendor: "openai", llmModel: "gpt-5.4-nano" }),
+      useContextBudget({ entries: [], contextWindow: 400_000, llmVendor: "openai", llmModel: "gpt-5.4-nano" }),
     );
     expect(result.current.tpmLimit).toBe(200_000);
     expect(result.current.effectiveBudget).toBe(200_000);
@@ -97,7 +103,7 @@ describe("useContextBudget — effectiveBudget (Issue #912)", () => {
   it("falls back to contextBudget when tpmLimit unset (most models)", () => {
     // claude-sonnet-4-6: no tpmDefault → effectiveBudget == contextBudget
     const { result } = renderHook(() =>
-      useContextBudget({ entries: [], llmVendor: "claude", llmModel: "claude-sonnet-4-6" }),
+      useContextBudget({ entries: [], contextWindow: 1_000_000, llmVendor: "claude", llmModel: "claude-sonnet-4-6" }),
     );
     expect(result.current.tpmLimit).toBeUndefined();
     expect(result.current.effectiveBudget).toBe(result.current.contextBudget);
@@ -105,7 +111,7 @@ describe("useContextBudget — effectiveBudget (Issue #912)", () => {
 
   it("uses OpenAI model spec for Azure OpenAI deployment ids", () => {
     const { result } = renderHook(() =>
-      useContextBudget({ entries: [], llmVendor: "azure-foundry", llmModel: "gpt-5.4-mini" }),
+      useContextBudget({ entries: [], contextWindow: 400_000, llmVendor: "azure-foundry", llmModel: "gpt-5.4-mini" }),
     );
     // gpt-5.4-mini now carries tpmDefault=200K (org Tier-1, empirically grounded
     // by the indexer-turn 429); azure-foundry deployment ids inherit the full
@@ -120,10 +126,39 @@ describe("useContextBudget — effectiveBudget (Issue #912)", () => {
     // baseline contextWindow. Even if a future model registers tpmDefault
     // larger than its window, the ring stays bounded by the smaller value.
     const { result } = renderHook(() =>
-      useContextBudget({ entries: [], llmVendor: "openai", llmModel: "nonexistent-model" }),
+      useContextBudget({ entries: [], contextWindow: FALLBACK_PRICING.contextWindow, llmVendor: "openai", llmModel: "nonexistent-model" }),
     );
     // unknown model has no tpmDefault — fall through to contextBudget.
     expect(result.current.effectiveBudget).toBe(result.current.contextBudget);
+  });
+
+  it("divides by the window the route resolved, not by a second lookup of its own", () => {
+    // The engine budgets compaction against `resolveContextWindowForRoute`.
+    // A gateway-served model the pricing catalog has never heard of is exactly
+    // the case where a renderer-side lookup would answer 128K while the engine
+    // was working from the 229,376 the provider reported.
+    const vendors = freshAllVendorBlocks();
+    vendors["openai-compatible"].model = "a-model-no-catalog-knows";
+    vendors["openai-compatible"].contextWindow = 229_376;
+    const route = resolveContextWindowForRoute({
+      provider: "openai-compatible",
+      vendors,
+    });
+    expect(route).toMatchObject({ contextWindow: 229_376, source: "vendor-setting" });
+
+    const { result } = renderHook(() =>
+      useContextBudget({
+        entries: [],
+        contextWindow: route.contextWindow,
+        llmVendor: "openai-compatible",
+        llmModel: route.model,
+      }),
+    );
+
+    expect(result.current.contextBudget).toBe(getUsableContext(229_376));
+    // And a renderer-side pricing lookup would have said otherwise.
+    expect(getUsableContext(FALLBACK_PRICING.contextWindow))
+      .not.toBe(result.current.contextBudget);
   });
 
   it("does not project API context or TPM limits when the runtime has no verified usage contract", () => {
@@ -131,6 +166,7 @@ describe("useContextBudget — effectiveBudget (Issue #912)", () => {
       useContextBudget({
         entries: [],
         // These deliberately stale API values must be ignored.
+        contextWindow: 400_000,
         llmVendor: "openai",
         llmModel: "gpt-5.4-nano",
         draftTokenEstimate: 99_999,

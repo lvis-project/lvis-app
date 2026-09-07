@@ -33,31 +33,25 @@ export { countHangul, estimateTokens } from "../shared/token-estimate.js";
 // pricing and context-window data share one maintained source.
 
 /**
- * A context window a caller already resolved from a source that outranks the
- * pricing catalog — an explicit vendor setting, or the provider's own
- * `/v1/models` report. Omit both fields to ask the catalog.
- */
-export type ContextWindowInputs = {
-  configured?: number;
-  reported?: number;
-};
-
-/**
  * Model identifier → effective context window in tokens.
  *
  * "Effective" because the adapter auto-sends the `context-1m-2025-08-07`
  * beta header for any Claude model with `contextWindow1MBeta` set
  * (`engine/llm/vercel/adapter.ts`), so the beta value is what the model
  * actually delivers. {@link resolveModelContextWindow} owns that, together
- * with the two inputs that outrank the catalog and the conservative 128K
- * fallback for a model nothing knows.
+ * with the conservative 128K fallback for a model nothing knows.
+ *
+ * `resolvedContextWindow` is the window a caller resolved for the ACTIVE route
+ * through {@link resolveContextWindowForRoute}, which also consults the vendor
+ * block and the provider's own `/models` report. Callers that only know a
+ * vendor and a model omit it and get the catalog's answer.
  */
 export function getModelContextWindow(
   vendor: LLMVendor,
   model: string,
-  inputs?: ContextWindowInputs,
+  resolvedContextWindow?: number,
 ): number {
-  return resolveModelContextWindow({ vendor, model, ...inputs }).contextWindow;
+  return resolvedContextWindow ?? resolveModelContextWindow({ vendor, model }).contextWindow;
 }
 
 /**
@@ -71,9 +65,9 @@ export function getModelContextWindow(
 export function getModelUsableContext(
   vendor: LLMVendor,
   model: string,
-  inputs?: ContextWindowInputs,
+  resolvedContextWindow?: number,
 ): number {
-  return getUsableContext(getModelContextWindow(vendor, model, inputs));
+  return getUsableContext(getModelContextWindow(vendor, model, resolvedContextWindow));
 }
 
 
@@ -82,13 +76,13 @@ export function getModelUsableContext(
 export function getModelPreflightThreshold(
   vendor: LLMVendor,
   model: string,
-  inputs?: ContextWindowInputs,
+  resolvedContextWindow?: number,
 ): number {
   // Priority: runtime override (UI slider) > env var (LVIS_DEV_PREFLIGHT_OVERRIDE) > computed.
   if (_runtimePreflightOverride !== null) return _runtimePreflightOverride;
   const devOverride = readDevPreflightOverride();
   if (devOverride !== null) return devOverride;
-  const windowThreshold = getPreflightThreshold(getModelContextWindow(vendor, model, inputs));
+  const windowThreshold = getPreflightThreshold(getModelContextWindow(vendor, model, resolvedContextWindow));
 
 
   const pricing = lookupPricing(vendor, model);
@@ -112,11 +106,11 @@ export type PreflightThresholdSource =
 export function getModelPreflightThresholdSource(
   vendor: LLMVendor,
   model: string,
-  inputs?: ContextWindowInputs,
+  resolvedContextWindow?: number,
 ): PreflightThresholdSource {
   if (_runtimePreflightOverride !== null) return "runtime-override";
   if (readDevPreflightOverride() !== null) return "dev-env-override";
-  const windowThreshold = getPreflightThreshold(getModelContextWindow(vendor, model, inputs));
+  const windowThreshold = getPreflightThreshold(getModelContextWindow(vendor, model, resolvedContextWindow));
   const pricing = lookupPricing(vendor, model);
   if (typeof pricing.tpmDefault === "number" && pricing.tpmDefault > 0) {
     const tpmThreshold = Math.floor(pricing.tpmDefault * 0.8);

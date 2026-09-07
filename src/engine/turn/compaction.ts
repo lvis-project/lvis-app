@@ -7,7 +7,7 @@
  * this-shaped param — all mutable compaction state stays on the instance.
  */
 import type { ConversationLoop } from "../conversation-loop.js";
-import type { GenericMessage, LLMVendor, MessageMeta } from "../llm/types.js";
+import type { GenericMessage, MessageMeta } from "../llm/types.js";
 import type {
   CompactTriggerSource,
   PreflightGuardOptions,
@@ -21,17 +21,15 @@ import {
   getModelPreflightThreshold,
   getModelPreflightThresholdSource,
   getModelUsableContext,
-  type ContextWindowInputs,
   type PreflightThresholdSource,
 } from "../auto-compact.js";
 import { t } from "../../i18n/index.js";
 import { createLogger } from "../../lib/logger.js";
-import { activeLlmRouteModel, getLlmVendorSettings } from "../../shared/llm-vendor-defaults.js";
-import { cachedModelListEntry } from "../../shared/llm-model-list.js";
 import { FALLBACK_PRICING } from "../../shared/pricing-data.js";
 import {
   getPreflightThreshold,
   getUsableContext,
+  resolveContextWindowForRoute,
   resolveModelContextWindow,
   type ContextWindowSource,
 } from "../../shared/context-budget.js";
@@ -86,48 +84,6 @@ function warnFallbackContextWindowOnce(identity: string, model: string): void {
     `context budget: no context window known for model '${model}' — using the ${FALLBACK_PRICING.contextWindow}-token fallback. `
     + `Declare the endpoint's real capacity as llm.vendors.<vendor>.contextWindow, or sync the provider's model list so it can report one.`,
   );
-}
-
-/**
- * The two inputs that outrank the pricing catalog for the active API-key route:
- * what the user declared on the vendor block, and what the provider said about
- * this model in its own `/models` handshake.
- *
- * The reported half is an external value. A route with no handshake in the
- * cache, a handshake that predates entry metadata, or a catalogue that does not
- * list the configured model all yield `undefined` here, which simply moves the
- * question to the next source.
- */
-function contextWindowInputsForRoute(
-  self: ConversationLoop,
-  provider: LLMVendor,
-  model: string,
-): { inputs: ContextWindowInputs; maxOutputTokens?: number } {
-  const llm = self.deps.settingsService.get("llm");
-  const block = getLlmVendorSettings(llm.vendors, provider);
-  const presetId = provider === "openai-compatible"
-    ? llm.marketplaceProviderPresetId?.trim()
-    : undefined;
-  const preset = presetId
-    ? (self.deps.settingsService.get("marketplace").installedProviderPresets ?? [])
-      .find((installed) => installed.providerId === presetId)
-    : undefined;
-  // The cache is keyed by the address the settings row actually synced, which
-  // for a preset is the preset's own endpoint rather than the generic
-  // custom-provider block's.
-  const entry = cachedModelListEntry(llm.modelListCache, {
-    vendor: provider,
-    model,
-    baseUrl: preset?.baseUrl ?? block.baseUrl,
-    ...(presetId ? { credentialScope: presetId } : {}),
-  });
-  return {
-    inputs: {
-      ...(block.contextWindow !== undefined ? { configured: block.contextWindow } : {}),
-      ...(entry?.contextLength !== undefined ? { reported: entry.contextLength } : {}),
-    },
-    ...(entry?.maxOutputTokens !== undefined ? { maxOutputTokens: entry.maxOutputTokens } : {}),
-  };
 }
 
 function safeReportedContextBudget(
@@ -216,19 +172,26 @@ export function contextBudgetForCurrentRuntime(self: ConversationLoop): RuntimeC
 
   const llmSettings = self.deps.settingsService.get("llm");
   const provider = llmSettings.provider;
-  const model = activeLlmRouteModel(llmSettings);
+  // The same resolution the renderer's context-fill ring divides by, off the
+  // same settings. Engine and UI cannot disagree about the window because
+  // neither of them decides it.
+  const route = resolveContextWindowForRoute(
+    llmSettings,
+    provider === "openai-compatible" && llmSettings.marketplaceProviderPresetId
+      ? self.deps.settingsService.get("marketplace").installedProviderPresets
+      : undefined,
+  );
+  const model = route.model;
   const identity = `${provider}/${model}`;
-  const { inputs, maxOutputTokens } = contextWindowInputsForRoute(self, provider, model);
-  const window = resolveModelContextWindow({ vendor: provider, model, ...inputs });
-  if (window.source === "fallback") warnFallbackContextWindowOnce(identity, model);
+  if (route.source === "fallback") warnFallbackContextWindowOnce(identity, model);
   return {
     model,
-    preflight: getModelPreflightThreshold(provider, model, inputs),
-    usableContext: getModelUsableContext(provider, model, inputs),
+    preflight: getModelPreflightThreshold(provider, model, route.contextWindow),
+    usableContext: getModelUsableContext(provider, model, route.contextWindow),
     identity,
-    thresholdSource: getModelPreflightThresholdSource(provider, model, inputs),
-    contextWindowSource: window.source,
-    ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
+    thresholdSource: getModelPreflightThresholdSource(provider, model, route.contextWindow),
+    contextWindowSource: route.source,
+    ...(route.maxOutputTokens !== undefined ? { maxOutputTokens: route.maxOutputTokens } : {}),
   };
 }
 

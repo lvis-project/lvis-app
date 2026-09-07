@@ -2,9 +2,12 @@ import { describe, it, expect } from "vitest";
 import {
   getUsableContext,
   getPreflightThreshold,
+  resolveContextWindowForRoute,
   resolveModelContextWindow,
 } from "../context-budget.js";
 import { FALLBACK_PRICING } from "../pricing-data.js";
+import { freshAllVendorBlocks } from "../llm-vendor-defaults.js";
+import { llmModelListCacheKey, type LlmModelListCache } from "../llm-model-list.js";
 
 describe("getUsableContext — LVIS tier-fixed reservations", () => {
   it("64K → 37K usable (27K reserved for output-heavy small models)", () => {
@@ -175,5 +178,91 @@ describe("resolveModelContextWindow — where the budget's denominator comes fro
         reported: 0,
       }),
     ).toEqual({ contextWindow: FALLBACK_PRICING.contextWindow, source: "fallback" });
+  });
+});
+
+describe("resolveContextWindowForRoute — one answer for the engine and the ring", () => {
+  function routeSettings(overrides: {
+    contextWindow?: number;
+    reported?: { contextLength?: number; maxOutputTokens?: number };
+    baseUrl?: string;
+    presetId?: string;
+  } = {}) {
+    const model = "a-model-no-catalog-knows";
+    const vendors = freshAllVendorBlocks();
+    const block = vendors["openai-compatible"];
+    block.baseUrl = overrides.baseUrl ?? "https://models.invalid/v1";
+    if (overrides.presetId) block.presetModels = { [overrides.presetId]: model };
+    else block.model = model;
+    if (overrides.contextWindow !== undefined) block.contextWindow = overrides.contextWindow;
+    const modelListCache: LlmModelListCache = {};
+    if (overrides.reported) {
+      const key = llmModelListCacheKey(
+        "openai-compatible",
+        overrides.baseUrl ?? "https://models.invalid/v1",
+        overrides.presetId ?? "",
+      );
+      modelListCache[key] = {
+        vendor: "openai-compatible",
+        endpoint: "https://models.invalid/v1/models",
+        models: [model],
+        modelEntries: [{ id: model, ...overrides.reported }],
+        fetchedAt: new Date(0).toISOString(),
+      };
+    }
+    return {
+      provider: "openai-compatible" as const,
+      vendors,
+      modelListCache,
+      ...(overrides.presetId ? { marketplaceProviderPresetId: overrides.presetId } : {}),
+    };
+  }
+
+  it("reads the window the vendor block declares, over the provider's report", () => {
+    expect(
+      resolveContextWindowForRoute(
+        routeSettings({ contextWindow: 300_000, reported: { contextLength: 229_376 } }),
+      ),
+    ).toMatchObject({
+      model: "a-model-no-catalog-knows",
+      contextWindow: 300_000,
+      source: "vendor-setting",
+    });
+  });
+
+  it("reads what the route's own /models handshake reported for that model", () => {
+    expect(
+      resolveContextWindowForRoute(
+        routeSettings({ reported: { contextLength: 229_376, maxOutputTokens: 32_768 } }),
+      ),
+    ).toMatchObject({
+      contextWindow: 229_376,
+      source: "provider-reported",
+      maxOutputTokens: 32_768,
+    });
+  });
+
+  it("looks the preset's row up under the preset's own endpoint", () => {
+    // A preset is a provider in its own right reached through the
+    // openai-compatible vendor: its catalogue synced against its own address,
+    // so keying the lookup on the generic block's would find nothing.
+    const settings = routeSettings({
+      presetId: "provider-alpha",
+      baseUrl: "https://preset.invalid/v1",
+      reported: { contextLength: 131_072 },
+    });
+
+    expect(
+      resolveContextWindowForRoute(settings, [
+        { providerId: "provider-alpha", baseUrl: "https://preset.invalid/v1" },
+      ]),
+    ).toMatchObject({ contextWindow: 131_072, source: "provider-reported" });
+  });
+
+  it("moves to the next source when the route has no handshake for the model", () => {
+    expect(resolveContextWindowForRoute(routeSettings())).toMatchObject({
+      contextWindow: FALLBACK_PRICING.contextWindow,
+      source: "fallback",
+    });
   });
 });

@@ -16,6 +16,13 @@ import {
   FALLBACK_PRICING,
   lookupPricingOptional,
 } from "./pricing-data.js";
+import {
+  activeLlmRouteModel,
+  getLlmVendorSettings,
+  type LLMVendor,
+  type LLMVendorSettingsMap,
+} from "./llm-vendor-defaults.js";
+import { cachedModelListEntry, type LlmModelListCache } from "./llm-model-list.js";
 
 /**
  * Reserve buffer for output + safety, return the *usable* portion of the
@@ -104,4 +111,75 @@ export function resolveModelContextWindow(params: {
     return { contextWindow: effectiveContextWindow(catalog), source: "pricing-catalog" };
   }
   return { contextWindow: FALLBACK_PRICING.contextWindow, source: "fallback" };
+}
+
+/** The settings a route's context window is read out of. */
+export interface LlmRouteSettings {
+  readonly provider: LLMVendor;
+  readonly vendors: LLMVendorSettingsMap;
+  readonly marketplaceProviderPresetId?: string;
+  readonly modelListCache?: LlmModelListCache;
+}
+
+/** A marketplace preset, as far as finding its catalogue row needs to know. */
+export interface LlmRouteProviderPreset {
+  readonly providerId: string;
+  readonly baseUrl: string;
+}
+
+export interface RouteContextWindow extends ResolvedContextWindow {
+  /** The model this route runs on — `activeLlmRouteModel`'s answer. */
+  readonly model: string;
+  /**
+   * The provider's own ceiling on a completion for this model, when it
+   * reported one. Carried beside the window for a caller that needs an output
+   * ceiling; the budget math does not use it.
+   */
+  readonly maxOutputTokens?: number;
+}
+
+/**
+ * The window the ACTIVE route should be budgeted against, read straight from
+ * the settings both the engine and the renderer already hold.
+ *
+ * This exists so there is one answer to "how big is this model's context". The
+ * engine budgets compaction against it and the renderer's context-fill ring
+ * divides by it; resolving it separately on each side is how the ring came to
+ * show a 128K denominator for a model the gateway had reported at 229,376.
+ *
+ * The declared window comes off the vendor block. The reported one comes off
+ * the catalogue row that route's last `/models` handshake left in the cache —
+ * keyed by the address the row actually synced, which for a marketplace preset
+ * is the preset's own endpoint rather than the generic custom-provider block's.
+ */
+export function resolveContextWindowForRoute(
+  llm: LlmRouteSettings,
+  installedProviderPresets?: readonly LlmRouteProviderPreset[],
+): RouteContextWindow {
+  const model = activeLlmRouteModel(llm);
+  const block = getLlmVendorSettings(llm.vendors, llm.provider);
+  const presetId = llm.provider === "openai-compatible"
+    ? llm.marketplaceProviderPresetId?.trim()
+    : undefined;
+  const preset = presetId
+    ? installedProviderPresets?.find((installed) => installed.providerId === presetId)
+    : undefined;
+  const entry = cachedModelListEntry(llm.modelListCache, {
+    vendor: llm.provider,
+    model,
+    baseUrl: preset?.baseUrl ?? block.baseUrl,
+    ...(presetId ? { credentialScope: presetId } : {}),
+  });
+  const resolved = resolveModelContextWindow({
+    vendor: llm.provider,
+    model,
+    ...(block.contextWindow !== undefined ? { configured: block.contextWindow } : {}),
+    ...(entry?.contextLength !== undefined ? { reported: entry.contextLength } : {}),
+  });
+  const maxOutputTokens = positiveTokenCount(entry?.maxOutputTokens);
+  return {
+    ...resolved,
+    model,
+    ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
+  };
 }

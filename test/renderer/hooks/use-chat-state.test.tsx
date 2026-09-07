@@ -16,6 +16,7 @@ import { makeMockLvisApi } from "../mock-lvis-api.js";
 import { deferred } from "../helpers.js";
 import { useChatState } from "../../../src/ui/renderer/hooks/use-chat-state.js";
 import { useContextBudget } from "../../../src/ui/renderer/hooks/use-context-budget.js";
+import { resolveModelContextWindow } from "../../../src/shared/context-budget.js";
 import { useCostEstimate } from "../../../src/ui/renderer/hooks/use-cost-estimate.js";
 import { useCurrentSession, useSessionList } from "../../../src/ui/renderer/hooks/use-sessions.js";
 import { useStarred } from "../../../src/ui/renderer/hooks/use-starred.js";
@@ -472,10 +473,23 @@ describe("useChatState", () => {
   });
 });
 
+/**
+ * The window the route would resolve to when nothing is declared and the
+ * provider reported nothing — read from the one resolver rather than pinned
+ * here, so these fixtures cannot drift from the catalog.
+ */
+const catalogWindow = (model: string): number =>
+  resolveModelContextWindow({ vendor: "openai", model }).contextWindow;
+
 describe("useContextBudget (deterministic math)", () => {
   it("returns zero usedTokens for empty entries", () => {
     const { result } = renderHook(() =>
-      useContextBudget({ entries: [], llmVendor: "openai", llmModel: "gpt-4o-mini" }),
+      useContextBudget({
+        entries: [],
+        contextWindow: catalogWindow("gpt-4o-mini"),
+        llmVendor: "openai",
+        llmModel: "gpt-4o-mini",
+      }),
     );
     expect(result.current.usedTokens).toBe(0);
   });
@@ -515,10 +529,20 @@ describe("useContextBudget (deterministic math)", () => {
       },
     ];
     const a = renderHook(() =>
-      useContextBudget({ entries: after10k, llmVendor: "openai", llmModel: "gpt-4o-mini" }),
+      useContextBudget({
+        entries: after10k,
+        contextWindow: catalogWindow("gpt-4o-mini"),
+        llmVendor: "openai",
+        llmModel: "gpt-4o-mini",
+      }),
     ).result.current.usedTokens;
     const b = renderHook(() =>
-      useContextBudget({ entries: after5k, llmVendor: "openai", llmModel: "gpt-4o-mini" }),
+      useContextBudget({
+        entries: after5k,
+        contextWindow: catalogWindow("gpt-4o-mini"),
+        llmVendor: "openai",
+        llmModel: "gpt-4o-mini",
+      }),
     ).result.current.usedTokens;
     expect(a).toBe(10_000);
     expect(b).toBe(5_000); // compact 후 감소가 정상 — Phase 3 의 핵심 동작.
@@ -546,10 +570,20 @@ describe("useContextBudget (deterministic math)", () => {
     ];
 
     const a = renderHook(() =>
-      useContextBudget({ entries: loaded, llmVendor: "openai", llmModel: "gpt-4o-mini" }),
+      useContextBudget({
+        entries: loaded,
+        contextWindow: catalogWindow("gpt-4o-mini"),
+        llmVendor: "openai",
+        llmModel: "gpt-4o-mini",
+      }),
     ).result.current.usedTokens;
     const b = renderHook(() =>
-      useContextBudget({ entries: liveAfterLoaded, llmVendor: "openai", llmModel: "gpt-4o-mini" }),
+      useContextBudget({
+        entries: liveAfterLoaded,
+        contextWindow: catalogWindow("gpt-4o-mini"),
+        llmVendor: "openai",
+        llmModel: "gpt-4o-mini",
+      }),
     ).result.current.usedTokens;
 
     expect(a).toBe(12_345);
@@ -573,7 +607,12 @@ describe("useContextBudget (deterministic math)", () => {
       },
     ];
     const { result } = renderHook(() =>
-      useContextBudget({ entries, llmVendor: "openai", llmModel: "gpt-5.4-nano" }),
+      useContextBudget({
+        entries,
+        contextWindow: catalogWindow("gpt-5.4-nano"),
+        llmVendor: "openai",
+        llmModel: "gpt-5.4-nano",
+      }),
     );
     expect(result.current.tpmLimit).toBe(200_000);
     expect(result.current.tpmPct).toBeCloseTo(0.5, 5);
@@ -593,7 +632,12 @@ describe("useContextBudget (deterministic math)", () => {
       },
     ];
     const { result } = renderHook(() =>
-      useContextBudget({ entries, llmVendor: "openai", llmModel: "gpt-4o-mini" }),
+      useContextBudget({
+        entries,
+        contextWindow: catalogWindow("gpt-4o-mini"),
+        llmVendor: "openai",
+        llmModel: "gpt-4o-mini",
+      }),
     );
     expect(result.current.tpmLimit).toBeUndefined();
     expect(result.current.tpmPct).toBeUndefined();
@@ -613,7 +657,12 @@ describe("useContextBudget (deterministic math)", () => {
       },
     ];
     const { result } = renderHook(() =>
-      useContextBudget({ entries, llmVendor: "openai", llmModel: "gpt-5.4-nano" }),
+      useContextBudget({
+        entries,
+        contextWindow: catalogWindow("gpt-5.4-nano"),
+        llmVendor: "openai",
+        llmModel: "gpt-5.4-nano",
+      }),
     );
     expect(result.current.tpmPct).toBeCloseTo(1.0, 5);
     expect(result.current.isTpmOverflow).toBe(true);
