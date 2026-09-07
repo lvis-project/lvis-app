@@ -8,7 +8,7 @@
  * and fail-closed parse errors on unbalanced quotes/parens.
  */
 import { describe, it, expect } from "vitest";
-import { tokenizeShell } from "../shell-tokenizer.js";
+import { redactHeredocBodies, tokenizeShell } from "../shell-tokenizer.js";
 
 describe("tokenizeShell — quoting", () => {
   it("keeps whitespace inside single quotes as one argv token", () => {
@@ -179,5 +179,58 @@ describe("tokenizeShell — fail closed", () => {
 
   it("returns no leaves on parse error so callers fail closed", () => {
     expect(tokenizeShell("echo 'x").leaves).toEqual([]);
+  });
+});
+
+describe("redactHeredocBodies", () => {
+  it("removes a quoted-delimiter body and its terminator line", () => {
+    const command = "python3 - <<'EOF'\nnstep = int(2.0 / 0.002)\nEOF\necho done";
+    expect(redactHeredocBodies(command)).toBe("python3 - <<'EOF'\necho done");
+  });
+
+  it("handles the tab-stripping `<<-` form and a double-quoted delimiter", () => {
+    expect(redactHeredocBodies('cat <<-"END"\nbody / line\n\tEND\nls').trim())
+      .toBe('cat <<-"END"\nls');
+  });
+
+  it("leaves an UNQUOTED delimiter alone, because the shell still expands the body", () => {
+    const command = "cat <<EOF\n$(id)\nEOF";
+    expect(redactHeredocBodies(command)).toBe(command);
+  });
+
+  it("leaves an unterminated heredoc alone", () => {
+    const command = "cat <<'EOF'\nstill going";
+    expect(redactHeredocBodies(command)).toBe(command);
+  });
+
+  it("does not treat a here-string `<<<` as a heredoc", () => {
+    const command = "grep x <<< 'a b'";
+    expect(redactHeredocBodies(command)).toBe(command);
+  });
+
+  it("does not treat `<<` inside quotes as a heredoc operator", () => {
+    const command = "echo \"a << 'EOF' b\"\nsecond";
+    expect(redactHeredocBodies(command)).toBe(command);
+  });
+
+  it("consumes two heredocs opened on one line in order", () => {
+    const command = "diff <<'A' <<'B'\nfirst\nA\nsecond\nB\nls";
+    expect(redactHeredocBodies(command)).toBe("diff <<'A' <<'B'\nls");
+  });
+});
+
+describe("tokenizeShell — heredoc bodies are not commands", () => {
+  it("does not turn body lines into leaves", () => {
+    const { leaves, parseError } = tokenizeShell("python3 - <<'PY'\nimport os\nos.listdir('/')\nPY");
+    expect(parseError).toBe(false);
+    expect(leaves).toHaveLength(1);
+    expect(leaves[0]!.argv).toEqual(["python3", "-"]);
+  });
+
+  it("keeps the input redirect on the consuming leaf, so the read/write verdict is unchanged", () => {
+    // This is why removing the body cannot relax `isReadOnlyCommand`: the leaf
+    // that owns the heredoc already fails closed on hasInputRedirect.
+    const { leaves } = tokenizeShell("cat <<'EOF'\nrm -rf /\nEOF");
+    expect(leaves[0]!.hasInputRedirect).toBe(true);
   });
 });

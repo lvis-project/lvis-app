@@ -132,11 +132,14 @@ interface RawLeaf {
  *    (only outside quotes/substitution).
  *  - leading `FOO=bar` assignments and wrapper commands are stripped from each
  *    leaf's argv to expose the effective verb.
+ *  - `<<'WORD'` / `<<"WORD"` heredoc bodies are removed before scanning (see
+ *    {@link redactHeredocBodies}); they are data on the consumer's stdin, not
+ *    commands.
  *
  * Fails closed (`parseError: true`) on unbalanced quotes or parentheses.
  */
 export function tokenizeShell(command: string): TokenizeResult {
-  const scan = scanLeaves(command);
+  const scan = scanLeaves(redactHeredocBodies(command));
   if (scan.parseError) {
     return { leaves: [], parseError: true };
   }
@@ -145,6 +148,143 @@ export function tokenizeShell(command: string): TokenizeResult {
     leaves.push(buildLeaf(rawLeaf));
   }
   return { leaves, parseError: false };
+}
+
+/**
+ * Remove the BODY of every quoted-delimiter heredoc (`<<'EOF'` / `<<"EOF"`,
+ * and the tab-stripping `<<-` forms) from a command string.
+ *
+ * WHY: the scanner ends a leaf at every newline, so without this a heredoc body
+ * became a run of pseudo-leaves whose first word was read as a head verb. A
+ * Python snippet fed to `python3 - <<'EOF'` was therefore classified as a
+ * sequence of shell commands, and its text was mined for path operands — which
+ * is where `nstep = int(2.0 / model.opt.timestep)` produced a filesystem-root
+ * operand and a JavaScript `//` comment produced another. A heredoc body is
+ * stdin data for the consuming command; the shell never runs it.
+ *
+ * QUOTED DELIMITERS ONLY. With an unquoted delimiter (`<<EOF`) the shell still
+ * performs parameter expansion and command substitution inside the body, so a
+ * `$(…)` there really does execute and the body must keep being scanned. Those
+ * are left exactly as they were.
+ *
+ * Every failure is a no-op that returns the input unchanged — an unbalanced
+ * quote, a heredoc whose terminator never arrives — so a command this cannot
+ * read confidently keeps the behaviour it had before.
+ *
+ * A terminator is recognised by comparing the TRIMMED line to the delimiter,
+ * which is laxer than plain `<<` (where the terminator must start at column 0).
+ * Lax in this direction ends the body early and hands the remaining lines back
+ * to the command scanner, which is the fail-closed side of the mistake.
+ *
+ * NOT a relaxation of the read/write classifier: `<<` is an input redirect, and
+ * {@link ShellLeaf.hasInputRedirect} on the consuming leaf already makes the
+ * whole command non-read regardless of what the body says.
+ */
+export function redactHeredocBodies(command: string): string {
+  if (!command.includes("<<")) return command;
+  const n = command.length;
+  // Delimiters opened on the current line, in the order their bodies follow it.
+  const pending: string[] = [];
+  let out = "";
+  let i = 0;
+  while (i < n) {
+    const ch = command[i]!;
+    if (ch === "\\" && i + 1 < n) {
+      out += command.slice(i, i + 2);
+      i += 2;
+      continue;
+    }
+    if (ch === "'") {
+      const close = command.indexOf("'", i + 1);
+      if (close === -1) return command;
+      out += command.slice(i, close + 1);
+      i = close + 1;
+      continue;
+    }
+    if (ch === '"') {
+      const res = consumeDoubleQuote(command, i);
+      if (res === null) return command;
+      out += command.slice(i, res.next);
+      i = res.next;
+      continue;
+    }
+    if (ch === "`") {
+      const close = command.indexOf("`", i + 1);
+      if (close === -1) return command;
+      out += command.slice(i, close + 1);
+      i = close + 1;
+      continue;
+    }
+    // `<<` heredoc, but NOT `<<<` (a here-STRING, whose operand is one word on
+    // the same line and therefore has no body to remove).
+    if (ch === "<" && command[i + 1] === "<" && command[i + 2] !== "<") {
+      const opened = readHeredocDelimiter(command, i);
+      if (opened) {
+        pending.push(opened.delimiter);
+        out += command.slice(i, opened.next);
+        i = opened.next;
+        continue;
+      }
+      out += "<<";
+      i += 2;
+      continue;
+    }
+    if (ch === "\n" && pending.length > 0) {
+      out += "\n";
+      i += 1;
+      for (const delimiter of pending) {
+        const bodyEnd = findHeredocTerminator(command, i, delimiter);
+        if (bodyEnd === null) return command;
+        i = bodyEnd;
+      }
+      pending.length = 0;
+      continue;
+    }
+    out += ch;
+    i += 1;
+  }
+  return out;
+}
+
+/**
+ * At `start` (the first `<` of a `<<`), read a QUOTED heredoc delimiter.
+ * Returns the delimiter text and the index just past its closing quote, or null
+ * when the delimiter is unquoted, empty, or never closes — all of which mean
+ * "leave this heredoc alone".
+ */
+function readHeredocDelimiter(
+  command: string,
+  start: number,
+): { delimiter: string; next: number } | null {
+  let i = start + 2;
+  if (command[i] === "-") i += 1;
+  while (command[i] === " " || command[i] === "\t") i += 1;
+  const quote = command[i];
+  if (quote !== "'" && quote !== '"') return null;
+  const close = command.indexOf(quote, i + 1);
+  if (close === -1) return null;
+  const delimiter = command.slice(i + 1, close);
+  if (delimiter.length === 0) return null;
+  return { delimiter, next: close + 1 };
+}
+
+/**
+ * Index just past the heredoc terminator line that closes a body starting at
+ * `from`, or null when the terminator never arrives.
+ */
+function findHeredocTerminator(command: string, from: number, delimiter: string): number | null {
+  let lineStart = from;
+  const n = command.length;
+  while (lineStart <= n) {
+    const newline = command.indexOf("\n", lineStart);
+    const lineEnd = newline === -1 ? n : newline;
+    if (command.slice(lineStart, lineEnd).trim() === delimiter) {
+      return newline === -1 ? n : newline + 1;
+    }
+    if (newline === -1) return null;
+    lineStart = newline + 1;
+  }
+  return null;
 }
 
 /**

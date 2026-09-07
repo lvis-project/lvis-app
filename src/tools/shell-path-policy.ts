@@ -2,7 +2,7 @@ import { homedir } from "node:os";
 import { isAbsolute, resolve as pathResolve } from "node:path";
 
 import { t } from "../i18n/index.js";
-import { stripCommandPath, tokenizeShell } from "../shared/shell-tokenizer.js";
+import { redactHeredocBodies, stripCommandPath, tokenizeShell } from "../shared/shell-tokenizer.js";
 import { validateSandboxPath } from "../sandbox/path-validator.js";
 import {
   canonicalizePathForMatch,
@@ -91,6 +91,29 @@ export function findShellPathPolicyViolation(
   sandboxRoot: string,
   extraAllowedDirectories: readonly string[],
 ): ShellPathPolicyViolation | null {
+  return findViolationInCommand(command, cwd, sandboxRoot, extraAllowedDirectories, 0);
+}
+
+/**
+ * How deep {@link findViolationInCommand} follows `$(…)` nesting before it
+ * stops descending. A substitution nested past this is still checked as TEXT by
+ * the enclosing scan (its `$` keeps a path operand dynamic); only the extra
+ * command-level pass is dropped, so the bound trades depth for termination
+ * without giving anything up.
+ */
+const COMMAND_SUBSTITUTION_SCAN_DEPTH = 4;
+
+function findViolationInCommand(
+  rawCommand: string,
+  cwd: string,
+  sandboxRoot: string,
+  extraAllowedDirectories: readonly string[],
+  depth: number,
+): ShellPathPolicyViolation | null {
+  // A quoted heredoc body is stdin data, not commands — see
+  // `redactHeredocBodies`. Removing it here rather than inside each extractor
+  // keeps the flat scan and the leaf walk reading the same text.
+  const command = redactHeredocBodies(rawCommand);
   const cwdSensitive = isSensitivePath(caseFoldForMatch(canonicalizePathForMatch(cwd)));
   if (cwdSensitive) {
     return {
@@ -115,6 +138,25 @@ export function findShellPathPolicyViolation(
   const dynamicPathComposition = findDynamicPathComposition(command);
   if (dynamicPathComposition) {
     return { kind: "dynamic-path", reason: dynamicPathComposition };
+  }
+  // `$(…)` and backticks hold COMMANDS, so their operands are checked by
+  // running this whole policy over the substitution body. Without this pass the
+  // body was only ever read as path text: `$(wc -l < /tmp/x)` reported an
+  // unresolved variable and `/tmp/x` itself was never judged. Nothing is
+  // subtracted here — the enclosing scan still sees the substitution text, so a
+  // path operand built out of one (`/tmp/$(basename "$f")`) stays a dynamic
+  // path.
+  if (depth < COMMAND_SUBSTITUTION_SCAN_DEPTH) {
+    for (const body of extractCommandSubstitutionBodies(command)) {
+      const violation = findViolationInCommand(
+        body,
+        cwd,
+        sandboxRoot,
+        extraAllowedDirectories,
+        depth + 1,
+      );
+      if (violation) return violation;
+    }
   }
   // Operands are checked twice, against two different base directories.
   //
@@ -217,7 +259,13 @@ function findCwdAwareLeafViolation(
 
   let current = cwd;
   for (const leaf of leaves) {
-    const operands = [...leaf.argv, ...leaf.redirectTargets];
+    // Redirect targets are always files, whatever the verb is, so they are
+    // never eligible for the non-path-operand skip below.
+    const nonPathArgv = nonPathOperandIndices(leaf.argv);
+    const operands = [
+      ...leaf.argv.filter((_, index) => !nonPathArgv.has(index)),
+      ...leaf.redirectTargets,
+    ];
     // `/`-only basename reduction, matching the risk classifier — the two must
     // agree on what verb a leaf runs. A Windows-style `C:\\tools\\cd` is not
     // reduced by either, so both see the full token and neither treats it as
@@ -405,6 +453,297 @@ const LVIS_ALTERNATIVE_BY_COMMAND: Readonly<Record<string, string>> = {
   mv: "be_shellPathPolicy.altMv",
 };
 
+/**
+ * Which argument slots a command reads as PROGRAM TEXT, a PATTERN or an output
+ * FORMAT rather than as a filesystem path.
+ *
+ * DENY-LIST, NOT ALLOW-LIST. The policy's default stays "any operand that looks
+ * like a path is one" — an unknown command, and every option this table has
+ * never heard of, keeps being checked exactly as before. Only slots whose
+ * meaning is fixed by the command's own interface are exempted. Inverting it
+ * (treating an operand as a path only where an allow-list says so) would stop
+ * checking `--output=/etc/passwd` on any tool not yet listed, which is the
+ * failure this control exists to prevent.
+ *
+ * WHAT IT BUYS. A quoted script is a single token, so the scan was reading
+ * `awk '{print $1}'` and `Rscript -e 'read.csv("…")'` as path operands and
+ * refusing them for carrying a `$`. It never gained anything by doing so: an
+ * embedded path sits mid-token, and a mid-token path resolves RELATIVE to the
+ * cwd (`<cwd>/read.csv("/app/x.csv"`), which lands inside the boundary. The
+ * check produced noise and no containment, and what really confines an
+ * interpreter's own file access is the OS sandbox the child runs under.
+ */
+interface NonPathOperandSpec {
+  /** Options whose value — next token, or `--opt=value` — is code/pattern/format. */
+  valueOptions?: ReadonlySet<string>;
+  /**
+   * Options that take a value which stays path-checked. Listing them is not
+   * decoration: an unconsumed value becomes the next POSITIONAL, so for a
+   * command whose first positional is its program (`awk`), `-v f=<path>` would
+   * otherwise be mistaken for the awk program and exempted.
+   */
+  pathValueOptions?: ReadonlySet<string>;
+  /** Cluster form of a code-carrying option, e.g. perl's `-ne` / `-lpe`. */
+  clusteredCodeOption?: RegExp;
+  /** True when the first non-option operand is the program/pattern. */
+  firstPositionalIsProgram?: true;
+  /** Options that supply the program elsewhere, freeing the first positional to be a path again. */
+  programSuppliedBy?: ReadonlySet<string>;
+  /** True when the command opens no operand at all — every argument is data. */
+  everyArgumentIsData?: true;
+}
+
+const INTERPRETER_CODE_OPTIONS = new Set(["-c", "--command", "-e", "--eval", "-E", "--exec"]);
+/** perl/ruby cluster options ending in `e` take the program as the next word (`-ne`, `-lpe`). */
+const PERL_CLUSTERED_CODE_OPTION = /^-[A-Za-z]*[eE]$/;
+
+const NON_PATH_OPERAND_SPECS: ReadonlyMap<string, NonPathOperandSpec> = new Map([
+  // Interpreters: `-c`/`-e` carry a program in the language, not a path.
+  ...(["python", "python2", "python3", "node", "deno", "bun", "php", "sh", "bash", "zsh",
+    "dash", "ksh", "osascript", "lua", "rscript", "r"] as const)
+    .map((verb) => [verb, { valueOptions: INTERPRETER_CODE_OPTIONS }] as const),
+  ...(["perl", "ruby"] as const).map((verb) => [verb, {
+    valueOptions: INTERPRETER_CODE_OPTIONS,
+    clusteredCodeOption: PERL_CLUSTERED_CODE_OPTION,
+  }] as const),
+  // awk: the program is the first positional unless `-f` names a program FILE
+  // (which is a path, and stays one). `-v`/`-F` carry assignments and field
+  // separators.
+  // awk: `-v` is deliberately ABSENT. An awk variable can name a file the
+  // program then opens (`getline < f`), so exempting its value would hand awk
+  // an unchecked path; the field separator cannot be one.
+  ...(["awk", "gawk", "mawk", "nawk"] as const).map((verb) => [verb, {
+    valueOptions: new Set(["-F", "--field-separator", "--source"]),
+    pathValueOptions: new Set(["-v", "--assign", "-f", "--file"]),
+    firstPositionalIsProgram: true as const,
+    programSuppliedBy: new Set(["-f", "--file", "--source"]),
+  }] as const),
+  ["sed", {
+    valueOptions: new Set(["-e", "--expression"]),
+    firstPositionalIsProgram: true as const,
+    programSuppliedBy: new Set(["-e", "--expression", "-f", "--file"]),
+  }],
+  // grep-family: the first positional is the PATTERN; `--include`/`--exclude`
+  // are filename globs matched against what the walk finds, not operands the
+  // command opens.
+  ...(["grep", "egrep", "fgrep", "rg", "ag", "ack"] as const).map((verb) => [verb, {
+    valueOptions: new Set([
+      "-e", "--regexp", "-g", "--glob",
+      "--include", "--exclude", "--include-dir", "--exclude-dir",
+    ]),
+    firstPositionalIsProgram: true as const,
+    programSuppliedBy: new Set(["-e", "--regexp", "-f", "--file"]),
+  }] as const),
+  ["curl", { valueOptions: new Set(["-w", "--write-out", "-H", "--header"]) }],
+  // Only `-subj`. openssl's passphrase options accept a `file:` source, so
+  // their values can name a path and stay checked.
+  ["openssl", { valueOptions: new Set(["-subj"]) }],
+  // echo and tr never open an operand — echo writes its arguments to stdout, tr
+  // maps character sets and reads only stdin. A redirect target beside them is
+  // a separate operand and is still checked.
+  ["echo", { everyArgumentIsData: true }],
+  ["tr", { everyArgumentIsData: true }],
+  // printf's first positional is the FORMAT string; the arguments it formats
+  // follow it and are checked normally.
+  ["printf", { firstPositionalIsProgram: true }],
+  // Format-string options. A format carries `%` placeholders and `\n` escapes,
+  // and the `\` is enough to make the token look like a Windows path.
+  ["stat", { valueOptions: new Set(["-c", "--format", "--printf"]) }],
+  ["dpkg-query", { valueOptions: new Set(["-f", "--showformat"]) }],
+  ...(["identify", "convert", "magick"] as const).map((verb) => [verb, {
+    valueOptions: new Set(["-format"]),
+  }] as const),
+]);
+
+/**
+ * Shell keywords that stand in front of the real verb of a segment.
+ *
+ * The segment `do echo "=== $d/x.log ==="` has `do` at argv[0], so a rule keyed
+ * on the verb reads a keyword and finds nothing. Stripping them here rather
+ * than in the shared tokenizer keeps this local to path-slot lookup: the risk
+ * classifier's verb scan is unchanged, so a keyword-led leaf still fails closed
+ * there as an unknown verb.
+ */
+const LEADING_SHELL_KEYWORDS: ReadonlySet<string> = new Set([
+  "do", "then", "else", "elif", "if", "while", "until", "!", "{", "(",
+]);
+
+/**
+ * Indices in `argv` (`argv[0]` is the head verb) that hold code, a pattern or a
+ * format rather than a path.
+ *
+ * `--` ends option parsing, so everything after it is positional — which is how
+ * `grep -- -pattern file` keeps naming its file.
+ */
+function nonPathOperandIndices(argv: readonly string[]): ReadonlySet<number> {
+  const skip = new Set<number>();
+  let verbIndex = 0;
+  while (
+    verbIndex < argv.length
+    && LEADING_SHELL_KEYWORDS.has(stripCommandPath(argv[verbIndex]!).toLowerCase())
+  ) {
+    verbIndex += 1;
+  }
+  const head = argv[verbIndex];
+  if (head === undefined) return skip;
+  const spec = NON_PATH_OPERAND_SPECS.get(stripCommandPath(head).toLowerCase());
+  if (!spec) return skip;
+  if (spec.everyArgumentIsData) {
+    for (let i = verbIndex + 1; i < argv.length; i += 1) skip.add(i);
+    return skip;
+  }
+  let programTaken = spec.firstPositionalIsProgram !== true;
+  let optionsEnded = false;
+  for (let i = verbIndex + 1; i < argv.length; i += 1) {
+    const token = argv[i]!;
+    if (!optionsEnded && token === "--") {
+      optionsEnded = true;
+      continue;
+    }
+    if (!optionsEnded && token.startsWith("-") && token.length > 1) {
+      const equals = token.indexOf("=");
+      const name = equals > 0 ? token.slice(0, equals) : token;
+      if (spec.programSuppliedBy?.has(name)) programTaken = true;
+      if (spec.pathValueOptions?.has(name) === true) {
+        // Consume the value so it is not mistaken for the first positional,
+        // but leave it in the candidate set: it is a path.
+        if (equals < 0) i += 1;
+        continue;
+      }
+      const carriesCode = spec.valueOptions?.has(name) === true
+        || spec.clusteredCodeOption?.test(token) === true;
+      if (!carriesCode) continue;
+      if (equals > 0) {
+        // `--opt=value` — the value never becomes its own token.
+        if (!isFileSigilValue(token.slice(equals + 1))) skip.add(i);
+        continue;
+      }
+      if (i + 1 < argv.length) {
+        // `@` is the "read this from a file" sigil several of these options
+        // accept (`curl -w @format`). A value wearing it names a path, so the
+        // exemption does not apply to it.
+        if (!isFileSigilValue(argv[i + 1]!)) skip.add(i + 1);
+        i += 1;
+      }
+      continue;
+    }
+    if (!programTaken) {
+      skip.add(i);
+      programTaken = true;
+    }
+  }
+  return skip;
+}
+
+/** True when a value carries the `@`-prefixed "contents of this file" sigil. */
+function isFileSigilValue(value: string): boolean {
+  return value.startsWith("@") && value.length > 1;
+}
+
+/**
+ * The bodies of every `$(…)` and backtick substitution in `command`, at the top
+ * level of quoting. Double-quoted regions are descended into because expansion
+ * still happens there; single-quoted ones are not, because it does not.
+ */
+function extractCommandSubstitutionBodies(command: string): string[] {
+  const bodies: string[] = [];
+  const n = command.length;
+  let i = 0;
+  let inDoubleQuote = false;
+  while (i < n) {
+    const ch = command[i]!;
+    if (ch === "\\") {
+      i += 2;
+      continue;
+    }
+    if (ch === "'" && !inDoubleQuote) {
+      const close = command.indexOf("'", i + 1);
+      if (close === -1) return bodies;
+      i = close + 1;
+      continue;
+    }
+    if (ch === '"') {
+      inDoubleQuote = !inDoubleQuote;
+      i += 1;
+      continue;
+    }
+    if (ch === "`") {
+      const close = command.indexOf("`", i + 1);
+      if (close === -1) return bodies;
+      bodies.push(command.slice(i + 1, close));
+      i = close + 1;
+      continue;
+    }
+    if (ch === "$" && command[i + 1] === "(") {
+      const close = matchClosingParen(command, i + 1);
+      if (close === -1) return bodies;
+      // `$((expr))` is arithmetic, not a command. Its body cannot name a file
+      // the shell opens, and reading it as one produced operands out of C-style
+      // integer division.
+      const body = command.slice(i + 2, close);
+      if (!(command[i + 2] === "(" && command[close - 1] === ")")) bodies.push(body);
+      i = close + 1;
+      continue;
+    }
+    i += 1;
+  }
+  return bodies;
+}
+
+/** Index of the `)` matching the `(` at `openParen`, or -1 when unbalanced. */
+function matchClosingParen(command: string, openParen: number): number {
+  let depth = 0;
+  for (let i = openParen; i < command.length; i += 1) {
+    const ch = command[i]!;
+    if (ch === "\\") {
+      i += 1;
+      continue;
+    }
+    if (ch === "(") depth += 1;
+    else if (ch === ")") {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+/**
+ * `value` with every command substitution removed.
+ *
+ * Used to answer one question only: was this token ever a path, or is it a
+ * substitution wearing a `/` from the command inside it? `p=$(command -v cc)`
+ * has no path once the substitution is gone; `/tmp/$(basename "$f")` still
+ * does, and keeps its substitution text so the dynamic-path rule still refuses
+ * it.
+ */
+function withoutCommandSubstitutions(value: string): string {
+  let out = "";
+  let i = 0;
+  while (i < value.length) {
+    const ch = value[i]!;
+    // An opener with no closer means the rest of the token is substitution text
+    // that candidate normalization trimmed (it strips a trailing `)`), so it is
+    // dropped rather than kept. The substitution's real body is inspected as a
+    // command from the full command string, where the parens still balance.
+    if (ch === "`") {
+      const close = value.indexOf("`", i + 1);
+      if (close === -1) return out;
+      i = close + 1;
+      continue;
+    }
+    if (ch === "$" && value[i + 1] === "(") {
+      const close = matchClosingParen(value, i + 1);
+      if (close === -1) return out;
+      i = close + 1;
+      continue;
+    }
+    out += ch;
+    i += 1;
+  }
+  return out;
+}
+
 function buildRecursiveBlockMessage(
   commandToken: string,
   commandName: string,
@@ -448,7 +787,8 @@ function splitCommandSegments(command: string): string[] {
   let segment = "";
   let quote: "'" | '"' | "`" | null = null;
   let escaping = false;
-  for (const ch of command) {
+  for (let i = 0; i < command.length; i += 1) {
+    const ch = command[i]!;
     if (escaping) {
       segment += ch;
       escaping = false;
@@ -472,6 +812,16 @@ function splitCommandSegments(command: string): string[] {
     if (ch === "|" || ch === ";" || ch === "\n") {
       if (segment.trim()) segments.push(segment);
       segment = "";
+      continue;
+    }
+    // `&&` is a segment boundary; a lone `&` is not, because `2>&1` would then
+    // be torn in half. Splitting here is what lets `cd /app && awk '{…}'` find
+    // `awk` as a head verb — without it the segment's head is `cd` and every
+    // rule keyed on the verb reads the wrong command.
+    if (ch === "&" && command[i + 1] === "&") {
+      if (segment.trim()) segments.push(segment);
+      segment = "";
+      i += 1;
       continue;
     }
     segment += ch;
@@ -529,13 +879,33 @@ function hasDynamicPathExpression(command: string): boolean {
   );
 }
 
+/**
+ * Flat path-candidate scan, now segment-aware.
+ *
+ * Segmenting is what lets this extractor apply the same non-path-operand rule
+ * the leaf walk applies: the rule is keyed on a segment's head verb, and before
+ * this the scan had no notion of where one command ended and the next began.
+ * Leading `NAME=value` assignments are still scanned — an assignment carries a
+ * path the later verb dereferences (`D=/usr/local/bin; cp x "$D/f"`), and
+ * dropping it would be exactly the hole this scan exists to cover.
+ */
 function extractPathCandidates(command: string): string[] {
   const candidates: string[] = [];
-  for (const token of tokenizeCommand(command)) {
-    for (const part of splitCandidateParts(token)) {
-      const normalized = normalizeCandidate(part);
-      if (normalized && looksLikePath(normalized)) {
-        candidates.push(normalized);
+  for (const segment of splitCommandSegments(command)) {
+    const tokens = tokenizeCommand(segment);
+    const headIndex = tokens.findIndex((token) => !isAssignmentToken(token));
+    const nonPath = headIndex < 0
+      ? new Set<number>()
+      : new Set(
+          [...nonPathOperandIndices(tokens.slice(headIndex))].map((index) => index + headIndex),
+        );
+    for (let i = 0; i < tokens.length; i += 1) {
+      if (nonPath.has(i)) continue;
+      for (const part of splitCandidateParts(tokens[i]!)) {
+        const normalized = normalizeCandidate(part);
+        if (normalized && looksLikePath(normalized)) {
+          candidates.push(normalized);
+        }
       }
     }
   }
@@ -602,10 +972,22 @@ function splitCandidateParts(token: string): string[] {
   if (glued && !token.startsWith("--")) {
     parts.push(glued[1]!);
   }
+  // `@path` — the "contents of this file" sigil. Without splitting it off, the
+  // token starts with `@` and so resolves RELATIVE to the cwd, landing inside
+  // the boundary while the command opens the absolute path behind the sigil.
+  if (isFileSigilValue(token)) {
+    parts.push(token.slice(1));
+  }
   parts.push(token);
   const eq = token.indexOf("=");
   if (eq > 0 && eq < token.length - 1) {
-    parts.push(token.slice(eq + 1));
+    const value = token.slice(eq + 1);
+    // `NAME=$(cmd)` stores a command's OUTPUT in a variable; it does not open a
+    // path. The derived value part is a heuristic split, not an operand the
+    // command was given, so a value that is nothing but a substitution is not
+    // emitted as a candidate at all — using the variable later (`"$NAME/f"`)
+    // produces its own operand, and that one is still a dynamic path.
+    if (withoutCommandSubstitutions(value).trim().length > 0) parts.push(value);
   }
   for (const part of token.split(/\d*(?:>>?|<<?|&>|2>|2>>)+/g)) {
     if (part && part !== token) parts.push(part);
@@ -624,6 +1006,26 @@ function normalizeCandidate(token: string): string | null {
 function looksLikePath(value: string): boolean {
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) return false;
   if (BARE_SENSITIVE_FILENAMES.some((pattern) => pattern.test(value))) return true;
+  // What is left of the token once its command substitutions are removed
+  // decides whether it was ever a path.
+  //
+  //  - nothing left: the token IS the substitution, so what it will name is
+  //    unknown until the shell runs it. That is exactly a dynamic path and it
+  //    stays one — `cat $(echo /etc/passwd)` must not become reachable by
+  //    calling the operand "a command".
+  //  - something left, but not path-shaped (`p=`, `total lines: `): the `/`
+  //    belonged to the command inside, which the caller's recursive pass
+  //    inspects as a command. Not a path operand.
+  //  - something path-shaped left (`/tmp/` in `/tmp/$(basename "$f")`): a real
+  //    path operand built partly from a substitution — keep the full text so
+  //    the dynamic-path rule still refuses it.
+  const withoutSubstitutions = withoutCommandSubstitutions(value);
+  if (withoutSubstitutions.length === 0 && value.length > 0) return true;
+  if (hasPathShape(value) && !hasPathShape(withoutSubstitutions)) return false;
+  return hasPathShape(value);
+}
+
+function hasPathShape(value: string): boolean {
   return (
     value === "~" ||
     /^~[^/\\]+$/.test(value) ||
@@ -641,6 +1043,13 @@ function looksLikePath(value: string): boolean {
 }
 
 function resolveCandidatePath(value: string, cwd: string): string {
+  // A substitution inside a path operand names something no static check can
+  // read. The `$` guard below catches `$(…)` but not a backtick, and a backtick
+  // operand resolves relative to the cwd — landing inside the boundary while
+  // the shell opens whatever the substitution printed.
+  if (withoutCommandSubstitutions(value) !== value) {
+    throw new Error(`Sandbox: unresolved command substitution in path operand ${value}`);
+  }
   const expandedVars = expandShellPathVariables(value, cwd);
   if (expandedVars.includes("$") || expandedVars.includes("%")) {
     throw new Error(`Sandbox: unresolved shell variable in path operand ${value}`);
