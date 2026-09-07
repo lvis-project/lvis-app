@@ -489,7 +489,7 @@ describe("session_tasks tool", () => {
     const tool = createSessionTasksTool(memoryStore().store);
     const schema = tool.toJsonSchema() as { required: string[]; properties: Record<string, { enum?: string[]; type: string }> };
     expect(schema.required).toEqual(["action"]);
-    expect(schema.properties.action.enum).toEqual(["create", "add", "edit", "delete", "complete"]);
+    expect(schema.properties.action.enum).toEqual(["create", "add", "edit", "delete", "complete", "list"]);
     expect(schema.properties.steps.type).toBe("string");
     expect(schema.properties.after.type).toBe("integer");
     expect(schema.properties.index.type).toBe("integer");
@@ -611,6 +611,40 @@ describe("session_tasks tool", () => {
     const twice = await tool.execute({ action: "complete", index: 1 }, ctx("s-noop"));
     expect(twice.isError).toBe(true);
     expect(twice.output).toContain("already completed");
+  });
+
+  it("returns the list without changing it", async () => {
+    // The counterpart to the rule above: a no-op write is refused, so re-reading
+    // the plan had to stop being a write. Every store mutator is watched here —
+    // a read that quietly edits would defeat the point.
+    const { store, disk } = memoryStore();
+    const tool = createSessionTasksTool(store);
+    await tool.execute({ action: "create", steps: "a, b" }, ctx("s-list"));
+    await tool.execute({ action: "complete", index: 1 }, ctx("s-list"));
+    const before = disk.get("s-list");
+    const spies = (["create", "add", "edit", "delete", "complete"] as const).map((m) =>
+      vi.spyOn(store, m),
+    );
+
+    const read = await tool.execute({ action: "list" }, ctx("s-list"));
+
+    expect(read.isError).toBe(false);
+    expect(tasksOf(read)).toEqual([
+      { index: 1, text: "a", status: "completed" },
+      { index: 2, text: "b", status: "pending" },
+    ]);
+    for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+    expect(disk.get("s-list")).toBe(before);
+    for (const spy of spies) spy.mockRestore();
+  });
+
+  it("reads an empty list without erroring", async () => {
+    // A model asking what its plan is before making one must get an answer, not
+    // a failure it will try to work around.
+    const tool = createSessionTasksTool(memoryStore().store);
+    const read = await tool.execute({ action: "list" }, ctx("s-empty"));
+    expect(read.isError).toBe(false);
+    expect(tasksOf(read)).toEqual([]);
   });
 });
 
