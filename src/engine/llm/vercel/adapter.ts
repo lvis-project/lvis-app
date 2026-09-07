@@ -25,6 +25,7 @@ import { createAzure } from "@ai-sdk/azure";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type {
   GenericMessage,
+  InvalidToolCallInput,
   LLMProvider,
   LLMVendor,
   StreamEvent,
@@ -671,11 +672,69 @@ type AssistantPart =
       input: unknown;
     };
 
+/**
+ * How much of a malformed argument payload is kept for the model to read back.
+ * Long enough to show where the JSON broke, short enough that a runaway
+ * generation cannot re-enter the next request at full size.
+ */
+const INVALID_TOOL_INPUT_EXCERPT_CHARS = 200;
+
+function isPlainToolCallInput(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Normalise whatever the SDK handed us as a tool call's `input` into an object.
+ *
+ * The AI SDK returns the argument text verbatim when `JSON.parse` fails on it
+ * (`parseToolCall` in `ai`: the outer catch re-parses without the tool schema
+ * and falls back to `toolCall.input`, the raw string, with `invalid: true`).
+ * The same fallback also fires for a call to a tool that is not in the request,
+ * where the arguments may well be valid JSON — so a string is parsed once here
+ * before being treated as a defect.
+ */
+function normalizeToolCallInput(value: unknown): {
+  input: Record<string, unknown>;
+  invalidInput?: InvalidToolCallInput;
+} {
+  if (isPlainToolCallInput(value)) return { input: value };
+  // No arguments at all is the empty-object case, not a malformed one.
+  if (value === undefined || value === null) return { input: {} };
+
+  const raw = typeof value === "string" ? value : JSON.stringify(value);
+  if (typeof value === "string") {
+    try {
+      const parsed: unknown = JSON.parse(value);
+      if (isPlainToolCallInput(parsed)) return { input: parsed };
+    } catch {
+      return {
+        input: {},
+        invalidInput: {
+          raw: raw.slice(0, INVALID_TOOL_INPUT_EXCERPT_CHARS),
+          reason: "unparsable-json",
+          rawChars: raw.length,
+        },
+      };
+    }
+  }
+  return {
+    input: {},
+    invalidInput: {
+      raw: raw.slice(0, INVALID_TOOL_INPUT_EXCERPT_CHARS),
+      reason: "non-object",
+      rawChars: raw.length,
+    },
+  };
+}
+
 export function genericToModelMessages(
   messages: GenericMessage[],
   vendor: LLMVendor = "claude",
 ): ModelMessage[] {
   const out: ModelMessage[] = [];
+  // Sessions persisted before tool-call inputs were normalised can still hold a
+  // string. Report the repair once per request rather than once per block.
+  let loggedNonObjectToolInput = false;
 
   for (const msg of messages) {
     if (msg.role === "user") {
@@ -749,11 +808,24 @@ export function genericToModelMessages(
 
       if (msg.toolCalls) {
         for (const tc of msg.toolCalls) {
+          // A non-object `input` must never reach the wire. Providers whose
+          // chat template iterates the argument object reject the ENTIRE
+          // request when one historical call carries a string, so a single
+          // malformed call from any earlier round would keep failing every
+          // round after it. Coercing here also repairs sessions already
+          // persisted with a string.
+          const wireInput = isPlainToolCallInput(tc.input) ? tc.input : {};
+          if (wireInput !== tc.input && !loggedNonObjectToolInput) {
+            loggedNonObjectToolInput = true;
+            messageMapperLog.warn(
+              `tool-call input was not an object (${typeof tc.input}) — sent as {}`,
+            );
+          }
           parts.push({
             type: "tool-call",
             toolCallId: tc.id,
             toolName: tc.name,
-            input: tc.input,
+            input: wireInput,
           });
         }
       }
@@ -921,11 +993,18 @@ export async function* fullStreamToStreamEvent(
           input: unknown;
         };
         hasToolCalls = true;
+        const normalized = normalizeToolCallInput(p.input);
+        if (normalized.invalidInput) {
+          streamMapperLog.warn(
+            `tool-call ${p.toolName} arguments were not usable (${normalized.invalidInput.reason}, ${normalized.invalidInput.rawChars} chars) — answering with an error`,
+          );
+        }
         yield {
           type: "tool_call",
           id: p.toolCallId,
           name: p.toolName,
-          input: (p.input ?? {}) as Record<string, unknown>,
+          input: normalized.input,
+          ...(normalized.invalidInput && { invalidInput: normalized.invalidInput }),
         };
         break;
       }

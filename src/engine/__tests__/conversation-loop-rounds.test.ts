@@ -859,6 +859,97 @@ describe("ConversationLoop queryLoop", () => {
     expect(resultIds.sort()).toEqual(persistedIds.slice().sort());
   });
 
+  it("answers a call whose arguments never parsed with an error and keeps executing the rest", async () => {
+    const executed: string[] = [];
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(createDynamicTool({
+      name: "noop",
+      description: "no-op tool",
+      source: "builtin",
+      category: "read",
+      isReadOnly: () => true,
+      jsonSchema: { type: "object", properties: {} },
+      execute: async (rawInput: unknown) => {
+        executed.push(JSON.stringify(rawInput));
+        return { output: "ok", isError: false };
+      },
+    }),
+    );
+
+    const provider = new FakeProvider([
+      [
+        { type: "text_delta", text: "calling two" },
+        { type: "tool_call", id: "tu-good", name: "noop", input: { a: 1 } },
+        {
+          type: "tool_call",
+          id: "tu-broken",
+          name: "noop",
+          input: {},
+          invalidInput: {
+            raw: '{"command":"echo hel',
+            reason: "unparsable-json",
+            rawChars: 20,
+          },
+        },
+        { type: "message_complete", stopReason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const loop = new ConversationLoop({
+      settingsService: { get: () => fakeLlmSettings(), getSecret: () => "test-key" },
+      systemPromptBuilder: { build: () => "system" },
+      inputClassifier: new InputClassifier(),
+      routeEngine: new RouteEngine(),
+      toolRegistry,
+      memoryManager: { saveSession: () => {}, listSessions: () => [] },
+    } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
+    (loop as { provider: LLMProvider | null }).provider = provider;
+    const decisions: TurnDecisionEvent[] = [];
+
+    const result = await loop.runTurn(
+      "call two tools",
+      { onDecision: (event) => decisions.push(event) },
+      undefined,
+      { inputOrigin: "user-keyboard" },
+    );
+
+    // The malformed call never reaches the executor; the healthy one does.
+    expect(executed).toEqual(['{"a":1}']);
+    // The turn survives it — this is the whole point: before the fix the
+    // string input replayed on the wire and the provider 400'd the round.
+    expect(result.text).toBe("done");
+
+    const messages = loop.getHistory().getMessages();
+    const assistantWithTools = messages.find(
+      (m) => m.role === "assistant" && Array.isArray((m as { toolCalls?: unknown[] }).toolCalls),
+    ) as { toolCalls: Array<{ id: string; input: unknown }> } | undefined;
+    expect(assistantWithTools).toBeDefined();
+    // History stores an object for the malformed call, never the raw string.
+    for (const tc of assistantWithTools!.toolCalls) {
+      expect(typeof tc.input).toBe("object");
+    }
+
+    // Tool-pair invariant: every persisted tool_use still has a tool_result.
+    const toolResults = messages.filter((m) => m.role === "tool_result") as Array<{
+      toolUseId: string; content: string; isError?: boolean;
+    }>;
+    expect(toolResults.map((m) => m.toolUseId).sort()).toEqual(["tu-broken", "tu-good"]);
+    const broken = toolResults.find((m) => m.toolUseId === "tu-broken")!;
+    expect(broken.isError).toBe(true);
+    expect(broken.content).toBe(
+      t("be_conversationLoop.toolCallInvalidArguments", { excerpt: '{"command":"echo hel' }),
+    );
+
+    const invalidDecisions = decisions.filter((d) => d.kind === "tool_call.invalid_arguments");
+    expect(invalidDecisions).toHaveLength(1);
+    expect(invalidDecisions[0]!.branch).toBe("unparsable-json");
+    expect(invalidDecisions[0]!.reason).toBe("noop");
+    expect(invalidDecisions[0]!.data?.rawChars).toBe(20);
+  });
+
   it("lets the model read host-truncated tool_result chunks through the builtin chunk tool", async () => {
     const toolRegistry = new ToolRegistry();
     const longContent = Array.from(
