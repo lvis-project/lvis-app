@@ -666,4 +666,91 @@ describe("shell-path-policy", () => {
       expect(validateShellCommandPathPolicy(command, root, root, [])).toContain("Sandbox:");
     });
   });
+
+  describe("sed file-access operands need no space after the command letter", () => {
+    // sed reads the filename from just after the command letter to end of line,
+    // so `w/tmp/x` and `w /tmp/x` name the same file. Recovering the operand by
+    // splitting the script on whitespace produced the token `w/tmp/x`, which
+    // resolves cwd-relative and therefore landed INSIDE the boundary.
+    const escapes = [
+      ["w, no space", `sed 'w/tmp/outside/x.txt' notes.txt`],
+      ["1r, no space", `sed '1r/tmp/outside/x.txt' notes.txt`],
+      ["s///w, no space", `sed 's/a/b/w/tmp/outside/x.txt' notes.txt`],
+      ["w, spaced", `sed 'w /tmp/outside/x.txt' notes.txt`],
+      ["1r, spaced", `sed '1r /tmp/outside/x.txt' notes.txt`],
+      ["-e W, no space", `sed -e 'W/tmp/outside/x.txt' notes.txt`],
+      ["R, no space", `sed 'R/tmp/outside/x.txt' notes.txt`],
+    ] as const;
+
+    for (const [label, command] of escapes) {
+      it(`blocks the outside file named by ${label}`, () => {
+        withRoot((root) => {
+          expect(validateShellCommandPathPolicy(command, root, root, [])).not.toBeNull();
+        });
+      });
+    }
+
+    it("still exempts a sed script that names no file", () => {
+      withRoot((root) => {
+        // `/^class/` is an address, not a path, and `s|a|b|` uses `|` as its
+        // delimiter — neither may be read as a file operand.
+        expect(validateShellCommandPathPolicy(`sed -e '/^class/p' -e 's|a|b|' notes.txt`, root, root, []))
+          .toBeNull();
+      });
+    });
+
+    it("does not invent a file operand for `e`, which runs a command", () => {
+      withRoot((root) => {
+        // `s///e` executes the pattern space; there is no filename after the flag,
+        // so nothing may be pushed as a path candidate.
+        expect(validateShellCommandPathPolicy(`sed 's/a/b/e' notes.txt`, root, root, []))
+          .toBeNull();
+      });
+    });
+  });
+
+  describe("a shell comment hides nothing behind it", () => {
+    // An unbalanced quote inside a comment used to put every character-by-
+    // character scanner into a quoted run for the rest of the input, so the
+    // command on the next line was never inspected at all.
+    const hidden = [
+      ["unbalanced single quote", `ls # don't\ncat /etc/shadow`],
+      ["unbalanced double quote", `ls # say "hi\ncat /etc/shadow`],
+      ["unbalanced backtick", "ls # a `b\ncat /etc/shadow"],
+      ["plain comment", `ls # fine\ncat /etc/shadow`],
+    ] as const;
+
+    for (const [label, command] of hidden) {
+      it(`still reads the command after a comment with an ${label}`, () => {
+        withRoot((root) => {
+          expect(validateShellCommandPathPolicy(command, root, root, [])).not.toBeNull();
+        });
+      });
+    }
+
+    it("still classifies a traversal verb hidden behind a comment", () => {
+      withRoot((root) => {
+        // This one goes through splitCommandSegments rather than the leaf scan,
+        // which was blinded by the same unbalanced quote.
+        expect(validateShellCommandPathPolicy(`ls # don't\nfind . -name x`, root, root, []))
+          .toContain("recursive shell filesystem traversal");
+      });
+    });
+
+    it("leaves a `#` inside a word alone", () => {
+      withRoot((root) => {
+        // `a#b` is a filename, not a comment: bash starts a comment only where a
+        // word could start.
+        expect(validateShellCommandPathPolicy(`cat /etc/shadow#backup`, root, root, []))
+          .not.toBeNull();
+      });
+    });
+
+    it("leaves a quoted `#` alone", () => {
+      withRoot((root) => {
+        expect(validateShellCommandPathPolicy(`grep '# /etc/shadow' notes.txt`, root, root, []))
+          .toBeNull();
+      });
+    });
+  });
 });

@@ -293,3 +293,38 @@ describe("tokenizeShell — here-strings", () => {
     expect(leaves[0]!.inputRedirectTargets).toEqual(["./f"]);
   });
 });
+
+describe("tokenizeShell — comments", () => {
+  it("drops a comment and keeps reading the next line as a command", () => {
+    // The apostrophe in `don't` used to open a quoted run that swallowed the
+    // newline, so the second command never became a leaf of its own.
+    const { leaves, parseError } = tokenizeShell("ls # don't\ncat /etc/shadow");
+    expect(parseError).toBe(false);
+    expect(leaves.map((l) => l.argv)).toEqual([["ls"], ["cat", "/etc/shadow"]]);
+  });
+
+  it("drops a comment holding an unbalanced double quote", () => {
+    const { leaves } = tokenizeShell(`ls # say "hi\ncat /etc/shadow`);
+    expect(leaves.map((l) => l.argv)).toEqual([["ls"], ["cat", "/etc/shadow"]]);
+  });
+
+  it("drops a comment holding an unbalanced backtick", () => {
+    const { leaves } = tokenizeShell("ls # a `b\ncat /etc/shadow");
+    expect(leaves.map((l) => l.argv)).toEqual([["ls"], ["cat", "/etc/shadow"]]);
+  });
+
+  it("treats `#` inside a word as part of the word", () => {
+    const { leaves } = tokenizeShell("cat a#b");
+    expect(leaves[0]!.argv).toEqual(["cat", "a#b"]);
+  });
+
+  it("treats a quoted `#` as text", () => {
+    const { leaves } = tokenizeShell("grep '# heading' f");
+    expect(leaves[0]!.argv).toEqual(["grep", "# heading", "f"]);
+  });
+
+  it("starts a comment after an operator, not only after whitespace", () => {
+    const { leaves } = tokenizeShell("ls;# note\ncat /etc/shadow");
+    expect(leaves.map((l) => l.argv)).toEqual([["ls"], ["cat", "/etc/shadow"]]);
+  });
+});

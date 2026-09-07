@@ -13,6 +13,7 @@
 import { describe, expect, it } from "vitest";
 
 import { inspectBuiltinCommandRisk } from "../../__tests__/test-helpers.js";
+import { inspectSedScriptFileAccess } from "../host-risk-inspector.js";
 
 describe("read-only command set", () => {
   it.each([
@@ -45,5 +46,48 @@ describe("read-only command set", () => {
     ["split -b 1m hugefile"],
   ])("keeps %s as shell — it writes files with no flag at all", (command) => {
     expect(inspectBuiltinCommandRisk(command)).toBe("shell");
+  });
+});
+
+describe("sed script file access", () => {
+  // The scanner returns the operand SPAN, not just a yes/no, because the shell
+  // path policy has to check the file sed will open. sed takes the filename
+  // from just after the command letter to end of line, so the space is optional
+  // and recovering the name by splitting on whitespace yielded `w/tmp/x`.
+  it.each([
+    ["w with no space", "w/tmp/outside/x.txt", ["/tmp/outside/x.txt"]],
+    ["w with a space", "w /tmp/outside/x.txt", ["/tmp/outside/x.txt"]],
+    ["addressed r", "1r/tmp/outside/x.txt", ["/tmp/outside/x.txt"]],
+    ["s///w flag", "s/a/b/w/tmp/outside/x.txt", ["/tmp/outside/x.txt"]],
+    ["R", "R/tmp/outside/x.txt", ["/tmp/outside/x.txt"]],
+    ["two lines", "w/tmp/a\nr/tmp/b", ["/tmp/a", "/tmp/b"]],
+  ])("reads the operand of %s", (_label, script, expected) => {
+    expect(inspectSedScriptFileAccess(script)).toEqual({
+      hasWriteOrExec: true,
+      fileOperands: expected,
+    });
+  });
+
+  it("reports execution without inventing a filename", () => {
+    // `s///e` runs the pattern space as a command; nothing after it is a path.
+    expect(inspectSedScriptFileAccess("s/a/b/e")).toEqual({
+      hasWriteOrExec: true,
+      fileOperands: [],
+    });
+    expect(inspectSedScriptFileAccess("e")).toEqual({
+      hasWriteOrExec: true,
+      fileOperands: [],
+    });
+  });
+
+  it("finds no file access in an address or a delimiter that looks like one", () => {
+    expect(inspectSedScriptFileAccess("/^class/p")).toEqual({
+      hasWriteOrExec: false,
+      fileOperands: [],
+    });
+    expect(inspectSedScriptFileAccess("s|a|b|")).toEqual({
+      hasWriteOrExec: false,
+      fileOperands: [],
+    });
   });
 });

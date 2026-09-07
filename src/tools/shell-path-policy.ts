@@ -2,14 +2,19 @@ import { homedir } from "node:os";
 import { isAbsolute, resolve as pathResolve } from "node:path";
 
 import { t } from "../i18n/index.js";
-import { redactHeredocBodies, stripCommandPath, tokenizeShell } from "../shared/shell-tokenizer.js";
+import {
+  redactHeredocBodies,
+  startsShellComment,
+  stripCommandPath,
+  tokenizeShell,
+} from "../shared/shell-tokenizer.js";
 import { validateSandboxPath } from "../sandbox/path-validator.js";
 import {
   canonicalizePathForMatch,
   caseFoldForMatch,
   isSensitivePath,
 } from "../permissions/sensitive-paths.js";
-import { sedScriptHasWriteOrExec } from "../permissions/reviewer/host-risk-inspector.js";
+import { inspectSedScriptFileAccess } from "../permissions/reviewer/host-risk-inspector.js";
 import { errorMessage } from "../shared/error-message.js";
 import { expandLeadingTilde } from "../shared/home-tilde.js";
 
@@ -518,7 +523,7 @@ interface NonPathOperandSpec {
    *
    * NOT set for `sed`/`awk`, where a lone `/…/` is address or regex syntax and
    * declining would refuse `sed -e '/^class/p'`. Their real file access is
-   * covered instead by {@link sedScriptHasWriteOrExec} and, for awk, by awk
+   * covered instead by {@link inspectSedScriptFileAccess} and, for awk, by awk
    * being excluded from the read-only verb set so every call is reviewed.
    */
   declineBarePathValue?: true;
@@ -705,16 +710,20 @@ function classifyOperandSlots(argv: readonly string[]): OperandSlotClassificatio
     // A one-word value shaped like a path IS one for slots that execute or open
     // what they are given: `sh -c /etc/evil.sh` runs that file.
     if (spec.declineBarePathValue && isBarePathValue(value)) return false;
-    // A sed script with a file-access command letter (`r R w W`, `s///w`,
-    // `s///e`) reads or writes the operand after the letter. The letters are
-    // recognised by the host's own sed scanner rather than a second copy of it;
-    // the operand is then recovered by word-splitting, which is safe here
-    // BECAUSE the scanner already said this script touches files.
-    if (isSed && sedScriptHasWriteOrExec(value)) {
-      for (const word of value.split(/\s+/)) {
-        if (word.length > 0) extraCandidates.push(word);
+    // A sed script with a file-access command letter (`r R w W`, `s///w`)
+    // reads or writes a file, and `e` / `s///e` executes. Both the letters and
+    // the operand come from the host's own sed scanner rather than a second
+    // copy of its grammar. The scanner returns the operand SPAN — sed takes the
+    // filename from just after the command letter to end of line, so `w/tmp/x`
+    // and `w /tmp/x` name the same file and splitting on whitespace would have
+    // yielded the token `w/tmp/x`, which resolves cwd-relative and stays inside
+    // any boundary.
+    if (isSed) {
+      const sedAccess = inspectSedScriptFileAccess(value);
+      if (sedAccess.hasWriteOrExec) {
+        extraCandidates.push(...sedAccess.fileOperands);
+        return false;
       }
-      return false;
     }
     return true;
   };
@@ -1004,6 +1013,16 @@ function splitCommandSegments(command: string): string[] {
       segment += ch;
       continue;
     }
+    // A comment runs to end of line and is not a command. Dropping it here is
+    // also what stops an unbalanced quote inside one (`ls # don't`) from
+    // putting this scanner into a quoted run for the rest of the input, which
+    // hid every later segment from the policy.
+    if (ch === "#" && startsShellComment(command, i)) {
+      let end = i + 1;
+      while (end < command.length && command[end] !== "\n") end += 1;
+      i = end - 1;
+      continue;
+    }
     if (ch === "'" || ch === '"' || ch === "`") {
       quote = ch;
       segment += ch;
@@ -1124,7 +1143,10 @@ function tokenizeCommand(command: string): string[] {
   let token = "";
   let quote: "'" | '"' | "`" | null = null;
   let escaping = false;
-  for (const ch of command) {
+  // Indexed rather than `for…of` because the comment rule needs the PRECEDING
+  // character to tell `#` starting a comment from `#` inside a word.
+  for (let i = 0; i < command.length; i += 1) {
+    const ch = command[i]!;
     if (escaping) {
       token += ch;
       escaping = false;
@@ -1138,6 +1160,17 @@ function tokenizeCommand(command: string): string[] {
     if (quote) {
       if (ch === quote) quote = null;
       else token += ch;
+      continue;
+    }
+    // Comment to end of line — no tokens, and no quote state carried past it.
+    if (ch === "#" && startsShellComment(command, i)) {
+      if (token) {
+        tokens.push(token);
+        token = "";
+      }
+      let end = i + 1;
+      while (end < command.length && command[end] !== "\n") end += 1;
+      i = end - 1;
       continue;
     }
     if (ch === "'" || ch === '"' || ch === "`") {

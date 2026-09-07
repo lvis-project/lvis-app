@@ -296,8 +296,15 @@ export function redactHeredocBodies(command: string): string {
  * True when the `#` at `index` begins a comment rather than sitting inside a
  * word. Bash starts a comment only where a word could start: at the beginning
  * of the input, or after whitespace or one of the operators that end a word.
+ *
+ * Exported because every scanner that walks a command character by character
+ * needs this same answer, and each one that lacked it could be blinded by a
+ * single unbalanced quote in a comment: `ls # don't` leaves the scanner inside
+ * a quoted run, so the newline and everything after it — a whole second
+ * command — is read as quoted text and never inspected. The callers must agree
+ * about where a comment starts, so they share the rule instead of restating it.
  */
-function startsShellComment(command: string, index: number): boolean {
+export function startsShellComment(command: string, index: number): boolean {
   if (index === 0) return true;
   const previous = command[index - 1]!;
   return previous === " " || previous === "\t" || previous === "\n" || previous === "\r"
@@ -405,6 +412,20 @@ function scanLeaves(command: string): { leaves: RawLeaf[]; parseError: boolean }
   let i = 0;
   while (i < n) {
     const ch = command[i]!;
+
+    // Comment: `#` where a word could start runs to end of line. The newline is
+    // left in place so it still ends the leaf.
+    if (ch === "#" && startsShellComment(command, i)) {
+      pushWord();
+      let end = i + 1;
+      while (end < n && command[end] !== "\n") end += 1;
+      // A line holding only a comment is no leaf at all. Without moving the
+      // leaf start past it the comment text becomes the leaf's raw string, and
+      // a leaf with a raw string survives the empty-leaf filter.
+      if (words.length === 0) leafStart = end;
+      i = end;
+      continue;
+    }
 
     // Single quote: literal run to the next single quote. No expansion.
     if (ch === "'") {
