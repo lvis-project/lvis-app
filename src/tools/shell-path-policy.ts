@@ -167,11 +167,20 @@ function findViolationInCommand(
   extraAllowedDirectories: readonly string[],
   blockReadsOutsideWorkingDirectories: boolean,
   depth: number,
+  // Loop values declared by the text that CONTAINS this command. A substitution
+  // body is analysed on its own, but at runtime it still runs inside whatever
+  // loop wrapped it, so `$(diff "$f" "/app/$f")` can see the `f` its enclosing
+  // `for` header spells out. Without inheriting them the body reads that
+  // operand as unresolvable and refuses a path the outer text fully determines.
+  inheritedLoopBindings: ReadonlyMap<string, readonly string[]> = new Map(),
 ): ShellPathPolicyViolation | null {
   // A quoted heredoc body is stdin data, not commands — see
   // `redactHeredocBodies`. Removing it here rather than inside each extractor
   // keeps the flat scan and the leaf walk reading the same text.
   const command = redactHeredocBodies(rawCommand);
+  // What this text declares, on top of what the text around it declared. A body
+  // rebinding a name shadows the outer one, which is what the shell does.
+  const loopBindings = mergeLoopBindings(inheritedLoopBindings, collectLiteralLoopBindings(command));
   const cwdSensitive = isSensitivePath(caseFoldForMatch(canonicalizePathForMatch(cwd)));
   if (cwdSensitive) {
     return {
@@ -227,6 +236,7 @@ function findViolationInCommand(
         extraAllowedDirectories,
         blockReadsOutsideWorkingDirectories,
         depth + 1,
+        loopBindings,
       );
       if (violation) return violation;
     }
@@ -256,36 +266,39 @@ function findViolationInCommand(
     sandboxRoot,
     extraAllowedDirectories,
     blockReadsOutsideWorkingDirectories,
+    loopBindings,
   );
   if (leafViolation) return leafViolation;
 
   const candidates = extractPathCandidates(command);
-  for (const { candidate, effect } of candidates) {
-    if (isIgnoredShellDeviceCandidate(candidate)) {
+  for (const { candidate: rawCandidate, effect } of candidates) {
+    if (isIgnoredShellDeviceCandidate(rawCandidate)) {
       continue;
     }
-    let absolute: string;
-    try {
-      absolute = resolveCandidatePath(candidate, cwd);
-    } catch (err) {
-      return {
-        kind: "invalid-path",
-        reason: errorMessage(err),
+    for (const candidate of expandLoopCandidates(rawCandidate, loopBindings)) {
+      let absolute: string;
+      try {
+        absolute = resolveCandidatePath(candidate, cwd);
+      } catch (err) {
+        return {
+          kind: "invalid-path",
+          reason: errorMessage(err),
+          candidate,
+        };
+      }
+      if (isIgnoredShellDevicePath(absolute)) {
+        continue;
+      }
+      const violation = checkResolvedPath(
+        absolute,
         candidate,
-      };
+        sandboxRoot,
+        extraAllowedDirectories,
+        effect,
+        blockReadsOutsideWorkingDirectories,
+      );
+      if (violation) return violation;
     }
-    if (isIgnoredShellDevicePath(absolute)) {
-      continue;
-    }
-    const violation = checkResolvedPath(
-      absolute,
-      candidate,
-      sandboxRoot,
-      extraAllowedDirectories,
-      effect,
-      blockReadsOutsideWorkingDirectories,
-    );
-    if (violation) return violation;
   }
   return null;
 }
@@ -320,6 +333,7 @@ function findCwdAwareLeafViolation(
   sandboxRoot: string,
   extraAllowedDirectories: readonly string[],
   blockReadsOutsideWorkingDirectories: boolean,
+  loopBindings: ReadonlyMap<string, readonly string[]>,
 ): ShellPathPolicyViolation | null {
   const { leaves, parseError } = tokenizeShell(command);
   // A command the SOT tokenizer cannot parse has no trustworthy leaf order, so
@@ -388,6 +402,7 @@ function findCwdAwareLeafViolation(
         extraAllowedDirectories,
         operand.effect,
         blockReadsOutsideWorkingDirectories,
+        loopBindings,
       );
       if (violation) return violation;
     }
@@ -438,33 +453,36 @@ function checkOperandAgainstBase(
   extraAllowedDirectories: readonly string[],
   effect: PathEffect,
   blockReadsOutsideWorkingDirectories: boolean,
+  loopBindings: ReadonlyMap<string, readonly string[]>,
 ): ShellPathPolicyViolation | null {
   for (const part of splitCandidateParts(operand)) {
-    const candidate = normalizeCandidate(part);
-    if (!candidate || !looksLikePath(candidate)) continue;
-    if (isIgnoredShellDeviceCandidate(candidate)) continue;
+    const rawCandidate = normalizeCandidate(part);
+    if (!rawCandidate || !looksLikePath(rawCandidate)) continue;
+    if (isIgnoredShellDeviceCandidate(rawCandidate)) continue;
 
-    let absolute: string;
-    try {
-      absolute = resolveCandidatePath(candidate, base);
-    } catch (err) {
-      return {
-        kind: "invalid-path",
-        reason: errorMessage(err),
+    for (const candidate of expandLoopCandidates(rawCandidate, loopBindings)) {
+      let absolute: string;
+      try {
+        absolute = resolveCandidatePath(candidate, base);
+      } catch (err) {
+        return {
+          kind: "invalid-path",
+          reason: errorMessage(err),
+          candidate,
+        };
+      }
+      if (isIgnoredShellDevicePath(absolute)) continue;
+
+      const violation = checkResolvedPath(
+        absolute,
         candidate,
-      };
+        sandboxRoot,
+        extraAllowedDirectories,
+        effect,
+        blockReadsOutsideWorkingDirectories,
+      );
+      if (violation) return violation;
     }
-    if (isIgnoredShellDevicePath(absolute)) continue;
-
-    const violation = checkResolvedPath(
-      absolute,
-      candidate,
-      sandboxRoot,
-      extraAllowedDirectories,
-      effect,
-      blockReadsOutsideWorkingDirectories,
-    );
-    if (violation) return violation;
   }
   return null;
 }
@@ -1472,6 +1490,92 @@ function hasPathShape(value: string): boolean {
     value.includes("\\") ||
     /^[A-Za-z]:[\\/]/.test(value)
   );
+}
+
+/**
+ * Loop variables whose values the command itself spells out.
+ *
+ * `for f in runtime/gc.c runtime/mem.c; do cat /app/$f; done` names every path
+ * it will touch, but the operand `/app/$f` carries a `$` and so was refused as
+ * unresolvable. The values are right there in the header. Reading them lets the
+ * policy judge the concrete paths instead of declining to judge at all, which
+ * is strictly more checking, not less: each expansion is run through the same
+ * boundary test and any one of them landing outside blocks the command.
+ *
+ * A value list is only read when every entry is a plain literal. Anything that
+ * would need the shell to evaluate it — a substitution, another variable, a
+ * glob — leaves the variable unbound, and an operand using it is refused as
+ * before.
+ */
+const MAX_LOOP_VALUES = 32;
+const LOOP_HEADER_RE = /\bfor\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\s+([^\n;]*?)(?:;|\n)\s*do\b/g;
+const LOOP_VALUE_RE = /^[A-Za-z0-9_@%+=:,./~-]+$/;
+
+function mergeLoopBindings(
+  outer: ReadonlyMap<string, readonly string[]>,
+  inner: ReadonlyMap<string, readonly string[]>,
+): ReadonlyMap<string, readonly string[]> {
+  if (outer.size === 0) return inner;
+  if (inner.size === 0) return outer;
+  return new Map([...outer, ...inner]);
+}
+
+function collectLiteralLoopBindings(command: string): ReadonlyMap<string, readonly string[]> {
+  const bindings = new Map<string, string[]>();
+  for (const match of command.matchAll(LOOP_HEADER_RE)) {
+    const name = match[1]!;
+    const values = match[2]!.trim().split(/\s+/).filter((v) => v.length > 0);
+    if (values.length === 0 || values.length > MAX_LOOP_VALUES) continue;
+    // Quoting does not make a value dynamic, but only a fully literal one is
+    // safe to substitute; a single non-literal entry disqualifies the header,
+    // because a partial binding would judge some iterations and silently skip
+    // the one that matters.
+    const literals = values.map((v) => v.replace(/^(['"])(.*)\1$/, "$2"));
+    if (!literals.every((v) => LOOP_VALUE_RE.test(v))) continue;
+    // The same name bound twice takes the union: checking both value sets is
+    // the conservative reading when the command text alone cannot say which
+    // header governs a given operand.
+    const existing = bindings.get(name);
+    if (existing) {
+      for (const v of literals) if (!existing.includes(v)) existing.push(v);
+      if (existing.length > MAX_LOOP_VALUES) bindings.delete(name);
+    } else {
+      bindings.set(name, [...literals]);
+    }
+  }
+  return bindings;
+}
+
+/**
+ * Every concrete form a candidate can take under the loop bindings, or the
+ * candidate itself when it references none of them. Expansion is capped so a
+ * command nesting several loops cannot turn one operand into a combinatorial
+ * pile of paths to check.
+ */
+const MAX_CANDIDATE_EXPANSIONS = 64;
+
+function expandLoopCandidates(
+  candidate: string,
+  bindings: ReadonlyMap<string, readonly string[]>,
+): readonly string[] {
+  if (bindings.size === 0 || !candidate.includes("$")) return [candidate];
+  let forms = [candidate];
+  for (const [name, values] of bindings) {
+    const ref = new RegExp(`\\$\\{${name}\\}|\\$${name}(?![A-Za-z0-9_])`, "g");
+    // `replace` rather than `test`: a global regex carries `lastIndex` between
+    // calls, so testing several forms in a row skips matches at the start of
+    // every form after the first.
+    if (!forms.some((f) => f.replace(ref, "") !== f)) continue;
+    const next: string[] = [];
+    for (const form of forms) {
+      for (const value of values) {
+        next.push(form.replace(ref, value));
+        if (next.length > MAX_CANDIDATE_EXPANSIONS) return [candidate];
+      }
+    }
+    forms = next;
+  }
+  return forms;
 }
 
 function resolveCandidatePath(value: string, cwd: string): string {

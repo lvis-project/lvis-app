@@ -200,6 +200,124 @@ describe("shell-path-policy", () => {
     });
   });
 
+  describe("loop variables whose values the command spells out", () => {
+    it("judges each value instead of refusing to judge the operand", () => {
+      withRoot((root) => {
+        expect(
+          validateShellCommandPathPolicy(
+            "for f in notes.txt draft.txt; do cat $f; done",
+            root,
+            root,
+            [],
+          ),
+        ).toBeNull();
+      });
+    });
+
+    it("accepts the brace form and a value used as a path segment", () => {
+      withRoot((root) => {
+        expect(
+          validateShellCommandPathPolicy(
+            "for name in alpha beta; do cat ./src/${name}/main.c; done",
+            root,
+            root,
+            [],
+          ),
+        ).toBeNull();
+      });
+    });
+
+    // The point of reading the values is that they get checked. A list that
+    // walks out of the sandbox has to be caught on the value that does it,
+    // even when its siblings are fine.
+    it("blocks when one value escapes the sandbox", () => {
+      withRoot((root) => {
+        const verdict = validateShellCommandPathPolicy(
+          "for f in notes.txt ../../etc/passwd; do cat ./$f; done",
+          root,
+          root,
+          [],
+        );
+        expect(verdict).not.toBeNull();
+        expect(verdict).not.toContain("unresolved shell variable");
+      });
+    });
+
+    it("blocks a write built from a value that leaves the sandbox", () => {
+      withRoot((root) => {
+        expect(
+          validateShellCommandPathPolicy(
+            "for d in build ../../../etc; do mkdir ./$d; done",
+            root,
+            root,
+            [],
+          ),
+        ).not.toBeNull();
+      });
+    });
+
+    // Everything below stays unresolvable, so the operand is still refused —
+    // reading a literal list must not become a way to wave through a value the
+    // command text does not actually contain.
+    it("leaves the variable unbound when a value needs the shell to evaluate it", () => {
+      withRoot((root) => {
+        expect(
+          validateShellCommandPathPolicy("for f in $(ls); do cat ./$f; done", root, root, []),
+        ).toContain("unresolved");
+      });
+    });
+
+    it("leaves the variable unbound when any single value is not a literal", () => {
+      withRoot((root) => {
+        expect(
+          validateShellCommandPathPolicy(
+            "for f in notes.txt $OTHER; do cat ./$f; done",
+            root,
+            root,
+            [],
+          ),
+        ).toContain("unresolved shell variable");
+      });
+    });
+
+    it("leaves a glob unbound rather than guessing what it matches", () => {
+      withRoot((root) => {
+        expect(
+          validateShellCommandPathPolicy("for f in *.txt; do cat ./$f; done", root, root, []),
+        ).toContain("unresolved shell variable");
+      });
+    });
+
+    it("does not bind a variable the command never loops over", () => {
+      withRoot((root) => {
+        expect(
+          validateShellCommandPathPolicy(
+            "for f in notes.txt; do cat ./$other; done",
+            root,
+            root,
+            [],
+          ),
+        ).toContain("unresolved shell variable");
+      });
+    });
+
+    // Two headers binding the same name: checking both value sets is the
+    // conservative reading, since the operand alone does not say which loop
+    // it sits in.
+    it("checks both value sets when a name is bound twice", () => {
+      withRoot((root) => {
+        expect(
+          validateShellCommandPathPolicy(
+            "for f in a.txt; do cat ./$f; done; for f in ../../etc/passwd; do cat ./$f; done",
+            root,
+            root,
+            [],
+          ),
+        ).not.toBeNull();
+      });
+    });
+  });
+
   it("expands $PWD and accepts operands that stay inside the sandbox", () => {
     withRoot((root) => {
       expect(validateShellCommandPathPolicy("cat $PWD/notes.txt", root, root, [])).toBeNull();
@@ -690,11 +808,20 @@ describe("shell-path-policy", () => {
 
     it("keeps echo arguments refused even when they only look like a path", () => {
       withRoot((root) => {
-        // The cost of the rule above: echo data carrying an unexpanded variable
-        // is refused as a dynamic path, exactly as main refused it. Exempting
-        // echo bought this one shape and cost the whole pipe class.
-        expect(validateShellCommandPathPolicy(`for d in a b; do echo "=== $d/log ==="; done`, root, root, []))
+        // The cost of the rule above: echo data carrying a variable nothing can
+        // resolve is refused as a dynamic path. Exempting echo bought one shape
+        // and cost the whole pipe class, so echo is judged like any other verb.
+        expect(validateShellCommandPathPolicy(`echo "=== $d/log ==="`, root, root, []))
           .toContain("unresolved shell variable");
+        // What narrows the cost is resolving the value rather than exempting
+        // the verb: the same argument under a loop that spells out its values
+        // is judged on those values, and passes because they stay inside.
+        expect(validateShellCommandPathPolicy(`for d in a b; do echo "=== $d/log ==="; done`, root, root, []))
+          .toBeNull();
+        // And it is a judgement, not a pass: a value that leaves the boundary
+        // is caught in exactly the same argument.
+        expect(validateShellCommandPathPolicy(`for d in a ../../etc; do echo "=== $d/log ==="; done`, root, root, []))
+          .not.toBeNull();
       });
     });
   });
