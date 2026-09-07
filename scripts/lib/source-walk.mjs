@@ -29,10 +29,13 @@ import { join } from "node:path";
  * @param {(path: string) => boolean} [options.accept] final per-file filter.
  * @param {boolean} [options.tolerateUnreadableDirs] `true` treats a directory
  *   that cannot be listed (absent, unreadable) as empty instead of throwing.
- * @param {string[]} [out]
+ * @param {string[]} [out] internal — passed only by the recursion, which is
+ *   also how a nested call is told apart from the caller's own.
  * @returns {string[]} absolute paths when `dir` is absolute.
  */
-export function walkSourceFiles(dir, options = {}, out = []) {
+export function walkSourceFiles(dir, options = {}, out) {
+  const isRoot = out === undefined;
+  const found = out ?? [];
   const {
     skipDirs = new Set(),
     extensions,
@@ -43,13 +46,23 @@ export function walkSourceFiles(dir, options = {}, out = []) {
   try {
     entries = readdirSync(dir, { withFileTypes: true });
   } catch (error) {
-    if (tolerateUnreadableDirs) return out;
+    // A directory listed by its parent a moment ago and gone by the time we
+    // descend was removed by something else running at the same time — a test
+    // clearing its scratch directory while a repo-wide walk is in flight. There
+    // is nothing left to walk, and failing the walk over it turns another
+    // suite's cleanup into this one's error.
+    //
+    // The root is not the same case: a caller naming a directory that does not
+    // exist has made a mistake, and it stays an error unless the caller opted
+    // out with `tolerateUnreadableDirs`.
+    if (!isRoot && error?.code === "ENOENT") return found;
+    if (tolerateUnreadableDirs) return found;
     throw error;
   }
   for (const entry of entries) {
     const path = join(dir, entry.name);
     if (entry.isDirectory()) {
-      if (!skipDirs.has(entry.name)) walkSourceFiles(path, options, out);
+      if (!skipDirs.has(entry.name)) walkSourceFiles(path, options, found);
       continue;
     }
     if (!entry.isFile()) continue;
@@ -57,7 +70,7 @@ export function walkSourceFiles(dir, options = {}, out = []) {
       continue;
     }
     if (accept && !accept(path)) continue;
-    out.push(path);
+    found.push(path);
   }
-  return out;
+  return found;
 }
