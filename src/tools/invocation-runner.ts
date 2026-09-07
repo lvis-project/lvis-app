@@ -126,6 +126,95 @@ import { errorMessage } from "../shared/error-message.js";
 
 const log = createLogger("executor");
 
+/**
+ * At most this many authorized directories are named in a denial message. A
+ * session can hold a long grant list, and the message is read by a model whose
+ * budget the enumeration would otherwise eat.
+ */
+const DENIAL_GUIDANCE_DIRECTORY_LIMIT = 8;
+
+/**
+ * The sentences appended to every host policy refusal — the four bracketed
+ * block kinds (`Directory policy blocked`, `Shell path policy blocked`,
+ * `Bash AST blocked`, `Sensitive path blocked`) plus the headless directory
+ * hold, which denies for the same reason without a person in the loop.
+ *
+ * WHY ONE FORMATTER. All five arrive at the model as an ordinary `isError`
+ * tool result, indistinguishable from a command that simply failed. Read that
+ * way they invite the one response that cannot work: rewrite the command and
+ * run it again. A refusal has to say three things a failure does not — WHAT was
+ * judged, whether a retry can change the answer, and what would be allowed
+ * instead — and it has to say them the same way every time, or the model learns
+ * the shape of one message and misreads the other four.
+ *
+ * The bracketed prefix stays on the caller's side: downstream parsers key on
+ * it, and this only ever appends.
+ *
+ * @param rule       Stable identifier of the rule that refused, e.g.
+ *                   `shell-path-policy/sandbox-boundary`.
+ * @param operand    The token or path actually judged, when the rule named one.
+ * @param retry      `never` for a decision no repetition can change; `grant`
+ *                   when a human authorization would change it.
+ */
+export function buildPolicyDenialGuidance(input: {
+  rule: string;
+  operand?: string;
+  retry: "never" | "grant";
+  alternative: PolicyDenialAlternative;
+  allowedDirectories: readonly string[];
+  filesystemRootReference?: boolean;
+}): string {
+  const sentences: string[] = [];
+  sentences.push(
+    input.operand === undefined || input.operand.length === 0
+      ? t("be_executor.denialJudgedRule", { rule: input.rule })
+      : t("be_executor.denialJudgedOperand", { operand: input.operand, rule: input.rule }),
+  );
+  sentences.push(
+    input.retry === "never"
+      ? t("be_executor.denialRetryNever")
+      : t("be_executor.denialRetryNeedsGrant"),
+  );
+  if (input.filesystemRootReference) {
+    sentences.push(t("be_executor.denialFilesystemRoot"));
+  }
+  if (input.alternative === "restructure-command") {
+    sentences.push(t("be_executor.denialRestructureCommand"));
+  } else if (input.alternative === "path-never-readable") {
+    sentences.push(t("be_executor.denialSensitivePathPermanent"));
+  } else {
+    const named = input.allowedDirectories.slice(0, DENIAL_GUIDANCE_DIRECTORY_LIMIT);
+    const remaining = input.allowedDirectories.length - named.length;
+    sentences.push(
+      named.length === 0
+        ? t("be_executor.denialNoAllowedDirectories")
+        : t("be_executor.denialAllowedDirectories", {
+            directories: remaining > 0 ? `${named.join(", ")}, …(+${remaining})` : named.join(", "),
+          }),
+    );
+  }
+  return ` ${sentences.join(" ")}`;
+}
+
+/**
+ * What the model could legitimately do instead — the sentence that closes a
+ * denial.
+ *
+ * Naming the authorized directories only helps when the refusal was ABOUT
+ * scope. Appending it to a structural refusal ("this command shape is not
+ * allowed") or to a Layer-0 sensitive path invites the retry that cannot work:
+ * re-issuing `rm -rf` under an authorized directory is still `rm -rf`, and no
+ * grant ever makes a protected path readable. Those two get sentences that say
+ * what would actually change the answer.
+ */
+type PolicyDenialAlternative =
+  /** The refusal was about scope: a path under an authorized directory works. */
+  | "retarget-under-authorized-directory"
+  /** The command's shape was refused; a different target changes nothing. */
+  | "restructure-command"
+  /** A Layer-0 protected path; no authorization makes it readable. */
+  | "path-never-readable";
+
 type AuditToolCallArgs = Parameters<AuditWriter["auditToolCall"]>;
 type AuditPermissionAskArgs = Parameters<AuditWriter["auditPermissionAsk"]>;
 
@@ -913,7 +1002,21 @@ export async function runToolInvocation(
       );
       const validation = validateDirectoryAddition(outOfAllowedTarget.canonicalPath);
       if (!validation.ok) {
-        const msg = t("be_executor.dirPolicyBlock", { name: toolUse.name, reason: validation.reason, filePath: outOfAllowedTarget.filePath });
+        // A path the host will never add to the allowed set — the filesystem
+        // root, or a Layer-0 sensitive pattern. The VERDICT matches an ordinary
+        // out-of-allowed read (both refuse), so the guidance matches too; only
+        // the root sentence differs, because root is the one target no
+        // authorization can ever cover and the model has to be told to name a
+        // subdirectory rather than keep asking for `/`.
+        const msg = t("be_executor.dirPolicyBlock", { name: toolUse.name, reason: validation.reason, filePath: outOfAllowedTarget.filePath })
+          + buildPolicyDenialGuidance({
+            rule: "allowed-directories/not-grantable",
+            operand: outOfAllowedTarget.filePath,
+            retry: "never",
+            alternative: "retarget-under-authorized-directory",
+            allowedDirectories: invocationAllowedScope.directories,
+            filesystemRootReference: isFilesystemRootPath(outOfAllowedTarget.canonicalPath),
+          });
         const durationMs = Date.now() - startTime;
         emitToolStart(callbacks, toolUse.name, finalInput, meta);
         callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
@@ -1068,7 +1171,17 @@ export async function runToolInvocation(
         const remoteOneShotRejected =
           requiresRemoteDirectoryOneShot && decision.choice !== "allow-once";
         if (decision.choice.startsWith("deny") || remoteOneShotRejected) {
-          const msg = t("be_executor.dirPolicyUserDenied", { name: toolUse.name, filePath: outOfAllowedTarget.filePath });
+          // Reached both when a person declines and when an unattended session
+          // auto-denies. Either way the same argument cannot succeed on its
+          // own, so the guidance points at authorization rather than a rewrite.
+          const msg = t("be_executor.dirPolicyUserDenied", { name: toolUse.name, filePath: outOfAllowedTarget.filePath })
+            + buildPolicyDenialGuidance({
+              rule: "allowed-directories/denied",
+              operand: outOfAllowedTarget.filePath,
+              retry: "grant",
+              alternative: "retarget-under-authorized-directory",
+              allowedDirectories: invocationAllowedScope.directories,
+            });
           const durationMs = Date.now() - startTime;
           emitToolStart(callbacks, toolUse.name, finalInput, meta);
           callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
@@ -1175,7 +1288,14 @@ export async function runToolInvocation(
         };
         const msg =
           t("be_executor.permHoldHeadlessDirectory", { name: toolUse.name, source }) +
-          (deferredId ? ` (deferredId=${deferredId})` : "");
+          (deferredId ? ` (deferredId=${deferredId})` : "") +
+          buildPolicyDenialGuidance({
+            rule: "allowed-directories/headless-hold",
+            operand: outOfAllowedTarget.filePath,
+            retry: "grant",
+            alternative: "retarget-under-authorized-directory",
+            allowedDirectories: invocationAllowedScope.directories,
+          });
         const durationMs = Date.now() - startTime;
         log.warn(msg);
         emitToolStart(callbacks, toolUse.name, finalInput, meta);
@@ -1308,7 +1428,22 @@ export async function runToolInvocation(
           continue;
         }
 
-        const msg = t("be_executor.shellPathPolicyBlock", { name: toolUse.name, reason: shellPathViolation.reason });
+        const msg = t("be_executor.shellPathPolicyBlock", { name: toolUse.name, reason: shellPathViolation.reason })
+          + buildPolicyDenialGuidance({
+            rule: `shell-path-policy/${shellPathViolation.kind}`,
+            operand: shellPathViolation.candidate ?? shellPathViolation.path,
+            retry: "never",
+            // Only a boundary verdict is about scope. A recursive-traversal or
+            // dynamic-path refusal is about the command's shape, and naming
+            // directories there sends the model to re-target instead of to
+            // rewrite.
+            alternative: shellPathViolation.kind === "sandbox-boundary"
+              ? "retarget-under-authorized-directory"
+              : shellPathViolation.kind === "sensitive-path"
+                ? "path-never-readable"
+                : "restructure-command",
+            allowedDirectories: invocationAllowedScope.directories,
+          });
         const durationMs = Date.now() - startTime;
         const blockedPermission: PermissionCheckResult = {
           decision: "deny",
@@ -1363,7 +1498,15 @@ export async function runToolInvocation(
     if (services.bashAstValidator) {
       const bashResult = services.bashAstValidator.validate(toolUse.name, finalInput);
       if (bashResult.decision === "deny") {
-        const msg = t("be_executor.bashAstBlock", { reason: bashResult.reason ?? "", patternId: bashResult.patternId ?? "" });
+        const msg = t("be_executor.bashAstBlock", { reason: bashResult.reason ?? "", patternId: bashResult.patternId ?? "" })
+          + buildPolicyDenialGuidance({
+            rule: `bash-ast/${bashResult.patternId ?? "unnamed"}`,
+            retry: "never",
+            // Structural: the shape was refused, so a different target is the
+            // one retry guaranteed to fail again.
+            alternative: "restructure-command",
+            allowedDirectories: invocationAllowedScope.directories,
+          });
         return await denyStructuralShellCommand(msg, bashResult.reason ?? "bash AST");
       }
       if (bashResult.decision === "warn") {
@@ -1418,7 +1561,16 @@ export async function runToolInvocation(
     }
 
     if (sensitivePathPattern) {
-      const msg = t("be_executor.sensitivePathBlock", { name: toolUse.name, source, filePath: sensitiveTarget?.filePath ?? "", pattern: sensitivePathPattern ?? "" });
+      const msg = t("be_executor.sensitivePathBlock", { name: toolUse.name, source, filePath: sensitiveTarget?.filePath ?? "", pattern: sensitivePathPattern ?? "" })
+        + buildPolicyDenialGuidance({
+          rule: `sensitive-paths/${sensitivePathPattern}`,
+          operand: sensitiveTarget?.filePath,
+          retry: "never",
+          // Layer 0: no directory grant reaches this path, so listing the
+          // authorized ones would only suggest a retry that cannot work.
+          alternative: "path-never-readable",
+          allowedDirectories: invocationAllowedScope.directories,
+        });
       const durationMs = Date.now() - startTime;
       const blockedPermission: PermissionCheckResult = {
         decision: "deny",

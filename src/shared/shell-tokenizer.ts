@@ -54,6 +54,16 @@ export interface ShellLeaf {
    * write, but they reach a file the argv-path check cannot see, so a
    * default-strict caller may still choose to treat the leaf as non-read. */
   hasInputRedirect: boolean;
+  /**
+   * Sources named by input redirects (`< file`). Reported for the same reason
+   * {@link redirectTargets} is: a containment check has to see every file the
+   * leaf reaches, and `tr -d x < ~/.ssh/id_rsa` names that file nowhere else.
+   * The source word was previously consumed and discarded, which left a flat
+   * whole-command scan as the only layer able to see it.
+   *
+   * A heredoc's delimiter word is NOT collected — it names no file.
+   */
+  inputRedirectTargets: string[];
   /** True when the leaf contained `$(...)` or backtick command substitution. */
   hasCommandSubstitution: boolean;
   /** True when the leaf contained `<(...)` or `>(...)` process substitution. */
@@ -132,11 +142,14 @@ interface RawLeaf {
  *    (only outside quotes/substitution).
  *  - leading `FOO=bar` assignments and wrapper commands are stripped from each
  *    leaf's argv to expose the effective verb.
+ *  - `<<'WORD'` / `<<"WORD"` heredoc bodies are removed before scanning (see
+ *    {@link redactHeredocBodies}); they are data on the consumer's stdin, not
+ *    commands.
  *
  * Fails closed (`parseError: true`) on unbalanced quotes or parentheses.
  */
 export function tokenizeShell(command: string): TokenizeResult {
-  const scan = scanLeaves(command);
+  const scan = scanLeaves(redactHeredocBodies(command));
   if (scan.parseError) {
     return { leaves: [], parseError: true };
   }
@@ -145,6 +158,198 @@ export function tokenizeShell(command: string): TokenizeResult {
     leaves.push(buildLeaf(rawLeaf));
   }
   return { leaves, parseError: false };
+}
+
+/**
+ * Remove the BODY of every quoted-delimiter heredoc (`<<'EOF'` / `<<"EOF"`,
+ * and the tab-stripping `<<-` forms) from a command string.
+ *
+ * WHY: the scanner ends a leaf at every newline, so without this a heredoc body
+ * became a run of pseudo-leaves whose first word was read as a head verb. A
+ * Python snippet fed to `python3 - <<'EOF'` was therefore classified as a
+ * sequence of shell commands, and its text was mined for path operands — which
+ * is where `nstep = int(2.0 / model.opt.timestep)` produced a filesystem-root
+ * operand and a JavaScript `//` comment produced another. A heredoc body is
+ * stdin data for the consuming command, and the PARSING shell never executes it
+ * as part of this command line.
+ *
+ * It is NOT inert, though, and the distinction matters: `bash <<'EOF'` hands
+ * the body to a shell that does run every line of it. What contains that is
+ * named under WHAT DEPENDS ON THIS below — not any claim that the text is
+ * harmless.
+ *
+ * QUOTED DELIMITERS ONLY. With an unquoted delimiter (`<<EOF`) the shell still
+ * performs parameter expansion and command substitution inside the body, so a
+ * `$(…)` there really does execute and the body must keep being scanned. Those
+ * are left exactly as they were.
+ *
+ * Every failure is a no-op that returns the input unchanged — an unbalanced
+ * quote, a heredoc whose terminator never arrives — so a command this cannot
+ * read confidently keeps the behaviour it had before.
+ *
+ * A terminator is recognised by comparing the TRIMMED line to the delimiter,
+ * which is laxer than plain `<<` (where the terminator must start at column 0).
+ * Lax in this direction ends the body early and hands the remaining lines back
+ * to the command scanner, which is the fail-closed side of the mistake.
+ *
+ * NOT a relaxation of the read/write classifier: `<<` is an input redirect, and
+ * {@link ShellLeaf.hasInputRedirect} on the consuming leaf already makes the
+ * whole command non-read regardless of what the body says.
+ *
+ * WHAT DEPENDS ON THIS. This runs inside {@link tokenizeShell}, so
+ * BOTH of the tokenizer's callers stop seeing heredoc bodies: the leaf guard in
+ * `src/main/bash-ast-validator.ts` and the read verdict in
+ * `src/permissions/reviewer/host-risk-inspector.ts`. Neither loses coverage
+ * today — the AST validator also matches its dangerous-command patterns against
+ * the RAW command string, which still contains the body (`sh <<'EOF'` carrying
+ * `rm -rf /` is refused by the raw-string layer, not the leaf guard), and the
+ * read verdict fails closed on `hasInputRedirect` before it ever looks at what
+ * the body says. Both of those are load-bearing for this redaction being safe.
+ * If either is ever narrowed — the raw-string patterns replaced by leaf-only
+ * matching, or `hasInputRedirect` stopped being disqualifying — a heredoc body
+ * becomes unexamined and this function has to grow a way to hand the body back.
+ *
+ * A `#` comment is honoured, and that is a security property rather than a
+ * nicety: a `<<'X'` written inside a comment opens no heredoc in bash, so
+ * treating it as one would erase every following line up to `X` from the scan
+ * while the shell went on running those lines.
+ */
+export function redactHeredocBodies(command: string): string {
+  if (!command.includes("<<")) return command;
+  const n = command.length;
+  // Delimiters opened on the current line, in the order their bodies follow it.
+  const pending: string[] = [];
+  let out = "";
+  let i = 0;
+  while (i < n) {
+    const ch = command[i]!;
+    if (ch === "\\" && i + 1 < n) {
+      out += command.slice(i, i + 2);
+      i += 2;
+      continue;
+    }
+    if (ch === "'") {
+      const close = command.indexOf("'", i + 1);
+      if (close === -1) return command;
+      out += command.slice(i, close + 1);
+      i = close + 1;
+      continue;
+    }
+    if (ch === '"') {
+      const res = consumeDoubleQuote(command, i);
+      if (res === null) return command;
+      out += command.slice(i, res.next);
+      i = res.next;
+      continue;
+    }
+    if (ch === "`") {
+      const close = command.indexOf("`", i + 1);
+      if (close === -1) return command;
+      out += command.slice(i, close + 1);
+      i = close + 1;
+      continue;
+    }
+    // A `#` that starts a word begins a comment that runs to end of line. The
+    // preceding-character test is what separates it from a `#` INSIDE a word,
+    // where it is ordinary text — `curl http://example.test/x#frag` is one
+    // argument, not a comment. The newline is left for the loop below, so a
+    // heredoc opened earlier on this line still gets its body consumed.
+    if (ch === "#" && startsShellComment(command, i)) {
+      const newline = command.indexOf("\n", i);
+      const end = newline === -1 ? n : newline;
+      out += command.slice(i, end);
+      i = end;
+      continue;
+    }
+    // `<<` heredoc, but NOT `<<<` (a here-STRING, whose operand is one word on
+    // the same line and therefore has no body to remove).
+    if (ch === "<" && command[i + 1] === "<" && command[i + 2] !== "<") {
+      const opened = readHeredocDelimiter(command, i);
+      if (opened) {
+        pending.push(opened.delimiter);
+        out += command.slice(i, opened.next);
+        i = opened.next;
+        continue;
+      }
+      out += "<<";
+      i += 2;
+      continue;
+    }
+    if (ch === "\n" && pending.length > 0) {
+      out += "\n";
+      i += 1;
+      for (const delimiter of pending) {
+        const bodyEnd = findHeredocTerminator(command, i, delimiter);
+        if (bodyEnd === null) return command;
+        i = bodyEnd;
+      }
+      pending.length = 0;
+      continue;
+    }
+    out += ch;
+    i += 1;
+  }
+  return out;
+}
+
+/**
+ * True when the `#` at `index` begins a comment rather than sitting inside a
+ * word. Bash starts a comment only where a word could start: at the beginning
+ * of the input, or after whitespace or one of the operators that end a word.
+ *
+ * Exported because every scanner that walks a command character by character
+ * needs this same answer, and each one that lacked it could be blinded by a
+ * single unbalanced quote in a comment: `ls # don't` leaves the scanner inside
+ * a quoted run, so the newline and everything after it — a whole second
+ * command — is read as quoted text and never inspected. The callers must agree
+ * about where a comment starts, so they share the rule instead of restating it.
+ */
+export function startsShellComment(command: string, index: number): boolean {
+  if (index === 0) return true;
+  const previous = command[index - 1]!;
+  return previous === " " || previous === "\t" || previous === "\n" || previous === "\r"
+    || previous === ";" || previous === "&" || previous === "|" || previous === "(";
+}
+
+/**
+ * At `start` (the first `<` of a `<<`), read a QUOTED heredoc delimiter.
+ * Returns the delimiter text and the index just past its closing quote, or null
+ * when the delimiter is unquoted, empty, or never closes — all of which mean
+ * "leave this heredoc alone".
+ */
+function readHeredocDelimiter(
+  command: string,
+  start: number,
+): { delimiter: string; next: number } | null {
+  let i = start + 2;
+  if (command[i] === "-") i += 1;
+  while (command[i] === " " || command[i] === "\t") i += 1;
+  const quote = command[i];
+  if (quote !== "'" && quote !== '"') return null;
+  const close = command.indexOf(quote, i + 1);
+  if (close === -1) return null;
+  const delimiter = command.slice(i + 1, close);
+  if (delimiter.length === 0) return null;
+  return { delimiter, next: close + 1 };
+}
+
+/**
+ * Index just past the heredoc terminator line that closes a body starting at
+ * `from`, or null when the terminator never arrives.
+ */
+function findHeredocTerminator(command: string, from: number, delimiter: string): number | null {
+  let lineStart = from;
+  const n = command.length;
+  while (lineStart <= n) {
+    const newline = command.indexOf("\n", lineStart);
+    const lineEnd = newline === -1 ? n : newline;
+    if (command.slice(lineStart, lineEnd).trim() === delimiter) {
+      return newline === -1 ? n : newline + 1;
+    }
+    if (newline === -1) return null;
+    lineStart = newline + 1;
+  }
+  return null;
 }
 
 /**
@@ -207,6 +412,20 @@ function scanLeaves(command: string): { leaves: RawLeaf[]; parseError: boolean }
   let i = 0;
   while (i < n) {
     const ch = command[i]!;
+
+    // Comment: `#` where a word could start runs to end of line. The newline is
+    // left in place so it still ends the leaf.
+    if (ch === "#" && startsShellComment(command, i)) {
+      pushWord();
+      let end = i + 1;
+      while (end < n && command[end] !== "\n") end += 1;
+      // A line holding only a comment is no leaf at all. Without moving the
+      // leaf start past it the comment text becomes the leaf's raw string, and
+      // a leaf with a raw string survives the empty-leaf filter.
+      if (words.length === 0) leafStart = end;
+      i = end;
+      continue;
+    }
 
     // Single quote: literal run to the next single quote. No expansion.
     if (ch === "'") {
@@ -354,7 +573,12 @@ function scanLeaves(command: string): { leaves: RawLeaf[]; parseError: boolean }
       continue;
     }
     if (ch === "<") {
-      const opLen = command[i + 1] === "<" ? 2 : 1;
+      // `<<<` is a here-STRING: its operand is a literal word placed on stdin,
+      // not a filename. Recognising it as one 3-character operator is what lets
+      // the leaf builder tell it apart — split into `<<` plus `<`, the trailing
+      // `<` looked like an ordinary input redirect and claimed the string as a
+      // file. `<<` is a heredoc, `<` an ordinary input redirect.
+      const opLen = command[i + 1] === "<" ? (command[i + 2] === "<" ? 3 : 2) : 1;
       pushOperator(command.slice(i, i + opLen), false);
       i += opLen;
       continue;
@@ -500,6 +724,7 @@ function buildLeaf(raw: RawLeaf): ShellLeaf {
   const argvWords: string[] = [];
   const argvWordsExpandable: boolean[] = [];
   const redirectTargets: string[] = [];
+  const inputRedirectTargets: string[] = [];
   let hasOutputRedirect = false;
   let hasInputRedirect = false;
   let hasCommandSubstitution = false;
@@ -525,9 +750,16 @@ function buildLeaf(raw: RawLeaf): ShellLeaf {
         }
       } else {
         hasInputRedirect = true;
-        // Input redirects: consume the source word so it is not mistaken for argv.
+        // Input redirects: consume the source word so it is not mistaken for
+        // argv, and REPORT it. Consuming it silently made the file unreachable
+        // to any caller reading leaves — `tr -d x < key` names it nowhere else.
+        // A heredoc's delimiter is not a file, so it is consumed but not
+        // reported.
         const src = words[i + 1];
         if (src && !src.isRedirectOperator) {
+          // `<<` (heredoc delimiter) and `<<<` (here-string literal) name no
+          // file; only a plain `<` does.
+          if (!w.value.startsWith("<<")) inputRedirectTargets.push(src.value);
           if (src.hasCommandSubstitution) hasCommandSubstitution = true;
           if (src.hasProcessSubstitution) hasProcessSubstitution = true;
           i += 1;
@@ -547,6 +779,7 @@ function buildLeaf(raw: RawLeaf): ShellLeaf {
     // construction rather than by a second pass that could drift from it.
     argvHasExpandableDollar: argvWordsExpandable.slice(argvStart),
     redirectTargets,
+    inputRedirectTargets,
     hasOutputRedirect,
     hasInputRedirect,
     hasCommandSubstitution,

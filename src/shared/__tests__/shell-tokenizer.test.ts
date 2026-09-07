@@ -8,7 +8,7 @@
  * and fail-closed parse errors on unbalanced quotes/parens.
  */
 import { describe, it, expect } from "vitest";
-import { tokenizeShell } from "../shell-tokenizer.js";
+import { redactHeredocBodies, tokenizeShell } from "../shell-tokenizer.js";
 
 describe("tokenizeShell — quoting", () => {
   it("keeps whitespace inside single quotes as one argv token", () => {
@@ -179,5 +179,152 @@ describe("tokenizeShell — fail closed", () => {
 
   it("returns no leaves on parse error so callers fail closed", () => {
     expect(tokenizeShell("echo 'x").leaves).toEqual([]);
+  });
+});
+
+describe("redactHeredocBodies", () => {
+  it("removes a quoted-delimiter body and its terminator line", () => {
+    const command = "python3 - <<'EOF'\nnstep = int(2.0 / 0.002)\nEOF\necho done";
+    expect(redactHeredocBodies(command)).toBe("python3 - <<'EOF'\necho done");
+  });
+
+  it("handles the tab-stripping `<<-` form and a double-quoted delimiter", () => {
+    expect(redactHeredocBodies('cat <<-"END"\nbody / line\n\tEND\nls').trim())
+      .toBe('cat <<-"END"\nls');
+  });
+
+  it("leaves an UNQUOTED delimiter alone, because the shell still expands the body", () => {
+    const command = "cat <<EOF\n$(id)\nEOF";
+    expect(redactHeredocBodies(command)).toBe(command);
+  });
+
+  it("leaves an unterminated heredoc alone", () => {
+    const command = "cat <<'EOF'\nstill going";
+    expect(redactHeredocBodies(command)).toBe(command);
+  });
+
+  it("does not treat a here-string `<<<` as a heredoc", () => {
+    const command = "grep x <<< 'a b'";
+    expect(redactHeredocBodies(command)).toBe(command);
+  });
+
+  it("does not treat `<<` inside quotes as a heredoc operator", () => {
+    const command = "echo \"a << 'EOF' b\"\nsecond";
+    expect(redactHeredocBodies(command)).toBe(command);
+  });
+
+  it("consumes two heredocs opened on one line in order", () => {
+    const command = "diff <<'A' <<'B'\nfirst\nA\nsecond\nB\nls";
+    expect(redactHeredocBodies(command)).toBe("diff <<'A' <<'B'\nls");
+  });
+});
+
+describe("tokenizeShell — heredoc bodies are not commands", () => {
+  it("does not turn body lines into leaves", () => {
+    const { leaves, parseError } = tokenizeShell("python3 - <<'PY'\nimport os\nos.listdir('/')\nPY");
+    expect(parseError).toBe(false);
+    expect(leaves).toHaveLength(1);
+    expect(leaves[0]!.argv).toEqual(["python3", "-"]);
+  });
+
+  it("keeps the input redirect on the consuming leaf, so the read/write verdict is unchanged", () => {
+    // This is why removing the body cannot relax `isReadOnlyCommand`: the leaf
+    // that owns the heredoc already fails closed on hasInputRedirect.
+    const { leaves } = tokenizeShell("cat <<'EOF'\nrm -rf /\nEOF");
+    expect(leaves[0]!.hasInputRedirect).toBe(true);
+  });
+});
+
+describe("redactHeredocBodies — comments", () => {
+  it("does not open a heredoc from a `<<` inside a comment", () => {
+    // bash runs line 2 here; treating the comment's `<<'X'` as a real opener
+    // deleted line 2 from every caller's view of the command.
+    const command = "echo hi # <<'X'\ncat /etc/shadow\nX";
+    expect(redactHeredocBodies(command)).toBe(command);
+  });
+
+  it("ignores a `<<` in a whole-line comment and in a `<<-` comment", () => {
+    const whole = "# <<'X'\ncat /etc/shadow\nX";
+    expect(redactHeredocBodies(whole)).toBe(whole);
+    const dash = "echo hi # <<-'X'\ncat /etc/shadow\nX";
+    expect(redactHeredocBodies(dash)).toBe(dash);
+  });
+
+  it("treats a mid-token `#` as text, not as a comment", () => {
+    // A URL fragment is part of the argument. If this started a comment, the
+    // heredoc that follows would stop being redacted.
+    const command = "curl http://example.test/x#frag <<'A'\nbody\nA\nls";
+    expect(redactHeredocBodies(command)).toBe("curl http://example.test/x#frag <<'A'\nls");
+  });
+
+  it("still consumes a body for a heredoc opened before a trailing comment", () => {
+    const command = "cat <<'A' # note\nbody\nA\nls";
+    expect(redactHeredocBodies(command)).toBe("cat <<'A' # note\nls");
+  });
+});
+
+describe("tokenizeShell — input redirect sources", () => {
+  it("reports the source of a `<` redirect", () => {
+    const { leaves } = tokenizeShell("tr -d x < ./key");
+    expect(leaves[0]!.inputRedirectTargets).toEqual(["./key"]);
+    expect(leaves[0]!.argv).toEqual(["tr", "-d", "x"]);
+  });
+
+  it("does not report a heredoc delimiter as a file", () => {
+    const { leaves } = tokenizeShell("cat <<'EOF'\nbody\nEOF");
+    expect(leaves[0]!.hasInputRedirect).toBe(true);
+    expect(leaves[0]!.inputRedirectTargets).toEqual([]);
+  });
+});
+
+describe("tokenizeShell — here-strings", () => {
+  it("recognises `<<<` as one operator and collects no file from it", () => {
+    // Split into `<<` plus `<`, the trailing `<` looked like an ordinary input
+    // redirect and claimed the here-string's literal word as a filename.
+    const { leaves } = tokenizeShell("grep x <<< 'a b'");
+    expect(leaves).toHaveLength(1);
+    expect(leaves[0]!.argv).toEqual(["grep", "x"]);
+    expect(leaves[0]!.inputRedirectTargets).toEqual([]);
+    expect(leaves[0]!.hasInputRedirect).toBe(true);
+  });
+
+  it("still collects the file named by a plain `<`", () => {
+    const { leaves } = tokenizeShell("grep x < ./f");
+    expect(leaves[0]!.inputRedirectTargets).toEqual(["./f"]);
+  });
+});
+
+describe("tokenizeShell — comments", () => {
+  it("drops a comment and keeps reading the next line as a command", () => {
+    // The apostrophe in `don't` used to open a quoted run that swallowed the
+    // newline, so the second command never became a leaf of its own.
+    const { leaves, parseError } = tokenizeShell("ls # don't\ncat /etc/shadow");
+    expect(parseError).toBe(false);
+    expect(leaves.map((l) => l.argv)).toEqual([["ls"], ["cat", "/etc/shadow"]]);
+  });
+
+  it("drops a comment holding an unbalanced double quote", () => {
+    const { leaves } = tokenizeShell(`ls # say "hi\ncat /etc/shadow`);
+    expect(leaves.map((l) => l.argv)).toEqual([["ls"], ["cat", "/etc/shadow"]]);
+  });
+
+  it("drops a comment holding an unbalanced backtick", () => {
+    const { leaves } = tokenizeShell("ls # a `b\ncat /etc/shadow");
+    expect(leaves.map((l) => l.argv)).toEqual([["ls"], ["cat", "/etc/shadow"]]);
+  });
+
+  it("treats `#` inside a word as part of the word", () => {
+    const { leaves } = tokenizeShell("cat a#b");
+    expect(leaves[0]!.argv).toEqual(["cat", "a#b"]);
+  });
+
+  it("treats a quoted `#` as text", () => {
+    const { leaves } = tokenizeShell("grep '# heading' f");
+    expect(leaves[0]!.argv).toEqual(["grep", "# heading", "f"]);
+  });
+
+  it("starts a comment after an operator, not only after whitespace", () => {
+    const { leaves } = tokenizeShell("ls;# note\ncat /etc/shadow");
+    expect(leaves.map((l) => l.argv)).toEqual([["ls"], ["cat", "/etc/shadow"]]);
   });
 });
