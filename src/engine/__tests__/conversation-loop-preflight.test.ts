@@ -13,12 +13,13 @@
 import { afterEach, describe, it, expect, vi, beforeEach } from "vitest";
 import { makeHistoryExceedingEstimateThreshold } from "./conversation-loop-test-helpers.js";
 import { ConversationLoop } from "../conversation-loop.js";
-import type { GenericMessage, LLMProvider, StreamEvent } from "../llm/types.js";
+import type { GenericMessage, LLMProvider, StreamEvent, StreamTurnParams } from "../llm/types.js";
 import type { TurnDecisionEvent } from "../turn/types.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import { createDynamicTool } from "../../tools/base.js";
 import { getModelPreflightThreshold, estimateMessagesTokens } from "../auto-compact.js";
 import { estimateRequestInputProjection } from "../request-input-projection.js";
+import { t } from "../../i18n/index.js";
 import {
   makeConversationLoopDeps as makeDeps,
   makeConversationLoopMemoryManager as makeMemoryManager,
@@ -808,6 +809,36 @@ class ToolLoopProvider implements LLMProvider {
   }
 }
 
+/**
+ * The one round that carries both a compaction and a pending re-prompt: two
+ * tool rounds grow the history, a reasoning-only round arms the re-prompt, and
+ * the round after it assembles the re-prompt AND crosses the threshold.
+ */
+class NudgeAndCompactProvider implements LLMProvider {
+  readonly vendor = "openai" as const;
+  readonly messages: GenericMessage[][] = [];
+  private round = 0;
+
+  async *streamTurn(input: StreamTurnParams): AsyncIterable<StreamEvent> {
+    this.messages.push(input.messages);
+    const round = this.round++;
+    if (round < 2) {
+      yield { type: "tool_call", id: `tu-${round}`, name: "probe", input: { n: round } };
+      yield { type: "message_complete", stopReason: "tool_use" };
+      return;
+    }
+    if (round <= 3) {
+      yield { type: "reasoning_delta", text: REASONING_BLOCK };
+      yield { type: "message_complete", stopReason: "end_turn" };
+      return;
+    }
+    yield { type: "text_delta", text: "done" };
+    yield { type: "message_complete", stopReason: "end_turn" };
+  }
+}
+
+const REASONING_BLOCK = "weigh the next step. ".repeat(200);
+
 function makeProbeRegistry(resultChars: number) {
   const registry = new ToolRegistry();
   registry.register(
@@ -887,6 +918,60 @@ describe("round-loop token preflight — a turn that grows its own context", () 
     expect(compactWithBoundary).toHaveBeenCalledWith(
       expect.objectContaining({ preserveUnit: "tool-rounds" }),
     );
+  });
+
+  it("sends one instruction row, once, when the re-prompt round is also the compacting round", async () => {
+    // Both the re-prompt and the compaction land in the same round, so the
+    // round is assembled twice: once to measure it, once against the history
+    // the compaction rewrote. An assembly that consumed the armed re-prompt
+    // itself would spend the cap on the assembly that was only measured and
+    // send the round that reaches the model without any instruction at all.
+    const sessionId = "7c9d2b41-3e18-4c05-8b6a-9d4f1e0a2c73";
+    // Measured on this shape: 1,169 projected tokens at the reasoning-only
+    // round, 1,745 at the round after it, where the replayed reasoning and the
+    // instruction join the history. A threshold between the two puts the
+    // crossing exactly on the round that carries the re-prompt.
+    process.env.LVIS_DEV_PREFLIGHT_OVERRIDE = "1400";
+    const provider = new NudgeAndCompactProvider();
+    const loop = new ConversationLoop(
+      makeDeps({
+        settingsService: makeSettings(true, "gpt-4o", "openai"),
+        memoryManager: makeMemoryManager([], sessionId),
+        memoryReviewer: makeMemoryReviewer(),
+        toolRegistry: makeProbeRegistry(2_000) as unknown as ReturnType<typeof makeDeps>["toolRegistry"],
+      }),
+    );
+    loop.resetAndResume(sessionId);
+    (loop as unknown as { provider: LLMProvider }).provider = provider;
+    const decisions: TurnDecisionEvent[] = [];
+
+    await loop.runTurn(
+      "run the probe until you are done",
+      { onDecision: (event) => decisions.push(event) },
+      undefined,
+      { inputOrigin: "user-keyboard" },
+    );
+
+    expect(decisions).toContainEqual(
+      expect.objectContaining({ kind: "compact.auto", branch: "fired" }),
+    );
+    const instruction = t("be_conversationLoop.reasoningOnlyContinuePrompt");
+    const rePromptRound = provider.messages[3] ?? [];
+    // The round went out on the compacted history, not the one the gate
+    // measured — and it still carries the instruction, exactly once.
+    expect(rePromptRound[0]?.meta?.compactBoundary).toBe(true);
+    expect(
+      rePromptRound.filter(
+        (message) =>
+          typeof message.content === "string" && message.content.includes(instruction),
+      ),
+    ).toHaveLength(1);
+    // And the cap was charged once for it: the second reasoning-only round
+    // still sees one spend behind it, not two.
+    expect(decisions.filter((event) => event.kind === "reasoning_only.continuation")).toEqual([
+      expect.objectContaining({ branch: "continue", data: expect.objectContaining({ nudgesRun: 0 }) }),
+      expect.objectContaining({ branch: "continue", data: expect.objectContaining({ nudgesRun: 1 }) }),
+    ]);
   });
 
   it("leaves the turn-start guard on the between-turns preserve unit", async () => {
