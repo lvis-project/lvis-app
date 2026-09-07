@@ -321,6 +321,37 @@ describe("shell-path-policy", () => {
     });
   });
 
+  /**
+   * sed's script slot in full. The script is the first positional, or the value
+   * of `-e`; `-f` names a script FILE and so stays a path, and once either `-e`
+   * or `-f` has supplied the script the first positional is a path again.
+   *
+   * Pinned as one test because the halves only mean something together: exempt
+   * the script without also moving the positional, and `sed -e 's/a/b/' secret`
+   * stops being checked.
+   */
+  it("exempts sed's script slot without exempting the file it edits", () => {
+    withRoot((root) => {
+      const key = join(homedir(), ".ssh", "id_rsa");
+      // Script slots — not paths.
+      expect(validateShellCommandPathPolicy(`sed -n "/def sample/,/return Fit/p" file.py`, root, root, []))
+        .toBeNull();
+      expect(validateShellCommandPathPolicy(`sed -e "/def sample/,/return Fit/p" file.py`, root, root, []))
+        .toBeNull();
+      // `-f` names a script FILE, so its value is judged like any other path.
+      expect(validateShellCommandPathPolicy(`sed -f ${key} file.py`, root, root, []))
+        .toContain("Sensitive path:");
+      // With the script supplied by an option, the first positional is a path.
+      expect(validateShellCommandPathPolicy(`sed -e 's/a/b/' ${key}`, root, root, []))
+        .toContain("Sensitive path:");
+      expect(validateShellCommandPathPolicy(`sed -f ./prog.sed ${key}`, root, root, []))
+        .toContain("Sensitive path:");
+      // And the operand after a plain script is still the file being read.
+      expect(validateShellCommandPathPolicy(`sed -n '1p' ${key}`, root, root, []))
+        .toContain("Sensitive path:");
+    });
+  });
+
   it("does not exempt an awk variable, which the program can open as a file", () => {
     withRoot((root) => {
       const key = join(homedir(), ".ssh", "id_rsa");
