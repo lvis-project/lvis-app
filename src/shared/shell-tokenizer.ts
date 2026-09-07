@@ -552,7 +552,12 @@ function scanLeaves(command: string): { leaves: RawLeaf[]; parseError: boolean }
       continue;
     }
     if (ch === "<") {
-      const opLen = command[i + 1] === "<" ? 2 : 1;
+      // `<<<` is a here-STRING: its operand is a literal word placed on stdin,
+      // not a filename. Recognising it as one 3-character operator is what lets
+      // the leaf builder tell it apart — split into `<<` plus `<`, the trailing
+      // `<` looked like an ordinary input redirect and claimed the string as a
+      // file. `<<` is a heredoc, `<` an ordinary input redirect.
+      const opLen = command[i + 1] === "<" ? (command[i + 2] === "<" ? 3 : 2) : 1;
       pushOperator(command.slice(i, i + opLen), false);
       i += opLen;
       continue;
@@ -731,7 +736,9 @@ function buildLeaf(raw: RawLeaf): ShellLeaf {
         // reported.
         const src = words[i + 1];
         if (src && !src.isRedirectOperator) {
-          if (w.value !== "<<") inputRedirectTargets.push(src.value);
+          // `<<` (heredoc delimiter) and `<<<` (here-string literal) name no
+          // file; only a plain `<` does.
+          if (!w.value.startsWith("<<")) inputRedirectTargets.push(src.value);
           if (src.hasCommandSubstitution) hasCommandSubstitution = true;
           if (src.hasProcessSubstitution) hasProcessSubstitution = true;
           i += 1;

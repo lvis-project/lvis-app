@@ -782,25 +782,57 @@ function extractNestedShellCommands(command: string): string[] {
   if (parseError) return [];
   const nested: string[] = [];
   for (const leaf of leaves) {
-    const head = leaf.argv[0];
+    // Past any leading keyword, for the same reason every other verb lookup is:
+    // a loop body arrives as `do sh -c '…'`.
+    const verbIndex = leadingKeywordCount(leaf.argv);
+    const head = leaf.argv[verbIndex];
     if (head === undefined) continue;
     const spec = NON_PATH_OPERAND_SPECS.get(stripCommandPath(head).toLowerCase());
     const options = spec?.nestedCommandOptions;
     if (!options) continue;
-    for (let i = 1; i < leaf.argv.length; i += 1) {
-      const token = leaf.argv[i]!;
-      const equals = token.indexOf("=");
-      if (equals > 0 && options.has(token.slice(0, equals))) {
-        nested.push(token.slice(equals + 1));
-        continue;
-      }
-      if (options.has(token) && i + 1 < leaf.argv.length) {
-        nested.push(leaf.argv[i + 1]!);
-        i += 1;
-      }
+    for (let i = verbIndex + 1; i < leaf.argv.length; i += 1) {
+      const carried = readOptionValue(leaf.argv, i, options);
+      if (!carried) continue;
+      nested.push(carried.value);
+      if (carried.consumedNext) i += 1;
     }
   }
   return nested;
+}
+
+/**
+ * The value an option in `options` carries at `argv[index]`, in any of the
+ * three forms a short option can wear it.
+ *
+ * Matching only the exact token missed two of them. `bash -lc 'cmd'` clusters
+ * the flag with `-l`, and `sh -c'cmd'` attaches the value — the tokenizer has
+ * already removed the quotes by the time this runs, so that argument arrives as
+ * one word, `-ccmd`. Both forms run the payload exactly as `-c cmd` does.
+ */
+function readOptionValue(
+  argv: readonly string[],
+  index: number,
+  options: ReadonlySet<string>,
+): { value: string; consumedNext: boolean } | null {
+  const token = argv[index]!;
+  const equals = token.indexOf("=");
+  if (equals > 0 && options.has(token.slice(0, equals))) {
+    return { value: token.slice(equals + 1), consumedNext: false };
+  }
+  const takeNext = (): { value: string; consumedNext: boolean } | null => {
+    const next = argv[index + 1];
+    return next === undefined ? null : { value: next, consumedNext: true };
+  };
+  if (options.has(token)) return takeNext();
+  // A clustered short-option group. A long option is never a cluster, so `--`
+  // is excluded rather than being read letter by letter.
+  if (!token.startsWith("-") || token.startsWith("--")) return null;
+  for (let i = 1; i < token.length; i += 1) {
+    if (!options.has(`-${token[i]!}`)) continue;
+    const attached = token.slice(i + 1);
+    return attached.length > 0 ? { value: attached, consumedNext: false } : takeNext();
+  }
+  return null;
 }
 
 /** True when a value carries the `@`-prefixed "contents of this file" sigil. */

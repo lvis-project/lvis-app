@@ -586,6 +586,41 @@ describe("shell-path-policy", () => {
       });
     });
 
+    it("reads a shell -c payload in every form the option can wear", () => {
+      withRoot((root) => {
+        // Matching `-c` as an exact token saw only the spaced form. The other
+        // three run the same payload: `-lc` clusters the flag with `-l`, and an
+        // attached value arrives as one word because the tokenizer has already
+        // removed the quotes by then.
+        for (const command of [
+          "sh -c 'cat /etc/passwd'",
+          "bash -lc 'cat /etc/passwd'",
+          "sh -c'cat /etc/passwd'",
+          `sh -c"cat /etc/passwd"`,
+          "for f in a; do sh -c 'cat /etc/passwd'; done",
+        ]) {
+          expect(validateShellCommandPathPolicy(command, root, root, []))
+            .toContain("Sandbox:");
+        }
+        // A payload that stays inside the boundary still passes.
+        expect(validateShellCommandPathPolicy("bash -lc 'cat ./notes.txt'", root, root, []))
+          .toBeNull();
+      });
+    });
+
+    it("does not treat a here-string operand as a file it reads", () => {
+      withRoot((root) => {
+        // `<<<` places a literal word on stdin. Reading it as a filename made
+        // the string itself an operand — and `grep x <<< '/etc/shadow'` would
+        // then be refused for a file nothing opens.
+        expect(validateShellCommandPathPolicy("grep x <<< 'a b'", root, root, []))
+          .toBeNull();
+        // A plain `<` still names a file, and is still checked.
+        expect(validateShellCommandPathPolicy("grep x < /etc/shadow", root, root, []))
+          .toContain("Sensitive path:");
+      });
+    });
+
     it("keeps echo arguments refused even when they only look like a path", () => {
       withRoot((root) => {
         // The cost of the rule above: echo data carrying an unexpanded variable

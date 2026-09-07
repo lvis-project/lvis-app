@@ -276,3 +276,20 @@ describe("tokenizeShell — input redirect sources", () => {
     expect(leaves[0]!.inputRedirectTargets).toEqual([]);
   });
 });
+
+describe("tokenizeShell — here-strings", () => {
+  it("recognises `<<<` as one operator and collects no file from it", () => {
+    // Split into `<<` plus `<`, the trailing `<` looked like an ordinary input
+    // redirect and claimed the here-string's literal word as a filename.
+    const { leaves } = tokenizeShell("grep x <<< 'a b'");
+    expect(leaves).toHaveLength(1);
+    expect(leaves[0]!.argv).toEqual(["grep", "x"]);
+    expect(leaves[0]!.inputRedirectTargets).toEqual([]);
+    expect(leaves[0]!.hasInputRedirect).toBe(true);
+  });
+
+  it("still collects the file named by a plain `<`", () => {
+    const { leaves } = tokenizeShell("grep x < ./f");
+    expect(leaves[0]!.inputRedirectTargets).toEqual(["./f"]);
+  });
+});
