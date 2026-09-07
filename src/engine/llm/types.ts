@@ -324,11 +324,24 @@ export interface ToolCallBlock {
  * would end the turn rather than just that call. Recording the defect lets the
  * loop answer the call with an error the model can act on, while history keeps
  * a real object.
+ *
+ * This marks a SHAPE defect only — arguments that are not an object. A call
+ * whose arguments are a well-formed object that does not match the tool's
+ * schema is NOT marked: it is dispatched as usual and the host's own tool
+ * validation answers it. Nothing here is a schema verdict.
  */
 export interface InvalidToolCallInput {
   /** Bounded excerpt of what the model actually emitted. */
   raw: string;
-  /** Machine-stable cause. */
+  /**
+   * Machine-stable cause.
+   *
+   * `unparsable-json` — the arguments arrived as text that `JSON.parse` threw
+   * on, which is the truncated-generation case.
+   * `non-object` — the arguments were readable but are not an object. Covers
+   * both a value that was never text (a number, a boolean, an array) and text
+   * that parsed cleanly into a non-object such as `[1,2,3]`.
+   */
   reason: "unparsable-json" | "non-object";
   /** Length of the emitted arguments before bounding. */
   rawChars: number;

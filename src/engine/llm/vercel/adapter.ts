@@ -692,14 +692,22 @@ function isPlainToolCallInput(value: unknown): value is Record<string, unknown> 
  * The same fallback also fires for a call to a tool that is not in the request,
  * where the arguments may well be valid JSON — so a string is parsed once here
  * before being treated as a defect.
+ *
+ * Only the SHAPE of the arguments is judged here. A call whose arguments are a
+ * well-formed object that does not match the tool's schema is not a defect at
+ * this layer: it passes through and the host's own tool validation answers it.
  */
 function normalizeToolCallInput(value: unknown): {
   input: Record<string, unknown>;
   invalidInput?: InvalidToolCallInput;
 } {
   if (isPlainToolCallInput(value)) return { input: value };
-  // No arguments at all is the empty-object case, not a malformed one.
+  // No arguments at all is the empty-object case, not a malformed one. Blank
+  // argument text says the same thing, and the SDK reads it that way too
+  // (`doParseToolCall` short-circuits on `input.trim() === ""`), so a
+  // no-argument call must not be answered with a parse error.
   if (value === undefined || value === null) return { input: {} };
+  if (typeof value === "string" && value.trim() === "") return { input: {} };
 
   const raw = typeof value === "string" ? value : JSON.stringify(value);
   if (typeof value === "string") {

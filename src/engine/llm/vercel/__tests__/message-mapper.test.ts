@@ -261,6 +261,19 @@ describe("fullStreamToStreamEvent — tool-call input normalisation", () => {
     expect(call.input).toEqual({});
     expect(call.invalidInput).toBeUndefined();
   });
+
+  // A no-argument call is how a zero-parameter tool is invoked. Answering it
+  // with a parse error would break a working call, so blank argument text has
+  // to read the same as no argument text — which is how the SDK reads it too.
+  it.each([
+    ["", "empty"],
+    ["   ", "spaces"],
+    ["\n\t", "blank lines"],
+  ])("reads %j (%s) as a no-argument call, not a parse failure", async (input) => {
+    const call = await toolCallEvent(input);
+    expect(call.input).toEqual({});
+    expect(call.invalidInput).toBeUndefined();
+  });
 });
 
 describe("genericToModelMessages — tool-call input never leaves as a non-object", () => {

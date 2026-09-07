@@ -1482,6 +1482,11 @@ export async function queryLoop(
       // malformed call would go on to poison the turn: the wire mapper coerces
       // the missing input to `{}`, and the model would keep waiting for a
       // result that describes a call it never actually made.
+      //
+      // No onToolStart/onToolEnd fires for these, so the live action panel
+      // shows no card until the transcript is reloaded — the same trade the
+      // intercepted-meta denial below already makes. Both rows are persisted,
+      // so nothing is lost; only the live card is.
       for (const tc of pendingToolCallsCapped) {
         if (!tc.invalidInput) continue;
         const content = t("be_conversationLoop.toolCallInvalidArguments", {
@@ -1498,8 +1503,7 @@ export async function queryLoop(
         decide({
           kind: "tool_call.invalid_arguments",
           branch: tc.invalidInput.reason,
-          reason: tc.name,
-          data: { round: roundIndex, rawChars: tc.invalidInput.rawChars },
+          data: { round: roundIndex, rawChars: tc.invalidInput.rawChars, tool: tc.name },
         });
       }
 
