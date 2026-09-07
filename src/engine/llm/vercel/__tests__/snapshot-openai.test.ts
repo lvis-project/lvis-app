@@ -924,7 +924,7 @@ describe("VercelUnifiedProvider openai-compatible", () => {
       expect(streamTextSpy).toHaveBeenCalledWith(
         expect.objectContaining({
           providerOptions: expect.objectContaining({
-            "lvis-compat": {
+            lvisCompat: {
               chat_template_kwargs: { enable_thinking: enableThinking },
               // A budget only means something while thinking is on; with the
               // switch off there are no reasoning tokens to limit.
@@ -982,7 +982,7 @@ describe("VercelUnifiedProvider openai-compatible", () => {
       expect(streamTextSpy).toHaveBeenCalledWith(
         expect.objectContaining({
           providerOptions: expect.objectContaining({
-            "lvis-compat": expect.objectContaining({
+            lvisCompat: expect.objectContaining({
               thinking_token_budget: thinkingBudgetTokens,
             }),
           }),
@@ -994,11 +994,63 @@ describe("VercelUnifiedProvider openai-compatible", () => {
     vi.doUnmock("@ai-sdk/openai-compatible");
   });
 
+  it("spells the passthrough key the way the SDK looks it up", async () => {
+    // The SDK resolves providerOptions by the camelCase form of the provider
+    // name and only falls back to the hyphenated name, warning as deprecated
+    // when it does. The fallback worked, so nothing broke -- it just warned on
+    // every single request, and the day the fallback goes away it takes the
+    // thinking toggle and the reasoning budget with it, silently.
+    vi.resetModules();
+    const streamTextSpy = vi.fn(() => ({
+      stream: (async function* () {
+        yield {
+          type: "finish",
+          finishReason: "stop",
+          totalUsage: { inputTokens: 1, outputTokens: 1 },
+        };
+      })(),
+    }));
+    vi.doMock("ai", async () => {
+      const actual = await vi.importActual<typeof import("ai")>("ai");
+      return { ...actual, streamText: streamTextSpy };
+    });
+    vi.doMock("@ai-sdk/openai-compatible", () => ({
+      createOpenAICompatible: vi.fn(() => vi.fn(() => ({ __mock: "compat" }))),
+    }));
+
+    const { VercelUnifiedProvider } = await import("../adapter.js");
+    const provider = new VercelUnifiedProvider(
+      "openai-compatible",
+      "k",
+      "https://example.test/v1",
+    );
+    await collect(
+      provider.streamTurn({
+        model: "qwen3.6",
+        systemPrompt: "sys",
+        messages: [{ role: "user", content: "hi" }],
+        enableThinking: true,
+      }),
+    );
+
+    // The spy is declared with no parameters, so its recorded call is typed as
+    // an empty tuple; go through `unknown` to read the argument it did receive.
+    const [callArg] = streamTextSpy.mock.calls[0] as unknown as [
+      { providerOptions: Record<string, unknown> },
+    ];
+    const providerOptions = callArg.providerOptions;
+    expect(Object.keys(providerOptions)).toContain("lvisCompat");
+    expect(Object.keys(providerOptions)).not.toContain("lvis-compat");
+
+    vi.doUnmock("ai");
+    vi.doUnmock("@ai-sdk/openai-compatible");
+  });
+
   it("does NOT forward chat_template_kwargs to commercial gateways (openrouter/groq)", async () => {
     // Commercial OpenAI-compatible gateways route through createOpenAICompatible
     // but do not run a vLLM chat template. A top-level chat_template_kwargs field
     // 400/422s the strict ones and no-ops the lenient ones — the OpenRouter
-    // breakage. providerOptions["lvis-compat"] must be absent entirely.
+    // breakage. providerOptions.lvisCompat must be absent entirely.
     for (const vendor of ["openrouter", "groq"] as const) {
       vi.resetModules();
       const streamTextSpy = vi.fn(() => ({
@@ -1083,10 +1135,10 @@ describe("VercelUnifiedProvider openai-compatible", () => {
     );
 
     const callArg = streamTextSpy.mock.calls[0]![0] as {
-      providerOptions: { "lvis-compat": Record<string, unknown> };
+      providerOptions: { lvisCompat: Record<string, unknown> };
       messages: Array<{ role: string }>;
     };
-    expect(callArg.providerOptions["lvis-compat"]).toMatchObject({
+    expect(callArg.providerOptions.lvisCompat).toMatchObject({
       continue_final_message: true,
       add_generation_prompt: false,
     });
@@ -1132,8 +1184,8 @@ describe("VercelUnifiedProvider openai-compatible", () => {
     );
 
     const compatOptions = (streamTextSpy.mock.calls[0]![0] as {
-      providerOptions: { "lvis-compat": Record<string, unknown> };
-    }).providerOptions["lvis-compat"];
+      providerOptions: { lvisCompat: Record<string, unknown> };
+    }).providerOptions.lvisCompat;
     expect("continue_final_message" in compatOptions).toBe(false);
     expect("add_generation_prompt" in compatOptions).toBe(false);
 
