@@ -479,6 +479,113 @@ describe("shell-path-policy", () => {
       });
     });
 
+    /**
+     * One negative case per exempted verb, each of the form
+     * `<verb> <boolean-flag-or-slot> <path>`.
+     *
+     * Every exemption that leaked did so because nothing asserted the negative
+     * side of it. A shared list of "code options" applied to every interpreter
+     * is the specific way that happened: `bash -e` is errexit and `python3 -E`
+     * ignores the environment, so the operand after them was swallowed as if it
+     * were program text.
+     */
+    const BOOLEAN_FLAG_BYPASSES: readonly { label: string; command: string }[] = [
+      { label: "bash -e is errexit", command: "bash -e /etc/evil.sh" },
+      { label: "sh -e is errexit", command: "sh -e /etc/evil.sh" },
+      { label: "zsh -e is errexit", command: "zsh -e /etc/evil.sh" },
+      { label: "dash -e is errexit", command: "dash -e /etc/evil.sh" },
+      { label: "ksh -e is errexit", command: "ksh -e /etc/evil.sh" },
+      { label: "bash -E inherits traps", command: "bash -E /etc/evil.sh" },
+      { label: "python3 -E ignores the environment", command: "python3 -E /etc/evil.py" },
+      { label: "php -e is extended info", command: "php -e /etc/passwd" },
+      { label: "deno -c names a config file", command: "deno -c /etc/deno.json run x" },
+      { label: "node -c is a syntax check", command: "node -c /etc/evil.js" },
+    ];
+
+    it.each(BOOLEAN_FLAG_BYPASSES)(
+      "does not swallow the path after a boolean flag: $label",
+      ({ command }) => {
+        withRoot((root) => {
+          expect(validateShellCommandPathPolicy(command, root, root, [])).not.toBeNull();
+        });
+      },
+    );
+
+    it("still exempts each verb's real code option", () => {
+      withRoot((root) => {
+        // The other half of the table above: narrowing the option sets must not
+        // start refusing the programs they exist for.
+        for (const command of [
+          `bash -c "echo hi; ls ./x"`,
+          `python3 -c "w,h=2400,1800; print((w*h) // 512)"`,
+          `node -e "console.log(1/2)"`,
+          `php -r 'echo 1/2;'`,
+          `Rscript -e 'd <- read.csv("data.csv"); print(nrow(d))'`,
+          `perl -ne 'chomp; s/\\s//g; print $seq .= $_;' seq.fa`,
+        ]) {
+          expect(validateShellCommandPathPolicy(command, root, root, [])).toBeNull();
+        }
+      });
+    });
+
+    it("reads a shell -c payload as a command instead of exempting it", () => {
+      withRoot((root) => {
+        // The payload is a command line this policy can parse, so the operand
+        // inside it is judged rather than hidden behind "that slot holds code".
+        expect(validateShellCommandPathPolicy("sh -c 'cat /etc/passwd'", root, root, []))
+          .toContain("Sandbox:");
+        expect(validateShellCommandPathPolicy(`bash -c "cat /etc/shadow"`, root, root, []))
+          .toContain("Sensitive path:");
+        expect(validateShellCommandPathPolicy("sh -c 'cat ./notes.txt'", root, root, []))
+          .toBeNull();
+      });
+    });
+
+    /**
+     * Negative cases for every remaining exempted slot, so a later widening of
+     * one of these tables fails a test rather than a review.
+     */
+    it("keeps the file operand checked beside every exempted slot", () => {
+      withRoot((root) => {
+        const outside = "/etc/shadow";
+        for (const command of [
+          `tr a b < ${outside}`,
+          `grep -e needle ${outside}`,
+          `grep --include=*.ts needle ${outside}`,
+          `rg -g '*.ts' needle ${outside}`,
+          `sed -e 's/a/b/' ${outside}`,
+          `awk -F: '{print $1}' ${outside}`,
+          `stat -c '%s' ${outside}`,
+          `dpkg-query -W -f '\${Package}' ${outside}`,
+          `identify -format "%w" ${outside}`,
+          `openssl req -subj "/O=Example Org/CN=x" -out ${outside}`,
+          `curl -w "%{http_code}" -o ${outside} https://example.test/`,
+          `printf '%s' ${outside}`,
+        ]) {
+          expect(validateShellCommandPathPolicy(command, root, root, []))
+            .not.toBeNull();
+        }
+      });
+    });
+
+    it("finds the verb behind a shell keyword and behind a background `&`", () => {
+      withRoot((root) => {
+        // `do cd "$f"` — a verb scan that stops at the keyword never sees the
+        // `cd`, so the dynamic-destination guard did not run and every later
+        // relative operand was resolved against a directory already left.
+        expect(validateShellCommandPathPolicy(`for f in a; do cd "$f"; cat notes.txt; done`, root, root, []))
+          .toContain("cannot be resolved before running");
+        // A background `&` ends a command just as `&&` does.
+        expect(validateShellCommandPathPolicy("ls & find . -name x", root, root, []))
+          .toContain("recursive shell filesystem traversal");
+        expect(validateShellCommandPathPolicy("ls & cp -r ./a ./b", root, root, []))
+          .toContain("recursive shell filesystem traversal");
+        // …but an fd redirect that merely spells `&` is not a boundary.
+        expect(validateShellCommandPathPolicy("ls ./x 2>&1", root, root, [])).toBeNull();
+        expect(validateShellCommandPathPolicy("ls ./x &> ./log", root, root, [])).toBeNull();
+      });
+    });
+
     it("keeps echo arguments refused even when they only look like a path", () => {
       withRoot((root) => {
         // The cost of the rule above: echo data carrying an unexpanded variable

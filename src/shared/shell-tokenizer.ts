@@ -170,7 +170,13 @@ export function tokenizeShell(command: string): TokenizeResult {
  * sequence of shell commands, and its text was mined for path operands — which
  * is where `nstep = int(2.0 / model.opt.timestep)` produced a filesystem-root
  * operand and a JavaScript `//` comment produced another. A heredoc body is
- * stdin data for the consuming command; the shell never runs it.
+ * stdin data for the consuming command, and the PARSING shell never executes it
+ * as part of this command line.
+ *
+ * It is NOT inert, though, and the distinction matters: `bash <<'EOF'` hands
+ * the body to a shell that does run every line of it. What contains that is
+ * named under WHAT DEPENDS ON THIS below — not any claim that the text is
+ * harmless.
  *
  * QUOTED DELIMITERS ONLY. With an unquoted delimiter (`<<EOF`) the shell still
  * performs parameter expansion and command substitution inside the body, so a
@@ -190,7 +196,7 @@ export function tokenizeShell(command: string): TokenizeResult {
  * {@link ShellLeaf.hasInputRedirect} on the consuming leaf already makes the
  * whole command non-read regardless of what the body says.
  *
- * WHAT DEPENDS ON THAT LAST CLAIM. This runs inside {@link tokenizeShell}, so
+ * WHAT DEPENDS ON THIS. This runs inside {@link tokenizeShell}, so
  * BOTH of the tokenizer's callers stop seeing heredoc bodies: the leaf guard in
  * `src/main/bash-ast-validator.ts` and the read verdict in
  * `src/permissions/reviewer/host-risk-inspector.ts`. Neither loses coverage

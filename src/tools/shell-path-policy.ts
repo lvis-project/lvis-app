@@ -147,8 +147,15 @@ function findViolationInCommand(
   // subtracted here — the enclosing scan still sees the substitution text, so a
   // path operand built out of one (`/tmp/$(basename "$f")`) stays a dynamic
   // path.
+  // A `sh -c '…'` payload is a command line too, and one this policy can read.
+  // Re-entering it is what makes `sh -c 'cat /etc/passwd'` visible: the value
+  // is program text, so exempting it as such left the operand inside
+  // completely unexamined.
   if (depth < COMMAND_SUBSTITUTION_SCAN_DEPTH) {
-    for (const body of extractCommandSubstitutionBodies(command)) {
+    for (const body of [
+      ...extractCommandSubstitutionBodies(command),
+      ...extractNestedShellCommands(command),
+    ]) {
       const violation = findViolationInCommand(
         body,
         cwd,
@@ -277,18 +284,26 @@ function findCwdAwareLeafViolation(
     // reduced by either, so both see the full token and neither treats it as
     // `cd`; that is a shared gap, not a disagreement, and closing it belongs
     // with the shared helper rather than here.
-    const isCd = leaf.argv.length > 0 && stripCommandPath(leaf.argv[0]!) === "cd";
+    //
+    // The verb is read PAST any leading shell keyword, for the same reason the
+    // slot rules are: a loop body arrives as `do cd "$f"`, and a scan that
+    // stops at `do` never sees the `cd` — so the dynamic-destination guard
+    // below did not run and every later relative operand was resolved against
+    // a directory the command had already left.
+    const verbIndex = leadingKeywordCount(leaf.argv);
+    const verb = leaf.argv[verbIndex];
+    const isCd = verb !== undefined && stripCommandPath(verb) === "cd";
 
     // `cd`'s own destination is checked as an operand like any other, so a
     // `cd` that leaves the boundary is caught here and not merely tracked.
-    for (const operand of isCd ? operands.slice(1) : operands) {
+    for (const operand of isCd ? operands.slice(verbIndex + 1) : operands) {
       const violation = checkOperandAgainstBase(operand, current, sandboxRoot, extraAllowedDirectories);
       if (violation) return violation;
     }
 
     if (!isCd) continue;
 
-    const destination = resolveCdDestination(leaf.argv.slice(1), current);
+    const destination = resolveCdDestination(leaf.argv.slice(verbIndex + 1), current);
     if (destination === null) {
       return {
         kind: "dynamic-path",
@@ -507,22 +522,62 @@ interface NonPathOperandSpec {
    * being excluded from the read-only verb set so every call is reviewed.
    */
   declineBarePathValue?: true;
+  /**
+   * Options whose value is a shell command LINE, not opaque program text.
+   * `sh -c 'cat /etc/passwd'` is a command this policy can read, so its value
+   * is re-entered through the whole policy the way a `$(…)` body is, instead
+   * of being exempted and forgotten.
+   */
+  nestedCommandOptions?: ReadonlySet<string>;
 }
 
-const INTERPRETER_CODE_OPTIONS = new Set(["-c", "--command", "-e", "--eval", "-E", "--exec"]);
+/**
+ * Code-carrying options, PER INTERPRETER.
+ *
+ * There is no shared set, and the absence is the point. One list applied to
+ * every interpreter swallowed the operand after any flag that happened to
+ * spell the same letter somewhere else: `bash -e` is errexit and `python3 -E`
+ * ignores the environment, so `bash -e /etc/evil.sh` read as "`-e` carries
+ * code" and exempted the script path that followed. Same for `php -e`
+ * (extended info — php's code option is `-r`) and `deno -c` (a config FILE).
+ * Every entry below is a flag that verb documents as taking program text.
+ */
+const SHELL_CODE_OPTIONS = new Set(["-c"]);
+const PYTHON_CODE_OPTIONS = new Set(["-c"]);
+const NODE_CODE_OPTIONS = new Set(["-e", "--eval", "-p", "--print"]);
+const DENO_CODE_OPTIONS = new Set(["-e", "--eval"]);
+/** php: `-r` runs code, `-B`/`-R`/`-E` are begin/each-line/end code. `-F` takes a FILE. */
+const PHP_CODE_OPTIONS = new Set(["-r", "-B", "-R", "-E"]);
+const EXPRESSION_CODE_OPTIONS = new Set(["-e", "--eval"]);
+/** perl/ruby: `-e` and perl's feature-enabled `-E`. */
+const PERL_CODE_OPTIONS = new Set(["-e", "-E"]);
 /** perl/ruby cluster options ending in `e` take the program as the next word (`-ne`, `-lpe`). */
 const PERL_CLUSTERED_CODE_OPTION = /^-[A-Za-z]*[eE]$/;
 
 const NON_PATH_OPERAND_SPECS: ReadonlyMap<string, NonPathOperandSpec> = new Map<string, NonPathOperandSpec>([
-  // Interpreters: `-c`/`-e` carry a program in the language, not a path.
-  ...(["python", "python2", "python3", "node", "deno", "bun", "php", "sh", "bash", "zsh",
-    "dash", "ksh", "osascript", "lua", "rscript", "r"] as const)
-    .map((verb) => [verb, {
-      valueOptions: INTERPRETER_CODE_OPTIONS,
-      declineBarePathValue: true,
-    }] as [string, NonPathOperandSpec]),
+  // Shell family: `-c` carries a command LINE, so its value is re-entered as a
+  // command rather than merely exempted — see `nestedCommandOption`.
+  ...(["sh", "bash", "zsh", "dash", "ksh"] as const).map((verb) => [verb, {
+    valueOptions: SHELL_CODE_OPTIONS,
+    nestedCommandOptions: SHELL_CODE_OPTIONS,
+    declineBarePathValue: true,
+  }] as [string, NonPathOperandSpec]),
+  ...(["python", "python2", "python3"] as const).map((verb) => [verb, {
+    valueOptions: PYTHON_CODE_OPTIONS,
+    declineBarePathValue: true,
+  }] as [string, NonPathOperandSpec]),
+  ["node", { valueOptions: NODE_CODE_OPTIONS, declineBarePathValue: true }],
+  ...(["deno", "bun"] as const).map((verb) => [verb, {
+    valueOptions: DENO_CODE_OPTIONS,
+    declineBarePathValue: true,
+  }] as [string, NonPathOperandSpec]),
+  ["php", { valueOptions: PHP_CODE_OPTIONS, declineBarePathValue: true }],
+  ...(["rscript", "r", "lua", "osascript"] as const).map((verb) => [verb, {
+    valueOptions: EXPRESSION_CODE_OPTIONS,
+    declineBarePathValue: true,
+  }] as [string, NonPathOperandSpec]),
   ...(["perl", "ruby"] as const).map((verb) => [verb, {
-    valueOptions: INTERPRETER_CODE_OPTIONS,
+    valueOptions: PERL_CODE_OPTIONS,
     clusteredCodeOption: PERL_CLUSTERED_CODE_OPTION,
     declineBarePathValue: true,
   }] as [string, NonPathOperandSpec]),
@@ -591,6 +646,21 @@ const LEADING_SHELL_KEYWORDS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * How many leading tokens of `argv` are shell keywords standing in front of the
+ * real verb. `do cd "$f"` has one.
+ */
+function leadingKeywordCount(argv: readonly string[]): number {
+  let index = 0;
+  while (
+    index < argv.length
+    && LEADING_SHELL_KEYWORDS.has(stripCommandPath(argv[index]!).toLowerCase())
+  ) {
+    index += 1;
+  }
+  return index;
+}
+
+/**
  * The result of reading a leaf's argument vector for path-operand purposes.
  */
 interface OperandSlotClassification {
@@ -615,13 +685,7 @@ function classifyOperandSlots(argv: readonly string[]): OperandSlotClassificatio
   const skip = new Set<number>();
   const extraCandidates: string[] = [];
   const empty = { nonPathIndices: skip, extraCandidates };
-  let verbIndex = 0;
-  while (
-    verbIndex < argv.length
-    && LEADING_SHELL_KEYWORDS.has(stripCommandPath(argv[verbIndex]!).toLowerCase())
-  ) {
-    verbIndex += 1;
-  }
+  const verbIndex = leadingKeywordCount(argv);
   const head = argv[verbIndex];
   if (head === undefined) return empty;
   const verb = stripCommandPath(head).toLowerCase();
@@ -706,6 +770,37 @@ function classifyOperandSlots(argv: readonly string[]): OperandSlotClassificatio
 function isBarePathValue(value: string): boolean {
   const trimmed = value.trim();
   return trimmed.length > 0 && !/\s/.test(trimmed) && hasPathShape(trimmed);
+}
+
+/**
+ * Command lines carried as the value of an option — today `sh -c '…'` and its
+ * family. Read out of the shared tokenizer's leaves so the option's value is
+ * the same string the shell would hand its child.
+ */
+function extractNestedShellCommands(command: string): string[] {
+  const { leaves, parseError } = tokenizeShell(command);
+  if (parseError) return [];
+  const nested: string[] = [];
+  for (const leaf of leaves) {
+    const head = leaf.argv[0];
+    if (head === undefined) continue;
+    const spec = NON_PATH_OPERAND_SPECS.get(stripCommandPath(head).toLowerCase());
+    const options = spec?.nestedCommandOptions;
+    if (!options) continue;
+    for (let i = 1; i < leaf.argv.length; i += 1) {
+      const token = leaf.argv[i]!;
+      const equals = token.indexOf("=");
+      if (equals > 0 && options.has(token.slice(0, equals))) {
+        nested.push(token.slice(equals + 1));
+        continue;
+      }
+      if (options.has(token) && i + 1 < leaf.argv.length) {
+        nested.push(leaf.argv[i + 1]!);
+        i += 1;
+      }
+    }
+  }
+  return nested;
 }
 
 /** True when a value carries the `@`-prefixed "contents of this file" sigil. */
@@ -887,14 +982,18 @@ function splitCommandSegments(command: string): string[] {
       segment = "";
       continue;
     }
-    // `&&` is a segment boundary; a lone `&` is not, because `2>&1` would then
-    // be torn in half. Splitting here is what lets `cd /app && awk '{…}'` find
-    // `awk` as a head verb — without it the segment's head is `cd` and every
-    // rule keyed on the verb reads the wrong command.
-    if (ch === "&" && command[i + 1] === "&") {
+    // `&&` and a background `&` are both segment boundaries. Splitting here is
+    // what lets `cd /app && awk '{…}'` find `awk` as a head verb — without it
+    // the segment's head is `cd` and every rule keyed on the verb reads the
+    // wrong command, and `ls & find . -name x` hid `find` the same way.
+    //
+    // The exclusions are the fd-redirect forms: `2>&1` and `ls &> log` both
+    // spell `&` without ending a command, and splitting them tears an operator
+    // in half.
+    if (ch === "&" && command[i + 1] !== ">" && command[i - 1] !== ">") {
       if (segment.trim()) segments.push(segment);
       segment = "";
-      i += 1;
+      if (command[i + 1] === "&") i += 1;
       continue;
     }
     segment += ch;

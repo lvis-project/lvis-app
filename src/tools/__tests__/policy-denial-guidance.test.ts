@@ -32,6 +32,7 @@ describe("buildPolicyDenialGuidance", () => {
       rule: "shell-path-policy/sandbox-boundary",
       operand: "/data/source",
       retry: "never",
+      alternative: "retarget-under-authorized-directory",
       allowedDirectories: ["/work"],
     });
     expect(guidance).toContain("/data/source");
@@ -44,13 +45,19 @@ describe("buildPolicyDenialGuidance", () => {
     const guidance = buildPolicyDenialGuidance({
       rule: "bash-ast/recursive-delete",
       retry: "never",
+      alternative: "restructure-command",
       allowedDirectories: ["/work"],
     });
     expect(guidance).toContain("bash-ast/recursive-delete");
   });
 
   it("distinguishes a decision no retry can change from one an authorization can", () => {
-    const base = { rule: "r", operand: "/x", allowedDirectories: ["/work"] } as const;
+    const base = {
+      rule: "r",
+      operand: "/x",
+      alternative: "retarget-under-authorized-directory",
+      allowedDirectories: ["/work"],
+    } as const;
     const never = buildPolicyDenialGuidance({ ...base, retry: "never" });
     const grant = buildPolicyDenialGuidance({ ...base, retry: "grant" });
     expect(never).not.toEqual(grant);
@@ -61,6 +68,7 @@ describe("buildPolicyDenialGuidance", () => {
       rule: "r",
       operand: "/x",
       retry: "grant",
+      alternative: "retarget-under-authorized-directory",
       allowedDirectories: ["/work", "/scratch"],
     });
     expect(guidance).toContain("/work");
@@ -73,6 +81,7 @@ describe("buildPolicyDenialGuidance", () => {
       rule: "r",
       operand: "/x",
       retry: "grant",
+      alternative: "retarget-under-authorized-directory",
       allowedDirectories: directories,
     });
     expect(guidance).toContain("/d0");
@@ -85,6 +94,7 @@ describe("buildPolicyDenialGuidance", () => {
       rule: "allowed-directories/not-grantable",
       operand: "/",
       retry: "never",
+      alternative: "retarget-under-authorized-directory",
       allowedDirectories: ["/work"],
       filesystemRootReference: true,
     });
@@ -92,9 +102,44 @@ describe("buildPolicyDenialGuidance", () => {
       rule: "allowed-directories/not-grantable",
       operand: "/other",
       retry: "never",
+      alternative: "retarget-under-authorized-directory",
       allowedDirectories: ["/work"],
     });
     expect(withRoot.length).toBeGreaterThan(withoutRoot.length);
+  });
+
+  it("names the authorized directories only when the refusal was about scope", () => {
+    const scope = buildPolicyDenialGuidance({
+      rule: "shell-path-policy/sandbox-boundary",
+      operand: "/data/x",
+      retry: "grant",
+      alternative: "retarget-under-authorized-directory",
+      allowedDirectories: ["/work"],
+    });
+    expect(scope).toContain("/work");
+
+    // A structural refusal is not about where the command points. Listing
+    // directories there tells the model to re-target, which is the one retry
+    // guaranteed to be refused again.
+    const structural = buildPolicyDenialGuidance({
+      rule: "bash-ast/rm-rf-root",
+      retry: "never",
+      alternative: "restructure-command",
+      allowedDirectories: ["/work"],
+    });
+    expect(structural).not.toContain("/work");
+
+    // No grant reaches a Layer-0 path, so the model must not be pointed at
+    // asking for one.
+    const protectedPath = buildPolicyDenialGuidance({
+      rule: "sensitive-paths/**/.ssh/**",
+      operand: "/home/u/.ssh/id_rsa",
+      retry: "never",
+      alternative: "path-never-readable",
+      allowedDirectories: ["/work"],
+    });
+    expect(protectedPath).not.toContain("/work");
+    expect(protectedPath).toContain("/home/u/.ssh/id_rsa");
   });
 });
 

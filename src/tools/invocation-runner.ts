@@ -160,6 +160,7 @@ export function buildPolicyDenialGuidance(input: {
   rule: string;
   operand?: string;
   retry: "never" | "grant";
+  alternative: PolicyDenialAlternative;
   allowedDirectories: readonly string[];
   filesystemRootReference?: boolean;
 }): string {
@@ -177,17 +178,42 @@ export function buildPolicyDenialGuidance(input: {
   if (input.filesystemRootReference) {
     sentences.push(t("be_executor.denialFilesystemRoot"));
   }
-  const named = input.allowedDirectories.slice(0, DENIAL_GUIDANCE_DIRECTORY_LIMIT);
-  const remaining = input.allowedDirectories.length - named.length;
-  sentences.push(
-    named.length === 0
-      ? t("be_executor.denialNoAllowedDirectories")
-      : t("be_executor.denialAllowedDirectories", {
-          directories: remaining > 0 ? `${named.join(", ")}, …(+${remaining})` : named.join(", "),
-        }),
-  );
+  if (input.alternative === "restructure-command") {
+    sentences.push(t("be_executor.denialRestructureCommand"));
+  } else if (input.alternative === "path-never-readable") {
+    sentences.push(t("be_executor.denialSensitivePathPermanent"));
+  } else {
+    const named = input.allowedDirectories.slice(0, DENIAL_GUIDANCE_DIRECTORY_LIMIT);
+    const remaining = input.allowedDirectories.length - named.length;
+    sentences.push(
+      named.length === 0
+        ? t("be_executor.denialNoAllowedDirectories")
+        : t("be_executor.denialAllowedDirectories", {
+            directories: remaining > 0 ? `${named.join(", ")}, …(+${remaining})` : named.join(", "),
+          }),
+    );
+  }
   return ` ${sentences.join(" ")}`;
 }
+
+/**
+ * What the model could legitimately do instead — the sentence that closes a
+ * denial.
+ *
+ * Naming the authorized directories only helps when the refusal was ABOUT
+ * scope. Appending it to a structural refusal ("this command shape is not
+ * allowed") or to a Layer-0 sensitive path invites the retry that cannot work:
+ * re-issuing `rm -rf` under an authorized directory is still `rm -rf`, and no
+ * grant ever makes a protected path readable. Those two get sentences that say
+ * what would actually change the answer.
+ */
+type PolicyDenialAlternative =
+  /** The refusal was about scope: a path under an authorized directory works. */
+  | "retarget-under-authorized-directory"
+  /** The command's shape was refused; a different target changes nothing. */
+  | "restructure-command"
+  /** A Layer-0 protected path; no authorization makes it readable. */
+  | "path-never-readable";
 
 type AuditToolCallArgs = Parameters<AuditWriter["auditToolCall"]>;
 type AuditPermissionAskArgs = Parameters<AuditWriter["auditPermissionAsk"]>;
@@ -987,6 +1013,7 @@ export async function runToolInvocation(
             rule: "allowed-directories/not-grantable",
             operand: outOfAllowedTarget.filePath,
             retry: "never",
+            alternative: "retarget-under-authorized-directory",
             allowedDirectories: invocationAllowedScope.directories,
             filesystemRootReference: isFilesystemRootPath(outOfAllowedTarget.canonicalPath),
           });
@@ -1152,6 +1179,7 @@ export async function runToolInvocation(
               rule: "allowed-directories/denied",
               operand: outOfAllowedTarget.filePath,
               retry: "grant",
+              alternative: "retarget-under-authorized-directory",
               allowedDirectories: invocationAllowedScope.directories,
             });
           const durationMs = Date.now() - startTime;
@@ -1265,6 +1293,7 @@ export async function runToolInvocation(
             rule: "allowed-directories/headless-hold",
             operand: outOfAllowedTarget.filePath,
             retry: "grant",
+            alternative: "retarget-under-authorized-directory",
             allowedDirectories: invocationAllowedScope.directories,
           });
         const durationMs = Date.now() - startTime;
@@ -1404,6 +1433,15 @@ export async function runToolInvocation(
             rule: `shell-path-policy/${shellPathViolation.kind}`,
             operand: shellPathViolation.candidate ?? shellPathViolation.path,
             retry: "never",
+            // Only a boundary verdict is about scope. A recursive-traversal or
+            // dynamic-path refusal is about the command's shape, and naming
+            // directories there sends the model to re-target instead of to
+            // rewrite.
+            alternative: shellPathViolation.kind === "sandbox-boundary"
+              ? "retarget-under-authorized-directory"
+              : shellPathViolation.kind === "sensitive-path"
+                ? "path-never-readable"
+                : "restructure-command",
             allowedDirectories: invocationAllowedScope.directories,
           });
         const durationMs = Date.now() - startTime;
@@ -1464,6 +1502,9 @@ export async function runToolInvocation(
           + buildPolicyDenialGuidance({
             rule: `bash-ast/${bashResult.patternId ?? "unnamed"}`,
             retry: "never",
+            // Structural: the shape was refused, so a different target is the
+            // one retry guaranteed to fail again.
+            alternative: "restructure-command",
             allowedDirectories: invocationAllowedScope.directories,
           });
         return await denyStructuralShellCommand(msg, bashResult.reason ?? "bash AST");
@@ -1525,6 +1566,9 @@ export async function runToolInvocation(
           rule: `sensitive-paths/${sensitivePathPattern}`,
           operand: sensitiveTarget?.filePath,
           retry: "never",
+          // Layer 0: no directory grant reaches this path, so listing the
+          // authorized ones would only suggest a retry that cannot work.
+          alternative: "path-never-readable",
           allowedDirectories: invocationAllowedScope.directories,
         });
       const durationMs = Date.now() - startTime;
