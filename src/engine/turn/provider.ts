@@ -29,7 +29,7 @@ import {
 import { stripSuggestedReplies } from "../suggested-replies.js";
 import { t } from "../../i18n/index.js";
 import { estimateTokens } from "../../shared/token-estimate.js";
-import { normalizeOutputTokenLimit } from "../llm/output-token-limit.js";
+import { clampBackgroundOutputTokenLimit } from "../llm/output-token-limit.js";
 
 export const AI_PROVIDER_PING_TIMEOUT_MS = 8_000;
 
@@ -277,7 +277,10 @@ export async function generateText(
       throw new Error("LLM provider not configured");
     }
     if (abortSignal?.aborted) throw new Error("LLM generation aborted");
-    const outputTokenLimit = normalizeOutputTokenLimit(options?.outputTokenLimit);
+    // Background/plugin surface: this caller owns the host ceiling, so it is
+    // applied here rather than in the shared transport, which also serves
+    // foreground chat and must not impose a plugin-sized bound on it.
+    const outputTokenLimit = clampBackgroundOutputTokenLimit(options?.outputTokenLimit);
     const outputLimitController = outputTokenLimit === undefined
       ? undefined
       : new AbortController();

@@ -623,9 +623,16 @@ export interface LLMVendorSettings {
    * inventing one would silently truncate models it guessed low for. Unset
    * therefore means uncapped, which the loop logs once per vendor.
    *
-   * The transport clamps whatever is set to
-   * `MAX_BACKGROUND_OUTPUT_TOKEN_LIMIT`, so a larger value does not take
-   * effect as written.
+   * What is set is what is sent: the host applies no ceiling of its own to
+   * this value, for the same reason it assumes no default. `generateText`'s
+   * plugin-sized `MAX_BACKGROUND_OUTPUT_TOKEN_LIMIT` is applied by that caller
+   * and does not reach here. A number the provider cannot serve comes back as
+   * the provider's own error, which names the real bound.
+   *
+   * There is deliberately no Settings control for it. It is a per-deployment
+   * fact about a gateway's credit policy or a benchmark's budget, not a choice
+   * a user makes while chatting, so it is configured in settings.json where
+   * that kind of fact already lives.
    */
   outputTokenLimit?: number;
   baseUrl?: string;

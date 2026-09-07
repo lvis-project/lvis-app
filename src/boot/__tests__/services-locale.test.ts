@@ -69,4 +69,20 @@ describe("applyBootLocale", () => {
 
     expect(getLocale()).toBe(DEFAULT_LOCALE);
   });
+
+  it("keeps the persisted locale for --set-secret, which runs no model", async () => {
+    // `--set-secret` is headless too, but it builds no prompt and calls no
+    // model. Pinning it would only mean its own diagnostics stop speaking the
+    // language the user chose, for no benefit.
+    const settingsService = {
+      get: () => ({ language: "ko" }),
+    } as unknown as Parameters<typeof applyBootLocale>[0];
+    process.argv = ["electron", ".", "--set-secret=some-key"];
+    setLocale(DEFAULT_LOCALE);
+    __resetLazyLocaleMessagesForTest();
+
+    await applyBootLocale(settingsService);
+
+    expect(getLocale()).toBe("ko");
+  });
 });

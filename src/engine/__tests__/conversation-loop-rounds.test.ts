@@ -28,6 +28,7 @@ type AssistantRoundStopReason =
 import { genericToModelMessages } from "../llm/vercel/adapter.js";
 import { t } from "../../i18n/index.js";
 import { DEFAULT_SETTINGS } from "../../data/settings-defaults.js";
+import { MAX_BACKGROUND_OUTPUT_TOKEN_LIMIT } from "../llm/output-token-limit.js";
 
 class FakeProvider implements LLMProvider {
   readonly vendor = "openai" as const;
@@ -1702,6 +1703,34 @@ describe("ConversationLoop output ceiling", () => {
     expect(provider.params[0]?.outputTokenLimit).toBe(16_384);
   });
 
+  it("sends a chat ceiling above the background bound unclamped", async () => {
+    // The background bound is sized for plugins. A user who configures a
+    // larger chat ceiling used to get the plugin number silently instead.
+    const provider = new RecordingPromptProvider([
+      [
+        { type: "text_delta", text: "done" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const loop = new ConversationLoop({
+      settingsService: {
+        get: () => fakeLlmSettings({ outputTokenLimit: 32_768 }),
+        getSecret: () => "test-key",
+      },
+      systemPromptBuilder: { build: () => "system" },
+      inputClassifier: new InputClassifier(),
+      routeEngine: new RouteEngine(),
+      toolRegistry: new ToolRegistry(),
+      memoryManager: { saveSession: () => {}, listSessions: () => [] },
+    } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
+    (loop as { provider: LLMProvider | null }).provider = provider;
+
+    await loop.runTurn("answer", undefined, undefined, { inputOrigin: "user-keyboard" });
+
+    expect(provider.params[0]?.outputTokenLimit).toBe(32_768);
+    expect(32_768).toBeGreaterThan(MAX_BACKGROUND_OUTPUT_TOKEN_LIMIT);
+  });
+
   it("sends no output ceiling when the vendor block declares none", async () => {
     const provider = new RecordingPromptProvider([
       [
@@ -1850,6 +1879,133 @@ describe("ConversationLoop progress notification", () => {
     const stored = loop.getHistory().getMessages()
       .map((message) => String((message as { content?: unknown }).content ?? ""));
     expect(stored.some((content) => content.includes(NUDGE_HEADER))).toBe(false);
+  });
+
+  it("counts assistant rounds, not loop iterations, and skips continuation rounds", async () => {
+    // The loop iterates for length continuations too, and `roundIndex` is
+    // deliberately held across them. A cadence counting iterations drifts off
+    // the assistant rounds the setting and the message both name: here it would
+    // fall due on the continuation round, where the request has to end with the
+    // assistant prefill, and be lost.
+    const provider = new RecordingPromptProvider([
+      // roundIndex 0 → 1: an ordinary tool round.
+      [
+        { type: "tool_call", id: "t1", name: "probe", input: {} },
+        { type: "message_complete", stopReason: "tool_use" },
+      ],
+      // roundIndex stays 1: truncated with no tool calls, so it is continued.
+      [
+        { type: "text_delta", text: "Part one " },
+        { type: "message_complete", stopReason: "max_tokens" },
+      ],
+      // The continuation. Tool calls end the chain, so roundIndex 1 → 2.
+      [
+        { type: "text_delta", text: "and part two." },
+        { type: "tool_call", id: "t2", name: "probe", input: {} },
+        { type: "message_complete", stopReason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const loop = new ConversationLoop({
+      settingsService: {
+        get: (key: string) =>
+          key === "chat"
+            ? { ...DEFAULT_SETTINGS.chat, progressNudgeRounds: 2 }
+            : fakeLlmSettings({ provider: "openai-compatible" }),
+        getSecret: () => "test-key",
+      },
+      systemPromptBuilder: { build: () => "system" },
+      inputClassifier: new InputClassifier(),
+      routeEngine: new RouteEngine(),
+      toolRegistry: probeRegistry(),
+      memoryManager: { saveSession: () => {}, listSessions: () => [] },
+    } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
+    (loop as { provider: LLMProvider | null }).provider = provider;
+
+    const decisions: Array<{ kind: string; branch: string }> = [];
+    await loop.runTurn(
+      "keep working",
+      { onDecision: (event) => { decisions.push({ kind: event.kind, branch: event.branch }); } },
+      undefined,
+      { inputOrigin: "user-keyboard" },
+    );
+
+    const last = (index: number) => provider.messages[index]?.at(-1);
+    const lastContent = (index: number) =>
+      String((last(index) as { content?: unknown } | undefined)?.content ?? "");
+
+    // Request 2 is the continuation: it must still end with the prefill.
+    expect(last(2)?.role).toBe("assistant");
+    expect(lastContent(2)).not.toContain(NUDGE_HEADER);
+    // Request 3 is the fourth iteration but only the third assistant round,
+    // and it is where roundIndex reaches the cadence.
+    expect(lastContent(3)).toContain(NUDGE_HEADER);
+    expect(
+      decisions.filter((decision) => decision.kind === "progress.nudge"),
+    ).toEqual([{ kind: "progress.nudge", branch: "cadence" }]);
+  });
+
+  it("shares one user row with the reasoning re-prompt when both fire", async () => {
+    // Two host instructions can fall on the same round. A chat template that
+    // asserts role alternation rejects a second consecutive user row, so they
+    // share the single appended row rather than each adding one.
+    const thought = "I should check the tokenizer next.";
+    const provider = new RecordingPromptProvider([
+      // Reasoning with no text and no tool call: arms the re-prompt, and
+      // advances roundIndex to 1, where a cadence of 1 also falls due.
+      [
+        { type: "reasoning_delta", text: thought },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const loop = new ConversationLoop({
+      settingsService: settingsWithNudgeCadence(1),
+      systemPromptBuilder: { build: () => "system" },
+      inputClassifier: new InputClassifier(),
+      routeEngine: new RouteEngine(),
+      toolRegistry: probeRegistry(),
+      memoryManager: { saveSession: () => {}, listSessions: () => [] },
+    } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
+    (loop as { provider: LLMProvider | null }).provider = provider;
+
+    const decisions: string[] = [];
+    await loop.runTurn(
+      "check it",
+      { onDecision: (event) => { decisions.push(event.kind); } },
+      undefined,
+      { inputOrigin: "user-keyboard" },
+    );
+
+    const secondRound = provider.messages[1]!;
+    // Exactly one appended user row, carrying both instructions.
+    const trailingUserRows = [...secondRound]
+      .reverse()
+      .findIndex((message) => message.role !== "user");
+    expect(trailingUserRows).toBe(1);
+    const appended = secondRound.at(-1)!;
+    expect(appended.role).toBe("user");
+    // Not pinned to an elapsed-seconds value the clock decides: what matters is
+    // that both instructions are in the one row, in order, blank-line joined.
+    const rePrompt = t("be_conversationLoop.reasoningOnlyContinuePrompt");
+    const appendedText = String(appended.content);
+    expect(appendedText.startsWith(`${rePrompt}\n\n`)).toBe(true);
+    expect(appendedText.slice(rePrompt.length + 2)).toContain(NUDGE_HEADER);
+    // The reasoning replay still sits immediately before it.
+    expect(secondRound.at(-2)!.role).toBe("assistant");
+    expect(secondRound.at(-2)!.content).toBe(thought);
+    expect(decisions).toContain("progress.nudge");
+    expect(decisions).toContain("reasoning_only.continuation");
+
+    // Neither instruction reached the transcript.
+    expect(JSON.stringify(loop.getHistory().getMessages()))
+      .not.toContain(NUDGE_HEADER);
   });
 
   it("injects nothing when the cadence is 0", async () => {

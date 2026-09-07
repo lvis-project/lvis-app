@@ -494,16 +494,22 @@ Plugin loading is untouched — the run still loads whatever the registry
 snapshot on disk holds, and what is dropped is the network refresh in front of
 it. An interactive launch keeps every one of them.
 
-One thing a headless run does **differently**, rather than skipping. The
+One thing a headless **turn** does differently, rather than skipping. The
 `appearance.language` setting names the language the app's surfaces are drawn
-in, and a one-shot run draws none — but the system prompt is assembled through
+in, and a one-shot turn draws none — but the system prompt is assembled through
 the same message catalog, so under a non-English setting the model was handed a
 prompt written in the machine's language and answered in it whatever language
-the request on stdin was written in. A headless run therefore pins the default
+the request on stdin was written in. A headless turn therefore pins the default
 locale at boot, and its prompt carries an explicit rule to answer in the
 language of the request in place of the `Locale:` line an interactive prompt
 carries. An interactive launch is unchanged: there the setting really is a
 statement about the person reading the answer.
+
+This is the one place the two headless flags part company. `--set-secret` is
+headless by the same test the log destination uses, but it runs no model and
+builds no prompt, so it keeps the persisted language for its own diagnostics —
+`execTurnRequested` asks the narrower question, `execModeRequested` the broader
+one.
 
 Implementation anchors:
 

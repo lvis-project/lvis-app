@@ -126,6 +126,19 @@ export function execModeRequested(argv: readonly string[]): boolean {
   );
 }
 
+/**
+ * The narrower question: whether this launch runs a TURN headlessly.
+ *
+ * `--set-secret` is headless too, which is what {@link execModeRequested}
+ * answers and all a log destination needs to know. But it runs no model and
+ * builds no prompt, so anything reasoning about what language a model should
+ * answer in, or about a conversation existing at all, has to ask this instead —
+ * otherwise the secret-writing CLI is treated as a conversation that has none.
+ */
+export function execTurnRequested(argv: readonly string[]): boolean {
+  return argv.some((arg) => arg === "--exec" || arg.startsWith("--exec="));
+}
+
 function usageError(message: string): { error: string } {
   return { error: `exec: ${message}` };
 }

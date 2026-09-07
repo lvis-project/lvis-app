@@ -252,6 +252,16 @@ export interface ChatSettings {
    * until an external deadline cuts it off mid tool-call. The notification
    * supplies exactly those three numbers plus one instruction, and is the only
    * thing in the turn that can say "this approach is not working".
+   *
+   * The notification itself is wire-only and is never written to the session,
+   * because its numbers are true only for the round that sent it. The visible
+   * consequence is that a reloaded transcript can show the model answering it —
+   * "I have run N rounds, so let me verify" — with no row explaining why; the
+   * `progress.nudge` decision on the turn is where the cause is recorded.
+   *
+   * There is deliberately no Settings control. The cadence is a policy knob for
+   * benchmark and evaluation runs rather than a preference a user forms while
+   * chatting, and a control implies a choice worth making mid-conversation.
    */
   progressNudgeRounds: number;
 }

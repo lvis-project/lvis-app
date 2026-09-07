@@ -19,7 +19,7 @@ import { lvisHome } from "../shared/lvis-home.js";
 import type { ProjectIdentity } from "../shared/project-identity.js";
 import { escapeHtml } from "../shared/escape-html.js";
 import { formatLocalIsoWithOffset, hostTimeZone } from "../shared/format-time.js";
-import { execModeRequested } from "../main/exec-mode.js";
+import { execTurnRequested } from "../main/exec-mode.js";
 
 const log = createLogger("system-prompt");
 
@@ -587,10 +587,12 @@ export class SystemPromptBuilder {
     // precondition, so the model was free to treat reading its own output as
     // confirmation of it.
     //
-    // id=4.6 sits between Tool Use Strategy (4.5) and Staged Origin Guidance,
-    // keeping the "how to work" block contiguous.
+    // id=4.55 sits between Tool Use Strategy (4.5) and Staged Origin Guidance
+    // (4.6), keeping the "how to work" block contiguous. Ids are the sort key
+    // AND how `listSources` / `sourceBreakdown` name a section, so reusing 4.6
+    // would report two sections under one id.
     this.sources.push({
-      id: 4.6,
+      id: 4.55,
       name: "Completion Discipline",
       refresh: "static",
       build: () => t("be_systemPromptBuilder.completionDiscipline"),
@@ -1030,7 +1032,7 @@ export class SystemPromptBuilder {
           // the OS locale there had the model answer in the machine's language
           // instead of the request's. The request itself is the only language
           // signal that run has.
-          ...(execModeRequested(process.argv)
+          ...(execTurnRequested(process.argv)
             ? [t("be_systemPromptBuilder.headlessResponseLanguage")]
             : [`Locale: ${Intl.DateTimeFormat().resolvedOptions().locale}`]),
           t("be_systemPromptBuilder.environmentDateTimeNote"),

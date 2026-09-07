@@ -389,6 +389,11 @@ export async function queryLoop(
     const turnStartedAtMs = Date.now();
     let toolErrorsRun = 0;
     let toolErrorsAtLastProgressNudge = 0;
+    // The assistant-round index the last notification was sent at. `roundIndex`
+    // is HELD across a continuation chain and across a schema-drop retry, so
+    // without this the same index would arm again on the next iteration and
+    // send twice for one assistant round.
+    let roundIndexAtLastProgressNudge = -1;
     // Cadence in assistant rounds; `0` disables the notification entirely.
     const progressNudgeRounds =
       self.deps.settingsService.get("chat").progressNudgeRounds;
@@ -671,13 +676,32 @@ export async function queryLoop(
       // every later turn, draw as a user bubble on reload, and survive
       // compaction as if the user had typed it.
       //
+      // The cadence counts `roundIndex`, not the for-loop index: the loop
+      // iterates for schema-drop retries and length continuations too, and
+      // neither is an assistant round. Counting iterations would make the
+      // interval shorter than the setting says and report a number the model
+      // cannot reconcile with its own transcript.
+      //
+      // Nothing is due on a length-continuation round, and no deferral is
+      // needed to say so. Both inputs to the question below are FROZEN across a
+      // continuation chain: `roundIndex` is deliberately not incremented for a
+      // continuation, and a continuation round carries no tool calls (that is
+      // the gate it is chosen under), so `toolErrorsRun` cannot move either.
+      // `roundIndex` also only ever advances on an iteration that did NOT
+      // continue, so the first iteration at any new index has no prefill
+      // pending. A notification therefore always falls due on an ordinary
+      // round — and `assembleRoundMessages` returns before the append on a
+      // continuation anyway, so no separate check is carried here.
+      //
       // Decided here, SENT by assembleRoundMessages below — which is also where
       // the decision is recorded and the bookkeeping is spent, so a recorded
       // notification always corresponds to one the model was actually handed.
       const progressNudgeBranch: "cadence" | "tool-errors" | null =
         progressNudgeRounds === 0
           ? null
-          : round > 0 && round % progressNudgeRounds === 0
+          : roundIndex > 0
+            && roundIndex % progressNudgeRounds === 0
+            && roundIndex !== roundIndexAtLastProgressNudge
             ? "cadence"
             : toolErrorsRun - toolErrorsAtLastProgressNudge >= PROGRESS_NUDGE_TOOL_ERROR_THRESHOLD
               ? "tool-errors"
@@ -760,7 +784,7 @@ export async function queryLoop(
         if (progressNudgeBranch !== null) {
           const elapsedSeconds = Math.round((Date.now() - turnStartedAtMs) / 1000);
           appendedUserText.push(t("be_conversationLoop.progressNudge", {
-            round,
+            round: roundIndex,
             elapsedSeconds,
             toolCalls: allToolCalls.length,
             toolErrors: toolErrorsRun,
@@ -769,13 +793,14 @@ export async function queryLoop(
             kind: "progress.nudge",
             branch: progressNudgeBranch,
             data: {
-              round,
+              round: roundIndex,
               elapsedSeconds,
               toolCalls: allToolCalls.length,
               toolErrors: toolErrorsRun,
             },
           });
           toolErrorsAtLastProgressNudge = toolErrorsRun;
+          roundIndexAtLastProgressNudge = roundIndex;
         }
         if (appendedUserText.length === 0) return rows;
         return [
@@ -784,16 +809,6 @@ export async function queryLoop(
         ];
       };
       const messagesForRound = assembleRoundMessages(baseMessagesForRound);
-||||||| parent of cc386e9 (feat(turn): bound a runaway turn with an output ceiling and progress pressure)
-      // finish_reason=length CONTINUATION: when continuing, append a WIRE-ONLY
-      // partial assistant turn (NOT persisted to history) as the final message.
-      // The openai-compatible adapter pairs this with continue_final_message so
-      // vLLM resumes it verbatim. For mid-<think> truncation the prefill text is
-      // `<think>\n…` (open, no closing tag) so the model finishes reasoning
-      // before answering; add_generation_prompt:false blocks a 2nd auto <think>.
-      const messagesForRound: GenericMessage[] = continuationPrefillText !== undefined ? [
-        ...baseMessagesForRound, { role: "assistant" as const, content: continuationPrefillText },
-      ] : baseMessagesForRound;
       self.lastRoundInputProjection = self.projectProviderRequestInput({
         systemPrompt, messages: messagesForRound, toolSchemas,
         continuationPrefill: continuationPrefillText !== undefined,
