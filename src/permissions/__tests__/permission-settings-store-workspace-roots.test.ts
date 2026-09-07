@@ -593,3 +593,71 @@ describe("a settings file the store cannot parse at all", () => {
     expect(readFileSync(settings, "utf-8")).toBe(DAMAGED);
   });
 });
+
+/**
+ * `permissions.blockReadsOutsideWorkingDirectories` — the one key that re-fences
+ * READ-tier path operands to the same allow-list writes are confined to.
+ *
+ * It has no settings UI and moves only by a hand edit, so the store is the
+ * whole of its input validation: whatever a person typed has to normalize to a
+ * boolean, and an absent key has to mean the shipped posture rather than an
+ * accidental fence.
+ */
+describe("the read fence setting", () => {
+  it("defaults to off when the key is absent", () => {
+    const { path: settings } = fixture();
+    writeFileSync(settings, JSON.stringify({ permissions: { additionalDirectories: [] } }));
+
+    expect(readPermissionSettings(settings).permissions.blockReadsOutsideWorkingDirectories)
+      .toBe(false);
+  });
+
+  it("defaults to off when there is no settings file at all", () => {
+    const { dir: root } = fixture();
+    expect(
+      readPermissionSettings(join(root, "does-not-exist.json"))
+        .permissions.blockReadsOutsideWorkingDirectories,
+    ).toBe(false);
+  });
+
+  it("reads a hand-edited `true`", () => {
+    const { path: settings } = fixture();
+    writeFileSync(settings, JSON.stringify({
+      permissions: { additionalDirectories: [], blockReadsOutsideWorkingDirectories: true },
+    }));
+
+    expect(readPermissionSettings(settings).permissions.blockReadsOutsideWorkingDirectories)
+      .toBe(true);
+  });
+
+  it.each([
+    ["the string \"true\"", "true"],
+    ["a number", 1],
+    ["null", null],
+    ["an object", {}],
+  ])("normalizes %s to off rather than fencing on a truthy value", (_label, value) => {
+    const { path: settings } = fixture();
+    writeFileSync(settings, JSON.stringify({
+      permissions: { additionalDirectories: [], blockReadsOutsideWorkingDirectories: value },
+    }));
+
+    // Strict `=== true`. A typed `"false"` is truthy in JavaScript, so a
+    // coercing read would fence reads for a user who wrote the word "false".
+    expect(readPermissionSettings(settings).permissions.blockReadsOutsideWorkingDirectories)
+      .toBe(false);
+  });
+
+  it("survives a write of an unrelated part of the file", async () => {
+    const { dir: root, path: settings } = fixture();
+    const project = join(root, "project");
+    mkdirSync(project);
+    writeFileSync(settings, JSON.stringify({
+      permissions: { additionalDirectories: [], blockReadsOutsideWorkingDirectories: true },
+    }));
+
+    await addAllowedDirectoryPersist(project, settings);
+
+    expect(readPermissionSettings(settings).permissions.blockReadsOutsideWorkingDirectories)
+      .toBe(true);
+  });
+});

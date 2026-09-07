@@ -94,6 +94,8 @@ export interface ExecutionStageContext {
   trust: TrustLevel;
   invocationCategory: ToolCategory;
   declaredCategoryForEffectShadow: ToolCategory;
+  /** Layer 1 read fence for this invocation; see ToolExecutionContext. */
+  blockReadsOutsideWorkingDirectories: boolean;
   finalInput: Record<string, unknown>;
   sessionId: string | undefined;
   invocationPermissionContext: ToolPermissionContext;
@@ -145,6 +147,7 @@ export async function executeAuthorizedToolInvocation(
     trust,
     invocationCategory,
     declaredCategoryForEffectShadow,
+    blockReadsOutsideWorkingDirectories,
     finalInput,
     sessionId,
     invocationPermissionContext,
@@ -611,6 +614,7 @@ export async function executeAuthorizedToolInvocation(
   const executionContext: ToolExecutionContext = {
     cwd: executionCwd,
     extraAllowedDirectories: [...new Set(invocationRuntimeAllowedDirectories)],
+    blockReadsOutsideWorkingDirectories,
     // Owner plugin sandbox root — same derivation the reviewer uses
     // (executor permission path). Plugin-owned tools confine their OS
     // write-jail to `~/.lvis/plugins/<pluginId>/data`, the plugin's own

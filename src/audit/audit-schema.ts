@@ -178,6 +178,18 @@ export interface AuditAllow extends AuditCommon {
    * loop and was conservatively narrowed.
    */
   grantLifetime?: "turn" | "session" | "always" | "degraded-to-turn";
+  /**
+   * Stable id of the rule that allowed, for a Layer-1 directory allow that came
+   * from POLICY rather than from a user gesture — today only
+   * `path-scope/read-anywhere`, a read admitted outside the authorized
+   * directories because reads are not confined to them.
+   *
+   * Mutually exclusive with `grantLifetime` on a directory row, and the pair is
+   * what tells the two kinds of allow apart in replay: a grant records how long
+   * a person authorized the directory for, a policy allow records which rule
+   * decided and outlives nothing.
+   */
+  policyRule?: string;
   layer: number;
   reviewer?: RiskVerdict;
   hookChain?: HookResult[];

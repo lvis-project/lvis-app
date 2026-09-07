@@ -404,12 +404,48 @@ describe("file native tools", () => {
     expect(existsSync(join(workDir, "README.md"))).toBe(false);
   });
 
-  it("rejects paths outside the sandbox boundary", async () => {
+  it("rejects a WRITE outside the sandbox boundary", async () => {
     const outside = mkdtempSync(join(tmpdir(), "lvis-file-tools-outside-"));
     try {
+      const result = await new WriteFileTool().execute(
+        { path: join(outside, "x.txt"), content: "nope" },
+        ctx(),
+      );
+
+      expect(result.isError).toBe(true);
+      expect(result.output).toContain("Sandbox:");
+      expect(existsSync(join(outside, "x.txt"))).toBe(false);
+    } finally {
+      await cleanupTmpDir(outside);
+    }
+  });
+
+  // The boundary is what the agent may CHANGE. A read is bounded by the
+  // Layer 0 deny-list instead, so a file outside it is readable without a
+  // grant — and refusing it here was what refused `ls /`.
+  it("reads a path outside the sandbox boundary", async () => {
+    const outside = mkdtempSync(join(tmpdir(), "lvis-file-tools-outside-read-"));
+    try {
+      writeFileSync(join(outside, "x.txt"), "outside content\n", "utf8");
       const result = await new ReadFileTool().execute(
         { path: join(outside, "x.txt") },
         ctx(),
+      );
+
+      expect(result.isError).toBe(false);
+      expect(result.output).toContain("outside content");
+    } finally {
+      await cleanupTmpDir(outside);
+    }
+  });
+
+  it("rejects that same read once the user re-fences reads", async () => {
+    const outside = mkdtempSync(join(tmpdir(), "lvis-file-tools-outside-fenced-"));
+    try {
+      writeFileSync(join(outside, "x.txt"), "outside content\n", "utf8");
+      const result = await new ReadFileTool().execute(
+        { path: join(outside, "x.txt") },
+        { ...ctx(), blockReadsOutsideWorkingDirectories: true },
       );
 
       expect(result.isError).toBe(true);
@@ -417,6 +453,18 @@ describe("file native tools", () => {
     } finally {
       await cleanupTmpDir(outside);
     }
+  });
+
+  // Layer 0 is not part of the asymmetry: widening reads widened the DIRECTORY
+  // boundary, not the deny-list.
+  it("still refuses a read of a Layer 0 protected path", async () => {
+    const result = await new ReadFileTool().execute(
+      { path: join(homedir(), ".ssh", "id_rsa") },
+      ctx(),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain("Sensitive path:");
   });
 
   it("honors executor-threaded additionalDirectories for extra workspace roots", async () => {

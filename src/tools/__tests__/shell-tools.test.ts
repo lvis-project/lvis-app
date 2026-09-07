@@ -310,15 +310,31 @@ describe("bash tool", () => {
       }
     });
 
-    it("rejects recursive filesystem traversal before spawning the shell", async () => {
+    it("rejects a MUTATING recursive filesystem traversal before spawning the shell", async () => {
       const root = mkdtempSync(join(tmpdir(), "lvis-bash-recursive-traversal-"));
+      try {
+        const result = await new BashTool().execute(
+          { command: "cp -R . ./copy", timeoutSeconds: SHELL_TIMEOUT_SECONDS },
+          ctx(root),
+        );
+        expect(result.isError).toBe(true);
+        expect(result.output).toContain("recursive shell filesystem traversal");
+      } finally {
+        await cleanupTmpDir(root);
+      }
+    });
+
+    // A walk that only prints paths reaches nothing a read could not reach
+    // directly, and reads are not confined to the workspace, so refusing it was
+    // refusing the read the host admits.
+    it("spawns a read-only recursive traversal", async () => {
+      const root = mkdtempSync(join(tmpdir(), "lvis-bash-recursive-read-"));
       try {
         const result = await new BashTool().execute(
           { command: "grep -R SECRET .", timeoutSeconds: SHELL_TIMEOUT_SECONDS },
           ctx(root),
         );
-        expect(result.isError).toBe(true);
-        expect(result.output).toContain("recursive shell filesystem traversal");
+        expect(result.output).not.toContain("recursive shell filesystem traversal");
       } finally {
         await cleanupTmpDir(root);
       }

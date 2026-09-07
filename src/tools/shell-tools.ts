@@ -394,6 +394,7 @@ export class BashTool extends ZodTool<typeof BashToolInputSchema> {
       resolvedCwd,
       ctx.cwd,
       ctx.extraAllowedDirectories,
+      ctx.blockReadsOutsideWorkingDirectories === true,
     );
     if (commandPathViolation) {
       return { output: commandPathViolation, isError: true };
@@ -1146,6 +1147,7 @@ export class PowerShellTool extends ZodTool<typeof PowerShellToolInputSchema> {
       resolvedCwd,
       ctx.cwd,
       ctx.extraAllowedDirectories,
+      ctx.blockReadsOutsideWorkingDirectories === true,
     );
     if (commandPathViolation) {
       return { output: commandPathViolation, isError: true };

@@ -186,10 +186,10 @@ describe("permission-review-scenario-board-v2.html contract", () => {
     }
   });
 
-  it("S3 out-of-dir read switches to directory-scope approval", async () => {
+  it("S3 out-of-dir write switches to directory-scope approval", async () => {
     const { pm, cleanup } = makeManager("default");
     try {
-      const { tool, execute } = makeTool({ name: "grep_files", category: "read", pathFields: ["path"] });
+      const { tool, execute } = makeTool({ name: "write_file", category: "write", pathFields: ["path"] });
       const gate = makeGate("allow-once");
       const result = await runProbe({
         tool,
@@ -202,6 +202,26 @@ describe("permission-review-scenario-board-v2.html contract", () => {
       expect(gate.requestAndWait).toHaveBeenCalledWith(expect.objectContaining({
         kind: "out-of-allowed-dir",
       }));
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("S3 the same path read instead is admitted with no approval at all", async () => {
+    const { pm, cleanup } = makeManager("default");
+    try {
+      const { tool, execute } = makeTool({ name: "grep_files", category: "read", pathFields: ["path"] });
+      const gate = makeGate("deny-once");
+      const result = await runProbe({
+        tool,
+        pm,
+        gate,
+        input: { path: "/var/tmp/lvis-scenario-outside" },
+      });
+      expect(result[0].is_error).toBeUndefined();
+      expect(execute).toHaveBeenCalledOnce();
+      // The gate would have DENIED. Nothing asked it, which is the scenario.
+      expect(gate.requestAndWait).not.toHaveBeenCalled();
     } finally {
       await cleanup();
     }

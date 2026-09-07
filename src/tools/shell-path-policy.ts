@@ -7,6 +7,7 @@ import {
   startsShellComment,
   stripCommandPath,
   tokenizeShell,
+  type ShellLeaf,
 } from "../shared/shell-tokenizer.js";
 import { validateSandboxPath } from "../sandbox/path-validator.js";
 import {
@@ -14,7 +15,14 @@ import {
   caseFoldForMatch,
   isSensitivePath,
 } from "../permissions/sensitive-paths.js";
-import { inspectSedScriptFileAccess } from "../permissions/reviewer/host-risk-inspector.js";
+import {
+  inspectSedScriptFileAccess,
+  isReadOnlyShellLeaf,
+} from "../permissions/reviewer/host-risk-inspector.js";
+import {
+  pathEffectIsConfined,
+  type PathEffect,
+} from "../permissions/allowed-directories.js";
 import { errorMessage } from "../shared/error-message.js";
 import { expandLeadingTilde } from "../shared/home-tilde.js";
 
@@ -96,8 +104,51 @@ export function findShellPathPolicyViolation(
   cwd: string,
   sandboxRoot: string,
   extraAllowedDirectories: readonly string[],
+  blockReadsOutsideWorkingDirectories: boolean,
 ): ShellPathPolicyViolation | null {
-  return findViolationInCommand(command, cwd, sandboxRoot, extraAllowedDirectories, 0);
+  return findViolationInCommand(
+    command,
+    cwd,
+    sandboxRoot,
+    extraAllowedDirectories,
+    blockReadsOutsideWorkingDirectories,
+    0,
+  );
+}
+
+/**
+ * What a leaf does with the operands in its own argv.
+ *
+ * Read straight off the risk classifier's verb tables
+ * ({@link isReadOnlyShellLeaf}) rather than from a second table here — a copy
+ * would let the classifier that decides "may this run unreviewed" and the one
+ * that decides "may this operand be outside the boundary" drift apart on the
+ * same command.
+ *
+ * `ignoreRedirects` because a redirect is judged as its own operand below: an
+ * output target is a write and an input source is a read whatever the verb is,
+ * so letting a redirect taint the verb's answer would confine `/etc/hosts` in
+ * `cat /etc/hosts > out` for a reason that has nothing to do with reading it.
+ */
+function leafArgvEffect(leaf: ShellLeaf): PathEffect {
+  return isReadOnlyShellLeaf(leaf, { ignoreRedirects: true }) ? "read" : "write";
+}
+
+/**
+ * What a whole command segment does with the operands the flat scan finds in
+ * it — the segment-level analogue of {@link leafArgvEffect}, used where there
+ * is no leaf to attribute an operand to.
+ *
+ * Fails closed to `write`: a segment the shared tokenizer cannot parse, or one
+ * that yields no leaf, has no read-only evidence, and the boundary is the only
+ * containment left for it.
+ */
+function segmentEffect(segment: string): PathEffect {
+  const { leaves, parseError } = tokenizeShell(segment);
+  if (parseError || leaves.length === 0) return "write";
+  return leaves.every((leaf) => isReadOnlyShellLeaf(leaf, { ignoreRedirects: true }))
+    ? "read"
+    : "write";
 }
 
 /**
@@ -114,6 +165,7 @@ function findViolationInCommand(
   cwd: string,
   sandboxRoot: string,
   extraAllowedDirectories: readonly string[],
+  blockReadsOutsideWorkingDirectories: boolean,
   depth: number,
 ): ShellPathPolicyViolation | null {
   // A quoted heredoc body is stdin data, not commands — see
@@ -137,7 +189,10 @@ function findViolationInCommand(
     };
   }
 
-  const recursiveTraversal = findUnsafeRecursiveTraversal(command);
+  const recursiveTraversal = findUnsafeRecursiveTraversal(
+    command,
+    blockReadsOutsideWorkingDirectories,
+  );
   if (recursiveTraversal) {
     return { kind: "recursive-traversal", reason: recursiveTraversal };
   }
@@ -170,6 +225,7 @@ function findViolationInCommand(
         cwd,
         sandboxRoot,
         extraAllowedDirectories,
+        blockReadsOutsideWorkingDirectories,
         depth + 1,
       );
       if (violation) return violation;
@@ -194,11 +250,17 @@ function findViolationInCommand(
   // from the flat scan. Any candidate one of them does not see, the other
   // still does. For a containment check, missing an operand is the failure that
   // matters, so both run.
-  const leafViolation = findCwdAwareLeafViolation(command, cwd, sandboxRoot, extraAllowedDirectories);
+  const leafViolation = findCwdAwareLeafViolation(
+    command,
+    cwd,
+    sandboxRoot,
+    extraAllowedDirectories,
+    blockReadsOutsideWorkingDirectories,
+  );
   if (leafViolation) return leafViolation;
 
   const candidates = extractPathCandidates(command);
-  for (const candidate of candidates) {
+  for (const { candidate, effect } of candidates) {
     if (isIgnoredShellDeviceCandidate(candidate)) {
       continue;
     }
@@ -215,24 +277,15 @@ function findViolationInCommand(
     if (isIgnoredShellDevicePath(absolute)) {
       continue;
     }
-    const sensitive = isSensitivePath(caseFoldForMatch(canonicalizePathForMatch(absolute)));
-    if (sensitive) {
-      return {
-        kind: "sensitive-path",
-        reason: `Sensitive path: command operand ${candidate} matches ${sensitive}`,
-        candidate,
-        path: absolute,
-      };
-    }
-    const check = validateSandboxPath(absolute, sandboxRoot, [...extraAllowedDirectories]);
-    if (!check.allowed) {
-      return {
-        kind: "sandbox-boundary",
-        reason: `Sandbox: ${check.reason}`,
-        candidate,
-        path: absolute,
-      };
-    }
+    const violation = checkResolvedPath(
+      absolute,
+      candidate,
+      sandboxRoot,
+      extraAllowedDirectories,
+      effect,
+      blockReadsOutsideWorkingDirectories,
+    );
+    if (violation) return violation;
   }
   return null;
 }
@@ -266,6 +319,7 @@ function findCwdAwareLeafViolation(
   cwd: string,
   sandboxRoot: string,
   extraAllowedDirectories: readonly string[],
+  blockReadsOutsideWorkingDirectories: boolean,
 ): ShellPathPolicyViolation | null {
   const { leaves, parseError } = tokenizeShell(command);
   // A command the SOT tokenizer cannot parse has no trustworthy leaf order, so
@@ -282,12 +336,6 @@ function findCwdAwareLeafViolation(
     // argv position at all.
     const slots = classifyOperandSlots(leaf.argv);
     const nonPathArgv = slots.nonPathIndices;
-    const operands = [
-      ...leaf.argv.filter((_, index) => !nonPathArgv.has(index)),
-      ...slots.extraCandidates,
-      ...leaf.redirectTargets,
-      ...leaf.inputRedirectTargets,
-    ];
     // `/`-only basename reduction, matching the risk classifier — the two must
     // agree on what verb a leaf runs. A Windows-style `C:\\tools\\cd` is not
     // reduced by either, so both see the full token and neither treats it as
@@ -303,10 +351,44 @@ function findCwdAwareLeafViolation(
     const verb = leaf.argv[verbIndex];
     const isCd = verb !== undefined && stripCommandPath(verb) === "cd";
 
+    // A `cd` destination is a WRITE operand even though `cd` writes nothing,
+    // and this is the one place the read/write asymmetry does not follow the
+    // verb.
+    //
+    // What `cd` changes is the base directory every LATER leaf's relative
+    // operand resolves against, write leaves included. Bare filenames are not
+    // path-shaped, so they are never candidates at all — `rm passwd` carries no
+    // operand this policy can see — and the only thing that has ever made that
+    // safe is the guarantee that every directory the command can stand in is
+    // inside the boundary. Letting `cd` land outside on the strength of being a
+    // read would hand `cd /etc && rm passwd` a write target no layer inspects.
+    //
+    // Nothing is lost: a read outside the boundary names its path
+    // absolutely (`cat /etc/hosts`), which is admitted.
+    const argvEffect: PathEffect = isCd ? "write" : leafArgvEffect(leaf);
+    const operands: { value: string; effect: PathEffect }[] = [
+      ...leaf.argv
+        .filter((_, index) => !nonPathArgv.has(index))
+        .map((value) => ({ value, effect: argvEffect })),
+      ...slots.extraCandidates.map((value) => ({ value, effect: argvEffect })),
+      // A redirect operand's effect comes from the redirect, not the verb:
+      // `cat x > y` writes `y` whatever `cat` does, and `tee out < in` reads
+      // `in` whatever `tee` does.
+      ...leaf.redirectTargets.map((value) => ({ value, effect: "write" as const })),
+      ...leaf.inputRedirectTargets.map((value) => ({ value, effect: "read" as const })),
+    ];
+
     // `cd`'s own destination is checked as an operand like any other, so a
     // `cd` that leaves the boundary is caught here and not merely tracked.
     for (const operand of isCd ? operands.slice(verbIndex + 1) : operands) {
-      const violation = checkOperandAgainstBase(operand, current, sandboxRoot, extraAllowedDirectories);
+      const violation = checkOperandAgainstBase(
+        operand.value,
+        current,
+        sandboxRoot,
+        extraAllowedDirectories,
+        operand.effect,
+        blockReadsOutsideWorkingDirectories,
+      );
       if (violation) return violation;
     }
 
@@ -330,7 +412,14 @@ function findCwdAwareLeafViolation(
     // Confining the destination is what makes those bare operands safe to keep
     // ignoring: if every directory the command can stand in is inside the
     // boundary, a name resolved against one of them is inside it as well.
-    const destinationViolation = checkResolvedPath(destination, leaf.argv.join(" "), sandboxRoot, extraAllowedDirectories);
+    const destinationViolation = checkResolvedPath(
+      destination,
+      leaf.argv.join(" "),
+      sandboxRoot,
+      extraAllowedDirectories,
+      "write",
+      blockReadsOutsideWorkingDirectories,
+    );
     if (destinationViolation) return destinationViolation;
 
     current = destination;
@@ -347,6 +436,8 @@ function checkOperandAgainstBase(
   base: string,
   sandboxRoot: string,
   extraAllowedDirectories: readonly string[],
+  effect: PathEffect,
+  blockReadsOutsideWorkingDirectories: boolean,
 ): ShellPathPolicyViolation | null {
   for (const part of splitCandidateParts(operand)) {
     const candidate = normalizeCandidate(part);
@@ -365,7 +456,14 @@ function checkOperandAgainstBase(
     }
     if (isIgnoredShellDevicePath(absolute)) continue;
 
-    const violation = checkResolvedPath(absolute, candidate, sandboxRoot, extraAllowedDirectories);
+    const violation = checkResolvedPath(
+      absolute,
+      candidate,
+      sandboxRoot,
+      extraAllowedDirectories,
+      effect,
+      blockReadsOutsideWorkingDirectories,
+    );
     if (violation) return violation;
   }
   return null;
@@ -375,12 +473,20 @@ function checkOperandAgainstBase(
  * Apply the sensitive-path and sandbox-boundary rules to an already-resolved
  * absolute path. `label` is what the violation reports as the operand, so the
  * message names something the user can find in the command they wrote.
+ *
+ * Layer 0 runs for BOTH effects and is unchanged: a protected path stays
+ * unreadable. Only the Layer 1 boundary below is asymmetric, and the
+ * asymmetry is not restated here — {@link pathEffectIsConfined} is the same
+ * predicate `isPathAllowedForEffect` asks for the tool path scope, so the two
+ * enforcement paths cannot come to disagree about `ls /`.
  */
 function checkResolvedPath(
   absolute: string,
   label: string,
   sandboxRoot: string,
   extraAllowedDirectories: readonly string[],
+  effect: PathEffect,
+  blockReadsOutsideWorkingDirectories: boolean,
 ): ShellPathPolicyViolation | null {
   const sensitive = isSensitivePath(caseFoldForMatch(canonicalizePathForMatch(absolute)));
   if (sensitive) {
@@ -391,6 +497,7 @@ function checkResolvedPath(
       path: absolute,
     };
   }
+  if (!pathEffectIsConfined(effect, blockReadsOutsideWorkingDirectories)) return null;
   const check = validateSandboxPath(absolute, sandboxRoot, [...extraAllowedDirectories]);
   if (!check.allowed) {
     return {
@@ -441,8 +548,15 @@ export function validateShellCommandPathPolicy(
   cwd: string,
   sandboxRoot: string,
   extraAllowedDirectories: readonly string[],
+  blockReadsOutsideWorkingDirectories: boolean,
 ): string | null {
-  return findShellPathPolicyViolation(command, cwd, sandboxRoot, extraAllowedDirectories)?.reason ?? null;
+  return findShellPathPolicyViolation(
+    command,
+    cwd,
+    sandboxRoot,
+    extraAllowedDirectories,
+    blockReadsOutsideWorkingDirectories,
+  )?.reason ?? null;
 }
 
 /**
@@ -1017,8 +1131,27 @@ function buildRecursiveBlockMessage(
   return head + guidance;
 }
 
-function findUnsafeRecursiveTraversal(command: string): string | null {
+/**
+ * Refuse a recursive filesystem walk that could MUTATE or execute what it
+ * finds, and point the caller at the LVIS builtin instead.
+ *
+ * Read-only walks are exempt while reads are unfenced, and this is not a
+ * relaxation of containment — containment is answered per operand below. The
+ * rule exists because an unbounded walk that copies, archives, deletes or execs
+ * per hit reaches files no operand names; `find / -name x` and `grep -r p /usr`
+ * only print paths, and refusing them was refusing the very reads the host now
+ * admits. `find … -delete`, `find … -exec`, `cp -r`, `mv -r`, `tar`, `zip` and
+ * `unzip` all classify as writes, so they stay refused by the same table that
+ * decides every other operand's effect.
+ */
+function findUnsafeRecursiveTraversal(
+  command: string,
+  blockReadsOutsideWorkingDirectories: boolean,
+): string | null {
   for (const segment of splitCommandSegments(command)) {
+    if (!pathEffectIsConfined(segmentEffect(segment), blockReadsOutsideWorkingDirectories)) {
+      continue;
+    }
     const tokens = tokenizeCommand(segment);
     const commandIndex = tokens.findIndex((token) => !isAssignmentToken(token));
     if (commandIndex < 0) continue;
@@ -1160,30 +1293,41 @@ function hasDynamicPathExpression(command: string): boolean {
  * path the later verb dereferences (`D=/usr/local/bin; cp x "$D/f"`), and
  * dropping it would be exactly the hole this scan exists to cover.
  */
-function extractPathCandidates(command: string): string[] {
-  const candidates: string[] = [];
+function extractPathCandidates(
+  command: string,
+): { candidate: string; effect: PathEffect }[] {
+  // Effect is carried per candidate rather than per command because a compound
+  // command mixes them: `ls / && rm -rf out` has a read operand and a write one
+  // and must be judged operand by operand, not on whichever verb came first.
+  //
+  // This scan has no leaf structure, so it attributes a candidate to its
+  // SEGMENT. A redirect target therefore takes its segment's effect here rather
+  // than its own — the leaf walk, which runs first and does see redirect
+  // operands individually, is where an output target is judged as a write.
+  const byCandidate = new Map<string, PathEffect>();
+  const record = (raw: string, effect: PathEffect): void => {
+    const normalized = normalizeCandidate(raw);
+    if (!normalized || !looksLikePath(normalized)) return;
+    // A candidate reached by two segments takes the stricter effect: it is the
+    // same path, and one of the commands writes it.
+    if (byCandidate.get(normalized) === "write") return;
+    byCandidate.set(normalized, effect);
+  };
   for (const segment of splitCommandSegments(command)) {
+    const effect = segmentEffect(segment);
     const tokens = tokenizeCommand(segment);
     const headIndex = tokens.findIndex((token) => !isAssignmentToken(token));
     const slots = headIndex < 0 ? undefined : classifyOperandSlots(tokens.slice(headIndex));
     const nonPath = slots === undefined
       ? new Set<number>()
       : new Set([...slots.nonPathIndices].map((index) => index + headIndex));
-    for (const part of slots?.extraCandidates ?? []) {
-      const normalized = normalizeCandidate(part);
-      if (normalized && looksLikePath(normalized)) candidates.push(normalized);
-    }
+    for (const part of slots?.extraCandidates ?? []) record(part, effect);
     for (let i = 0; i < tokens.length; i += 1) {
       if (nonPath.has(i)) continue;
-      for (const part of splitCandidateParts(tokens[i]!)) {
-        const normalized = normalizeCandidate(part);
-        if (normalized && looksLikePath(normalized)) {
-          candidates.push(normalized);
-        }
-      }
+      for (const part of splitCandidateParts(tokens[i]!)) record(part, effect);
     }
   }
-  return [...new Set(candidates)];
+  return [...byCandidate].map(([candidate, effect]) => ({ candidate, effect }));
 }
 
 function tokenizeCommand(command: string): string[] {

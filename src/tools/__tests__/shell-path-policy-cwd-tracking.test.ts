@@ -24,29 +24,60 @@ const ROOT = "/private/tmp/lvis-cwd-tracking";
 const CWD = `${ROOT}/src/deep/nested`;
 const EXTRAS = ["/tmp"];
 
-function check(command: string) {
-  return findShellPathPolicyViolation(command, CWD, ROOT, EXTRAS);
+/**
+ * `blockReads` is `permissions.blockReadsOutsideWorkingDirectories`. It ships
+ * OFF, so a READ operand is bounded by the Layer 0 deny-list rather than by
+ * this boundary; the cwd-tracking escape therefore has to be shown twice — with
+ * a write verb under the shipped policy, and with the original read verb once
+ * the user re-fences reads. Both prove the same mechanic: the operand resolves
+ * against the directory `cd` moved to.
+ */
+function check(command: string, blockReads = false) {
+  return findShellPathPolicyViolation(command, CWD, ROOT, EXTRAS, blockReads);
 }
 
 describe("shell path policy — working directory tracking", () => {
-  it("blocks climbing out of a shallow allowed directory reached by cd", () => {
-    const violation = check("cd /tmp && cat ../../etc/passwd");
+  it("blocks a WRITE climbing out of a shallow allowed directory reached by cd", () => {
+    const violation = check("cd /tmp && cp ./staged ../../etc/evil");
+    expect(violation).not.toBeNull();
+    expect(violation!.kind).toBe("sandbox-boundary");
+  });
+
+  it("blocks the same climb with a READ verb once reads are re-fenced", () => {
+    const violation = check("cd /tmp && cat ../../etc/passwd", true);
     expect(violation).not.toBeNull();
     expect(violation!.kind).toBe("sandbox-boundary");
   });
 
   it.each([
-    ["cd /tmp && cat ../etc/passwd", "one level up"],
-    ["cd /tmp; cat ./x/../../etc/passwd", "climb hidden mid-path"],
+    ["cd /tmp && mv ./staged ../etc/evil", "one level up"],
+    ["cd /tmp; cp ./staged ./x/../../etc/evil", "climb hidden mid-path"],
     ["cd /tmp && head -1 ../../../etc/shadow", "a sensitive file above"],
   ])("blocks %s (%s)", (command) => {
     expect(check(command)).not.toBeNull();
   });
 
+  it.each([
+    ["cd /tmp && cat ../etc/passwd", "one level up"],
+    ["cd /tmp; cat ./x/../../etc/passwd", "climb hidden mid-path"],
+  ])("blocks read %s (%s) when reads are re-fenced", (command) => {
+    expect(check(command, true)).not.toBeNull();
+  });
+
   it("still resolves against the session cwd when no cd is present", () => {
     // The historical behaviour, unchanged: this is the check that was always
-    // here, and it must keep catching what it caught.
-    expect(check("cat ../../../../../etc/passwd")).not.toBeNull();
+    // here, and it must keep catching what it caught. Shown on a write, and on
+    // the original read once reads are re-fenced.
+    expect(check("cp ./staged ../../../../../etc/evil")).not.toBeNull();
+    expect(check("cat ../../../../../etc/passwd", true)).not.toBeNull();
+  });
+
+  // Reading outside the boundary is the SHIPPED behaviour, not a gap the cases
+  // above forgot: a directory list answers what may be changed, and a read is
+  // bounded by the Layer 0 deny-list, which still catches `/etc/shadow` above.
+  it("admits a read that climbs out, under the shipped policy", () => {
+    expect(check("cd /tmp && cat ../../etc/passwd")).toBeNull();
+    expect(check("cat ../../../../../etc/passwd")).toBeNull();
   });
 
   it.each([

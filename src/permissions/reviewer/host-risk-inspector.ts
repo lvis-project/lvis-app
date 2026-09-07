@@ -435,17 +435,43 @@ export function isReadOnlyCommand(command: string): boolean {
   const { leaves, parseError } = tokenizeShell(command);
   if (parseError) return false;
   if (leaves.length === 0) return false;
-  return leaves.every((leaf) => isReadOnlyLeaf(leaf));
+  return leaves.every((leaf) => isReadOnlyShellLeaf(leaf));
 }
 
-function isReadOnlyLeaf(leaf: ShellLeaf): boolean {
+/**
+ * The read/write classification of ONE shell leaf — the per-leaf half of
+ * {@link isReadOnlyCommand}, which is `leaves.every(...)` over this.
+ *
+ * Exported because path containment needs the same answer at leaf granularity:
+ * a compound command mixes leaves whose operands are read and leaves whose
+ * operands are written, and the boundary that applies to a path operand is
+ * decided by the effect of the leaf that carries it. `shell-path-policy.ts`
+ * calls THIS rather than restating the verb tables, so the classifier that
+ * decides risk and the classifier that decides containment cannot disagree
+ * about what a leaf does.
+ *
+ * `ignoreRedirects` asks the narrower question "what does this leaf's VERB do
+ * with its own argv operands", dropping the redirect taint and nothing else. It
+ * exists for path containment, which resolves each redirect operand itself:
+ * `cat x > y` reads `x` and writes `y`, and a caller judging those two
+ * separately needs the verb's answer for `x` rather than the whole-leaf answer
+ * a redirect has already forced to "not read-only". Risk classification keeps
+ * the taint (the default) because it answers the coarser question "may this run
+ * unreviewed", and a redirect is exactly the shape it must not wave through.
+ */
+export function isReadOnlyShellLeaf(
+  leaf: ShellLeaf,
+  options?: { readonly ignoreRedirects?: boolean },
+): boolean {
   // Any hidden execution or redirect (output OR input) taints the whole
   // command (default-strict — see the doc comment on isReadOnlyCommand).
   // hasOutputRedirect covers both file-target redirects AND fd-dup (>&m, n>&m)
   // so `ls 2>&1` / `ls >&2` correctly stay shell — they have an output-redirect
   // operator even though no file target is named.
   if (leaf.hasCommandSubstitution || leaf.hasProcessSubstitution) return false;
-  if (leaf.hasOutputRedirect || leaf.hasInputRedirect) return false;
+  if (options?.ignoreRedirects !== true && (leaf.hasOutputRedirect || leaf.hasInputRedirect)) {
+    return false;
+  }
 
   // An assignment that selects the interpreter/pager/diff-driver the verb then
   // runs is the execution, not a detail of it. The tokenizer strips assignments

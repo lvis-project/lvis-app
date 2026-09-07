@@ -25,6 +25,10 @@ import { z } from "zod";
 
 import { validateSandboxPath } from "../sandbox/path-validator.js";
 import {
+  pathEffectIsConfined,
+  type PathEffect,
+} from "../permissions/allowed-directories.js";
+import {
   MAX_TEXT_FILE_BYTES,
   isBinaryFile,
   readTextFileWindow,
@@ -132,10 +136,28 @@ abstract class FileTool<TSchema extends z.ZodTypeAny> extends ZodTool<TSchema> {
     return isAbsolute(expanded) ? pathResolve(expanded) : pathResolve(ctx.cwd, expanded);
   }
 
-  protected ensureAllowed(path: string, ctx: ToolExecutionContext): ToolExecutionResult | null {
+  /**
+   * The tool's own copy of Layers 0 and 1, run again at execute time.
+   *
+   * `effect` is required rather than defaulted: this gate is what a tool
+   * asserts about its own operand, and a default would silently give a new
+   * write tool the read boundary. Layer 0 runs for both effects — a protected
+   * path stays unreadable — and only the directory boundary is asymmetric.
+   * {@link pathEffectIsConfined} is the same predicate the permission layer
+   * asked before dispatching here, so this re-check cannot refuse an operand
+   * the executor had already admitted.
+   */
+  protected ensureAllowed(
+    path: string,
+    ctx: ToolExecutionContext,
+    effect: PathEffect,
+  ): ToolExecutionResult | null {
     const sensitive = sensitivePatternForPath(path);
     if (sensitive) {
       return toolError(`Sensitive path: ${path} matches ${sensitive}`);
+    }
+    if (!pathEffectIsConfined(effect, ctx.blockReadsOutsideWorkingDirectories === true)) {
+      return null;
     }
     const check = validateSandboxPath(path, ctx.cwd, [...ctx.extraAllowedDirectories]);
     if (!check.allowed) {
@@ -180,7 +202,7 @@ export class ReadFileTool extends FileTool<typeof ReadFileInputSchema> {
     ctx: ToolExecutionContext,
   ): Promise<ToolExecutionResult> {
     const target = this.resolvePath(input.path, ctx);
-    const blocked = this.ensureAllowed(target, ctx);
+    const blocked = this.ensureAllowed(target, ctx, "read");
     if (blocked) return blocked;
 
     const fileStat = await statFile(target);
@@ -266,7 +288,7 @@ export class ViewImageTool extends FileTool<typeof ViewImageInputSchema> {
     ctx: ToolExecutionContext,
   ): Promise<ToolExecutionResult> {
     const target = this.resolvePath(input.path, ctx);
-    const blocked = this.ensureAllowed(target, ctx);
+    const blocked = this.ensureAllowed(target, ctx, "read");
     if (blocked) return blocked;
 
     const fileStat = await statFile(target);
@@ -310,7 +332,7 @@ export class ListFilesTool extends FileTool<typeof ListFilesInputSchema> {
     ctx: ToolExecutionContext,
   ): Promise<ToolExecutionResult> {
     const root = this.resolvePath(input.path, ctx);
-    const blocked = this.ensureAllowed(root, ctx);
+    const blocked = this.ensureAllowed(root, ctx, "read");
     if (blocked) return blocked;
 
     const listed = await listEntries(root, input.depth, input.limit);
@@ -343,7 +365,7 @@ export class GlobFilesTool extends FileTool<typeof GlobFilesInputSchema> {
     ctx: ToolExecutionContext,
   ): Promise<ToolExecutionResult> {
     const root = this.resolvePath(input.path ?? ".", ctx);
-    const blocked = this.ensureAllowed(root, ctx);
+    const blocked = this.ensureAllowed(root, ctx, "read");
     if (blocked) return blocked;
 
     const regex = globToRegExp(input.pattern);
@@ -382,7 +404,7 @@ export class GrepFilesTool extends FileTool<typeof GrepFilesInputSchema> {
     ctx: ToolExecutionContext,
   ): Promise<ToolExecutionResult> {
     const root = this.resolvePath(input.path ?? ".", ctx);
-    const blocked = this.ensureAllowed(root, ctx);
+    const blocked = this.ensureAllowed(root, ctx, "read");
     if (blocked) return blocked;
 
     let regex: RegExp;
@@ -435,7 +457,7 @@ export class WriteFileTool extends FileTool<typeof WriteFileInputSchema> {
     ctx: ToolExecutionContext,
   ): Promise<ToolExecutionResult> {
     const target = this.resolvePath(input.path, ctx);
-    const blocked = this.ensureAllowed(target, ctx);
+    const blocked = this.ensureAllowed(target, ctx, "write");
     if (blocked) return blocked;
 
     // Read existing content for diff sidecar (best-effort — missing file = empty before).
@@ -520,7 +542,7 @@ export class EditFileTool extends FileTool<typeof EditFileInputSchema> {
     ctx: ToolExecutionContext,
   ): Promise<ToolExecutionResult> {
     const target = this.resolvePath(input.path, ctx);
-    const blocked = this.ensureAllowed(target, ctx);
+    const blocked = this.ensureAllowed(target, ctx, "write");
     if (blocked) return blocked;
 
     const fileStat = await statFile(target);
@@ -575,7 +597,7 @@ export class ApplyPatchTool extends FileTool<typeof ApplyPatchInputSchema> {
     ctx: ToolExecutionContext,
   ): Promise<ToolExecutionResult> {
     const target = this.resolvePath(input.path, ctx);
-    const blocked = this.ensureAllowed(target, ctx);
+    const blocked = this.ensureAllowed(target, ctx, "write");
     if (blocked) return blocked;
 
     const fileStat = await statFile(target);
@@ -637,9 +659,9 @@ export class MoveFileTool extends FileTool<typeof MoveFileInputSchema> {
   ): Promise<ToolExecutionResult> {
     const source = this.resolvePath(input.sourcePath, ctx);
     const destination = this.resolvePath(input.destinationPath, ctx);
-    const sourceBlocked = this.ensureAllowed(source, ctx);
+    const sourceBlocked = this.ensureAllowed(source, ctx, "write");
     if (sourceBlocked) return sourceBlocked;
-    const destinationBlocked = this.ensureAllowed(destination, ctx);
+    const destinationBlocked = this.ensureAllowed(destination, ctx, "write");
     if (destinationBlocked) return destinationBlocked;
 
     const sourceStat = await statFile(source);
@@ -682,7 +704,7 @@ export class DeleteFileTool extends FileTool<typeof DeleteFileInputSchema> {
     ctx: ToolExecutionContext,
   ): Promise<ToolExecutionResult> {
     const target = this.resolvePath(input.path, ctx);
-    const blocked = this.ensureAllowed(target, ctx);
+    const blocked = this.ensureAllowed(target, ctx, "write");
     if (blocked) return blocked;
 
     const fileStat = await statFile(target);

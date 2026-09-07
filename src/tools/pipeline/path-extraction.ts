@@ -59,6 +59,7 @@ export function shellPathPolicyViolation(
   finalInput: Record<string, unknown>,
   sandboxRoot: string,
   allowedDirectories: readonly string[],
+  blockReadsOutsideWorkingDirectories: boolean,
 ): ShellPathPolicyViolation | null {
   const commands = extractShellCommands(finalInput);
   if (commands.length === 0) {
@@ -77,6 +78,7 @@ export function shellPathPolicyViolation(
       resolvedCwd,
       sandboxRoot,
       allowedDirectories,
+      blockReadsOutsideWorkingDirectories,
     );
     if (violation) return violation;
   }

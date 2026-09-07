@@ -69,13 +69,17 @@ const workspaceDeps = {
 /** A child loop's deps: exactly what `buildChildDeps` spreads — no lifecycle. */
 function makeSubAgentShapedLoop(gate: ApprovalGate, executeSpy: (input: unknown) => Promise<string>) {
   const registry = new ToolRegistry();
+  // A WRITE tool, because the out-of-allowed-dir approval this test drives is
+  // the write boundary: reads are not confined to the authorized directories,
+  // so a read outside them is admitted and never reaches an approval. The
+  // subject here is the grant lifecycle, not which effect triggers it.
   registry.register(createDynamicTool({
-    name: "read_file",
-    description: "Reads a file.",
+    name: "write_file",
+    description: "Writes a file.",
     source: "builtin",
-    category: "read",
+    category: "write",
     pathFields: ["path"],
-    isReadOnly: () => true,
+    isReadOnly: () => false,
     jsonSchema: {
       type: "object",
       properties: { path: { type: "string" } },
@@ -134,7 +138,7 @@ describe("workspace-root lifecycle authority", () => {
     const callPromise = loop.toolExecutor.executeAll(
       [{
         id: "tu-subagent-allow-always",
-        name: "read_file",
+        name: "write_file",
         input: { path: join(grantRoot, "notes.md") },
       }],
       {
