@@ -850,16 +850,21 @@ async function runTurnInSpan(
     // `engine/llm/vercel/adapter.ts` which forwards the values into the
     // round stream's `usage` field). Suppressed for interrupted turns and for
     // the two error stop reasons below — those are dropped turns, not answers.
-    // NOT gated on the final text being non-empty: a turn that ends with the
-    // model reasoning and emitting no visible text still spent every token it
-    // spent, and suppressing the summary there reported the whole turn as zero
-    // usage on both surfaces and left no cost record. Empty text is a shape the
-    // summary consumers already tolerate — `attachTurnSummaryToLastAssistant`
-    // keys on role, and `historyToEntries` emits the turn_summary entry off the
-    // attached meta rather than off the assistant text.
+    // The "did the turn produce an answer" test reads the turn-final assistant
+    // row rather than `result.text` alone: a turn can end with that row holding
+    // reasoning and no text (the model reasoned and emitted nothing), which is
+    // an answer's worth of spend and used to report the whole turn as zero
+    // usage on the badge and the ring, leaving no cost record. A row with
+    // neither text nor reasoning is a blank provider round and stays suppressed
+    // as before. Empty text alone is a shape the consumers already tolerate:
+    // `attachTurnSummaryToLastAssistant` keys on role, and `historyToEntries`
+    // emits the turn_summary entry off the attached meta, not the row's text.
     // Production diagnostic — turn_summary 가 사용자 UI (TokenCostBadge 배지
     // + TokenProgressRing) 의 단일 source 라 *emit 되지 않으면* 두 표면 모두
     // 0 표시. 어느 단계에서 끊겼는지 정확히 가시화.
+    const turnProducedAnswer =
+      result.text.trim().length > 0 ||
+      self.history.getLastAssistantThought().trim().length > 0;
     const willEmitSummary =
       result.stopReason !== "interrupted" &&
       result.stopReason !== "context-error" &&
@@ -868,7 +873,7 @@ async function runTurnInSpan(
       // under a user-facing failure notice with stats that belong to the
       // PARTIAL (failed) round, not a completed turn. Exclude explicitly.
       result.stopReason !== "stream-error" &&
-      typeof result.text === "string";
+      turnProducedAnswer;
     // Shape attributes are set for EVERY turn, including the ones whose summary
     // is suppressed (interrupted, context error, stream error) — those are
     // exactly the turns an attribution run needs to be able to see.
@@ -887,7 +892,7 @@ async function runTurnInSpan(
     const subscriptionTurnUsage = isSubscriptionRuntime ? result.subscriptionUsage : [];
     const subscriptionTotals = aggregateSubscriptionUsage(subscriptionTurnUsage);
     log.info(
-      `turn_summary: emit decision — stopReason="${result.stopReason}" textLen=${result.text?.trim().length ?? 0} usage=${billableTurnUsage ? `in=${billableTurnUsage.inputTokens} out=${billableTurnUsage.outputTokens}` : "MISSING"} → willEmit=${willEmitSummary}`,
+      `turn_summary: emit decision — stopReason="${result.stopReason}" textLen=${result.text.trim().length} thoughtLen=${self.history.getLastAssistantThought().trim().length} usage=${billableTurnUsage ? `in=${billableTurnUsage.inputTokens} out=${billableTurnUsage.outputTokens}` : "MISSING"} → willEmit=${willEmitSummary}`,
     );
     if (willEmitSummary) {
       // tokensIn = turn-end projected context input. It is calibrated from

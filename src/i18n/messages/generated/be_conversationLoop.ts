@@ -18,7 +18,7 @@ export const en = {
   "be_conversationLoop.roundCapFinalizePrompt":
     "You have run out of tool rounds and cannot act further. Do not attempt any more tools. Write a hand-off for whoever picks this up: what you established (with the concrete findings, not a description of them), what you were in the middle of, and the specific next steps that remain. Be direct and specific — this is the only report of your work that survives.",
   "be_conversationLoop.reasoningOnlyContinuePrompt":
-    "Your last turn produced reasoning but no reply and no tool call, so nothing reached the user or the system. Carry out what that reasoning said you would do next: call the tool, or write the answer. Do not restate the reasoning.",
+    "Your last turn produced reasoning but no reply and no tool call, so nothing reached the user or the system. Here is how that reasoning ended:\n\n{reasoning}\n\nCarry out what it said you would do next: call the tool, or write the answer. Do not restate the reasoning.",
   "be_conversationLoop.guidanceTruncationMarker": "[Some direction instructions omitted — {count} items discarded due to length]\n\n{joined}",
   "be_conversationLoop.guidanceInjectionHeader": "[Direction instruction — additional input while in progress]\n{joined}",
   "be_conversationLoop.contextErrorUserMessage": "The conversation history has exceeded the model's limit. Send a new message to retry automatic compaction.",
@@ -110,7 +110,7 @@ export const ko: Record<keyof typeof en, string> = {
   "be_conversationLoop.roundCapFinalizePrompt":
     "도구 라운드를 모두 소진해 더 이상 행동할 수 없습니다. 도구를 추가로 호출하지 마세요. 이어받을 사람을 위한 인계문을 작성하세요: 확인한 사실(설명이 아니라 구체적 발견 내용), 진행 중이던 작업, 남은 구체적 다음 단계. 직접적이고 구체적으로 — 이것이 당신 작업에 대해 남는 유일한 보고입니다.",
   "be_conversationLoop.reasoningOnlyContinuePrompt":
-    "직전 턴은 추론만 내놓고 답변도 도구 호출도 내놓지 않아, 사용자에게도 시스템에도 아무것도 전달되지 않았습니다. 그 추론이 다음에 하겠다고 말한 것을 실제로 수행하세요: 도구를 호출하거나, 답변을 작성하세요. 추론을 다시 서술하지 마세요.",
+    "직전 턴은 추론만 내놓고 답변도 도구 호출도 내놓지 않아, 사용자에게도 시스템에도 아무것도 전달되지 않았습니다. 그 추론의 마지막 부분은 다음과 같습니다:\n\n{reasoning}\n\n거기서 다음에 하겠다고 말한 것을 실제로 수행하세요: 도구를 호출하거나, 답변을 작성하세요. 추론을 다시 서술하지 마세요.",
   "be_conversationLoop.guidanceTruncationMarker": "[일부 방향 지시 생략 — {count}개 항목 길이 초과로 폐기됨]\n\n{joined}",
   "be_conversationLoop.guidanceInjectionHeader": "[방향 지시 — 진행 중 추가 입력]\n{joined}",
   "be_conversationLoop.contextErrorUserMessage": "대화 이력이 모델 한도를 초과했습니다. 새 메시지를 보내면 자동 압축이 다시 시도됩니다.",

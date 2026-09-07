@@ -89,6 +89,22 @@ const MAX_LENGTH_CONTINUATIONS = 3;
  */
 const MAX_REASONING_ONLY_NUDGES = 2;
 /**
+ * How much of the previous round's reasoning the re-prompt above carries.
+ *
+ * The re-prompt has to quote the reasoning because nothing else puts it in
+ * front of the model: `thought` is mapped to no wire part on any vendor, and
+ * the assistant row holding it has neither text nor tool calls, so the adapter
+ * drops the whole message rather than send an empty assistant turn. Without the
+ * quote the instruction would name reasoning the model cannot see.
+ *
+ * The TAIL is the part that matters — a reasoning block ends on the action it
+ * decided, and the earlier text is the deliberation that led there. 2,000
+ * characters is roughly the last few paragraphs: enough to carry the decision
+ * and its immediate justification, small enough that a runaway reasoning block
+ * cannot push the round over the context budget it just came back under.
+ */
+const MAX_NUDGE_REASONING_CHARS = 2_000;
+/**
  * Defensive cap on provider-as-oracle tool drops per turn. Termination is
  * already guaranteed structurally (each drop strictly shrinks the finite tool
  * set and we only drop a tool the provider named AND that is still present),
@@ -346,11 +362,14 @@ export async function queryLoop(
     let continuationCarryText = "";
     let continuationCarryThought = "";
     let continuationPrefillText: string | undefined = undefined;
-    // Reasoning-only re-prompt state. `reasoningNudgePending` arms exactly one
-    // wire-only instruction for the NEXT round (see MAX_REASONING_ONLY_NUDGES);
-    // `reasoningNudgesRun` is the per-turn spend against that cap.
+    // Reasoning-only re-prompt state. `reasoningNudgeText` arms exactly one
+    // wire-only instruction for the NEXT round, already carrying the reasoning
+    // tail it refers to (see MAX_REASONING_ONLY_NUDGES / MAX_NUDGE_REASONING_CHARS).
+    // `reasoningNudgesRun` is the per-turn spend against the cap, and it is
+    // incremented where the re-prompt is actually put on the wire — an armed
+    // re-prompt that gets dropped costs nothing.
     let reasoningNudgesRun = 0;
-    let reasoningNudgePending = false;
+    let reasoningNudgeText: string | undefined = undefined;
     // C3(a): effective round budget. A host-assigned `maxRounds` (the sub-agent
     // runner, carrying the user's configured budget) is HONOURED exactly, above
     // the default too; narrowing it only shows up as an agent stopped mid-task.
@@ -616,17 +635,19 @@ export async function queryLoop(
       // before answering; add_generation_prompt:false blocks a 2nd auto <think>.
       // Reasoning-only re-prompt: also WIRE-ONLY. The reasoning round it answers
       // is already committed to history, and persisting a host instruction there
-      // would replay on every later turn as if the user had typed it. Dropped
-      // when this round already carries injected guidance — that guidance IS the
-      // re-prompt, and appending after it would put two user rows in a row.
-      const injectReasoningNudge =
-        reasoningNudgePending && pendingGuidanceDelivery === null;
-      reasoningNudgePending = false;
+      // would replay on every later turn as if the user had typed it. The cap is
+      // spent HERE, where the instruction actually reaches the model, not where
+      // it is armed. Queued guidance cannot collide with it: the end-turn
+      // boundary takes the guidance branch before the re-prompt branch can arm,
+      // and nothing awaits between arming and this line for a guide to arrive in.
+      const injectedNudgeText = reasoningNudgeText;
+      reasoningNudgeText = undefined;
+      if (injectedNudgeText !== undefined) reasoningNudgesRun += 1;
       const messagesForRound: GenericMessage[] = continuationPrefillText !== undefined ? [
         ...baseMessagesForRound, { role: "assistant" as const, content: continuationPrefillText },
-      ] : injectReasoningNudge ? [
+      ] : injectedNudgeText !== undefined ? [
         ...baseMessagesForRound,
-        { role: "user" as const, content: t("be_conversationLoop.reasoningOnlyContinuePrompt") },
+        { role: "user" as const, content: injectedNudgeText },
       ] : baseMessagesForRound;
       self.lastRoundInputProjection = self.projectProviderRequestInput({
         systemPrompt, messages: messagesForRound, toolSchemas,
@@ -1133,8 +1154,14 @@ export async function queryLoop(
             },
           });
           if (willNudge) {
-            reasoningNudgesRun += 1;
-            reasoningNudgePending = true;
+            // Quote the reasoning INTO the instruction. The committed assistant
+            // row holds it, but no vendor mapping carries `thought` onto the
+            // wire and a row with neither text nor tool calls is dropped whole,
+            // so without the quote the instruction would refer to reasoning the
+            // model never receives.
+            reasoningNudgeText = t("be_conversationLoop.reasoningOnlyContinuePrompt", {
+              reasoning: mergedThought.slice(-MAX_NUDGE_REASONING_CHARS),
+            });
             self.tracer.step("REASONING_ONLY_CONTINUATION", {
               round: roundIndex,
               nudgesRun: reasoningNudgesRun,

@@ -186,6 +186,23 @@ export class ConversationHistory {
     return "";
   }
 
+  /**
+   * Reasoning of the same row `getLastAssistantText` reads — the row
+   * `attachTurnSummaryToLastAssistant` carries the turn's stats on.
+   *
+   * A turn can end with this non-empty while the text is empty: the model
+   * reasoned and emitted nothing. That is an answer's worth of spend, and the
+   * turn-summary gate uses this to tell it apart from a round the provider
+   * returned entirely blank.
+   */
+  getLastAssistantThought(): string {
+    for (let i = this.messages.length - 1; i >= 0; i--) {
+      const msg = this.messages[i];
+      if (msg.role === "assistant") return msg.thought ?? "";
+    }
+    return "";
+  }
+
   private trim(): void {
     if (Number.isFinite(this.maxMessages) && this.messages.length > this.maxMessages) {
       this.messages = this.messages.slice(-this.maxMessages);

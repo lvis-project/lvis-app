@@ -21,7 +21,7 @@ import { MCP_RESOURCE_FENCE_OPEN } from "../../shared/mcp-resource-bounds.js";
 import type { SubscriptionRuntimeId } from "../../shared/subscription-runtime.js";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 import type { TurnDecisionEvent } from "../turn/types.js";
-import { t } from "../../i18n/index.js";
+import { genericToModelMessages } from "../llm/vercel/adapter.js";
 
 class FakeProvider implements LLMProvider {
   readonly vendor = "openai" as const;
@@ -1406,15 +1406,21 @@ describe("reasoning-only round is not a finished turn", () => {
     return loop;
   }
 
+  const REASONING = "I need to retry the installation.";
+
+  function reasoningOnlyRound(thought: string): StreamEvent[] {
+    return [
+      { type: "reasoning_delta", text: thought },
+      { type: "message_complete", stopReason: "end_turn" },
+    ];
+  }
+
   it("re-prompts a round that ended with reasoning but no text and no tool call", async () => {
     // The measured shape: stopReason end_turn, empty visible text, no tool
     // call, and reasoning that names the next action. Ending there is the loop
     // giving up before the model did.
     const provider = new RecordingPromptProvider([
-      [
-        { type: "reasoning_delta", text: "I need to retry the installation." },
-        { type: "message_complete", stopReason: "end_turn" },
-      ],
+      reasoningOnlyRound(REASONING),
       [
         { type: "text_delta", text: "Reinstalled and verified." },
         { type: "message_complete", stopReason: "end_turn" },
@@ -1435,16 +1441,66 @@ describe("reasoning-only round is not a finished turn", () => {
     expect(decisions).toContainEqual({
       kind: "reasoning_only.continuation",
       branch: "continue",
-      data: { nudgesRun: 0, cap: 2, thoughtChars: 33 },
+      data: { nudgesRun: 0, cap: 2, thoughtChars: REASONING.length },
     });
+  });
+
+  it("puts the reasoning the re-prompt refers to on the wire, since no vendor maps `thought`", async () => {
+    // The committed assistant row holds the reasoning, but `thought` is mapped
+    // to no wire part and a row with neither text nor tool calls is dropped
+    // whole by the adapter. Quoting it inside the instruction is what makes the
+    // instruction actionable — assert against the REAL mapper, not the
+    // pre-adapter GenericMessage list.
+    const provider = new RecordingPromptProvider([
+      reasoningOnlyRound(REASONING),
+      [
+        { type: "text_delta", text: "Reinstalled." },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const loop = createLoop(provider);
+
+    await loop.runTurn("install it", undefined, undefined, {
+      inputOrigin: "user-keyboard",
+    });
+
+    const wire = genericToModelMessages(provider.messages[1]!, "openai");
+    const last = wire[wire.length - 1]!;
+    expect(last.role).toBe("user");
+    expect(JSON.stringify(last.content)).toContain(REASONING);
+  });
+
+  it("carries only the tail of a long reasoning block", async () => {
+    // A reasoning block ends on the action it decided; the earlier text is the
+    // deliberation that led there. Bounding the quote keeps a runaway block
+    // from pushing the round over the context budget it just came back under.
+    const head = "H".repeat(5_000);
+    const tail = " and finally I will run the installer.";
+    const provider = new RecordingPromptProvider([
+      reasoningOnlyRound(head + tail),
+      [
+        { type: "text_delta", text: "Ran it." },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const loop = createLoop(provider);
+
+    await loop.runTurn("install it", undefined, undefined, {
+      inputOrigin: "user-keyboard",
+    });
+
+    const secondRound = provider.messages[1]!;
+    const nudge = secondRound[secondRound.length - 1]!.content;
+    expect(nudge).toContain(tail);
+    // The prompt wrapper is small, so a 2,000-char cap on a 5,037-char thought
+    // must leave the message far below the un-truncated length.
+    expect(nudge.length).toBeLessThan(2_500);
+    expect(nudge).not.toContain(head);
   });
 
   it("sends the re-prompt on the wire only, never into persisted history", async () => {
     const provider = new RecordingPromptProvider([
-      [
-        { type: "reasoning_delta", text: "Let me verify the tokenizer." },
-        { type: "message_complete", stopReason: "end_turn" },
-      ],
+      reasoningOnlyRound("Let me verify the tokenizer."),
       [
         { type: "text_delta", text: "Verified." },
         { type: "message_complete", stopReason: "end_turn" },
@@ -1456,25 +1512,72 @@ describe("reasoning-only round is not a finished turn", () => {
       inputOrigin: "user-keyboard",
     });
 
-    const nudge = t("be_conversationLoop.reasoningOnlyContinuePrompt");
-    // Round 2 carries it as the last wire message …
     const secondRound = provider.messages[1]!;
-    expect(secondRound[secondRound.length - 1]).toEqual({
-      role: "user",
-      content: nudge,
-    });
-    // … and round 3 would not, because history never took it: a persisted host
-    // instruction would replay on every later turn as if the user typed it.
-    expect(JSON.stringify(loop.getHistory().getMessages())).not.toContain(nudge);
+    const nudge = secondRound[secondRound.length - 1]!;
+    expect(nudge.role).toBe("user");
+    // History never took it: a persisted host instruction would replay on
+    // every later turn as if the user had typed it.
+    expect(JSON.stringify(loop.getHistory().getMessages()))
+      .not.toContain("Let me verify the tokenizer.\n\nCarry out");
+    expect(JSON.stringify(loop.getHistory().getMessages()))
+      .not.toContain(nudge.content);
+  });
+
+  it("lets queued guidance win the end-turn boundary without spending the cap", async () => {
+    // Guidance queued while the round ran is itself a re-prompt, and the
+    // end-turn boundary hands the round to it before the reasoning-only branch
+    // is reached. Nothing is armed, so nothing is spent: the NEXT reasoning-only
+    // round still gets the full budget.
+    const firstThought = "First thought.";
+    const secondThought = "Second thought.";
+    const provider = new RecordingPromptProvider([
+      reasoningOnlyRound(firstThought),
+      reasoningOnlyRound(secondThought),
+      [
+        { type: "text_delta", text: "Done." },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const loop = createLoop(provider);
+    const decisions: TurnDecisionEvent[] = [];
+    // queueGuidance requires an in-flight turn; the loop sets this itself in
+    // production, and the test stands in for the IPC thread that queues mid-turn.
+    (loop as unknown as { currentAbortController: AbortController | null })
+      .currentAbortController = new AbortController();
+    loop.queueGuidance("use the other installer");
+
+    await loop.runTurn(
+      "install it",
+      { onDecision: (event) => decisions.push(event) },
+      undefined,
+      { inputOrigin: "user-keyboard" },
+    );
+
+    const secondRoundText = JSON.stringify(provider.messages[1]!);
+    expect(secondRoundText).toContain("use the other installer");
+    // The first round's reasoning was never quoted into that round.
+    expect(secondRoundText).not.toContain(`${firstThought}\n\nCarry out`);
+    // Round 2 reasons only as well, and its re-prompt still reports 0 spent.
+    expect(decisions.filter((event) =>
+      event.kind === "reasoning_only.continuation")).toEqual([
+      expect.objectContaining({
+        branch: "continue",
+        data: expect.objectContaining({
+          nudgesRun: 0, thoughtChars: secondThought.length,
+        }),
+      }),
+    ]);
+    expect(JSON.stringify(provider.messages[2]!)).toContain(secondThought);
   });
 
   it("bounds the re-prompt so a model that only ever reasons still terminates", async () => {
+    const thought = "still thinking";
     let calls = 0;
     class AlwaysReasoningProvider implements LLMProvider {
       readonly vendor = "openai" as const;
       async *streamTurn(): AsyncIterable<StreamEvent> {
         calls += 1;
-        yield { type: "reasoning_delta", text: "still thinking" };
+        yield { type: "reasoning_delta", text: thought };
         yield { type: "message_complete", stopReason: "end_turn" };
       }
     }
@@ -1501,7 +1604,7 @@ describe("reasoning-only round is not a finished turn", () => {
       kind: "reasoning_only.continuation",
       branch: "stop",
       reason: "cap",
-      data: { nudgesRun: 2, cap: 2, thoughtChars: 14 },
+      data: { nudgesRun: 2, cap: 2, thoughtChars: thought.length },
     });
   });
 
