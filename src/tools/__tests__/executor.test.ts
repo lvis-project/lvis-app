@@ -16,13 +16,14 @@
  * called, the tool execute() was NOT invoked, and the tool result is
  * an approval-denial error.
  */
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 import { existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve as pathResolve } from "node:path";
 
 import { ToolExecutor } from "../executor.js";
+import { initPiiRedactionPolicy } from "../../shared/dlp.js";
 import { userPermissionContext } from "./tool-context-fixture.js";
 import { ToolRegistry } from "../registry.js";
 import { createDynamicTool, type Tool } from "../base.js";
@@ -2732,6 +2733,9 @@ describe("ToolExecutor — R2-CR-4 ask_user_question audit redaction is gated by
   });
 
   it("preserves user-provided email in tool_result while masking UI callback and audit", async () => {
+    // Display and audit masking follow `privacy.piiRedactEnabled`; this case is
+    // the toggle-on contract. The off side lives in the privacy-toggle suite.
+    initPiiRedactionPolicy(() => true);
     const builtinAskTool = createDynamicTool({
       name: "ask_user_question",
       description: "builtin",
@@ -2796,6 +2800,7 @@ describe("ToolExecutor — R2-CR-4 ask_user_question audit redaction is gated by
       expect(auditEntries.some((e) => e.type === "tool_call" && e.input?.includes("***@gmail.com"))).toBe(true);
     } finally {
       logSpy.mockRestore();
+      initPiiRedactionPolicy(() => false);
     }
   });
 });
@@ -5316,5 +5321,132 @@ describe("ToolExecutor — Tailnet controller local one-shot boundary", () => {
     } finally {
       await cleanupTmpDir(dir);
     }
+  });
+});
+
+/**
+ * `privacy.piiRedactEnabled` governs the two surfaces Step 7b writes: the
+ * display content handed to the renderer callbacks, and the audit entry. The
+ * machine channel — the tool_result the next LLM round consumes — is unmasked
+ * in both states, because a later tool still needs the recipient it was given.
+ */
+describe("privacy toggle governs tool-output masking", () => {
+  const PII_OUTPUT = "contact real.user@example.com on 010-1234-5678";
+  const CREDENTIAL = "abcdefghij0123456789";
+  const PII_AND_CREDENTIAL = `${PII_OUTPUT}, authorization: Bearer ${CREDENTIAL}`;
+
+  afterEach(() => initPiiRedactionPolicy(() => false));
+
+  async function runProbe(piiRedactEnabled: boolean, output: string) {
+    initPiiRedactionPolicy(() => piiRedactEnabled);
+    const registry = new ToolRegistry();
+    registry.register(createDynamicTool({
+      name: "pii_probe",
+      description: "returns text carrying PII and optionally a credential",
+      source: "builtin",
+      category: "read",
+      jsonSchema: {
+        type: "object",
+        properties: { note: { type: "string" } },
+      },
+      isReadOnly: () => true,
+      execute: async () => ({ output, isError: false }),
+    }));
+
+    const permMgr = new PermissionManager("/tmp/nonexistent-permissions.json");
+    permMgr.checkDetailed = () => ({
+      decision: "allow",
+      reason: "privacy toggle probe",
+      layer: 3,
+    });
+    const auditLogger = {
+      log: vi.fn(),
+      isPermissionAuditChainReady: vi.fn(() => true),
+      assertPermissionAuditWritable: vi.fn(),
+      appendPermissionAuditEntry: vi.fn(async (entry: Record<string, unknown>) => ({
+        ...entry,
+        prevHash: "h",
+      })),
+    };
+    const onToolEnd = vi.fn();
+    const executor = new ToolExecutor(
+      registry,
+      undefined,
+      permMgr,
+      undefined,
+      undefined,
+      undefined,
+      auditLogger as never,
+    );
+
+    const result = await executor.executeAll(
+      [{
+        id: "tu-pii-probe",
+        name: "pii_probe",
+        input: { note: "reply to real.user@example.com" },
+      }],
+      {
+        sessionId: "sess-pii-probe",
+        permissionContext: userPermissionContext({}),
+        callbacks: { onToolEnd },
+      },
+    );
+
+    const auditRows = auditLogger.log.mock.calls.map(
+      (call) => call[0] as {
+        input?: string;
+        output?: string;
+        toolCalls?: Array<{ permissionDecision?: string; permissionReason?: string }>;
+      },
+    );
+    return {
+      modelContent: result[0].content,
+      displayContent: onToolEnd.mock.calls[0]?.[1] as string,
+      auditRows,
+      dlpRow: auditRows.find((row) =>
+        row.toolCalls?.some((call) => call.permissionDecision === "dlp_masked"),
+      ),
+    };
+  }
+
+  it("leaves PII on display when the toggle is off, and writes no DLP audit note", async () => {
+    const { displayContent, dlpRow } = await runProbe(false, PII_OUTPUT);
+
+    expect(displayContent).toBe(PII_OUTPUT);
+    expect(dlpRow).toBeUndefined();
+  });
+
+  it("masks PII on display and records the DLP note when the toggle is on", async () => {
+    const { displayContent, dlpRow } = await runProbe(true, PII_OUTPUT);
+
+    expect(displayContent).not.toContain("real.user@example.com");
+    expect(displayContent).toContain("***@example.com");
+    expect(displayContent).toContain("010-****-****");
+    expect(dlpRow?.output).toContain("[DLP masking applied]");
+  });
+
+  it("scrubs the credential in both states, and names only it when the toggle is off", async () => {
+    const off = await runProbe(false, PII_AND_CREDENTIAL);
+    expect(off.displayContent).not.toContain(CREDENTIAL);
+    expect(off.displayContent).toContain("[REDACTED:TOKEN]");
+    // The user's own contact details are untouched beside the scrubbed token.
+    expect(off.displayContent).toContain("real.user@example.com");
+    expect(off.displayContent).toContain("010-1234-5678");
+    expect(off.dlpRow?.toolCalls?.[0]?.permissionReason).toBe(
+      "Detected patterns: 자격 증명",
+    );
+
+    const on = await runProbe(true, PII_AND_CREDENTIAL);
+    expect(on.displayContent).not.toContain(CREDENTIAL);
+    expect(on.displayContent).toContain("[REDACTED:TOKEN]");
+    expect(on.displayContent).not.toContain("real.user@example.com");
+  });
+
+  it("hands the model the same unmasked tool result in both states", async () => {
+    const off = await runProbe(false, PII_AND_CREDENTIAL);
+    const on = await runProbe(true, PII_AND_CREDENTIAL);
+
+    expect(off.modelContent).toBe(PII_AND_CREDENTIAL);
+    expect(on.modelContent).toBe(PII_AND_CREDENTIAL);
   });
 });

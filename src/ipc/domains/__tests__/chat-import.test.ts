@@ -63,7 +63,9 @@ vi.mock("../../../audit/dlp-filter.js", () => ({
   redactFsPath: vi.fn((s: string) => s),
   redactAuditPayload: vi.fn((p: unknown) => p),
   maskSensitiveData: vi.fn((s: string) => ({ masked: s, findings: [] })),
+  isPiiRedactionEnabled: vi.fn(() => false),
   initDlpAudit: vi.fn(),
+  initPiiRedactionPolicy: vi.fn(),
 }));
 vi.mock("../../../lib/logger.js", () => ({
   createLogger: vi.fn(() => ({ warn: vi.fn(), info: vi.fn(), error: vi.fn() })),

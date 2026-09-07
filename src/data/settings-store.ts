@@ -785,6 +785,16 @@ export interface HomeDocsSettings {
 }
 
 export interface PrivacySettings {
+  /**
+   * The single switch for personal-data handling. On, it redacts the user's
+   * input before the turn reaches the provider, and masks PII in the tool
+   * output the renderer shows and in the audit entries the host writes. Off,
+   * none of those three surfaces touches PII, and no PII detection is reported.
+   *
+   * It does not govern credential scrubbing: bearer tokens, API keys and
+   * private keys are removed from display, audit and log text in both states,
+   * because a leaked secret is a security defect rather than a preference.
+   */
   piiRedactEnabled: boolean;
 }
 

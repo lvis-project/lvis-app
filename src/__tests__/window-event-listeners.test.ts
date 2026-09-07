@@ -29,6 +29,7 @@ vi.mock("../permissions/policy-store.js", () => ({
 vi.mock("../audit/dlp-filter.js", () => ({
   redactForLLM: vi.fn((x: unknown) => x),
   initDlpAudit: vi.fn(),
+  initPiiRedactionPolicy: vi.fn(),
 }));
 vi.mock("../audit/audit-logger.js", () => ({ createAuditLogger: vi.fn() }));
 

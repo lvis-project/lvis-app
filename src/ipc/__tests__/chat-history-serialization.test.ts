@@ -1,7 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { serializeHistoryMessage } from "../../shared/chat-history.js";
+import { initPiiRedactionPolicy } from "../../shared/dlp.js";
 import type { GenericMessage } from "../../engine/llm/types.js";
+
+// The renderer history payload is one of the surfaces `privacy.piiRedactEnabled`
+// governs, so every case here has to say which side of the toggle it is on.
+// Restore the shipped default afterwards: the policy is process-wide.
+afterEach(() => initPiiRedactionPolicy(() => false));
 
 describe("chat history IPC serialization", () => {
   it("passes through persisted assistant/tool structure used by renderer replay", () => {
@@ -51,6 +57,7 @@ describe("chat history IPC serialization", () => {
   });
 
   it("masks sensitive tool_result content for renderer history replay without mutating history", () => {
+    initPiiRedactionPolicy(() => true);
     const message: GenericMessage = {
       role: "tool_result",
       toolUseId: "tool-email",
@@ -70,5 +77,27 @@ describe("chat history IPC serialization", () => {
     if (message.role === "tool_result") {
       expect(message.content).toContain("real.user@gmail.com");
     }
+  });
+
+  it("leaves PII in tool_result content when PII redaction is off, and still scrubs a credential", () => {
+    initPiiRedactionPolicy(() => false);
+    const message: GenericMessage = {
+      role: "tool_result",
+      toolUseId: "tool-email",
+      toolName: "ask_user_question",
+      content: JSON.stringify({
+        recipient: "real.user@gmail.com",
+        phone: "010-1234-5678",
+        authorization: "Bearer abcdef0123456789",
+      }),
+      isError: false,
+    };
+
+    const serialized = serializeHistoryMessage(message, 3);
+    expect(serialized.content).toContain("real.user@gmail.com");
+    expect(serialized.content).toContain("010-1234-5678");
+    // Credential scrubbing is a security control, not a privacy preference.
+    expect(serialized.content).not.toContain("abcdef0123456789");
+    expect(serialized.content).toContain("[REDACTED:TOKEN]");
   });
 });
