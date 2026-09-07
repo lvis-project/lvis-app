@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { genericToModelMessages } from "../adapter.js";
-import type { GenericMessage } from "../../types.js";
+import { genericToModelMessages, fullStreamToStreamEvent } from "../adapter.js";
+import type { GenericMessage, StreamEvent, ToolCallBlock } from "../../types.js";
 import { MAX_LOCAL_USER_CONTENT_PARTS } from "../../../../main/subscription-attachment-input.js";
+import { collectStreamEvents, streamFromArray } from "./test-helpers.js";
 
 describe("genericToModelMessages — multimodal user content", () => {
   it("preserves string content as a single text part (backward compat)", () => {
@@ -188,5 +189,122 @@ describe("genericToModelMessages — tool_result image (view_image)", () => {
     expect(out[0]).toMatchObject({
       content: [{ output: { type: "text", value: "ok" } }],
     });
+  });
+});
+
+// ────────────────────────────────────────────────────────────────
+// Malformed tool-call arguments must be contained, not replayed.
+//
+// The AI SDK returns the argument text verbatim when JSON.parse fails on it
+// (`parseToolCall`'s outer catch keeps `toolCall.input`, a string, and marks
+// the part `invalid: true`). A string that reaches history is replayed on
+// every later round, and a provider whose chat template iterates the argument
+// object rejects the WHOLE request — one malformed call would end the turn.
+// ────────────────────────────────────────────────────────────────
+
+describe("fullStreamToStreamEvent — tool-call input normalisation", () => {
+  const finish = { type: "finish", finishReason: "tool-calls" };
+
+  async function toolCallEvent(input: unknown) {
+    const events = await collectStreamEvents(
+      fullStreamToStreamEvent(
+        streamFromArray([
+          { type: "start" },
+          { type: "tool-call", toolCallId: "tu-1", toolName: "bash", input },
+          finish,
+        ]),
+      ),
+    );
+    const call = events.find((e) => e.type === "tool_call");
+    expect(call?.type).toBe("tool_call");
+    return call as Extract<StreamEvent, { type: "tool_call" }>;
+  }
+
+  it("passes an object input through untouched and marks nothing", async () => {
+    const call = await toolCallEvent({ command: "ls" });
+    expect(call.input).toEqual({ command: "ls" });
+    expect(call.invalidInput).toBeUndefined();
+  });
+
+  it("parses a JSON string input into an object (unknown-tool fallback path)", async () => {
+    const call = await toolCallEvent('{"command":"ls"}');
+    expect(call.input).toEqual({ command: "ls" });
+    expect(call.invalidInput).toBeUndefined();
+  });
+
+  it("marks truncated JSON as invalid and yields an empty object", async () => {
+    const truncated = '{"command":"echo hello wor';
+    const call = await toolCallEvent(truncated);
+    expect(call.input).toEqual({});
+    expect(call.invalidInput).toEqual({
+      raw: truncated,
+      reason: "unparsable-json",
+      rawChars: truncated.length,
+    });
+  });
+
+  it("bounds the excerpt it keeps from a runaway argument string", async () => {
+    const runaway = `{"command":"${"x".repeat(5000)}`;
+    const call = await toolCallEvent(runaway);
+    expect(call.invalidInput?.raw.length).toBe(200);
+    expect(call.invalidInput?.rawChars).toBe(runaway.length);
+  });
+
+  it("marks valid JSON that is not an object as invalid", async () => {
+    const call = await toolCallEvent("[1,2,3]");
+    expect(call.input).toEqual({});
+    expect(call.invalidInput?.reason).toBe("non-object");
+  });
+
+  it("keeps absent arguments as an empty object without marking a defect", async () => {
+    const call = await toolCallEvent(undefined);
+    expect(call.input).toEqual({});
+    expect(call.invalidInput).toBeUndefined();
+  });
+
+  // A no-argument call is how a zero-parameter tool is invoked. Answering it
+  // with a parse error would break a working call, so blank argument text has
+  // to read the same as no argument text — which is how the SDK reads it too.
+  it.each([
+    ["", "empty"],
+    ["   ", "spaces"],
+    ["\n\t", "blank lines"],
+  ])("reads %j (%s) as a no-argument call, not a parse failure", async (input) => {
+    const call = await toolCallEvent(input);
+    expect(call.input).toEqual({});
+    expect(call.invalidInput).toBeUndefined();
+  });
+});
+
+describe("genericToModelMessages — tool-call input never leaves as a non-object", () => {
+  function assistantWithToolCall(input: unknown): GenericMessage[] {
+    return [
+      { role: "user", content: "run it" },
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [{ id: "tu-1", name: "bash", input } as unknown as ToolCallBlock],
+      },
+    ];
+  }
+
+  function toolCallPart(input: unknown): { type: string; input: unknown } {
+    const out = genericToModelMessages(assistantWithToolCall(input), "openai");
+    const parts = (out[1] as { content: Array<{ type: string; input: unknown }> }).content;
+    const part = parts.find((p) => p.type === "tool-call");
+    expect(part).toBeDefined();
+    return part!;
+  }
+
+  it("sends a persisted string input as an empty object", () => {
+    const part = toolCallPart('{"command":"echo hel');
+    // Strict: a string here is what the provider rejects the whole request over.
+    expect(typeof part.input).toBe("object");
+    expect(part.input).toEqual({});
+  });
+
+  it("leaves a well-formed object input byte-identical", () => {
+    const input = { command: "ls" };
+    expect(toolCallPart(input).input).toBe(input);
   });
 });

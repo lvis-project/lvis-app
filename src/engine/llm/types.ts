@@ -304,6 +304,47 @@ export interface ToolCallBlock {
   category?: ToolCategory;
   pluginId?: string;
   mcpServerId?: string;
+  /**
+   * Present only when the provider's arguments for this call were not a usable
+   * object. Host-side only, like the origin fields above. `input` is `{}` in
+   * that case, so the transcript would otherwise lose the reason the call was
+   * answered with an error instead of being executed.
+   */
+  invalidInput?: InvalidToolCallInput;
+}
+
+/**
+ * A tool call the model emitted with arguments that are not an object.
+ *
+ * The AI SDK hands the raw argument text back verbatim when `JSON.parse` fails
+ * on it: `parseToolCall`'s outer catch marks the part `invalid: true` and
+ * leaves `input` a string. A string that reaches history poisons every later
+ * round, because the wire mapper replays it and a provider whose chat template
+ * iterates the argument object rejects the WHOLE request — one malformed call
+ * would end the turn rather than just that call. Recording the defect lets the
+ * loop answer the call with an error the model can act on, while history keeps
+ * a real object.
+ *
+ * This marks a SHAPE defect only — arguments that are not an object. A call
+ * whose arguments are a well-formed object that does not match the tool's
+ * schema is NOT marked: it is dispatched as usual and the host's own tool
+ * validation answers it. Nothing here is a schema verdict.
+ */
+export interface InvalidToolCallInput {
+  /** Bounded excerpt of what the model actually emitted. */
+  raw: string;
+  /**
+   * Machine-stable cause.
+   *
+   * `unparsable-json` — the arguments arrived as text that `JSON.parse` threw
+   * on, which is the truncated-generation case.
+   * `non-object` — the arguments were readable but are not an object. Covers
+   * both a value that was never text (a number, a boolean, an array) and text
+   * that parsed cleanly into a non-object such as `[1,2,3]`.
+   */
+  reason: "unparsable-json" | "non-object";
+  /** Length of the emitted arguments before bounding. */
+  rawChars: number;
 }
 
 // ─── 도구 스키마 ────────────────────────────────────
@@ -329,6 +370,8 @@ export type StreamEvent =
       id: string;
       name: string;
       input: Record<string, unknown>;
+      /** Present only when the provider's arguments were not a usable object. */
+      invalidInput?: InvalidToolCallInput;
     }
   | {
       type: "message_complete";

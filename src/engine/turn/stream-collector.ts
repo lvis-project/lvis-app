@@ -195,7 +195,12 @@ export async function collectRoundStream(
             };
           }
           toolCallIds.add(event.id);
-          toolCalls.push({ id: event.id, name: event.name, input: event.input });
+          toolCalls.push({
+            id: event.id,
+            name: event.name,
+            input: event.input,
+            ...(event.invalidInput && { invalidInput: event.invalidInput }),
+          });
           break;
         case "message_complete":
           sawMessageComplete = true;

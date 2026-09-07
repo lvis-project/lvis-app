@@ -87,6 +87,10 @@ interface GuidanceInjectionRow {
 export type TurnDecisionKind =
   | "tool_batch"
   | "tool_schema.drop"
+  // The model emitted a tool call whose arguments were not a usable object.
+  // The call is answered with an error instead of being executed, so a run can
+  // count how often generation breaks mid-arguments.
+  | "tool_call.invalid_arguments"
   | "length.continuation"
   | "reasoning_only.continuation"
   | "tool_search"

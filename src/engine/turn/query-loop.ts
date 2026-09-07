@@ -1475,9 +1475,43 @@ export async function queryLoop(
       // §4.5.6 tool execution — request_plugin 가로채기 + knowledge depth cap + executor 호출
       // (cap already applied above before history commit; pendingToolCallsCapped is the
       //  authoritative slice that flows through executor and produces tool_result blocks.)
-      const toolUses: ToolUseBlock[] = pendingToolCallsCapped.map((tc) => ({
-        id: tc.id, name: tc.name, input: tc.input,
-      }));
+      // A call whose arguments never parsed carries no input to execute, so it
+      // is answered with an error here instead of reaching the executor. The
+      // model reads that error on the next round and re-issues the call — the
+      // same recovery it gets from any other failing tool. Without this the
+      // malformed call would go on to poison the turn: the wire mapper coerces
+      // the missing input to `{}`, and the model would keep waiting for a
+      // result that describes a call it never actually made.
+      //
+      // No onToolStart/onToolEnd fires for these, so the live action panel
+      // shows no card until the transcript is reloaded — the same trade the
+      // intercepted-meta denial below already makes. Both rows are persisted,
+      // so nothing is lost; only the live card is.
+      for (const tc of pendingToolCallsCapped) {
+        if (!tc.invalidInput) continue;
+        const content = t("be_conversationLoop.toolCallInvalidArguments", {
+          excerpt: tc.invalidInput.raw,
+        });
+        self.history.append({
+          role: "tool_result",
+          toolUseId: tc.id,
+          toolName: tc.name,
+          content,
+          isError: true,
+        });
+        allToolCalls.push({ name: tc.name, input: {}, result: content });
+        decide({
+          kind: "tool_call.invalid_arguments",
+          branch: tc.invalidInput.reason,
+          data: { round: roundIndex, rawChars: tc.invalidInput.rawChars, tool: tc.name },
+        });
+      }
+
+      const toolUses: ToolUseBlock[] = pendingToolCallsCapped
+        .filter((tc) => !tc.invalidInput)
+        .map((tc) => ({
+          id: tc.id, name: tc.name, input: tc.input,
+        }));
 
       const availableRationaleCoordinatorFactory =
         typeof self.deps.rationaleCoordinatorFactory === "function"

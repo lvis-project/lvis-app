@@ -25,7 +25,7 @@ import type { TurnCallbacks, TurnDecisionEvent } from "../turn/types.js";
 /** Derived so a widened callback union cannot drift from this file again. */
 type AssistantRoundStopReason =
   Parameters<NonNullable<TurnCallbacks["onAssistantRound"]>>[0]["stopReason"];
-import { genericToModelMessages } from "../llm/vercel/adapter.js";
+import { genericToModelMessages, fullStreamToStreamEvent } from "../llm/vercel/adapter.js";
 import { t } from "../../i18n/index.js";
 import { DEFAULT_SETTINGS } from "../../data/settings-defaults.js";
 import { MAX_BACKGROUND_OUTPUT_TOKEN_LIMIT } from "../llm/output-token-limit.js";
@@ -857,6 +857,186 @@ describe("ConversationLoop queryLoop", () => {
       (m) => (m as { toolUseId: string }).toolUseId,
     );
     expect(resultIds.sort()).toEqual(persistedIds.slice().sort());
+  });
+
+  it("answers a call whose arguments never parsed with an error and keeps executing the rest", async () => {
+    const executed: string[] = [];
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(createDynamicTool({
+      name: "noop",
+      description: "no-op tool",
+      source: "builtin",
+      category: "read",
+      isReadOnly: () => true,
+      jsonSchema: { type: "object", properties: {} },
+      execute: async (rawInput: unknown) => {
+        executed.push(JSON.stringify(rawInput));
+        return { output: "ok", isError: false };
+      },
+    }),
+    );
+
+    const provider = new FakeProvider([
+      [
+        { type: "text_delta", text: "calling two" },
+        { type: "tool_call", id: "tu-good", name: "noop", input: { a: 1 } },
+        {
+          type: "tool_call",
+          id: "tu-broken",
+          name: "noop",
+          input: {},
+          invalidInput: {
+            raw: '{"command":"echo hel',
+            reason: "unparsable-json",
+            rawChars: 20,
+          },
+        },
+        { type: "message_complete", stopReason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const loop = new ConversationLoop({
+      settingsService: { get: () => fakeLlmSettings(), getSecret: () => "test-key" },
+      systemPromptBuilder: { build: () => "system" },
+      inputClassifier: new InputClassifier(),
+      routeEngine: new RouteEngine(),
+      toolRegistry,
+      memoryManager: { saveSession: () => {}, listSessions: () => [] },
+    } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
+    (loop as { provider: LLMProvider | null }).provider = provider;
+    const decisions: TurnDecisionEvent[] = [];
+
+    const result = await loop.runTurn(
+      "call two tools",
+      { onDecision: (event) => decisions.push(event) },
+      undefined,
+      { inputOrigin: "user-keyboard" },
+    );
+
+    // The malformed call never reaches the executor; the healthy one does.
+    expect(executed).toEqual(['{"a":1}']);
+    // The turn survives it — this is the whole point: before the fix the
+    // string input replayed on the wire and the provider 400'd the round.
+    expect(result.text).toBe("done");
+
+    const messages = loop.getHistory().getMessages();
+    const assistantWithTools = messages.find(
+      (m) => m.role === "assistant" && Array.isArray((m as { toolCalls?: unknown[] }).toolCalls),
+    ) as { toolCalls: Array<{ id: string; input: unknown }> } | undefined;
+    expect(assistantWithTools).toBeDefined();
+    // History stores an object for the malformed call, never the raw string.
+    for (const tc of assistantWithTools!.toolCalls) {
+      expect(typeof tc.input).toBe("object");
+    }
+
+    // Tool-pair invariant: every persisted tool_use still has a tool_result.
+    const toolResults = messages.filter((m) => m.role === "tool_result") as Array<{
+      toolUseId: string; content: string; isError?: boolean;
+    }>;
+    expect(toolResults.map((m) => m.toolUseId).sort()).toEqual(["tu-broken", "tu-good"]);
+    const broken = toolResults.find((m) => m.toolUseId === "tu-broken")!;
+    expect(broken.isError).toBe(true);
+    expect(broken.content).toBe(
+      t("be_conversationLoop.toolCallInvalidArguments", { excerpt: '{"command":"echo hel' }),
+    );
+
+    const invalidDecisions = decisions.filter((d) => d.kind === "tool_call.invalid_arguments");
+    expect(invalidDecisions).toHaveLength(1);
+    expect(invalidDecisions[0]!.branch).toBe("unparsable-json");
+    expect(invalidDecisions[0]!.data?.tool).toBe("noop");
+    expect(invalidDecisions[0]!.data?.rawChars).toBe(20);
+  });
+
+  it("contains truncated arguments end to end, from the raw provider part to the tool_result", async () => {
+    // The test above hands the loop an event that already carries the marker.
+    // This one starts where the defect actually starts — the AI SDK part whose
+    // `input` is the raw argument text — and runs it through the real stream
+    // mapper, so a regression anywhere along adapter → collector → loop is
+    // caught rather than assumed away.
+    const truncated = '{"command":"echo hel';
+    const rounds: Array<Array<Record<string, unknown> & { type: string }>> = [
+      [
+        { type: "start" },
+        { type: "tool-call", toolCallId: "tu-good", toolName: "noop", input: '{"a":1}' },
+        { type: "tool-call", toolCallId: "tu-broken", toolName: "noop", input: truncated },
+        { type: "finish", finishReason: "tool-calls" },
+      ],
+      [
+        { type: "start" },
+        { type: "text-delta", id: "t1", text: "done" },
+        { type: "finish", finishReason: "stop" },
+      ],
+    ];
+
+    class AdapterBackedProvider implements LLMProvider {
+      readonly vendor = "openai" as const;
+      private index = 0;
+      async *streamTurn(): AsyncIterable<StreamEvent> {
+        const parts = rounds[this.index++] ?? [];
+        async function* raw() {
+          for (const part of parts) yield part;
+        }
+        yield* fullStreamToStreamEvent(raw());
+      }
+    }
+
+    const executed: string[] = [];
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(createDynamicTool({
+      name: "noop",
+      description: "no-op tool",
+      source: "builtin",
+      category: "read",
+      isReadOnly: () => true,
+      jsonSchema: { type: "object", properties: {} },
+      execute: async (rawInput: unknown) => {
+        executed.push(JSON.stringify(rawInput));
+        return { output: "ok", isError: false };
+      },
+    }),
+    );
+    const loop = new ConversationLoop({
+      settingsService: { get: () => fakeLlmSettings(), getSecret: () => "test-key" },
+      systemPromptBuilder: { build: () => "system" },
+      inputClassifier: new InputClassifier(),
+      routeEngine: new RouteEngine(),
+      toolRegistry,
+      memoryManager: { saveSession: () => {}, listSessions: () => [] },
+    } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
+    (loop as { provider: LLMProvider | null }).provider = new AdapterBackedProvider();
+
+    const result = await loop.runTurn("call two tools", undefined, undefined, {
+      inputOrigin: "user-keyboard",
+    });
+
+    // The mapper parsed the good call's argument text; the broken one never ran.
+    expect(executed).toEqual(['{"a":1}']);
+    expect(result.text).toBe("done");
+
+    const messages = loop.getHistory().getMessages();
+    const toolResults = messages.filter((m) => m.role === "tool_result") as Array<{
+      toolUseId: string; content: string; isError?: boolean;
+    }>;
+    expect(toolResults.map((m) => m.toolUseId).sort()).toEqual(["tu-broken", "tu-good"]);
+    const broken = toolResults.find((m) => m.toolUseId === "tu-broken")!;
+    expect(broken.isError).toBe(true);
+    expect(broken.content).toBe(
+      t("be_conversationLoop.toolCallInvalidArguments", { excerpt: truncated }),
+    );
+
+    // The raw string must not survive anywhere in the persisted assistant row —
+    // that is the byte the provider rejects the whole next request over.
+    const assistantWithTools = messages.find(
+      (m) => m.role === "assistant" && Array.isArray((m as { toolCalls?: unknown[] }).toolCalls),
+    ) as { toolCalls: Array<{ id: string; input: unknown }> } | undefined;
+    expect(assistantWithTools).toBeDefined();
+    for (const tc of assistantWithTools!.toolCalls) {
+      expect(typeof tc.input).toBe("object");
+    }
+    expect(JSON.stringify(assistantWithTools!.toolCalls)).not.toContain(truncated);
   });
 
   it("lets the model read host-truncated tool_result chunks through the builtin chunk tool", async () => {
