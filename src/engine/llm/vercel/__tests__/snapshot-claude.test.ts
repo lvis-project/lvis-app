@@ -151,6 +151,38 @@ describe("message-mapper — thinkingBlocks → assistant.reasoning parts (P3)",
 // ────────────────────────────────────────────────────────────────
 
 describe("stream-mapper — Claude signature capture per-step", () => {
+  it("stays silent about an unsigned reasoning block on a non-Anthropic wire", async () => {
+    // A self-hosted model reasons heavily and signs nothing, so before the
+    // wire gate this warned once per reasoning block -- thousands of times a
+    // run, which is how a warning stops being read at all.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const canned = [
+      { type: "start" },
+      { type: "reasoning-start", id: "r1" },
+      { type: "reasoning-delta", id: "r1", text: "thinking out loud" },
+      { type: "reasoning-end", id: "r1" },
+      { type: "text-delta", id: "t1", text: "answer" },
+      {
+        type: "finish",
+        finishReason: "stop",
+        totalUsage: { inputTokens: 5, outputTokens: 9 },
+      },
+    ];
+    const events = await collect(
+      fullStreamToStreamEvent(fromArray(canned), "openai-compatible"),
+    );
+    const last = events.at(-1);
+    expect(last?.type).toBe("message_complete");
+    if (last?.type === "message_complete") {
+      expect(last.thinkingBlocks ?? []).toEqual([]);
+    }
+    // The reasoning itself still reaches the caller -- only the Anthropic
+    // echo bookkeeping is skipped.
+    expect(events.some((e) => e.type === "reasoning_delta")).toBe(true);
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
   it("accumulates reasoning per block id and attaches signature on reasoning-end", async () => {
     const canned = [
       { type: "start" },
@@ -169,7 +201,7 @@ describe("stream-mapper — Claude signature capture per-step", () => {
         totalUsage: { inputTokens: 5, outputTokens: 9 },
       },
     ];
-    const events = await collect(fullStreamToStreamEvent(fromArray(canned)));
+    const events = await collect(fullStreamToStreamEvent(fromArray(canned), "claude"));
     const last = events.at(-1);
     expect(last?.type).toBe("message_complete");
     if (last?.type === "message_complete") {
@@ -208,7 +240,7 @@ describe("stream-mapper — Claude signature capture per-step", () => {
         totalUsage: { inputTokens: 1, outputTokens: 2 },
       },
     ];
-    const events = await collect(fullStreamToStreamEvent(fromArray(canned)));
+    const events = await collect(fullStreamToStreamEvent(fromArray(canned), "claude"));
     const last = events.at(-1);
     if (last?.type === "message_complete") {
       expect(last.thinkingBlocks).toEqual([
@@ -228,7 +260,7 @@ describe("stream-mapper — Claude signature capture per-step", () => {
         totalUsage: { inputTokens: 3, outputTokens: 4 },
       },
     ];
-    const events = await collect(fullStreamToStreamEvent(fromArray(canned)));
+    const events = await collect(fullStreamToStreamEvent(fromArray(canned), "claude"));
     const last = events.at(-1);
     expect(last?.type).toBe("message_complete");
     if (last?.type === "message_complete") {
@@ -258,7 +290,7 @@ describe("stream-mapper — Claude signature capture per-step", () => {
         totalUsage: { inputTokens: 1, outputTokens: 1 },
       },
     ];
-    const events = await collect(fullStreamToStreamEvent(fromArray(canned)));
+    const events = await collect(fullStreamToStreamEvent(fromArray(canned), "claude"));
     const last = events.at(-1);
     if (last?.type === "message_complete") {
       expect(last.thinkingBlocks).toBeUndefined();
@@ -284,7 +316,7 @@ describe("stream-mapper — Claude signature capture per-step", () => {
         },
       },
     ];
-    const events = await collect(fullStreamToStreamEvent(fromArray(canned)));
+    const events = await collect(fullStreamToStreamEvent(fromArray(canned), "claude"));
     const last = events.at(-1);
     if (last?.type === "message_complete") {
       expect(last.usage?.cacheReadTokens).toBe(7);
@@ -301,7 +333,7 @@ describe("stream-mapper — Claude signature capture per-step", () => {
         totalUsage: { inputTokens: 5, outputTokens: 1 },
       },
     ];
-    const events = await collect(fullStreamToStreamEvent(fromArray(canned)));
+    const events = await collect(fullStreamToStreamEvent(fromArray(canned), "claude"));
     const last = events.at(-1);
     if (last?.type === "message_complete") {
       // Spread-conditional emits only when defined — undefined keys must
@@ -326,7 +358,7 @@ describe("stream-mapper — Claude signature capture per-step", () => {
         },
       },
     ];
-    const events = await collect(fullStreamToStreamEvent(fromArray(canned)));
+    const events = await collect(fullStreamToStreamEvent(fromArray(canned), "claude"));
     const last = events.at(-1);
     if (last?.type === "message_complete") {
       expect(last.usage?.cacheReadTokens).toBe(30);
@@ -352,7 +384,7 @@ describe("stream-mapper — Claude signature capture per-step", () => {
         },
       },
     ];
-    const events = await collect(fullStreamToStreamEvent(fromArray(canned)));
+    const events = await collect(fullStreamToStreamEvent(fromArray(canned), "claude"));
     const last = events.at(-1);
     if (last?.type === "message_complete") {
       expect(last.usage).toEqual({
@@ -378,7 +410,7 @@ describe("stream-mapper — Claude signature capture per-step", () => {
         },
       },
     ];
-    const events = await collect(fullStreamToStreamEvent(fromArray(canned)));
+    const events = await collect(fullStreamToStreamEvent(fromArray(canned), "claude"));
     const last = events.at(-1);
     if (last?.type === "message_complete") {
       expect(last.usage?.cacheReadTokens).toBe(999);
@@ -633,7 +665,7 @@ describe("Claude — L4 signature byte-equality round-trip", () => {
     ];
 
     const turn1Events = await collect(
-      fullStreamToStreamEvent(fromArray(turn1Stream)),
+      fullStreamToStreamEvent(fromArray(turn1Stream), "claude"),
     );
     const complete = turn1Events.find((e) => e.type === "message_complete");
     expect(complete?.type).toBe("message_complete");

@@ -32,7 +32,7 @@ describe("VercelUnifiedProvider gemini — L1 structural parity", () => {
       },
     ];
 
-    const events = await collect(fullStreamToStreamEvent(fromArray(canned)));
+    const events = await collect(fullStreamToStreamEvent(fromArray(canned), "gemini"));
 
     expect(events.map((e) => e.type)).toEqual([
       "text_delta",
@@ -53,7 +53,7 @@ describe("VercelUnifiedProvider gemini — L1 structural parity", () => {
       { type: "error", error: new Error("boom") },
       { type: "finish", finishReason: "error", totalUsage: {} },
     ];
-    const events = await collect(fullStreamToStreamEvent(fromArray(canned)));
+    const events = await collect(fullStreamToStreamEvent(fromArray(canned), "gemini"));
     expect(events[0]).toMatchObject({
       type: "error",
       error: "boom",
@@ -79,7 +79,7 @@ describe("VercelUnifiedProvider gemini — L1 structural parity", () => {
           },
         },
       },
-    ])));
+    ]), "gemini"));
 
     expect(events[0]).toMatchObject({
       type: "error",
@@ -114,7 +114,7 @@ describe("VercelUnifiedProvider gemini — L2 content parity", () => {
       },
     ];
 
-    const events = await collect(fullStreamToStreamEvent(fromArray(canned)));
+    const events = await collect(fullStreamToStreamEvent(fromArray(canned), "gemini"));
 
     const text = events
       .filter(
@@ -153,7 +153,7 @@ describe("VercelUnifiedProvider gemini — L3 tool payload parity", () => {
       },
     ];
 
-    const events = await collect(fullStreamToStreamEvent(fromArray(canned)));
+    const events = await collect(fullStreamToStreamEvent(fromArray(canned), "gemini"));
     const toolCall = events.find((e) => e.type === "tool_call");
     expect(toolCall).toBeDefined();
     if (toolCall?.type === "tool_call") {
@@ -400,7 +400,7 @@ describe("stream-mapper — usage v4/v5 fallback", () => {
         usage: { promptTokens: 10, completionTokens: 5 },
       },
     ];
-    const events = await collect(fullStreamToStreamEvent(fromArray(canned)));
+    const events = await collect(fullStreamToStreamEvent(fromArray(canned), "gemini"));
     const finish = events.find((e) => e.type === "message_complete");
     expect(finish).toBeDefined();
     if (finish?.type === "message_complete") {
@@ -416,7 +416,7 @@ describe("stream-mapper — usage v4/v5 fallback", () => {
         totalUsage: { inputTokens: 1, outputTokens: 2 },
       },
     ];
-    const events = await collect(fullStreamToStreamEvent(fromArray(canned)));
+    const events = await collect(fullStreamToStreamEvent(fromArray(canned), "gemini"));
     const finish = events.find((e) => e.type === "message_complete");
     expect(finish).toBeDefined();
     if (finish?.type === "message_complete") {
@@ -438,7 +438,7 @@ describe("stream-mapper — usage v4/v5 fallback", () => {
         totalUsage: { inputTokens: 1, outputTokens: 2 },
       },
     ];
-    const events = await collect(fullStreamToStreamEvent(fromArray(canned)));
+    const events = await collect(fullStreamToStreamEvent(fromArray(canned), "gemini"));
     const finish = events.find((e) => e.type === "message_complete");
     expect(finish).toBeDefined();
     if (finish?.type === "message_complete") {
