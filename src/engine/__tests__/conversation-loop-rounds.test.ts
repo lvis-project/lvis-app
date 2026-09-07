@@ -1507,7 +1507,7 @@ describe("reasoning-only round is not a finished turn", () => {
     expect(replay.content.length).toBe(2_000);
   });
 
-  it("sends both re-prompt rows on the wire only, never into persisted history", async () => {
+  it("keeps the replay and the instruction on the wire only", async () => {
     const thought = "Let me verify the tokenizer.";
     const provider = new RecordingPromptProvider([
       reasoningOnlyRound(thought),
@@ -1525,17 +1525,17 @@ describe("reasoning-only round is not a finished turn", () => {
     const secondRound = provider.messages[1]!;
     const [replay, instruction] = secondRound.slice(-2);
     expect(replay!.role).toBe("assistant");
+    expect(replay!.content).toBe(thought);
     expect(instruction!.role).toBe("user");
 
-    // Neither row is persisted. A host instruction committed to history would
-    // replay on every later turn as if the user had typed it, and the replayed
-    // reasoning would become a second copy of a row history already holds.
+    // The replay rewrites the row only for that request. History keeps the
+    // committed shape — reasoning in `thought`, no assistant text — and never
+    // takes the instruction, which would otherwise replay on every later turn
+    // as if the user had typed it.
     const persisted = loop.getHistory().getMessages();
     expect(JSON.stringify(persisted)).not.toContain(instruction!.content);
     expect(persisted.filter((message) =>
       message.role === "assistant" && message.content === thought)).toEqual([]);
-    // History keeps exactly one carrier of that reasoning: the `thought` field
-    // of the row the round actually committed.
     expect(persisted.filter((message) => message.thought === thought))
       .toHaveLength(1);
   });
@@ -1572,6 +1572,16 @@ describe("reasoning-only round is not a finished turn", () => {
 
     const secondRoundText = JSON.stringify(provider.messages[1]!);
     expect(secondRoundText).toContain("use the other installer");
+    // The replay is not tied to the re-prompt: the guide alone would have left
+    // the dropped reasoning row collapsing its neighbours into two user turns.
+    const guidedWire = genericToModelMessages(provider.messages[1]!, "openai");
+    expect(guidedWire.map((message) => message.role)).toEqual([
+      "user", "assistant", "user",
+    ]);
+    for (const message of guidedWire) {
+      expect(JSON.stringify(message.content)).not.toBe("[]");
+    }
+    expect(JSON.stringify(guidedWire[1]!.content)).toContain(firstThought);
     // The first round's reasoning was never quoted into that round.
     expect(secondRoundText)
       .not.toContain(t("be_conversationLoop.reasoningOnlyContinuePrompt"));

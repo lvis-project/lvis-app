@@ -89,14 +89,14 @@ const MAX_LENGTH_CONTINUATIONS = 3;
  */
 const MAX_REASONING_ONLY_NUDGES = 2;
 /**
- * How much of the previous round's reasoning the re-prompt above replays as the
- * model's own prior turn.
+ * How much of an answer-less round's reasoning the next round replays as that
+ * round's assistant text.
  *
  * The replay is what puts the reasoning in front of the model at all: `thought`
- * is mapped to no wire part on any vendor, and the committed row holding it has
- * neither text nor tool calls, so the adapter drops the whole message rather
- * than send an empty assistant turn. Without the replay the instruction would
- * name reasoning the model cannot see.
+ * is mapped to no wire part on any vendor, and a row holding it with neither
+ * text nor tool calls is dropped whole rather than sent as an empty assistant
+ * turn. Dropping it also collapses the rows either side into two consecutive
+ * user turns, which a chat template that asserts role alternation rejects.
  *
  * The TAIL is the part that matters — a reasoning block ends on the action it
  * decided, and the earlier text is the deliberation that led there. 2,000
@@ -363,13 +363,13 @@ export async function queryLoop(
     let continuationCarryText = "";
     let continuationCarryThought = "";
     let continuationPrefillText: string | undefined = undefined;
-    // Reasoning-only re-prompt state. `reasoningNudgeTail` arms exactly one
-    // re-prompt for the NEXT round, holding the reasoning tail that round will
-    // replay as the model's own prior turn (see MAX_REASONING_ONLY_NUDGES /
-    // MAX_NUDGE_REASONING_CHARS). `reasoningNudgesRun` is the per-turn spend
-    // against the cap, incremented where the re-prompt reaches the wire.
+    // Reasoning-only re-prompt state. `reasoningNudgePending` arms exactly one
+    // re-prompt for the NEXT round (see MAX_REASONING_ONLY_NUDGES); the round
+    // assembly consumes it and spends `reasoningNudgesRun`, the per-turn tally
+    // against the cap. The reasoning itself needs no carrying — the assembly
+    // replays it off the committed row.
     let reasoningNudgesRun = 0;
-    let reasoningNudgeTail: string | undefined = undefined;
+    let reasoningNudgePending = false;
     // C3(a): effective round budget. A host-assigned `maxRounds` (the sub-agent
     // runner, carrying the user's configured budget) is HONOURED exactly, above
     // the default too; narrowing it only shows up as an agent stopped mid-task.
@@ -636,13 +636,8 @@ export async function queryLoop(
       // so every host instruction for a round shares the single row rather than
       // adding its own.
       //
-      // The cap is spent HERE, where the re-prompt reaches the model, not where
-      // it is armed. Queued guidance cannot collide with it: the end-turn
-      // boundary takes the guidance branch before the re-prompt branch can arm,
-      // and nothing awaits between arming and this line for a guide to arrive in.
-      const injectedNudgeTail = reasoningNudgeTail;
-      reasoningNudgeTail = undefined;
-      if (injectedNudgeTail !== undefined) reasoningNudgesRun += 1;
+      // Called exactly ONCE per round: it consumes the armed re-prompt and
+      // spends its cap, so a second call would charge the same instruction twice.
       const assembleRoundMessages = (
         base: GenericMessage[],
       ): GenericMessage[] => {
@@ -660,14 +655,36 @@ export async function queryLoop(
           ];
         }
         const rows: GenericMessage[] = [...base];
+        // A round whose whole answer went into reasoning leaves an assistant row
+        // with no text and no tool calls. `thought` is mapped to no wire part on
+        // any vendor, so the adapter drops that row entirely — the model loses
+        // the reasoning, AND the rows either side of it collapse into two
+        // consecutive user turns. Replay the reasoning as the row's text on the
+        // wire: the model sees what it worked out, and alternation holds for
+        // whatever follows, the re-prompt below or a delivered guide alike.
+        // Bounded because a reasoning block ends on the action it decided.
+        for (let i = rows.length - 1; i >= 0; i--) {
+          const row = rows[i]!;
+          if (row.role !== "assistant") continue;
+          const thought = row.thought ?? "";
+          if (
+            row.content.trim().length === 0 &&
+            (row.toolCalls?.length ?? 0) === 0 &&
+            thought.trim().length > 0
+          ) {
+            rows[i] = {
+              role: "assistant",
+              content: thought.slice(-MAX_NUDGE_REASONING_CHARS),
+            };
+          }
+          break;
+        }
         const appendedUserText: string[] = [];
-        if (injectedNudgeTail !== undefined) {
-          // Replay the reasoning as the model's own prior turn, then instruct.
-          // The committed row carrying that reasoning has no text and no tool
-          // calls, so the adapter drops it — this is the only thing that puts
-          // the reasoning on the wire, and giving it the assistant role is what
-          // keeps user/assistant alternation intact on every vendor.
-          rows.push({ role: "assistant" as const, content: injectedNudgeTail });
+        if (reasoningNudgePending) {
+          // Spend the cap where the instruction reaches the wire, so a spend can
+          // never stand for an instruction the model was not actually sent.
+          reasoningNudgePending = false;
+          reasoningNudgesRun += 1;
           appendedUserText.push(
             t("be_conversationLoop.reasoningOnlyContinuePrompt"),
           );
@@ -1184,11 +1201,10 @@ export async function queryLoop(
             },
           });
           if (willNudge) {
-            // Arm the reasoning tail. The next round replays it as the model's
-            // own prior turn, because the committed row holding it carries the
-            // reasoning in `thought` — which no vendor maps onto the wire — and
-            // has neither text nor tool calls, so the adapter drops it whole.
-            reasoningNudgeTail = mergedThought.slice(-MAX_NUDGE_REASONING_CHARS);
+            // Arm the instruction only. The round that sends it replays this
+            // round's reasoning off the row just committed, so nothing about it
+            // has to be carried across the loop iteration.
+            reasoningNudgePending = true;
             self.tracer.step("REASONING_ONLY_CONTINUATION", {
               round: roundIndex,
               nudgesRun: reasoningNudgesRun,
