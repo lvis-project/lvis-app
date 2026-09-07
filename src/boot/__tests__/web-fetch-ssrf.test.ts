@@ -62,13 +62,14 @@ describe("web_fetch SSRF guard", () => {
     expect(result.output).toMatch(/http and https/i);
   });
 
-  it("scopes private network access behind a separate approval key", () => {
+  it("keeps the network category for every destination", () => {
     const tool = makeWebFetchTool();
 
     // `network` for BOTH public and private destinations: the URL is
-    // model-chosen, so a public fetch is an exfiltration channel just as much
-    // as a private one. The private-network distinction survives in the
-    // approval CACHE KEY below, not in the category.
+    // model-chosen, so a public fetch is an egress channel just as much as a
+    // private one, and every exclusion resting on this category keeps applying
+    // to both. Which public fetches actually prompt is decided by the request
+    // screen in the risk classifier, not here.
     expect(tool.category).toBe("network");
     expect(tool.categoryForInput?.({
       url: "https://example.com/page",
@@ -77,13 +78,39 @@ describe("web_fetch SSRF guard", () => {
       url: "http://10.185.177.209:8080/status",
       allowPrivateNetwork: true,
     })).toBe("network");
+  });
+
+  it("remembers an approval per destination host, not per URL", () => {
+    const tool = makeWebFetchTool();
+
+    // The host is the unit a person can decide about, and the unit that bounds
+    // where data can go. A key per URL would make "always allow" mean "this
+    // exact page"; the tool name alone would make it mean "anywhere".
     expect(tool.approvalCacheKey?.({
+      url: "https://docs.example.org/guide/install",
+    })).toBe("web_fetch:host:docs.example.org");
+    expect(tool.approvalCacheKey?.({
+      url: "https://DOCS.example.ORG/other/page?q=1",
+    })).toBe("web_fetch:host:docs.example.org");
+    expect(tool.approvalCacheKey?.({
+      url: "https://other.example.org/guide",
+    })).not.toBe("web_fetch:host:docs.example.org");
+    expect(tool.approvalCacheKey?.({ url: "not a url" })).toBeUndefined();
+  });
+
+  it("keeps a private-network grant distinct from the public one for the same host", () => {
+    const tool = makeWebFetchTool();
+
+    const privateKey = tool.approvalCacheKey?.({
       url: "http://10.185.177.209:8080/status",
       allowPrivateNetwork: true,
-    })).toBe("private-network:http://10.185.177.209:8080");
-    expect(tool.approvalCacheKey?.({
+    });
+    const publicKey = tool.approvalCacheKey?.({
       url: "http://10.185.177.209:8080/status",
-    })).toBeUndefined();
+    });
+    expect(privateKey).toBe("web_fetch:host:private-network:10.185.177.209");
+    expect(publicKey).toBe("web_fetch:host:10.185.177.209");
+    expect(privateKey).not.toBe(publicKey);
   });
 
   it("does not reuse the bare web_fetch allow rule for private network access", () => {
@@ -99,7 +126,7 @@ describe("web_fetch SSRF guard", () => {
       "builtin",
       "network",
       null,
-      { approvalCacheKey: "web_fetch:private-network:http://10.185.177.209:8080" },
+      { approvalCacheKey: "web_fetch:host:private-network:10.185.177.209" },
     );
     expect(privateDecision.decision).toBe("ask");
   });

@@ -130,7 +130,7 @@ describe("extraction order and scheme handling are preserved", () => {
     expect(extractNetworkTarget({
       target: "https://evil.example/x",
       url: "https://api.openai.com/v1/chat",
-    })).toEqual({ host: "api.openai.com", path: "/v1/chat" });
+    })).toMatchObject({ host: "api.openai.com", path: "/v1/chat" });
   });
 
   it("named fields are tried in declaration order", () => {
@@ -138,7 +138,7 @@ describe("extraction order and scheme handling are preserved", () => {
     expect(extractNetworkTarget({
       uri: "https://api.anthropic.com/x",
       endpoint: "https://api.openai.com/y",
-    })).toEqual({ host: "api.openai.com", path: "/y" });
+    })).toMatchObject({ host: "api.openai.com", path: "/y" });
   });
 
   it("a non-network scheme is not a target, under a named key or any other", () => {
@@ -150,14 +150,14 @@ describe("extraction order and scheme handling are preserved", () => {
 
   it("ws:// counts, so a websocket endpoint is still a network target", () => {
     expect(extractNetworkTarget({ target: "wss://api.openai.com/stream" }))
-      .toEqual({ host: "api.openai.com", path: "/stream" });
+      .toMatchObject({ host: "api.openai.com", path: "/stream" });
   });
 
   it("an empty-authority URL is normalized by WHATWG, not treated as hostless", () => {
     // An empty-authority https URL parses with the first path segment promoted
     // to the authority, so there is no reachable "hostless network URL" shape.
     // Pinned because it is the input that looks like it should produce one.
-    expect(extractNetworkTarget({ url: "https:///x" })).toEqual({ host: "x", path: "/" });
+    expect(extractNetworkTarget({ url: "https:///x" })).toMatchObject({ host: "x", path: "/" });
     expect(categoryAndVerdict({ url: "https:///x" })).toEqual({
       category: "network",
       level: "high",
@@ -167,7 +167,7 @@ describe("extraction order and scheme handling are preserved", () => {
 
   it("a junk `host` field is taken as a hostname so the call cannot leave the network domain", () => {
     expect(extractNetworkTarget({ host: "junk not a host!!" }))
-      .toEqual({ host: "junk not a host!!", path: "" });
+      .toMatchObject({ host: "junk not a host!!", path: "" });
     expect(categoryAndVerdict({ host: "junk not a host!!" })).toEqual({
       category: "network",
       level: "high",

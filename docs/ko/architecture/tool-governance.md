@@ -234,7 +234,55 @@ Plugin 제거:
 | skill_load | read | ask (default; first-use approval gated) |
 | session_tasks | read | allow |
 | web_search | read | allow |
-| web_fetch | read / network | allow (public URL), ask (private network opt-in) |
+| web_fetch | network | allow (스크린 통과한 공개 요청), ask (스크린 걸린 요청 · 사설망 opt-in · 주소 리터럴) |
+
+### web_fetch — 목적지가 아니라 요청을 심사한다
+
+`web_fetch` 는 모델이 고른 문자열을 모델이 고른 목적지로 보내므로 카테고리는 항상
+`network` 이다. 이 카테고리에 걸린 제약은 그대로다: 레지스트리가 무인 실행 레인에서
+이 도구를 빼고, away-authority 의 읽기 승인이 이 호출을 덮지 않으며, 부팅 시 상시
+allow 규칙을 갖지 않는다.
+
+바뀐 것은 *공개 목적지에 대한 판정* 뿐이다. 공개 URL 을 전부 HIGH 로 매기면 문서 한
+장 읽는 데 승인 창이 뜨고, 하루에 수십 번 뜨는 창은 결국 "항상 허용" 으로 눌린다.
+그건 무승인과 같으면서 사용자가 직접 연 구멍이라 더 나쁘다.
+
+그래서 경계를 목적지에서 요청으로 옮겼다. 호스트가 URL 만 보고 판정하며
+(`screenEgressRequest`, `permissions/reviewer/risk-classifier.ts`), 도구나 플러그인이
+자기에 대해 주장하는 값은 하나도 쓰지 않는다.
+
+| 요청 모양 | 판정 |
+|---|---|
+| 공개 호스트 + 스크린 통과 | low (승인 없이 실행) |
+| URL 에 자격증명 형태 토큰 (`scrubSecretsForLLM` 과 같은 패턴) | high |
+| path+query+fragment 가 512자 초과 | high |
+| 32자 이상 불투명 토큰이 호스트 라벨·경로 세그먼트에 있음 (구분자 없는 연속 실행) | high |
+| 32자 이상 값이 쿼리 값·쿼리 이름·프래그먼트에 있음 | high |
+| URL authority 에 userinfo (`user:pw@`) | high |
+| 라우팅 가능한 주소 리터럴 (이름 없는 목적지) | medium |
+| 사설망 opt-in · localhost · 비라우팅 주소 | 기존 판정 유지 |
+
+승인이 필요한 경우의 "항상 허용" 은 **호스트 단위**로 기억된다
+(`web_fetch:host:<host>`). URL 단위면 아무도 누르지 않을 만큼 좁고, 도구 이름 단위면
+어디로든 보낼 수 있는 상시 egress 권한이 된다. 사설망 승인은 같은 호스트라도 공개
+요청과 별도 키를 쓴다.
+
+이름과 payload 는 *구분자* 로 가른다. 슬러그는 단어를 하이픈으로 이은 것이라 끊기지
+않는 영숫자 실행이 한 단어 길이(10자 내외)지만, 인코딩된 payload 는 통째로 한 토큰이다.
+Shannon 엔트로피로는 갈리지 않는다 — `how-to-configure-your-database-connection` 이
+3.89 bits/char, 40자 커밋 해시가 3.97 로 사실상 같아서 한쪽을 통과시키는 임계값은
+다른 쪽도 통과시킨다.
+
+쿼리 값·프래그먼트는 *이름* 이 아니라 *값* 이므로 구분자 허용 없이 길이만 본다.
+base64url 은 자체 알파벳에 `-`, `_` 가 있어 경로 규칙만으로는 잡히지 않는데, 이 값
+규칙이 잡는다.
+
+알려진 한계 (덮지 않고 명시): 임계값 아래로 쪼개 여러 세그먼트에 나눠 담으면 세 규칙을
+모두 통과한다. 한 요청으로 나갈 수 있는 양은 512자 꼬리 규칙이 묶는다. 여러 요청에 걸친
+청크 유출은 요청 단위 심사가 볼 수 있는 것이 아니며, 그에 대한 통제는 이 변경이 건드리지
+않은 것들이다 — 상시 allow 규칙 없음, 무인 레인에서 도구 제외.
+
+내용 주소 URL (예: 40자 커밋 해시) 은 payload 와 구분되지 않아 승인 한 번을 부른다.
 
 ---
 
