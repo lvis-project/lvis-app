@@ -276,8 +276,9 @@ export class VercelUnifiedProvider implements LLMProvider {
       // Per-vendor model resolution.
       const model = this.resolveModel(params.model, hasTools);
 
-      // Reasoning effort (OpenAI family). Only passed through providerOptions
-      // when the model actually supports it.
+      // How much reasoning we are willing to pay for. Both families read this
+      // value: the OpenAI family as a coarse effort level, the self-hosted class
+      // as an exact token budget further down.
       const budget = params.thinkingBudgetTokens ?? 10_000;
       const rawReasoningEffort = mapReasoningEffort(budget);
       // "none" is GPT-5.2+ only; clamp to "low" for o-series / GPT-5.0-5.1,
@@ -341,6 +342,19 @@ export class VercelUnifiedProvider implements LLMProvider {
             enable_thinking: params.enableThinking === true,
           },
         };
+        // REASONING BUDGET. `enable_thinking` is a switch, not a dial: without
+        // this field the only settings available are "no reasoning at all" and
+        // "reason without limit", and the user's configured budget reaches
+        // nothing. vLLM counts reasoning tokens from the reasoning-start marker
+        // and, at the budget, emits the reasoning-end marker itself, so the
+        // model closes its thinking and answers instead of being cut off
+        // mid-generation. Measured against a self-hosted vLLM backend: the same
+        // prompt drew 133 reasoning tokens unbudgeted and 31 at a budget of 32.
+        // Servers that do not implement it ignore it, exactly as they do the
+        // chat-template kwargs above.
+        if (params.enableThinking === true) {
+          compatOptions.thinking_token_budget = budget;
+        }
         // finish_reason=length CONTINUATION. The conversation loop appended a
         // partial assistant turn as the FINAL message and set this flag. vLLM's
         // `continue_final_message` re-opens that trailing assistant message and
