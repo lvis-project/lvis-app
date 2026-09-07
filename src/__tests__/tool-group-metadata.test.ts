@@ -26,6 +26,7 @@ vi.mock("../audit/audit-logger.js", () => ({
 
 vi.mock("../audit/dlp-filter.js", () => ({
   maskSensitiveData: vi.fn((input: string) => ({ masked: input, detections: [] })),
+  isPiiRedactionEnabled: vi.fn(() => false),
 }));
 
 import { ToolExecutor } from "../tools/executor.js";

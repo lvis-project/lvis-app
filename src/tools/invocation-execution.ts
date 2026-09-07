@@ -2,7 +2,7 @@ import type { ApprovalDecision } from "../permissions/approval-gate.js";
 import { randomUUID } from "node:crypto";
 import type { PermissionCheckResult } from "../permissions/permission-manager.js";
 import type { ToolExecutionAuditMetadata } from "../audit/audit-schema.js";
-import { maskSensitiveData } from "../audit/dlp-filter.js";
+import { isPiiRedactionEnabled, maskSensitiveData } from "../audit/dlp-filter.js";
 import { emitEffectShadowLog } from "../permissions/reviewer/risk-shadow-log.js";
 import { runWithEffectLedger, type EffectLedger } from "../permissions/effect-ledger.js";
 import { runWithToolExecutionCwd } from "./execution-context.js";
@@ -257,6 +257,7 @@ export async function executeAuthorizedToolInvocation(
         type: "tool_call",
         input: maskSensitiveData(
           JSON.stringify(auditSafeToolInput(finalInput, audit)),
+          { pii: isPiiRedactionEnabled() },
         ).masked.slice(0, 500),
         output: msg.slice(0, 1024),
         toolCalls: [{
@@ -1095,13 +1096,21 @@ export async function executeAuthorizedToolInvocation(
   // user-provided operational data such as an email recipient must remain
   // available to later tools. DLP applies only to renderer callbacks and
   // audit entries.
+  //
+  // Those two surfaces are what `privacy.piiRedactEnabled` governs. With the
+  // toggle off a credential still gets scrubbed — that is a security control,
+  // not a preference — but the user's own email or phone number reaches the
+  // display and the audit entry intact, and raises neither the warning nor the
+  // `dlp_masked` audit note.
   let displayContent = content;
-  const dlpResult = maskSensitiveData(content);
+  const pii = isPiiRedactionEnabled();
+  const dlpResult = maskSensitiveData(content, { pii });
   if (dlpResult.detections.length > 0) {
     displayContent = dlpResult.masked;
     const audit = currentAuditMetadata(finalInput);
     const dlpAuditInput = maskSensitiveData(
       JSON.stringify(auditSafeToolInput(finalInput, audit)),
+      { pii },
     ).masked;
     log.warn(
       `Sensitive data detected and masked — tool: '${toolUse.name}', patterns: ${dlpResult.detections.join(", ")}`,

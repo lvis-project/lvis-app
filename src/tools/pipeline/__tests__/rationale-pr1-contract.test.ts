@@ -712,7 +712,7 @@ describe("invocation audit and sealed resume", () => {
       ["effect-shadow-reconciliation", "const effectSummary = effectLedger.summary()"],
       ["post-tool-use-hooks", "postFeedback = await services.hookRunner.runPostHooks("],
       ["post-failure-lifecycle", "\"PostToolUseFailure\","],
-      ["post-exec-dlp-display-audit", "const dlpResult = maskSensitiveData(content)"],
+      ["post-exec-dlp-display-audit", "const dlpResult = maskSensitiveData(content, { pii })"],
       ["final-permission-audit", "await auditCurrentToolCall(sessionId, toolUse.name, source, trust, finalInput, auditContent"],
       ["tool-end-emit", "callbacks?.onToolEnd?.(\n    toolUse.name,\n    displayContent"],
     ] as const;

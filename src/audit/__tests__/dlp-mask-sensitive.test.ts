@@ -214,3 +214,43 @@ describe("converged detection — maskSensitiveData and redactForLLM agree", () 
     expect(redactForLLM(text).counts.SSN_KR ?? 0).toBe(0);
   });
 });
+
+// ── privacy toggle: PII is optional, credentials are not ─────────────────────
+//
+// `privacy.piiRedactEnabled` governs PII. `pii: false` is what the governed
+// surfaces pass when the user has the toggle off, and it must leave every
+// personal-data pattern intact while still removing credentials — a leaked
+// token is a security defect whatever the privacy setting says.
+describe("maskSensitiveData — pii: false (privacy toggle off)", () => {
+  it("leaves every PII class intact and reports no detection", () => {
+    const text = [
+      "email user@example.com",
+      "phone 010-1234-5678",
+      "us phone 415-555-1234",
+      "rrn 900101-1234567",
+      "card 4111 1111 1111 1111",
+    ].join(" / ");
+
+    const { masked, detections } = maskSensitiveData(text, { pii: false });
+
+    expect(masked).toBe(text);
+    expect(detections).toEqual([]);
+  });
+
+  it("still scrubs a credential and names only the credential class", () => {
+    const text = `key=${fixtureSecret("sk", "-", "abcdefghijklmnopqrst")} email user@example.com`;
+
+    const { masked, detections } = maskSensitiveData(text, { pii: false });
+
+    expect(masked).toContain("[REDACTED:TOKEN]");
+    expect(masked).toContain("user@example.com");
+    expect(detections).toEqual(["자격 증명"]);
+  });
+
+  it("matches the default and pii: true when the toggle is on", () => {
+    const text = "email user@example.com phone 010-1234-5678";
+
+    expect(maskSensitiveData(text, { pii: true })).toEqual(maskSensitiveData(text));
+    expect(maskSensitiveData(text, { pii: true }).masked).not.toBe(text);
+  });
+});

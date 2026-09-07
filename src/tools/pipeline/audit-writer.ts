@@ -18,7 +18,7 @@ import type { ToolSource, ToolCategory, TrustLevel } from "../types.js";
 import type { PermissionCheckResult } from "../../permissions/permission-manager.js";
 import type { AuditLogger } from "../../audit/audit-logger.js";
 import type { PermissionAuditEntryInput, HookResult, ToolExecutionAuditMetadata } from "../../audit/audit-schema.js";
-import { maskSensitiveData } from "../../audit/dlp-filter.js";
+import { isPiiRedactionEnabled, maskSensitiveData } from "../../audit/dlp-filter.js";
 import type {
   ScriptHookManager,
   HookDispatchResult,
@@ -254,7 +254,11 @@ export class AuditWriter {
     }
     try {
       const inputText = JSON.stringify(auditSafeInput);
-      const auditInput = maskSensitiveData(inputText).masked;
+      // Audit text is one of the surfaces `privacy.piiRedactEnabled` governs;
+      // credentials are scrubbed either way.
+      const auditInput = maskSensitiveData(inputText, {
+        pii: isPiiRedactionEnabled(),
+      }).masked;
       this.auditLogger.log({
         timestamp: new Date().toISOString(),
         sessionId: sessionId ?? "unknown",

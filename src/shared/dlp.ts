@@ -6,6 +6,40 @@ export interface DlpResult {
 }
 
 /**
+ * Reads the user's `privacy.piiRedactEnabled` setting. Injected rather than
+ * imported so this leaf keeps no dependency on the settings store, and read at
+ * each call rather than captured once so flipping the toggle takes effect
+ * without a restart. Installed where the DLP audit logger is (IPC
+ * registration); until then this mirrors the shipped default,
+ * `privacy.piiRedactEnabled: false`.
+ *
+ * The setting governs PII only. Credential scrubbing is a security control, not
+ * a privacy preference — a leaked bearer token in a log line is a defect
+ * whatever the user asked for — so {@link scrubSecretsForLLM} runs on every
+ * masking path regardless of this value.
+ */
+let readPiiRedactionEnabled: () => boolean = () => false;
+
+export function initPiiRedactionPolicy(read: () => boolean): void {
+  readPiiRedactionEnabled = read;
+}
+
+export function isPiiRedactionEnabled(): boolean {
+  return readPiiRedactionEnabled();
+}
+
+export interface MaskSensitiveDataOptions {
+  /**
+   * Mask PII spans in addition to credentials. Defaults to `true`, so a caller
+   * asking "does this host-generated identifier look like PII?" keeps a fixed
+   * answer that a user setting cannot flip. The privacy-governed surfaces —
+   * tool-output display and audit text — pass {@link isPiiRedactionEnabled}
+   * explicitly.
+   */
+  pii?: boolean;
+}
+
+/**
  * Short, scrubbed form for an error surface — a log line, a status string, a
  * message handed to the model. Credential-scrubbed by {@link scrubSecretsForLLM}
  * and hard-capped, because the text is usually authored by something the host does
@@ -197,15 +231,26 @@ export const PII_PATTERNS: PiiPattern[] = [
  * replacement. The credential scrubber runs first, then each PII pattern in the
  * shared order.
  *
+ * With `pii: false` only the credential scrubber runs: the returned text keeps
+ * every email, phone number, ID and card intact, and `detections` names at most
+ * the credential class. A surface governed by the privacy toggle therefore
+ * produces no PII detection — and so no warning and no audit note — when the
+ * user has the toggle off.
+ *
  * @param text 검사할 원본 텍스트
  * @returns masked: 마스킹된 텍스트, detections: 탐지된 패턴명 목록
  */
-export function maskSensitiveData(text: string): DlpResult {
+export function maskSensitiveData(
+  text: string,
+  options?: MaskSensitiveDataOptions,
+): DlpResult {
   const detections: string[] = [];
   let masked = scrubSecretsForLLM(text);
   if (masked !== text) {
     detections.push(t("be_dlp.patternCredential"));
   }
+
+  if (options?.pii === false) return { masked, detections };
 
   for (const spec of PII_PATTERNS) {
     spec.pattern.lastIndex = 0;

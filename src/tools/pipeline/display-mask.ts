@@ -6,7 +6,7 @@
  * cache key, and fan tool-start / permission-review events out to the executor
  * callbacks. No executor state is touched.
  */
-import { maskSensitiveData } from "../../audit/dlp-filter.js";
+import { isPiiRedactionEnabled, maskSensitiveData } from "../../audit/dlp-filter.js";
 import {
   getHostShellExecutionPlanCacheIdentity,
   type HostShellExecutionPlanAuditProjection,
@@ -18,28 +18,34 @@ import type {
   ToolExecutorCallbacks,
 } from "../executor.js";
 
-function maskDisplayValue(value: unknown): unknown {
+// The tool input the renderer shows, and the deferred-approval summary, are
+// display surfaces governed by `privacy.piiRedactEnabled`. Resolve the setting
+// once per input rather than per string so one displayed object cannot be half
+// masked if the user flips the toggle mid-walk.
+function maskDisplayValue(value: unknown, pii: boolean): unknown {
   if (typeof value === "string") {
-    return maskSensitiveData(value).masked;
+    return maskSensitiveData(value, { pii }).masked;
   }
   if (Array.isArray(value)) {
-    return value.map((item) => maskDisplayValue(item));
+    return value.map((item) => maskDisplayValue(item, pii));
   }
   if (value && typeof value === "object") {
     return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, maskDisplayValue(item)]),
+      Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, maskDisplayValue(item, pii)]),
     );
   }
   return value;
 }
 
 export function maskToolInputForDisplay(input: Record<string, unknown>): Record<string, unknown> {
-  return maskDisplayValue(input) as Record<string, unknown>;
+  return maskDisplayValue(input, isPiiRedactionEnabled()) as Record<string, unknown>;
 }
 
 export function summarizeInputForDeferred(input: Record<string, unknown>): string {
   try {
-    return maskSensitiveData(JSON.stringify(input)).masked.slice(0, 1000);
+    return maskSensitiveData(JSON.stringify(input), {
+      pii: isPiiRedactionEnabled(),
+    }).masked.slice(0, 1000);
   } catch {
     return "[unserializable input]";
   }

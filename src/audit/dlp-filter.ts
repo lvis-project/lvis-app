@@ -8,7 +8,12 @@ import { pathToFileURL } from "node:url";
 import { PII_PATTERNS } from "../shared/dlp.js";
 import { escapeRegExp } from "../shared/escape-reg-exp.js";
 
-export { maskSensitiveData, scrubSecretsForLLM } from "../shared/dlp.js";
+export {
+  initPiiRedactionPolicy,
+  isPiiRedactionEnabled,
+  maskSensitiveData,
+  scrubSecretsForLLM,
+} from "../shared/dlp.js";
 
 
 

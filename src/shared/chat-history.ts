@@ -1,6 +1,6 @@
 import type { GenericMessage, MessageMeta } from "../engine/llm/types.js";
 import { userContentText } from "../engine/llm/types.js";
-import { maskSensitiveData } from "./dlp.js";
+import { isPiiRedactionEnabled, maskSensitiveData } from "./dlp.js";
 import { isStagedTurnSource } from "./staged-origins.js";
 import {
   normalizeProviderToolAliasName,
@@ -92,7 +92,13 @@ export function serializeHistoryMessage(
     m.role === "user"
       ? userContentText(m.content)
       : m.role === "tool_result"
-        ? normalizeProviderToolAliasText(maskSensitiveData(m.content).masked)
+        ? normalizeProviderToolAliasText(
+            // Renderer history payload only — the machine channel keeps the raw
+            // tool result. Masking here is the same tool-output display surface
+            // `privacy.piiRedactEnabled` governs at execution time, so a reload
+            // must not re-mask what the live turn left intact.
+            maskSensitiveData(m.content, { pii: isPiiRedactionEnabled() }).masked,
+          )
         : normalizeProviderToolAliasText(m.content);
   const meta = m.meta as MessageMeta | undefined;
   const toolDisplay = serializeToolDisplay(meta?.toolDisplay);

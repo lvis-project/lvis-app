@@ -51,7 +51,9 @@ vi.mock("../../../audit/dlp-filter.js", () => ({
   redactFsPath: vi.fn((s: string) => s),
   redactAuditPayload: vi.fn((p: unknown) => p),
   maskSensitiveData: vi.fn((s: string) => ({ masked: s, findings: [] })),
+  isPiiRedactionEnabled: vi.fn(() => false),
   initDlpAudit: vi.fn(),
+  initPiiRedactionPolicy: vi.fn(),
 }));
 vi.mock("../../../engine/wire-serialize.js", () => ({ prepareMarkedToolResultsForWire: vi.fn((m: unknown) => m) }));
 vi.mock("../../../boot/dev-flags.js", () => ({ isDevModeUnlocked: vi.fn(() => false) }));
