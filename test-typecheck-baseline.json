@@ -41,7 +41,6 @@
     "src/engine/__tests__/conversation-loop-preflight.test.ts": 1,
     "src/engine/__tests__/conversation-loop-provider-fetch.test.ts": 7,
     "src/engine/__tests__/conversation-loop-resume.test.ts": 2,
-    "src/engine/__tests__/conversation-loop-rounds.test.ts": 1,
     "src/engine/__tests__/conversation-loop-turn-summary.test.ts": 14,
     "src/engine/__tests__/request-plugin.test.ts": 4,
     "src/engine/__tests__/subagent-a2a-wire-runner.test.ts": 1,

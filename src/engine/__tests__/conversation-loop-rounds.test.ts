@@ -20,7 +20,11 @@ import { createSkillLoadTool } from "../../tools/skill-load.js";
 import { MCP_RESOURCE_FENCE_OPEN } from "../../shared/mcp-resource-bounds.js";
 import type { SubscriptionRuntimeId } from "../../shared/subscription-runtime.js";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
-import type { TurnDecisionEvent } from "../turn/types.js";
+import type { TurnCallbacks, TurnDecisionEvent } from "../turn/types.js";
+
+/** Derived so a widened callback union cannot drift from this file again. */
+type AssistantRoundStopReason =
+  Parameters<NonNullable<TurnCallbacks["onAssistantRound"]>>[0]["stopReason"];
 import { genericToModelMessages } from "../llm/vercel/adapter.js";
 import { t } from "../../i18n/index.js";
 
@@ -681,7 +685,7 @@ describe("ConversationLoop queryLoop", () => {
     (loop as { provider: LLMProvider | null }).provider = provider;
 
     const reasoningDeltas: string[] = [];
-    const rounds: Array<{ text: string; thought: string; stopReason: "end_turn" | "tool_use"; hasToolCalls: boolean;
+    const rounds: Array<{ text: string; thought: string; stopReason: AssistantRoundStopReason; hasToolCalls: boolean;
     }> = [];
     const toolEvents: Array<{ type: "start" | "end"; name: string }> = [];
 
@@ -1536,7 +1540,8 @@ describe("reasoning-only round is not a finished turn", () => {
     expect(JSON.stringify(persisted)).not.toContain(instruction!.content);
     expect(persisted.filter((message) =>
       message.role === "assistant" && message.content === thought)).toEqual([]);
-    expect(persisted.filter((message) => message.thought === thought))
+    expect(persisted.filter((message) =>
+      message.role === "assistant" && message.thought === thought))
       .toHaveLength(1);
   });
 
