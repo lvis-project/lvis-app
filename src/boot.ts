@@ -12,7 +12,7 @@
  *
  * The remaining inline glue here is the earliest bring-up (core services,
  * approval gate, permission manager, routines store, plugin runtime) plus the
- * tail lifecycle hooks (watcher telemetry, before-quit diff-cache cleanup,
+ * tail lifecycle hooks (watcher telemetry, shutdown-hook diff-cache cleanup,
  * starred/feedback stores, release prep). Everything with real weight lives in
  * a focused step module:
  *
@@ -38,7 +38,7 @@
  * No plugin-specific code lives here — all plugins register themselves via the
  * HostApi manufactured in `steps/plugin-runtime.ts`.
  */
-import { app, shell } from "electron";
+import { shell } from "electron";
 import type { BrowserWindow } from "electron";
 import { resolve } from "node:path";
 import { sweepOrphanUninstallDirs } from "./plugins/orphan-uninstall-sweeper.js";
@@ -60,6 +60,7 @@ import {
   removeQuiescentPluginResidualState,
 } from "./plugins/uninstall-lifecycle.js";
 import { drainPluginInstallLockOperations } from "./plugins/install-lifecycle.js";
+import { registerShutdownHook } from "./main/app-shutdown.js";
 import { openLinkWindow as openLinkWindowService } from "./main/link-window-service.js";
 import { openAuthPartitionViewer as openAuthPartitionViewerService } from "./main/auth-partition-viewer-service.js";
 
@@ -902,7 +903,7 @@ export async function bootstrap(
     subscribe: (type, handler) => onEvent(type, handler),
     log: (msg, meta) => log.warn({ meta }, msg),
   });
-  app.on("before-quit", () => watcherTelemetryCollector.stop());
+  registerShutdownHook("watcher-telemetry", () => watcherTelemetryCollector.stop());
 
   // Issue #749 — clean up CURRENT session's diff-cache dir on quit.
   // NOTE: only clears the CURRENT session's diff-cache dir. Diff caches from
@@ -912,7 +913,7 @@ export async function bootstrap(
   //   (b) boot purge backstop exists,
   //   (c) tracking all touched-session-ids would add lifecycle complexity.
   // Fire-and-forget: quit must not block on I/O.
-  app.prependOnceListener("before-quit", () => {
+  registerShutdownHook("diff-cache", () => {
     const sid = ctx.conversationLoop.getSessionId();
     if (sid)
       void clearSessionDiffCache(sid).catch((err: unknown) => {

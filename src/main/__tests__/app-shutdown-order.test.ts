@@ -15,6 +15,8 @@
  *    test fail on its other assertion.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { readdirSync, readFileSync } from "node:fs";
+import { join, relative, resolve } from "node:path";
 
 const calls: string[] = [];
 
@@ -235,5 +237,151 @@ describe("runAppShutdownCleanup ordering (critic M1)", () => {
       "before-quit",
       "routine root failure",
     );
+  });
+});
+
+/**
+ * Shutdown hooks, and the listener ceiling they exist to keep.
+ *
+ * Node warns once an emitter passes ten listeners for one event. Electron's
+ * `App` is a single long-lived emitter and `before-quit` is the event every
+ * subsystem wants, so one listener per subsystem put a
+ * `MaxListenersExceededWarning` on stderr of every launch — which a one-shot
+ * `--exec` run hands to its caller as if the run had leaked something.
+ *
+ * The bound is structural rather than a raised ceiling: teardown that needs no
+ * ordering registers a hook and shares the one listener `src/main.ts` owns, so
+ * the listener count does not move when a subsystem is added. The source scan
+ * at the bottom is what holds that: it fails the moment a new module takes a
+ * `before-quit` listener of its own.
+ */
+describe("shutdown hooks", () => {
+  it("runs every hook once, in registration order", async () => {
+    vi.resetModules();
+    const { registerShutdownHook, runShutdownHooks } = await import("../app-shutdown.js");
+    const ran: string[] = [];
+    registerShutdownHook("first", () => ran.push("first"));
+    registerShutdownHook("second", () => ran.push("second"));
+
+    runShutdownHooks();
+    runShutdownHooks();
+
+    expect(ran).toEqual(["first", "second"]);
+  });
+
+  it("runs a hook registered after the drain immediately, and only once", async () => {
+    // Boot can still be registering while a quit is in flight: the drain has
+    // already happened, the ordered cleanup declined because AppServices did
+    // not exist yet, and the plugin runtime deferred the quit. A hook that
+    // arrives then belongs to a drain that has passed, and a second drain
+    // never comes — so it has to run on the spot.
+    vi.resetModules();
+    const { registerShutdownHook, runShutdownHooks } = await import("../app-shutdown.js");
+    runShutdownHooks();
+
+    const late = vi.fn();
+    registerShutdownHook("registered-after-drain", late);
+    expect(late).toHaveBeenCalledTimes(1);
+
+    runShutdownHooks();
+    expect(late).toHaveBeenCalledTimes(1);
+
+    // Same containment as the drain: a late hook that throws must not surface
+    // in the middle of the boot step that registered it.
+    expect(() =>
+      registerShutdownHook("late-and-throws", () => {
+        throw new Error("timer already gone");
+      }),
+    ).not.toThrow();
+    expect(logWarn).toHaveBeenCalledWith(
+      "shutdown hook failed (%s): %s",
+      "late-and-throws",
+      "timer already gone",
+    );
+  });
+
+  it("contains a throwing hook so the ones after it still run", async () => {
+    vi.resetModules();
+    const { registerShutdownHook, runShutdownHooks } = await import("../app-shutdown.js");
+    const ran: string[] = [];
+    registerShutdownHook("throws", () => {
+      throw new Error("timer already gone");
+    });
+    registerShutdownHook("after", () => ran.push("after"));
+
+    runShutdownHooks();
+
+    expect(ran).toEqual(["after"]);
+    expect(logWarn).toHaveBeenCalledWith(
+      "shutdown hook failed (%s): %s",
+      "throws",
+      "timer already gone",
+    );
+  });
+});
+
+/**
+ * Every `before-quit` listener in the shipped main process, by file.
+ *
+ * Source inspection rather than a runtime count: the registrations are spread
+ * across boot steps that a single test cannot execute together, and the
+ * property being locked is "no module takes its own listener", which is a
+ * property of the source.
+ */
+describe("before-quit listener inventory", () => {
+  /**
+   * One entry per file allowed to register an Electron `before-quit` listener,
+   * with the reason it cannot be a shutdown hook instead.
+   */
+  const ALLOWED_LISTENER_FILES: ReadonlyMap<string, string> = new Map([
+    [
+      "src/main.ts",
+      "the quit orchestrator: runs the hooks, then defers the quit for the ordered cleanup",
+    ],
+    [
+      "src/boot/steps/plugin-runtime.ts",
+      "defers the quit to await plugin shutdown handlers during the boot window, before AppServices is published",
+    ],
+  ]);
+
+  function collectSourceFiles(dir: string, out: string[]): string[] {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name === "__tests__" || entry.name === "__mocks__") continue;
+        collectSourceFiles(full, out);
+      } else if (/\.tsx?$/u.test(entry.name) && !entry.name.endsWith(".d.ts")) {
+        out.push(full);
+      }
+    }
+    return out;
+  }
+
+  it("is exactly the two listeners the host documents", () => {
+    const srcRoot = resolve(process.cwd(), "src");
+    const registration =
+      /\bapp\s*\.\s*(?:on|once|addListener|prependListener|prependOnceListener)\s*\(\s*"before-quit"/u;
+    const found = collectSourceFiles(srcRoot, [])
+      .filter((file) => registration.test(readFileSync(file, "utf-8")))
+      .map((file) => relative(process.cwd(), file))
+      .sort();
+
+    const allowed = [...ALLOWED_LISTENER_FILES.keys()].sort();
+    const why = [...ALLOWED_LISTENER_FILES]
+      .map(([file, reason]) => `  ${file} — ${reason}`)
+      .join("\n");
+    expect(
+      found,
+      [
+        "The set of files registering an Electron `before-quit` listener changed.",
+        "Allow-list (src/main/__tests__/app-shutdown-order.test.ts, ALLOWED_LISTENER_FILES):",
+        why,
+        "A new listener needs an entry here only when its teardown CANNOT be a",
+        "shutdown hook — it has to call event.preventDefault(), or its position",
+        "relative to another teardown step matters. Everything else belongs in",
+        "registerShutdownHook() (src/main/app-shutdown.ts), which shares the one",
+        "listener main.ts owns and keeps the App emitter under Node's ceiling.",
+      ].join("\n"),
+    ).toEqual(allowed);
   });
 });

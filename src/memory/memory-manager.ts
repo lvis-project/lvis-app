@@ -1517,7 +1517,7 @@ export class MemoryManager implements PromptMemorySource {
    * (`searchSessions`) and write (`indexSessionForSearch`) paths already
    * open→use→close per operation, so no persistent handle normally survives a
    * call boundary — this is a defensive no-op safety net (idempotent, cheap)
-   * kept wired into `before-quit` alongside `stopPersistentContextWatcher()`
+   * kept wired into the shutdown hook alongside `stopPersistentContextWatcher()`
    * in case a future long-lived-handle code path is added.
    */
   closeSearchIndex(): void {

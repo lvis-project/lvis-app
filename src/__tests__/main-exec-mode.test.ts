@@ -91,6 +91,20 @@ describe("main.ts — headless exec branch", () => {
     expect(branch!).toMatch(/process\.exitCode\s*=/);
   });
 
+  it("drains the shutdown hooks before the guards that can return early", () => {
+    // The hooks replaced a set of `prependOnceListener`s, which fired ahead of
+    // this handler and on every quit — including one that arrives while boot is
+    // still running, where `getServices()` is still null and the guards below
+    // return without starting the ordered cleanup.
+    const handler = mainSource.indexOf('app.on("before-quit"');
+    expect(handler).toBeGreaterThanOrEqual(0);
+    const body = mainSource.slice(handler, mainSource.indexOf("\n});", handler));
+    const hooks = body.indexOf("runShutdownHooks()");
+    const servicesGuard = body.indexOf("if (!getServices()");
+    expect(hooks).toBeGreaterThanOrEqual(0);
+    expect(servicesGuard).toBeGreaterThan(hooks);
+  });
+
   it("carries the chosen exit code through will-quit, after before-quit cleanup", () => {
     const handler = mainSource.indexOf('app.on("will-quit"');
     expect(handler).toBeGreaterThanOrEqual(0);

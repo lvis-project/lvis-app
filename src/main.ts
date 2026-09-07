@@ -32,7 +32,7 @@ import { ensureCorporateCaInjected } from "./main/corp-ca-runtime.js";
 import { readPersistedCorpCaConfigSync } from "./main/persisted-corp-ca.js";
 import { loadMainStartupDependencies } from "./main/startup-dependencies.js";
 import { updateSplashStatus, waitForMinimumBootstrapSplash } from "./main/bootstrap-splash.js";
-import { runAppShutdownCleanup } from "./main/app-shutdown.js";
+import { runAppShutdownCleanup, runShutdownHooks } from "./main/app-shutdown.js";
 import {
   createWindow,
   getAppWindows,
@@ -762,7 +762,15 @@ app.on("will-quit", (event) => {
   app.exit(process.exitCode);
 });
 
+// The one `before-quit` listener the host installs. Every subsystem that only
+// needs to stop a timer, a watcher or a batch exporter registers a shutdown
+// hook instead of a listener of its own, so this count does not grow with the
+// service graph and Electron's `App` never crosses Node's listener ceiling.
 app.on("before-quit", (event) => {
+  // Hooks run first and unconditionally. Eight of them were prepended
+  // listeners, which fired ahead of this handler; all of them fired on quits
+  // where the guards below return early.
+  runShutdownHooks();
   const appUpdateInstallRequested = isAppUpdateInstallRequested();
   if (isAppUpdateInstallPrepared()) return;
   if (!getServices() || isAppShutdownCompleted()) return;

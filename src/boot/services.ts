@@ -12,6 +12,7 @@ import { getIsPackaged } from "./dev-flags.js";
 import { DEFAULT_LOCALE, normalizeLocale, setLocale, tryLoadLocaleMessages,
 } from "../i18n/index.js";
 import { MemoryManager } from "../memory/memory-manager.js";
+import { registerShutdownHook } from "../main/app-shutdown.js";
 import { MemoryCaptureService } from "../memory/memory-capture-service.js";
 import { getDefaultWorkspaceRoot } from "../main/default-workspace-root.js";
 import { execTurnRequested } from "../main/exec-mode.js";
@@ -169,7 +170,7 @@ export async function bootstrapCoreServices(mainWindow: BrowserWindow,
   });
   memoryManager.load();
   memoryManager.startPersistentContextWatcher();
-  app.once("before-quit", () => {
+  registerShutdownHook("memory-manager", () => {
     memoryManager.stopPersistentContextWatcher();
     memoryManager.closeSearchIndex();
   });

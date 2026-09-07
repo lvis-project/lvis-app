@@ -41,7 +41,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 // hoisted vi.mock factories run, so each mocked seam can record when it fires.
 const h = vi.hoisted(() => {
   const order: string[] = [];
-  const captured: Record<string, unknown> = {};
+  const captured: Record<string, unknown> = { shutdownHooks: [] as string[] };
   const rec = (label: string) => {
     order.push(label);
   };
@@ -50,18 +50,31 @@ const h = vi.hoisted(() => {
 });
 
 // ── electron ───────────────────────────────────────────────────────────────
-vi.mock("electron", () => {
+// `app` is backed by a REAL EventEmitter rather than bare spies: the listener
+// ceiling this file locks (see the shutdown-listener describe at the bottom) is
+// a property of the emitter, so a boot that added listeners past Node's default
+// would have to make the emitter itself warn for the guard to mean anything.
+vi.mock("electron", async () => {
+  const { EventEmitter } = await import("node:events");
   const BrowserWindow = Object.assign(function BrowserWindow() {}, {
     getAllWindows: vi.fn(() => [] as unknown[]),
     getFocusedWindow: vi.fn(() => null),
   });
+  const appEvents = new EventEmitter();
+  h.captured["appEvents"] = appEvents;
   return {
     app: {
       getPath: vi.fn(() => "/tmp/lvis-boot-test"),
       isPackaged: false,
-      on: vi.fn(),
-      prependOnceListener: vi.fn(),
-      once: vi.fn(),
+      on: vi.fn((event: string, listener: (...a: unknown[]) => void) =>
+        appEvents.on(event, listener),
+      ),
+      prependOnceListener: vi.fn((event: string, listener: (...a: unknown[]) => void) =>
+        appEvents.prependOnceListener(event, listener),
+      ),
+      once: vi.fn((event: string, listener: (...a: unknown[]) => void) =>
+        appEvents.once(event, listener),
+      ),
     },
     net: { fetch: vi.fn() },
     session: {
@@ -75,6 +88,18 @@ vi.mock("electron", () => {
     BrowserWindow,
   };
 });
+
+// The shutdown coordinator is a seam here for two reasons: importing it for
+// real would drag every teardown target (servers, pty manager, host API) into
+// this file's graph, and the hook NAMES are what the listener-ceiling suite
+// asserts bootstrap registers.
+vi.mock("../../main/app-shutdown.js", () => ({
+  registerShutdownHook: vi.fn((name: string) => {
+    (h.captured["shutdownHooks"] as string[]).push(name);
+  }),
+  runShutdownHooks: vi.fn(),
+  runAppShutdownCleanup: vi.fn(async () => "completed"),
+}));
 
 // ── boot step seams (the modules bootstrap orchestrates) ─────────────────────
 vi.mock("../services.js", () => ({
@@ -592,6 +617,26 @@ import { bootstrap, type AppServices } from "../../boot.js";
 import { runManagedBootstrap } from "../managed-marketplace.js";
 import { wireAnnouncementCheck, wireUpdateCheck } from "../steps/post-boot.js";
 
+/**
+ * Node reports a listener leak through `process.emitWarning`, so the spy has to
+ * be in place before the first boot below runs. It keeps the real
+ * implementation: the assertion is about what was emitted, not about silencing
+ * it.
+ */
+const emitWarningSpy = vi.spyOn(process, "emitWarning");
+
+/** Names of the warnings Node raised while the boots below ran. */
+function emittedWarningNames(): string[] {
+  return emitWarningSpy.mock.calls.map(([warning]) =>
+    typeof warning === "string" ? warning : String((warning as Error)?.name ?? warning),
+  );
+}
+
+/** The mocked Electron `App` emitter, so listener counts can be read back. */
+function appEventEmitter(): import("node:events").EventEmitter {
+  return h.captured["appEvents"] as import("node:events").EventEmitter;
+}
+
 function fakeWindow() {
   return {
     isDestroyed: () => false,
@@ -899,6 +944,13 @@ describe("bootstrap() integration lock", () => {
     );
   });
 
+  it("stops its own timers and watchers through the shutdown coordinator, not its own listeners", () => {
+    // The interactive launch still wires both of bootstrap's teardown paths —
+    // it just no longer spends an Electron listener on either.
+    expect(h.captured["shutdownHooks"]).toEqual(["watcher-telemetry", "diff-cache"]);
+    expect(appEventEmitter().listenerCount("before-quit")).toBe(0);
+  });
+
   it("opens the host's own service connections (interactive launch is unchanged)", () => {
     // Every registry resolves `online` from its own default, so boot passes
     // nothing and each step keeps deciding.
@@ -937,6 +989,7 @@ describe("bootstrap() headless launch opens no discretionary service connection"
     vi.mocked(wireUpdateCheck).mockClear();
     vi.mocked(wireAnnouncementCheck).mockClear();
     h.order.length = 0;
+    (h.captured["shutdownHooks"] as string[]).length = 0;
     const win = fakeWindow();
     headlessServices = await bootstrap(
       "/tmp/lvis-boot-test/project",
@@ -981,5 +1034,19 @@ describe("bootstrap() headless launch opens no discretionary service connection"
     expect(h.order).toContain("initPluginRuntime");
     expect(h.order).toContain("startPlugins");
     expect(headlessServices.pluginRuntime.listPluginIds()).toEqual([]);
+  });
+
+  it("adds no `before-quit` listener of its own, and Node never reports a leak", () => {
+    // A one-shot run writes its stderr straight to whoever launched it, so a
+    // `MaxListenersExceededWarning` there reads as a defect in the run. The
+    // count is bounded by construction: teardown that needs no ordering is a
+    // shutdown hook, and both hooks below share the single listener `main.ts`
+    // owns — which this file's Electron seam never installs.
+    expect((h.captured["shutdownHooks"] as string[])).toEqual([
+      "watcher-telemetry",
+      "diff-cache",
+    ]);
+    expect(appEventEmitter().listenerCount("before-quit")).toBe(0);
+    expect(emittedWarningNames()).not.toContain("MaxListenersExceededWarning");
   });
 });
