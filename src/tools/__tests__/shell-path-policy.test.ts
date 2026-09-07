@@ -213,6 +213,19 @@ describe("shell-path-policy", () => {
     { label: "grep pattern that begins with a slash", command: `grep -vE "^[+-] *$|^[+-][+]" diff.txt` },
     { label: "curl --write-out format", command: `curl -sS -o ./out.json -w "HTTP %{http_code}\\n" https://example.test/api` },
     { label: "openssl subject DN", command: `openssl req -x509 -subj "/O=Example Org/CN=dev.example.test" -out ./cert.pem` },
+    // A double-quoted argument that begins with `/` is an option VALUE, not a
+    // path. The full certificate-request form was refused twice in a second
+    // bench run, both times as a target outside the allowed directories: the
+    // subject DN resolved to an absolute path nothing would ever open, while
+    // the two operands that ARE paths (`-keyout`, `-out`) were unremarkable.
+    {
+      label: "openssl subject DN in the full certificate-request form",
+      command: `openssl req -x509 -newkey rsa:2048 -nodes -keyout ./key.pem -out ./cert.pem -days 365 -subj "/O=Example Org/CN=svc.example.test"`,
+    },
+    // The same shape one layer down. The single-quoted entry above reaches the
+    // scan as a literal run; double quotes are an expansion-active run and
+    // arrive by a different route through the tokenizer, so both are pinned.
+    { label: "double-quoted sed address range", command: `sed -n "/def sample/,/return Fit/p" file.py` },
     { label: "echo carrying a substitution", command: `echo "total lines: $(wc -l < ./log.txt)"` },
     { label: "assignment whose value is only a substitution", command: `p=$(command -v cc); echo "$p"` },
     { label: "quoted heredoc body with a division slash", command: "python3 - <<'EOF'\nnstep = int(2.0 / 0.002)\nprint(nstep)\nEOF" },

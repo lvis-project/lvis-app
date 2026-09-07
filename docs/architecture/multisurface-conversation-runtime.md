@@ -461,7 +461,12 @@ An unattended run has nobody to ask, so it registers a pending-approval observer
 that answers every parked request with `deny-once` and notes it on stderr. That
 is the whole of its approval behaviour: it never widens a verdict, and
 `--exec-approve=allow` sets the permission manager's allow mode without removing
-any Layer 0 check. `--set-secret` writes through the app's own secret store so a
+any Layer 0 check. Allow mode does not cover the Layer-1 allowed-directory
+prompt either — that prompt is its own request, so an unattended run turns it
+into a `deny-once` and every path outside the already-granted set is refused,
+which is why a harness has to pre-grant the directories its tasks work in
+through the workspace grant document rather than expecting allow mode to reach
+them. `--set-secret` writes through the app's own secret store so a
 container never has to produce the platform's ciphertext itself; the store's key
 validation and its refusal to store a secret it cannot encrypt are surfaced as
 exit codes rather than worked around.
