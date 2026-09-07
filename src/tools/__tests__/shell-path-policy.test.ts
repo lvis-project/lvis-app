@@ -200,6 +200,62 @@ describe("shell-path-policy", () => {
     });
   });
 
+  describe("a regex argument is a pattern, not a filename", () => {
+    it("stops reading a grep pattern as a Windows path", () => {
+      withRoot((root) => {
+        // `\.` is a regex escape. Read as a separator it made the pattern
+        // path-shaped, and then the `$` anchors read as unresolved variables —
+        // so a command that opens nothing outside the sandbox was refused.
+        expect(
+          validateShellCommandPathPolicy(
+            'grep -v -E "\\.(o$|cmx$|a$)" list.txt',
+            root,
+            root,
+            [],
+          ),
+        ).toBeNull();
+      });
+    });
+
+    it("does not need the pattern to be the only argument", () => {
+      withRoot((root) => {
+        expect(
+          validateShellCommandPathPolicy(
+            'ls | grep -v -E "\\.(tmp$|bak$)" | head -40',
+            root,
+            root,
+            [],
+          ),
+        ).toBeNull();
+      });
+    });
+
+    // The point of the bare-path rule is that a slot which opens what it is
+    // given must keep checking real filenames. Escapes are dropped only to ask
+    // whether anything path-shaped is left; a path still has its separators
+    // afterwards, so none of these become exempt.
+    it("keeps refusing a real path in a slot that would open it", () => {
+      withRoot((root) => {
+        expect(validateShellCommandPathPolicy("sh -c /etc/shadow", root, root, []))
+          .toContain("Sensitive path:");
+        // Escaping a separator does not hide it: the slashes survive.
+        expect(validateShellCommandPathPolicy("sh -c \\/etc/shadow", root, root, []))
+          .toContain("Sensitive path:");
+        expect(validateShellCommandPathPolicy("grep /etc/shadow", root, root, []))
+          .toContain("Sensitive path:");
+      });
+    });
+
+    it("leaves a Windows path path-shaped", () => {
+      withRoot((root) => {
+        // `\W` and `\n` are separators followed by word characters, so nothing
+        // is dropped and the value stays a path.
+        expect(validateShellCommandPathPolicy("sh -c C:\\Windows\\notes.txt", root, root, []))
+          .not.toBeNull();
+      });
+    });
+  });
+
   describe("loop variables whose values the command spells out", () => {
     it("judges each value instead of refusing to judge the operand", () => {
       withRoot((root) => {
