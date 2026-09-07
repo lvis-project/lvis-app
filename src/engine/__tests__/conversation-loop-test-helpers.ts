@@ -2,7 +2,7 @@ import { vi } from "vitest";
 import { makePromptMemorySource } from "../../prompts/__tests__/test-helpers.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
 import type { ConversationLoopDeps } from "../conversation-loop.js";
-import type { GenericMessage, StreamEvent } from "../llm/types.js";
+import type { GenericMessage, LLMVendor, StreamEvent } from "../llm/types.js";
 import type { CompactWithBoundaryResult } from "../structured-compact.js";
 import { CompressionStatus } from "../../shared/compact-status.js";
 import { unusedNetworkFetch } from "../../__tests__/support/network-fetch-stubs.js";
@@ -10,8 +10,7 @@ import { unusedNetworkFetch } from "../../__tests__/support/network-fetch-stubs.
 export function makeConversationLoopSettings(
   autoCompact = true,
   model = "claude-sonnet-4-5",
-  provider:
-    | "openai" | "claude" | "gemini" | "copilot" | "azure-foundry" | "vertex-ai" = "claude",
+  provider: LLMVendor = "claude",
 ): ConversationLoopDeps["settingsService"] {
   return {
     get: (key: string) => {

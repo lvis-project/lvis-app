@@ -1,5 +1,15 @@
 import { describe, it, expect } from "vitest";
-import { getUsableContext, getPreflightThreshold } from "../context-budget.js";
+import {
+  getUsableContext,
+  getPreflightThreshold,
+  llmRouteCatalogAddress,
+  MAX_CREDIBLE_CONTEXT_WINDOW,
+  resolveContextWindowForRoute,
+  resolveModelContextWindow,
+} from "../context-budget.js";
+import { FALLBACK_PRICING } from "../pricing-data.js";
+import { freshAllVendorBlocks } from "../llm-vendor-defaults.js";
+import { llmModelListCacheKey, type LlmModelListCache } from "../llm-model-list.js";
 
 describe("getUsableContext — LVIS tier-fixed reservations", () => {
   it("64K → 37K usable (27K reserved for output-heavy small models)", () => {
@@ -93,5 +103,225 @@ describe("getPreflightThreshold — token preflight trigger", () => {
       const ratio = getPreflightThreshold(ctx) / getUsableContext(ctx);
       expect(ratio).toBe(0.8);
     }
+  });
+});
+
+describe("resolveModelContextWindow — where the budget's denominator comes from", () => {
+  it("takes the vendor block's declared window over everything else", () => {
+    const resolved = resolveModelContextWindow({
+      vendor: "claude",
+      model: "claude-sonnet-4-5",
+      configured: 300_000,
+      reported: 229_376,
+    });
+
+    expect(resolved).toEqual({ contextWindow: 300_000, source: "vendor-setting" });
+  });
+
+  it("takes what the provider reported when nothing was declared", () => {
+    const resolved = resolveModelContextWindow({
+      vendor: "openai-compatible",
+      model: "a-model-no-catalog-knows",
+      reported: 229_376,
+    });
+
+    expect(resolved).toEqual({ contextWindow: 229_376, source: "provider-reported" });
+  });
+
+  it("reads the pricing catalog when neither input is present", () => {
+    const resolved = resolveModelContextWindow({
+      vendor: "openai-compatible",
+      model: "Qwen3.6-35B-A3B-NVFP4",
+    });
+
+    expect(resolved).toEqual({ contextWindow: 262_144, source: "pricing-catalog" });
+  });
+
+  it("matches the catalog entry whatever case the served id is spelled in", () => {
+    const resolved = resolveModelContextWindow({
+      vendor: "openai-compatible",
+      model: "qwen3.6-35b-a3b-nvfp4",
+    });
+
+    expect(resolved).toEqual({ contextWindow: 262_144, source: "pricing-catalog" });
+  });
+
+  it("names the fallback as a fallback so a caller can report the guess", () => {
+    const resolved = resolveModelContextWindow({
+      vendor: "openai-compatible",
+      model: "a-model-no-catalog-knows",
+    });
+
+    expect(resolved).toEqual({
+      contextWindow: FALLBACK_PRICING.contextWindow,
+      source: "fallback",
+    });
+  });
+
+  it("treats a malformed or non-positive declared window as not declared", () => {
+    // A stored 0 that survived would zero the preflight threshold and switch
+    // auto-compaction off for the route entirely.
+    for (const configured of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(
+        resolveModelContextWindow({
+          vendor: "openai-compatible",
+          model: "a-model-no-catalog-knows",
+          configured,
+        }).source,
+      ).toBe("fallback");
+    }
+  });
+
+  it("refuses a window an order of magnitude past anything real", () => {
+    // A typo'd extra digit on 229,376 reads as 2,293,760, whose preflight
+    // threshold no conversation reaches: compaction would never run again and
+    // the turn would die on a provider context error instead.
+    for (const value of [MAX_CREDIBLE_CONTEXT_WINDOW + 1, 22_937_600, Number.MAX_SAFE_INTEGER]) {
+      expect(
+        resolveModelContextWindow({
+          vendor: "openai-compatible",
+          model: "a-model-no-catalog-knows",
+          configured: value,
+        }).source,
+      ).toBe("fallback");
+      expect(
+        resolveModelContextWindow({
+          vendor: "openai-compatible",
+          model: "a-model-no-catalog-knows",
+          reported: value,
+        }).source,
+      ).toBe("fallback");
+    }
+    // The largest real windows still pass.
+    expect(
+      resolveModelContextWindow({
+        vendor: "openai-compatible",
+        model: "a-model-no-catalog-knows",
+        configured: MAX_CREDIBLE_CONTEXT_WINDOW,
+      }),
+    ).toEqual({ contextWindow: MAX_CREDIBLE_CONTEXT_WINDOW, source: "vendor-setting" });
+  });
+
+  it("treats a malformed provider-reported window as absent, not as an error", () => {
+    expect(
+      resolveModelContextWindow({
+        vendor: "openai-compatible",
+        model: "a-model-no-catalog-knows",
+        reported: 0,
+      }),
+    ).toEqual({ contextWindow: FALLBACK_PRICING.contextWindow, source: "fallback" });
+  });
+});
+
+describe("resolveContextWindowForRoute — one answer for the engine and the ring", () => {
+  function routeSettings(overrides: {
+    contextWindow?: number;
+    reported?: { contextLength?: number; maxOutputTokens?: number };
+    baseUrl?: string;
+    presetId?: string;
+  } = {}) {
+    const model = "a-model-no-catalog-knows";
+    const vendors = freshAllVendorBlocks();
+    const block = vendors["openai-compatible"];
+    block.baseUrl = overrides.baseUrl ?? "https://models.invalid/v1";
+    if (overrides.presetId) block.presetModels = { [overrides.presetId]: model };
+    else block.model = model;
+    if (overrides.contextWindow !== undefined) block.contextWindow = overrides.contextWindow;
+    const modelListCache: LlmModelListCache = {};
+    if (overrides.reported) {
+      const key = llmModelListCacheKey(
+        "openai-compatible",
+        overrides.baseUrl ?? "https://models.invalid/v1",
+        overrides.presetId ?? "",
+      );
+      modelListCache[key] = {
+        vendor: "openai-compatible",
+        endpoint: "https://models.invalid/v1/models",
+        models: [model],
+        modelEntries: [{ id: model, ...overrides.reported }],
+        fetchedAt: new Date(0).toISOString(),
+      };
+    }
+    return {
+      provider: "openai-compatible" as const,
+      vendors,
+      modelListCache,
+      ...(overrides.presetId ? { marketplaceProviderPresetId: overrides.presetId } : {}),
+    };
+  }
+
+  it("reads the window the vendor block declares, over the provider's report", () => {
+    expect(
+      resolveContextWindowForRoute(
+        routeSettings({ contextWindow: 300_000, reported: { contextLength: 229_376 } }),
+      ),
+    ).toMatchObject({
+      model: "a-model-no-catalog-knows",
+      contextWindow: 300_000,
+      source: "vendor-setting",
+    });
+  });
+
+  it("reads what the route's own /models handshake reported for that model", () => {
+    expect(
+      resolveContextWindowForRoute(
+        routeSettings({ reported: { contextLength: 229_376, maxOutputTokens: 32_768 } }),
+      ),
+    ).toMatchObject({
+      contextWindow: 229_376,
+      source: "provider-reported",
+      maxOutputTokens: 32_768,
+    });
+  });
+
+  it("looks the preset's row up under the preset's own endpoint", () => {
+    // A preset is a provider in its own right reached through the
+    // openai-compatible vendor: its catalogue synced against its own address,
+    // so keying the lookup on the generic block's would find nothing.
+    const settings = routeSettings({
+      presetId: "provider-alpha",
+      baseUrl: "https://preset.invalid/v1",
+      reported: { contextLength: 131_072 },
+    });
+
+    expect(
+      resolveContextWindowForRoute(settings, [
+        { providerId: "provider-alpha", baseUrl: "https://preset.invalid/v1" },
+      ]),
+    ).toMatchObject({ contextWindow: 131_072, source: "provider-reported" });
+  });
+
+  it("finds the reported row whatever case the configured model id is spelled in", () => {
+    const settings = routeSettings({ reported: { contextLength: 131_072 } });
+    const cached = Object.values(settings.modelListCache)[0]!;
+    cached.modelEntries = [{ id: "A-Model-No-Catalog-Knows", contextLength: 131_072 }];
+    cached.models = ["A-Model-No-Catalog-Knows"];
+
+    expect(resolveContextWindowForRoute(settings)).toMatchObject({
+      contextWindow: 131_072,
+      source: "provider-reported",
+    });
+  });
+
+  it("names the same cache coordinates a refresh has to write back to", () => {
+    // A refresher that keys the row differently writes an answer the reader
+    // never finds, so the probe repeats forever.
+    expect(
+      llmRouteCatalogAddress(
+        routeSettings({ presetId: "provider-alpha", baseUrl: "https://preset.invalid/v1" }),
+        [{ providerId: "provider-alpha", baseUrl: "https://preset.invalid/v1" }],
+      ),
+    ).toEqual({
+      vendor: "openai-compatible",
+      baseUrl: "https://preset.invalid/v1",
+      credentialScope: "provider-alpha",
+    });
+  });
+
+  it("moves to the next source when the route has no handshake for the model", () => {
+    expect(resolveContextWindowForRoute(routeSettings())).toMatchObject({
+      contextWindow: FALLBACK_PRICING.contextWindow,
+      source: "fallback",
+    });
   });
 });

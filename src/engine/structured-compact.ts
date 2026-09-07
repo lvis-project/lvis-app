@@ -186,6 +186,9 @@ const LEDGER_RESULT_MAX = 200;
 /** Recent user turns that must survive compaction verbatim. */
 export const DEFAULT_PRESERVE_RECENT_TURNS = 5;
 
+/** See {@link CompactWithBoundaryArgs.preserveUnit}. */
+type PreserveUnit = "user-turns" | "tool-rounds";
+
 /**
  * The only capability structured compaction needs from the common Memory
  * Reviewer lane. Keeping this recap-only prevents callers from substituting a
@@ -217,6 +220,21 @@ export interface CompactWithBoundaryArgs {
    * completed turns.
    */
   preserveRecentTurns?: number;
+  /**
+   * What a "recent unit" is for the preserve floor.
+   *
+   * `user-turns` (default) is right BETWEEN turns: keep the last
+   * `preserveRecentTurns` user questions and everything after them.
+   *
+   * `tool-rounds` is right INSIDE one. An agent turn appends no user message,
+   * so the user-turn floor puts everything that turn produced inside the
+   * preserve region — the compactor then has nothing of this turn to work on
+   * and returns NOOP no matter how far over the threshold the turn has grown.
+   * Counting assistant tool rounds instead makes the turn's own earlier rounds
+   * reducible, which is the only thing that can bring a long agent turn back
+   * under its budget.
+   */
+  preserveUnit?: PreserveUnit;
   compactNum: number;
 
 
@@ -425,6 +443,7 @@ export async function compactWithBoundary(
     memoryReviewer,
     preserveRecentTokens,
     preserveRecentTurns = DEFAULT_PRESERVE_RECENT_TURNS,
+    preserveUnit = "user-turns",
     compactNum,
     sessionId,
     preflightTokens,
@@ -441,6 +460,7 @@ export async function compactWithBoundary(
     workingMessages,
     preserveRecentTokens,
     preserveRecentTurns,
+    preserveUnit,
   );
 
   if (toCompact.length === 0) {
@@ -689,11 +709,14 @@ function splitForBoundary(
   messages: GenericMessage[],
   preserveRecentTokens: number,
   preserveRecentTurns = DEFAULT_PRESERVE_RECENT_TURNS,
+  preserveUnit: PreserveUnit = "user-turns",
 ): { toCompact: GenericMessage[]; toPreserve: GenericMessage[]; protectedPreserveCount: number } {
   if (messages.length === 0) {
     return { toCompact: [], toPreserve: [], protectedPreserveCount: 0 };
   }
-  const turnPreserveStart = findRecentTurnPreserveStart(messages, preserveRecentTurns);
+  const turnPreserveStart = preserveUnit === "tool-rounds"
+    ? findRecentToolRoundPreserveStart(messages, preserveRecentTurns)
+    : findRecentTurnPreserveStart(messages, preserveRecentTurns);
   const protectedPreserveCount =
     turnPreserveStart < messages.length ? messages.length - turnPreserveStart : 0;
   if (preserveRecentTokens <= 0 && turnPreserveStart >= messages.length) {
@@ -717,11 +740,70 @@ function splitForBoundary(
   // 절대 orphan tool_result 가 되지 않게 한다 — 그렇지 않으면 다음 turn 의
   // provider 호출이 tool_use_id 미스매치로 400.
   preserveStart = adjustForwardToToolBoundary(messages, preserveStart);
+  if (preserveUnit === "tool-rounds") {
+    // The question the turn is answering. Between turns the user-turn floor
+    // keeps it by construction and `runPreflightGuard` adds a token allowance
+    // for a just-typed one; inside a turn neither applies, and after enough
+    // rounds the round floor leaves it behind — a reloaded transcript would
+    // show the turn's answer with no question above it. Pinned to the head of
+    // the preserve region instead of summarized.
+    const pinned = latestRenderableUserIndex(messages, preserveStart);
+    if (pinned >= 0) {
+      return {
+        toCompact: [
+          ...messages.slice(0, pinned),
+          ...messages.slice(pinned + 1, preserveStart),
+        ],
+        toPreserve: [messages[pinned], ...messages.slice(preserveStart)],
+        // Counted as protected so the forced-drop pass cannot take it; that
+        // pass already stands down rather than drop the latest user row, and
+        // logs when it does.
+        protectedPreserveCount: protectedPreserveCount + 1,
+      };
+    }
+  }
   return {
     toCompact: messages.slice(0, preserveStart),
     toPreserve: messages.slice(preserveStart),
     protectedPreserveCount,
   };
+}
+
+/** The most recent real user row strictly before `end`, or -1. */
+function latestRenderableUserIndex(messages: GenericMessage[], end: number): number {
+  for (let i = Math.min(end, messages.length) - 1; i >= 0; i--) {
+    const message = messages[i];
+    if (message.role === "user" && message.meta?.compactBoundary !== true) return i;
+  }
+  return -1;
+}
+
+/**
+ * Where the last `keepRounds` assistant tool rounds start.
+ *
+ * A round begins at the assistant message that carried the tool calls; its
+ * results follow. Counting from the end and stopping at the `keepRounds`-th
+ * such assistant leaves every earlier round of the turn reducible, which is
+ * what {@link findRecentTurnPreserveStart} cannot do inside a turn that has
+ * appended no user message of its own.
+ *
+ * A history with fewer than `keepRounds` rounds preserves everything and the
+ * caller gets its NOOP — correct, because there is nothing older than the
+ * protected window to summarize.
+ */
+function findRecentToolRoundPreserveStart(messages: GenericMessage[], keepRounds: number): number {
+  const keep = Math.max(0, Math.floor(keepRounds));
+  if (keep === 0) return messages.length;
+  let seen = 0;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i];
+    if (message.role !== "assistant" || !message.toolCalls || message.toolCalls.length === 0) continue;
+    seen += 1;
+    if (seen === keep) return i;
+  }
+  // Fewer rounds than the floor asks for: the whole history is inside the
+  // protected window.
+  return 0;
 }
 
 function findRecentTurnPreserveStart(messages: GenericMessage[], preserveRecentTurns: number): number {

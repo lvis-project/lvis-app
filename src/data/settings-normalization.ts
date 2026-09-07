@@ -403,6 +403,7 @@ function normalizeCachedModelListEntries(
     const ownedBy = normalizeCachedModelListString(record.ownedBy);
     const description = normalizeCachedModelListString(record.description, 4_096);
     const contextLength = normalizeCachedModelListNumber(record.contextLength);
+    const maxOutputTokens = normalizeCachedModelListNumber(record.maxOutputTokens);
     const inputModalities = normalizeCachedModelListStringArray(record.inputModalities);
     const outputModalities = normalizeCachedModelListStringArray(record.outputModalities);
     const supportedParameters = normalizeCachedModelListStringArray(record.supportedParameters);
@@ -413,6 +414,7 @@ function normalizeCachedModelListEntries(
     if (ownedBy) entry.ownedBy = ownedBy;
     if (description) entry.description = description;
     if (contextLength !== undefined) entry.contextLength = contextLength;
+    if (maxOutputTokens !== undefined) entry.maxOutputTokens = maxOutputTokens;
     if (inputModalities) entry.inputModalities = inputModalities;
     if (outputModalities) entry.outputModalities = outputModalities;
     if (supportedParameters) entry.supportedParameters = supportedParameters;
@@ -590,6 +592,10 @@ const LLM_VENDOR_SETTING_KEYS = [
   // without this the openai-compatible block is pruned the moment chat moves
   // to another vendor, and every preset's model goes with it.
   "presetModels",
+  // A route whose only customization is the window its endpoint serves is
+  // still configured: pruning it would put that route back on the fallback
+  // window the moment chat moved to another vendor.
+  "contextWindow",
   "baseUrl",
   "vertexProject",
   "vertexLocation",

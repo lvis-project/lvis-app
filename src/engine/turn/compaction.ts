@@ -25,8 +25,18 @@ import {
 } from "../auto-compact.js";
 import { t } from "../../i18n/index.js";
 import { createLogger } from "../../lib/logger.js";
-import { activeLlmRouteModel } from "../../shared/llm-vendor-defaults.js";
-import { getPreflightThreshold, getUsableContext } from "../../shared/context-budget.js";
+import { FALLBACK_PRICING } from "../../shared/pricing-data.js";
+import {
+  getPreflightThreshold,
+  getUsableContext,
+  llmRouteCatalogAddress,
+  resolveContextWindowForRoute,
+  resolveModelContextWindow,
+  type ContextWindowSource,
+  type LlmRouteProviderPreset,
+  type LlmRouteSettings,
+} from "../../shared/context-budget.js";
+import { refreshRouteModelList } from "../llm/model-list.js";
 import type { SubscriptionChatRuntimeSelection } from "../../shared/subscription-runtime.js";
 
 const log = createLogger("lvis");
@@ -49,6 +59,70 @@ interface RuntimeContextBudget {
   readonly identity: string;
   /** Observability only — which input the preflight threshold came from. */
   readonly thresholdSource: PreflightThresholdSource | "subscription-fallback" | "reported-context-window";
+  /**
+   * Observability only — which input the CONTEXT WINDOW behind that threshold
+   * came from. `fallback` says the whole budget rests on a guess.
+   */
+  readonly contextWindowSource: ContextWindowSource | "subscription-fallback";
+  /**
+   * The provider's own ceiling on a completion for this model, when it
+   * reported one. Carried so an output cap has a number to read; the budget
+   * math here does not use it.
+   */
+  readonly maxOutputTokens?: number;
+}
+
+/**
+ * Warn once per route about a budget resting on the fallback window.
+ *
+ * Once, because this is read on every preflight evaluation and the round-loop
+ * gate evaluates it every round — a per-evaluation warning would bury the log
+ * of a long agent turn under thousands of identical lines.
+ */
+const fallbackContextWindowWarned = new Set<string>();
+
+function warnFallbackContextWindowOnce(identity: string, model: string): void {
+  if (fallbackContextWindowWarned.has(identity)) return;
+  fallbackContextWindowWarned.add(identity);
+  log.warn(
+    `context budget: no context window known for model '${model}' — using the ${FALLBACK_PRICING.contextWindow}-token fallback. `
+    + `Declare the endpoint's real capacity as llm.vendors.<vendor>.contextWindow, or sync the provider's model list so it can report one.`,
+  );
+}
+
+/**
+ * Ask the route's endpoint what it serves, in the background.
+ *
+ * Reached only when nothing knew the model's window, so it costs one request
+ * per route per process and nothing at all on a route the catalog knows. The
+ * answer lands in settings and the NEXT budget reads it — this one is already
+ * committed to the fallback, which is the honest thing to budget against until
+ * a better number exists.
+ *
+ * Deliberately not awaited: this is on the path of every preflight evaluation,
+ * including one per round of a long turn, and a turn must not wait on a
+ * catalogue probe.
+ */
+function probeRouteModelListInBackground(
+  self: ConversationLoop,
+  llm: LlmRouteSettings,
+  presets: readonly LlmRouteProviderPreset[] | undefined,
+): void {
+  const address = llmRouteCatalogAddress(llm, presets);
+  // A preset's declared discovery policy governs whether its endpoint may be
+  // asked at all. Passing it through is what keeps this probe from doing what
+  // the settings page refuses to do for the same route.
+  const policy = address.credentialScope
+    ? presets?.find((preset) => preset.providerId === address.credentialScope)?.modelDiscoveryPolicy
+    : undefined;
+  void refreshRouteModelList({
+    settingsService: self.deps.settingsService,
+    fetchOptions: { fetchImpl: self.deps.networkFetch },
+    address,
+    ...(policy ? { modelDiscoveryPolicy: policy } : {}),
+  }).catch((err: unknown) => {
+    log.debug(`model list probe failed: ${(err as Error).message}`);
+  });
 }
 
 function safeReportedContextBudget(
@@ -92,10 +166,12 @@ export function contextBudgetForCurrentRuntime(self: ConversationLoop): RuntimeC
           usableContext: SUBSCRIPTION_FALLBACK_USABLE_CONTEXT,
           identity: `subscription:codex/${model}`,
           thresholdSource: "subscription-fallback",
+          contextWindowSource: "subscription-fallback",
         };
       }
       // Codex catalog model IDs are OpenAI model IDs, but remain isolated from
       // the user's inactive API-key configuration and pricing accounting.
+      const catalogWindow = resolveModelContextWindow({ vendor: "openai", model });
       const catalogPreflight = getModelPreflightThreshold("openai", model);
       const catalogUsableContext = getModelUsableContext("openai", model);
       const reported = self.lastReportedSubscriptionContextWindow;
@@ -120,6 +196,7 @@ export function contextBudgetForCurrentRuntime(self: ConversationLoop): RuntimeC
         thresholdSource: reportedIsTighter
           ? "reported-context-window"
           : getModelPreflightThresholdSource("openai", model),
+        contextWindowSource: reportedIsTighter ? "provider-reported" : catalogWindow.source,
       };
     }
     return {
@@ -128,18 +205,34 @@ export function contextBudgetForCurrentRuntime(self: ConversationLoop): RuntimeC
       usableContext: SUBSCRIPTION_FALLBACK_USABLE_CONTEXT,
       identity: `subscription:${subscriptionRuntime.provider}/${model}`,
       thresholdSource: "subscription-fallback",
+      contextWindowSource: "subscription-fallback",
     };
   }
 
   const llmSettings = self.deps.settingsService.get("llm");
   const provider = llmSettings.provider;
-  const model = activeLlmRouteModel(llmSettings);
+  // The same resolution the renderer's context-fill ring divides by, off the
+  // same settings. Engine and UI cannot disagree about the window because
+  // neither of them decides it.
+  const installedProviderPresets =
+    provider === "openai-compatible" && llmSettings.marketplaceProviderPresetId
+      ? self.deps.settingsService.get("marketplace").installedProviderPresets
+      : undefined;
+  const route = resolveContextWindowForRoute(llmSettings, installedProviderPresets);
+  const model = route.model;
+  const identity = `${provider}/${model}`;
+  if (route.source === "fallback") {
+    warnFallbackContextWindowOnce(identity, model);
+    probeRouteModelListInBackground(self, llmSettings, installedProviderPresets);
+  }
   return {
     model,
-    preflight: getModelPreflightThreshold(provider, model),
-    usableContext: getModelUsableContext(provider, model),
-    identity: `${provider}/${model}`,
-    thresholdSource: getModelPreflightThresholdSource(provider, model),
+    preflight: getModelPreflightThreshold(provider, model, route.contextWindow),
+    usableContext: getModelUsableContext(provider, model, route.contextWindow),
+    identity,
+    thresholdSource: getModelPreflightThresholdSource(provider, model, route.contextWindow),
+    contextWindowSource: route.source,
+    ...(route.maxOutputTokens !== undefined ? { maxOutputTokens: route.maxOutputTokens } : {}),
   };
 }
 
@@ -515,10 +608,10 @@ export async function runPreflightGuard(
       return false;
     }
 
-    const { preflight, identity, thresholdSource } = contextBudgetForCurrentRuntime(self);
+    const { preflight, identity, thresholdSource, contextWindowSource } = contextBudgetForCurrentRuntime(self);
     if (!forceRecover && !forceRateLimit && preflight <= 0) {
       tracePreflightGuard(self, "skipped", "invalid-preflight-threshold", {
-        threshold: preflight, thresholdSource, model: identity,
+        threshold: preflight, thresholdSource, contextWindowSource, model: identity,
       });
       return false;
     }
@@ -538,7 +631,7 @@ export async function runPreflightGuard(
       : estimated;
     if (!forceRecover && !forceRateLimit && estimated < preflight && contextTokensIn < preflight) {
       tracePreflightGuard(self, "not-reached", "below-threshold", {
-        threshold: preflight, thresholdSource, model: identity, estimated, contextTokensIn,
+        threshold: preflight, thresholdSource, contextWindowSource, model: identity, estimated, contextTokensIn,
       });
       return false;
     }
@@ -550,7 +643,7 @@ export async function runPreflightGuard(
           ? "estimate"
           : "context-tokens";
     tracePreflightGuard(self, "fired", triggerSource, {
-      threshold: preflight, thresholdSource, model: identity, estimated, contextTokensIn,
+      threshold: preflight, thresholdSource, contextWindowSource, model: identity, estimated, contextTokensIn,
     });
 
     self.isCompacting = true;
@@ -605,6 +698,11 @@ export async function runPreflightGuard(
         memoryReviewer,
         preserveRecentTokens,
         preserveRecentTurns: DEFAULT_PRESERVE_RECENT_TURNS,
+        // Mid-turn the protected window has to be measured in this turn's own
+        // tool rounds. Left on user turns it covers everything the turn
+        // appended, and the compactor returns NOOP however far over the
+        // threshold the turn has grown.
+        ...(options?.intraTurn ? { preserveUnit: "tool-rounds" as const } : {}),
         compactNum: self.compactNum + 1,
         sessionId: self.sessionId,
         preflightTokens: preflight,

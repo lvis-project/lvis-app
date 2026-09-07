@@ -162,6 +162,17 @@ const INTRA_TURN_PRESERVE_RECENT_RESULTS = 2 * MAX_TOOL_CALLS_PER_ROUND;
 // already large enough to matter — half the model's preflight threshold —
 // so short turns don't pay the mark overhead.
 const MICRO_COMPACT_FLOOR_FACTOR = 0.5;
+// How much a turn's projected request has to grow, as a fraction of the
+// preflight threshold, before the round-loop gate may repeat a compaction that
+// a previous attempt in the same turn already failed to deliver. Real
+// compaction is an LLM call; without this a turn whose history cannot be
+// reduced any further would spend one on every remaining round.
+//
+// A quarter of the threshold is the same order as the preserve window a
+// compaction protects (`preserveRecentTokens` is 0.2–0.4 × preflight), so an
+// attempt only repeats once enough new content exists for a boundary to have
+// something new to cut.
+const ROUND_COMPACT_REARM_GROWTH_FACTOR = 0.25;
 
 export async function queryLoop(
   self: LoopContext,
@@ -397,6 +408,15 @@ export async function queryLoop(
     // Cadence in assistant rounds; `0` disables the notification entirely.
     const progressNudgeRounds =
       self.deps.settingsService.get("chat").progressNudgeRounds;
+    // Round-loop compaction re-arm. The projection this turn must exceed
+    // before the round-loop preflight gate may attempt another compaction.
+    // Zero means armed: the next crossing of the threshold fires. See the gate
+    // itself for why a failed attempt raises it and a successful one clears it.
+    let roundCompactArmedAbove = 0;
+    const roundCompactRearmGrowth = Math.max(
+      1_000,
+      Math.floor(runtimeContextBudget.preflight * ROUND_COMPACT_REARM_GROWTH_FACTOR),
+    );
     // finish_reason=length CONTINUATION carry. While a logical answer is being
     // continued across rounds we accumulate its raw text + reasoning here and
     // DEFER the history append + onAssistantRound until the chain terminates —
@@ -435,8 +455,12 @@ export async function queryLoop(
       const delivery = pendingGuidanceDelivery;
       if (!delivery) return;
       pendingGuidanceDelivery = null;
-      if (delivery.historyMessage) {
-        self.history.removeExact(delivery.historyMessage);
+      const injectionId = delivery.historyMessage?.meta?.hostInjectionId;
+      if (injectionId !== undefined) {
+        // NOT removeExact: a compaction between the append and this rollback
+        // replaces message object identities, and a row that survives rollback
+        // while its entry goes back on the queue is delivered twice.
+        self.history.removeByHostInjectionId(injectionId);
       }
       // Return the drained entries to the turn queue. runTurn's outer finally
       // clears the active controller first, then atomically drops this queue via
@@ -475,6 +499,10 @@ export async function queryLoop(
     const loopRoundBound = effectiveMaxRounds;
     try {
     for (let round = 0; round < loopRoundBound; round++) {
+      // Whether the guidance-injection guard already evaluated the preflight
+      // for THIS round. Reset per round, read by the round-loop gate below so
+      // one round never runs two compactions.
+      let preflightRanThisRound = false;
       // C3(a): hard guard between rounds — if we have already executed
       // `effectiveMaxRounds` assistant turns, stop cleanly and return the
       // last text. This is the loop-boundary defense for agent_spawn
@@ -609,6 +637,7 @@ export async function queryLoop(
         // well below the post-compact preserveRecent budget, so the
         // next round's prompt-assembly will fit.
         if (self.provider && !self.deps.disableSessionPersistence) {
+          preflightRanThisRound = true;
           const compacted = await self.runPreflightGuard(
             {
               systemPrompt,
@@ -693,8 +722,8 @@ export async function queryLoop(
       // round — and `assembleRoundMessages` returns before the append on a
       // continuation anyway, so no separate check is carried here.
       //
-      // Decided here, SENT by assembleRoundMessages below — which is also where
-      // the decision is recorded and the bookkeeping is spent, so a recorded
+      // Decided here and spent just below, next to the re-prompt; the text it
+      // produces is what assembleRoundMessages appends, so a recorded
       // notification always corresponds to one the model was actually handed.
       const progressNudgeBranch: "cadence" | "tool-errors" | null =
         progressNudgeRounds === 0
@@ -715,7 +744,6 @@ export async function queryLoop(
       }
 
       // ─── Stream attempt — token preflight 가 사전 압축 처리하므로 mid-loop retry 없음 ───
-      const baseMessagesForRound = self.history.getMessages();
       // Rows appended for THIS round only. None of them is persisted: history
       // holds what the conversation said, and a host row committed there would
       // replay on every later turn as if the user had typed it.
@@ -725,8 +753,44 @@ export async function queryLoop(
       // so every host instruction for a round shares the single row rather than
       // adding its own.
       //
-      // Called exactly ONCE per round: it consumes the armed re-prompt and
-      // spends its cap, so a second call would charge the same instruction twice.
+      // Both host instructions for the round are spent HERE, once, rather than
+      // inside the assembly below: the round-loop preflight re-assembles the
+      // round against the history a compaction rewrote, and state consumed
+      // inside assembly would be consumed by the assembly that was only
+      // measured — leaving the round the model actually receives without the
+      // instruction, its cap already charged and its decision already recorded.
+      // Both conditions are the ones the assembly appends under, so a spend
+      // still cannot stand for an instruction the model was never sent.
+      let nudgeTextForRound: string | undefined;
+      if (continuationPrefillText === undefined && reasoningNudgePending) {
+        reasoningNudgePending = false;
+        reasoningNudgesRun += 1;
+        nudgeTextForRound = t("be_conversationLoop.reasoningOnlyContinuePrompt");
+      }
+      let progressNudgeText: string | undefined;
+      if (continuationPrefillText === undefined && progressNudgeBranch !== null) {
+        const elapsedSeconds = Math.round((Date.now() - turnStartedAtMs) / 1000);
+        progressNudgeText = t("be_conversationLoop.progressNudge", {
+          round: roundIndex,
+          elapsedSeconds,
+          toolCalls: allToolCalls.length,
+          toolErrors: toolErrorsRun,
+        });
+        decide({
+          kind: "progress.nudge",
+          branch: progressNudgeBranch,
+          data: {
+            round: roundIndex,
+            elapsedSeconds,
+            toolCalls: allToolCalls.length,
+            toolErrors: toolErrorsRun,
+          },
+        });
+        toolErrorsAtLastProgressNudge = toolErrorsRun;
+        roundIndexAtLastProgressNudge = roundIndex;
+      }
+      // Pure over the history handed in, so the gate below can rebuild the same
+      // round from the compacted history without re-deciding anything.
       const assembleRoundMessages = (
         base: GenericMessage[],
       ): GenericMessage[] => {
@@ -769,52 +833,115 @@ export async function queryLoop(
           break;
         }
         const appendedUserText: string[] = [];
-        if (reasoningNudgePending) {
-          // Spend the cap where the instruction reaches the wire, so a spend can
-          // never stand for an instruction the model was not actually sent.
-          reasoningNudgePending = false;
-          reasoningNudgesRun += 1;
-          appendedUserText.push(
-            t("be_conversationLoop.reasoningOnlyContinuePrompt"),
-          );
-        }
+        if (nudgeTextForRound !== undefined) appendedUserText.push(nudgeTextForRound);
         // After the re-prompt: that one says what to do with THIS round, the
-        // notification says what the turn has spent so far. Spent here for the
-        // same reason the re-prompt is — this is where it reaches the wire.
-        if (progressNudgeBranch !== null) {
-          const elapsedSeconds = Math.round((Date.now() - turnStartedAtMs) / 1000);
-          appendedUserText.push(t("be_conversationLoop.progressNudge", {
-            round: roundIndex,
-            elapsedSeconds,
-            toolCalls: allToolCalls.length,
-            toolErrors: toolErrorsRun,
-          }));
-          decide({
-            kind: "progress.nudge",
-            branch: progressNudgeBranch,
-            data: {
-              round: roundIndex,
-              elapsedSeconds,
-              toolCalls: allToolCalls.length,
-              toolErrors: toolErrorsRun,
-            },
-          });
-          toolErrorsAtLastProgressNudge = toolErrorsRun;
-          roundIndexAtLastProgressNudge = roundIndex;
-        }
+        // notification says what the turn has spent so far.
+        if (progressNudgeText !== undefined) appendedUserText.push(progressNudgeText);
         if (appendedUserText.length === 0) return rows;
         return [
           ...rows,
           { role: "user" as const, content: appendedUserText.join("\n\n") },
         ];
       };
-      const messagesForRound = assembleRoundMessages(baseMessagesForRound);
-      self.lastRoundInputProjection = self.projectProviderRequestInput({
-        systemPrompt, messages: messagesForRound, toolSchemas,
+      const projectRound = (messages: GenericMessage[]) => self.projectProviderRequestInput({
+        systemPrompt, messages, toolSchemas,
         continuationPrefill: continuationPrefillText !== undefined,
         enableThinking: roundLlmSettings.enableThinking,
         thinkingBudgetTokens: subscriptionRuntime ? undefined : activeBlock.thinkingBudgetTokens,
       });
+      let messagesForRound = assembleRoundMessages(self.history.getMessages());
+      self.lastRoundInputProjection = projectRound(messagesForRound);
+
+      // ─── Round-loop token preflight ───
+      // The turn-start guard (run-turn.ts) used to be the only place a turn's
+      // context was ever measured against the threshold. An agent turn appends
+      // its own tool results for as many rounds as it runs, so it could cross
+      // the threshold at round 3 and stay over for every round after it —
+      // this round's projection was computed and then never compared.
+      //
+      // This is the same condition and the same compaction, evaluated against
+      // the request that is about to go out. It reuses the projection the
+      // round already computed, so a turn that stays under the threshold pays
+      // nothing for the gate.
+      if (
+        assistantRoundsRun > 0 &&
+        // A length-continuation round is mid-stitch: its wire prefill is an
+        // unpersisted assistant message that the provider resumes verbatim.
+        // Rewriting the history under it would hand the model a prefill that
+        // no longer follows from what precedes it.
+        continuationPrefillText === undefined &&
+        // A guidance round already ran the guard against this same history a
+        // few lines above. Running it twice in one round would spend a second
+        // LLM compaction on a history the first one just rewrote.
+        !preflightRanThisRound &&
+        self.provider &&
+        !self.deps.disableSessionPersistence &&
+        runtimeContextBudget.preflight > 0
+      ) {
+        const projected = self.lastRoundInputProjection.totalTokens;
+        if (projected >= runtimeContextBudget.preflight) {
+          if (projected < roundCompactArmedAbove) {
+            decide({
+              kind: "compact.auto",
+              branch: "rearm-hold",
+              data: { threshold: runtimeContextBudget.preflight, projected, armedAbove: roundCompactArmedAbove },
+            });
+          } else {
+            const compacted = await self.runPreflightGuard(
+              {
+                systemPrompt,
+                toolSchemas,
+                estimateCurrent: () => self.estimateCurrentRequestProjection({ systemPrompt, toolSchemas }),
+              },
+              abortSignal,
+              callbacks,
+              // Mid-turn: the compactor's protected window has to be this
+              // turn's own tool rounds, or it protects everything the turn
+              // appended and reduces nothing.
+              { intraTurn: true },
+            );
+            decide({
+              kind: "compact.auto",
+              branch: compacted ? "fired" : "skipped",
+              data: { threshold: runtimeContextBudget.preflight, projected },
+            });
+            if (compacted) {
+              systemPrompt = self.buildSystemPromptForScope(
+                scope,
+                stagedOrigin,
+                bounds.rolePrompt,
+                bounds.sessionIdOverride ?? self.sessionId,
+                bounds.memoryQuery,
+              );
+              // The round already repaired the history above; compaction has
+              // since rewritten it, and a boundary that cut between a tool_use
+              // and its result is exactly what the provider rejects.
+              const repairedAfterCompact = self.history.repairToolPairInvariant();
+              if (repairedAfterCompact.removedMessages > 0 || repairedAfterCompact.removedToolCalls > 0) {
+                log.warn(
+                  `queryLoop: repaired invalid tool history after round-loop compaction (removedMessages=${repairedAfterCompact.removedMessages}, removedToolCalls=${repairedAfterCompact.removedToolCalls})`,
+                );
+              }
+              messagesForRound = assembleRoundMessages(self.history.getMessages());
+              self.lastRoundInputProjection = projectRound(messagesForRound);
+              // Re-arm against what the compaction actually achieved, not
+              // against zero. A compaction that reduced the history but did
+              // not get back under the threshold would otherwise fire again on
+              // the very next round; measured from the post-compaction
+              // projection, a compaction that DID get back under re-arms as
+              // soon as the turn grows into the threshold again.
+              roundCompactArmedAbove =
+                self.lastRoundInputProjection.totalTokens + roundCompactRearmGrowth;
+            } else {
+              // A compaction that could not reduce anything leaves the
+              // projection over the threshold, so an ungated retry would spend
+              // one LLM compaction per round for the rest of the turn. Require
+              // real growth before asking again.
+              roundCompactArmedAbove = projected + roundCompactRearmGrowth;
+            }
+          }
+        }
+      }
       if (subscriptionRuntime) self.lastRoundProviderInputTokens = 0;
       const toolExposure = self.buildToolExposureMetrics(
         scope,
@@ -1007,7 +1134,10 @@ export async function queryLoop(
             },
             abortSignal,
             callbacks,
-            { forceReason: "rate-limit" },
+            // Also mid-turn: without this the compactor protects everything
+            // the turn appended and recovers nothing, which is the whole
+            // reason the recovery was attempted.
+            { forceReason: "rate-limit", intraTurn: true },
           );
           if (compacted) {
             const recoveredMessage = self.rateLimitCompactMessage(stream);

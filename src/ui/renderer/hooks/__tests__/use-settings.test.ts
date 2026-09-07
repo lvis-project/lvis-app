@@ -5,6 +5,8 @@ import type { AppSettings, LvisApi } from "../../types.js";
 import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
 import { fakeAppSettings } from "../../../../../test/renderer/fake-app-settings.js";
 import { LLM_VENDOR_DEFAULTS } from "../../../../shared/llm-vendor-defaults.js";
+import { FALLBACK_PRICING } from "../../../../shared/pricing-data.js";
+import { llmModelListCacheKey } from "../../../../shared/llm-model-list.js";
 
 function makeSettings(): AppSettings {
   return fakeAppSettings({
@@ -76,9 +78,56 @@ describe("useSettings", () => {
     expect(result.current.llmModel).toBe("local/reasoner");
     expect(result.current.enableThinkingChat).toBe(false);
     expect(result.current.llmReadyWithoutApiKey).toBe(true);
+    // Nothing in this snapshot knows the model, so the route lands on the
+    // conservative window — the same one the engine would budget against.
+    expect(result.current.llmContextWindow).toBe(FALLBACK_PRICING.contextWindow);
 
     unmount();
     expect(unsubscribe).toHaveBeenCalledOnce();
+  });
+
+  it("carries the route's resolved context window, so the ring and the engine divide by one number", async () => {
+    const initial = makeSettings();
+    let onSettingsUpdated: ((settings: AppSettings) => void) | undefined;
+    const { api } = makeMockLvisApi({ settings: initial, hasApiKey: false });
+    api.onSettingsUpdated = vi.fn((handler) => {
+      onSettingsUpdated = handler as (settings: AppSettings) => void;
+      return vi.fn();
+    });
+
+    const { result } = renderHook(() => useSettings(api as unknown as LvisApi));
+    await waitFor(() => expect(result.current.llmModel).toBe("gpt-5.4-mini"));
+
+    const reported = makeSettings();
+    reported.llm.provider = "openai-compatible";
+    reported.llm.vendors["openai-compatible"] = {
+      model: "a-model-no-catalog-knows",
+      baseUrl: "https://models.invalid/v1",
+      enableThinking: false,
+      thinkingBudgetTokens: 10_000,
+    };
+    reported.llm.modelListCache = {
+      [llmModelListCacheKey("openai-compatible", "https://models.invalid/v1", "")]: {
+        vendor: "openai-compatible",
+        baseUrl: "https://models.invalid/v1",
+        endpoint: "https://models.invalid/v1/models",
+        models: ["a-model-no-catalog-knows"],
+        modelEntries: [{ id: "a-model-no-catalog-knows", contextLength: 229_376 }],
+        fetchedAt: new Date(0).toISOString(),
+      },
+    };
+
+    act(() => onSettingsUpdated!(reported));
+
+    expect(result.current.llmContextWindow).toBe(229_376);
+
+    // A window the user declared outranks what the provider reported, exactly
+    // as it does on the engine side.
+    const declared = structuredClone(reported);
+    declared.llm.vendors["openai-compatible"]!.contextWindow = 300_000;
+    act(() => onSettingsUpdated!(declared));
+
+    expect(result.current.llmContextWindow).toBe(300_000);
   });
 
   it("does not let a stale initial read overwrite a newer broadcast", async () => {

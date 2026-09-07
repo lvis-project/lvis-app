@@ -56,6 +56,12 @@ export interface ChatGroupEnvironment {
   // model + readiness
   llmVendor: LLMVendor;
   llmModel: string;
+  /**
+   * The active route's context window, resolved once off the settings snapshot
+   * (`resolveContextWindowForRoute`). The same number the engine budgets
+   * compaction against, so the ring and the compaction threshold agree.
+   */
+  llmContextWindow: number;
   settingsLoaded: boolean;
   subscriptionRuntimeSelected: boolean;
   subscriptionRuntimePolicy: SubscriptionRuntimeUiPolicy;
@@ -383,6 +389,7 @@ export function ChatGroupSession({
   const { usedTokens, contextBudget, effectiveBudget, contextOverflowPct, tpmLimit, tpmPct, isTpmOverflow } =
     useContextBudget({
       entries,
+      contextWindow: env.llmContextWindow,
       llmVendor: env.subscriptionRuntimeSelected ? undefined : env.llmVendor,
       llmModel: env.subscriptionRuntimeSelected ? undefined : env.llmModel,
       draftTokenEstimate,

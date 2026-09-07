@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
-import { lookupPricing, effectiveContextWindow } from "../../../shared/pricing-data.js";
+import { lookupPricing } from "../../../shared/pricing-data.js";
 import { getUsableContext } from "../../../shared/context-budget.js";
 
 /**
@@ -31,12 +31,23 @@ import { getUsableContext } from "../../../shared/context-budget.js";
  * through the shared provider-wire helper, so pasted text, file paths, resource
  * text parts, and image overhead reach the ring exactly once.
  *
- * Context window source: `src/shared/pricing-data.ts` →
- * `effectiveContextWindow()` (picks 1M-beta tier for Sonnet/Opus 4.6) →
- * `getUsableContext()` (LVIS fixed output/safety reservation).
+ * Context window: supplied already resolved. `resolveContextWindowForRoute`
+ * (`src/shared/context-budget.ts`) answers it once off the settings snapshot —
+ * a declared `llm.vendors.<vendor>.contextWindow`, else what the provider
+ * reported for the model, else the pricing catalog, else the conservative
+ * fallback — and the engine budgets compaction against that same number. This
+ * hook only applies `getUsableContext()` (LVIS fixed output/safety reservation)
+ * so the ring hits 100% at the compact threshold rather than at raw context.
  */
 export function useContextBudget(params: {
   entries: ChatEntry[];
+  /**
+   * The active route's context window, already resolved by
+   * `resolveContextWindowForRoute` — the same number the engine budgets
+   * compaction against. Not derived here: two resolutions of one fact is how
+   * the ring and the engine came to disagree.
+   */
+  contextWindow: number;
   /** Omit when the active runtime has no verified pricing/context contract. */
   llmVendor?: string;
   /** Omit when the active runtime has no verified pricing/context contract. */
@@ -48,6 +59,7 @@ export function useContextBudget(params: {
 }) {
   const {
     entries,
+    contextWindow,
     llmVendor,
     llmModel,
     draftTokenEstimate,
@@ -56,14 +68,8 @@ export function useContextBudget(params: {
 
   const contextBudget = useMemo(() => {
     if (!enabled) return 0;
-    // Effective window picks the 1M beta tier when the model defines one
-    // (adapter auto-sends `context-1m-2025-08-07`). LVIS reservation
-    // then subtracts output + safety reservation so the ring hits 100% at
-    // the compact threshold, not at raw context = full.
-    // `lookupPricing` always returns a value (FALLBACK_PRICING on miss),
-    // so no null branch is needed here.
-    return getUsableContext(effectiveContextWindow(lookupPricing(llmVendor ?? "", llmModel ?? "")));
-  }, [enabled, llmVendor, llmModel]);
+    return getUsableContext(contextWindow);
+  }, [enabled, contextWindow]);
 
   const baseTokens = useMemo(() => {
     if (!enabled) return 0;

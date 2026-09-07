@@ -19,6 +19,7 @@ import {
   type SubscriptionRuntimeId,
 } from "../../../shared/subscription-runtime.js";
 import { selectSubscriptionRuntimeUiPolicy, type SubscriptionRuntimeUiPolicy } from "../utils/subscription-runtime-ui-policy.js";
+import { resolveContextWindowForRoute } from "../../../shared/context-budget.js";
 
 function canUseSettingsWithoutApiKey(
   settings: Awaited<ReturnType<LvisApi["getSettings"]>>,
@@ -76,6 +77,13 @@ export interface UseSettingsResult {
   llmVendor: LLMVendor;
   /** Cached model id. */
   llmModel: string;
+  /**
+   * The active route's context window, resolved once from the settings
+   * snapshot through `resolveContextWindowForRoute` — the same number the
+   * engine budgets compaction against. The context-fill ring divides by it
+   * rather than resolving it a second time.
+   */
+  llmContextWindow: number;
   /** True after an authoritative settings snapshot has been applied. */
   settingsLoaded: boolean;
   /** Cached `enableThinking` flag for the active vendor. */
@@ -101,6 +109,7 @@ export interface UseSettingsResult {
 export function useSettings(api: LvisApi): UseSettingsResult {
   const [llmVendor, setLlmVendor] = useState<LLMVendor>(DEFAULT_LLM_VENDOR);
   const [llmModel, setLlmModel] = useState<string>("");
+  const [llmContextWindow, setLlmContextWindow] = useState<number>(0);
   const [enableThinkingChat, setEnableThinkingChat] = useState<boolean>(true);
   const [llmReadyWithoutApiKey, setLlmReadyWithoutApiKey] = useState(false);
   const [activeSubscriptionRuntime, setActiveSubscriptionRuntime] =
@@ -133,6 +142,12 @@ export function useSettings(api: LvisApi): UseSettingsResult {
         block,
         provider === "openai-compatible" ? settings.llm.marketplaceProviderPresetId : undefined,
       ));
+      setLlmContextWindow(
+        resolveContextWindowForRoute(
+          { ...settings.llm, provider },
+          settings.marketplace?.installedProviderPresets,
+        ).contextWindow,
+      );
       setEnableThinkingChat(block.enableThinking);
       setLlmReadyWithoutApiKey(canUseSettingsWithoutApiKey(settings, provider));
       const nextSubscriptionRuntime = activeSubscriptionRuntimeFromSettings(settings);
@@ -278,6 +293,7 @@ export function useSettings(api: LvisApi): UseSettingsResult {
   return {
     llmVendor,
     llmModel,
+    llmContextWindow,
     enableThinkingChat,
     llmReadyWithoutApiKey,
     subscriptionRuntimePolicy,

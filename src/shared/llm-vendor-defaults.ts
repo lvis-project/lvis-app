@@ -635,6 +635,21 @@ export interface LLMVendorSettings {
    * that kind of fact already lives.
    */
   outputTokenLimit?: number;
+  /**
+   * The prompt capacity of the model this vendor route serves, declared by the
+   * user. Unset by default, and it outranks every other answer: the pricing
+   * catalog cannot know a self-hosted or gateway-served model, and a provider
+   * that reports nothing about its own limits leaves the host budgeting
+   * compaction against the conservative 128K fallback — far too early for a
+   * 229K-window deployment, and far too late for a 32K one.
+   *
+   * Deliberately not on the settings page. The provider's own `/models`
+   * handshake answers this for every endpoint that reports it, so a field
+   * would ask the user for a number the host can already obtain and would
+   * invite a wrong one. It stays an escape hatch for an endpoint that reports
+   * nothing, edited in `settings.json`.
+   */
+  contextWindow?: number;
   baseUrl?: string;
   vertexProject?: string;
   vertexLocation?: string;
@@ -832,6 +847,18 @@ function normalizeLlmPresetModels(
   return Object.keys(models).length > 0 ? models : undefined;
 }
 
+/**
+ * A declared context window, or undefined when nothing usable was stored.
+ *
+ * A malformed or non-positive value has to read as "not declared" rather than
+ * as a tiny window: a stored `0` that survived would zero the preflight
+ * threshold and silently switch auto-compaction off for that route.
+ */
+function normalizeLlmContextWindow(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) return undefined;
+  return value;
+}
+
 export function getLlmVendorSettings(
   vendors: LLMVendorSettingsMap | undefined,
   vendor: LLMVendor,
@@ -852,6 +879,7 @@ export function getLlmVendorSettings(
     && stored.outputTokenLimit > 0
       ? stored.outputTokenLimit
       : undefined;
+  const contextWindow = normalizeLlmContextWindow(stored?.contextWindow);
   const block: LLMVendorSettings = {
     ...defaults,
     ...stored,
@@ -870,6 +898,8 @@ export function getLlmVendorSettings(
   else delete block.presetModels;
   if (outputTokenLimit !== undefined) block.outputTokenLimit = outputTokenLimit;
   else delete block.outputTokenLimit;
+  if (contextWindow !== undefined) block.contextWindow = contextWindow;
+  else delete block.contextWindow;
   return block;
 }
 
