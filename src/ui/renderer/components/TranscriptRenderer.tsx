@@ -381,18 +381,16 @@ export function TranscriptRenderer({
             </div>
             {/* Keep a fixed footer slot outside the bubble. The send time holds
                 the row open, so revealing the controls changes only opacity and
-                transform, never message or transcript height. */}
+                transform, never message or transcript height. The time is the
+                last child of this `justify-end` row so it stays pinned to the
+                trailing edge; the controls occupy the leading side and slide in
+                beside it. */}
             {(showHoverActions || sentAtLabel) && (
               <div className="mt-1 flex h-7 items-center justify-end gap-1">
-                {sentAtLabel ? (
-                  <span data-testid="user-message-time" className="shrink-0 px-1 text-xs text-muted-foreground">
-                    {sentAtLabel}
-                  </span>
-                ) : null}
                 {showHoverActions ? (
                   <div
                     data-testid="user-message-actions"
-                    className="flex translate-y-1 gap-1 opacity-0 pointer-events-none transition-[opacity,transform] duration-[var(--motion-fast)] ease-[var(--motion-ease-out)] group-hover:translate-y-0 group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:translate-y-0 group-focus-within:opacity-100 group-focus-within:pointer-events-auto motion-reduce:transition-none motion-reduce:transform-none"
+                    className="flex translate-x-1 gap-1 opacity-0 pointer-events-none transition-[opacity,transform] duration-[var(--motion-fast)] ease-[var(--motion-ease-out)] group-hover:translate-x-0 group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:translate-x-0 group-focus-within:opacity-100 group-focus-within:pointer-events-auto motion-reduce:transition-none motion-reduce:transform-none"
                   >
                     {setEditingEntryIdx ? (
                       <Button type="button" variant="ghost" size="icon-xs" className="text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-ring" title={t("chatView.editButtonTitle")} onClick={() => setEditingEntryIdx(idx)}>
@@ -412,6 +410,11 @@ export function TranscriptRenderer({
                       </Button>
                     ) : null}
                   </div>
+                ) : null}
+                {sentAtLabel ? (
+                  <span data-testid="user-message-time" className="shrink-0 px-1 text-xs text-muted-foreground">
+                    {sentAtLabel}
+                  </span>
                 ) : null}
               </div>
             )}

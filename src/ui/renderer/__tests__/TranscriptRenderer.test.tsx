@@ -343,6 +343,35 @@ describe("TranscriptRenderer — action suppression keys off callback presence",
 
     expect(queryByTestId("user-message-time")).toBeNull();
   });
+
+  it("pins the send time to the trailing edge, with the hover controls before it", () => {
+    // The footer row is `justify-end`, so the LAST child owns the trailing
+    // edge. Ordering the controls first keeps the time in a fixed column while
+    // they fade in on its leading side.
+    const { getByTestId } = renderCore(
+      <TranscriptRenderer
+        entries={[{ kind: "user", text: "timed", createdAt: Date.UTC(2026, 0, 2, 4, 26) }]}
+        streaming={false}
+        currentSessionId="s1"
+        actions={{ onReturnHere: vi.fn() }}
+      />,
+    );
+
+    const actions = getByTestId("user-message-actions");
+    const time = getByTestId("user-message-time");
+    const footer = time.parentElement;
+
+    expect(footer).toBe(actions.parentElement);
+    expect(footer?.lastElementChild).toBe(time);
+    expect(
+      actions.compareDocumentPosition(time) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    // The reveal must stay opacity/transform-only: the row keeps its fixed
+    // height so showing the controls never reflows the transcript.
+    expect(footer?.className).toContain("h-7");
+    expect(actions.className).toContain("opacity-0");
+    expect(actions.className).not.toContain("h-");
+  });
 });
 
 describe("TranscriptRenderer — sub-agent report box", () => {
