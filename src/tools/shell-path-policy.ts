@@ -933,11 +933,24 @@ function classifyOperandSlots(argv: readonly string[]): OperandSlotClassificatio
  * The whitespace test is what keeps a real program out of this: `python3 -c
  * "import os; print(os.sep)"` and `sed -n '/a b/,/c d/p'` are prose with a
  * slash in them, while `/etc/evil.sh` is a filename and nothing else.
+ *
+ * A compact regex has no whitespace either, so the whitespace test alone let
+ * `grep -v -E "\.(o$|cmx$|a$)"` through as a filename: a backslash reads as a
+ * Windows separator, which made the pattern path-shaped, and its `$` anchors
+ * then read as unresolved variables. Dropping regex escapes and re-testing
+ * separates them — a path keeps its shape (`C:\tools\x` has no escapes to
+ * drop, `\\server\share` keeps a separator, `\/etc/x` keeps its slashes)
+ * while a pattern loses the only thing that made it look like one.
  */
 function isBarePathValue(value: string): boolean {
   const trimmed = value.trim();
-  return trimmed.length > 0 && !/\s/.test(trimmed) && hasPathShape(trimmed);
+  if (trimmed.length === 0 || /\s/.test(trimmed)) return false;
+  if (!hasPathShape(trimmed)) return false;
+  return hasPathShape(trimmed.replace(REGEX_ESCAPE_RE, ""));
 }
+
+/** A backslash escaping a non-word character — regex syntax, not a separator. */
+const REGEX_ESCAPE_RE = /\\[^A-Za-z0-9_]/g;
 
 /**
  * Command lines carried as the value of an option — today `sh -c '…'` and its
