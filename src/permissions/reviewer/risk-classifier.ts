@@ -31,7 +31,9 @@
  * is the documented atomic-cutover behaviour (CLAUDE.md No-Fallback).
  */
 import type { ToolCategory, ToolSource, ToolTrustOrigin } from "../../tools/types.js";
-import { maskSensitiveData } from "../../audit/dlp-filter.js";
+import { isIP } from "node:net";
+import { maskSensitiveData, scrubSecretsForLLM } from "../../audit/dlp-filter.js";
+import { isGloballyRoutableAddress } from "../../core/network-guard.js";
 import { PERMISSION_REVIEWER_SYSTEM_PROMPT } from "../../shared/permission-reviewer-framework.js";
 import { getDottedFieldValue } from "../../shared/dotted-field-value.js";
 import { extractShellCommands } from "../../shared/shell-command-fields.js";
@@ -386,6 +388,197 @@ function extractNetworkHost(input: Record<string, unknown>): string | null {
   return extractNetworkTarget(input)?.host ?? null;
 }
 
+/** The one builtin whose network verdict the request screen below owns. */
+const SCREENED_EGRESS_TOOL = "web_fetch";
+
+/**
+ * Longest `path + query + fragment` a fetch of a document is expected to
+ * carry. Chosen well above ordinary deep links and doc anchors (~100-200
+ * chars) and well below what it takes to carry a useful amount of text in a
+ * URL. A tail past this is not a way to name a page.
+ */
+const EXFIL_URL_TAIL_MAX_CHARS = 512;
+
+/** Shortest opaque run treated as carried DATA rather than as a name. */
+const EXFIL_BLOB_MIN_CHARS = 32;
+
+/** Characters a base64 / base64url / hex encoded blob is made of. */
+const EXFIL_BLOB_ALPHABET_RE = /^[A-Za-z0-9+/=_-]+$/;
+
+/**
+ * Longest unbroken alphanumeric run in a span.
+ *
+ * This is what separates a NAME from a BLOB where the two share an alphabet. A
+ * slug is words joined by separators, so its longest run is one word:
+ * `how-to-configure-your-database-connection` runs 10. An encoded payload is
+ * one token: a commit hash runs 40, standard base64 runs the whole length.
+ *
+ * Measured instead of Shannon entropy, which does not separate the two at all
+ * — that slug scores 3.89 bits/char and a hash scores 3.97, so any threshold
+ * admitting one admits the other. Reading a documentation page must not raise
+ * an approval, and this rule is the reason it does not.
+ */
+function longestAlphanumericRun(value: string): number {
+  let longest = 0;
+  let current = 0;
+  for (const ch of value) {
+    if (/[A-Za-z0-9]/.test(ch)) {
+      current += 1;
+      if (current > longest) longest = current;
+    } else {
+      current = 0;
+    }
+  }
+  return longest;
+}
+
+/**
+ * A path segment or hostname label that is one long opaque token — a name
+ * nobody wrote.
+ *
+ * Strict about separators because this is where legitimate names live: page
+ * slugs, package names, doc anchors. Only an unbroken run counts.
+ */
+function isOpaqueNameToken(token: string): boolean {
+  if (token.length < EXFIL_BLOB_MIN_CHARS) return false;
+  if (!EXFIL_BLOB_ALPHABET_RE.test(token)) return false;
+  return longestAlphanumericRun(token) >= EXFIL_BLOB_MIN_CHARS;
+}
+
+/**
+ * A query value or fragment long enough to be a payload.
+ *
+ * Looser than {@link isOpaqueNameToken}, deliberately: a query value is a
+ * VALUE, and nothing a person reads needs 32 opaque characters of one, so the
+ * separator allowance a slug earns does not apply here. This is what catches
+ * base64url, whose own alphabet includes `-` and `_` and which therefore
+ * carries separators of its own.
+ */
+function isCarriedValueBlob(value: string): boolean {
+  if (value.length < EXFIL_BLOB_MIN_CHARS) return false;
+  return EXFIL_BLOB_ALPHABET_RE.test(value);
+}
+
+/**
+ * Does any part of this request carry an opaque payload?
+ *
+ * Three places, each judged by what it is FOR: a hostname label and a path
+ * segment name something, so only an unbroken opaque run counts; a query value
+ * or fragment carries something, so length in the encoding alphabet is enough.
+ * Query NAMES are read as values too — `?<data>=1` smuggles just as well as
+ * `?d=<data>`.
+ *
+ * Known limit, stated rather than papered over: data split into sub-threshold
+ * pieces across several segments passes all three, and so does any encoding
+ * that mixes in characters outside the alphabet. The oversized-tail rule bounds
+ * how much can leave that way in one request; a determined chunked exfiltration
+ * over many requests is not something a per-request screen can see, and the
+ * controls for it are the ones this change leaves untouched — no standing allow
+ * rule, and no unattended lane.
+ */
+function carriesOpaquePayload(target: NetworkTarget): boolean {
+  const labels = target.host.split(".");
+  if (labels.some(isOpaqueNameToken)) return true;
+  const segments = target.path.split("/").filter((segment) => segment.length > 0);
+  if (segments.some(isOpaqueNameToken)) return true;
+  for (const [name, value] of new URLSearchParams(target.query)) {
+    if (isCarriedValueBlob(value) || isCarriedValueBlob(name)) return true;
+  }
+  const fragment = target.fragment.replace(/^#/, "");
+  return isCarriedValueBlob(fragment);
+}
+
+/**
+ * Is `host` an address literal, and if so does it name somewhere outside this
+ * machine and this network? Bracketed IPv6 authorities are unwrapped first. A
+ * NAME is never an address literal: the host cannot resolve one without
+ * blocking, and the SSRF guard resolves it per hop later anyway.
+ */
+function classifyAddressLiteral(host: string): { literal: boolean; routable: boolean } {
+  const bare = host.replace(/^\[/, "").replace(/\]$/, "");
+  if (isIP(bare) === 0) return { literal: false, routable: false };
+  return { literal: true, routable: isGloballyRoutableAddress(bare) };
+}
+
+/** Machine-readable prefix every escalated fetch verdict shares. */
+export const EXFIL_VERDICT_REASON_PREFIX = "network possible exfiltration";
+
+/** Verdict reason for a screened-clean public destination. */
+export const PUBLIC_FETCH_REASON = "network public host (screened)";
+
+/** Verdict reason for a public destination named by address rather than name. */
+export const PUBLIC_RAW_IP_FETCH_REASON = "network public raw ip";
+
+/** Why one fetch was escalated. Stable codes; the renderer localizes them. */
+export type EgressScreenSignal =
+  | "url-userinfo"
+  | "credential-in-url"
+  | "oversized-url-tail"
+  | "high-entropy-blob";
+
+/**
+ * What the host concluded about one fetch, before any policy reads it.
+ *
+ * `not-public` is an abstention, not a clearance: such a call falls through to
+ * the network rules that already graded it, and those rules are unchanged.
+ */
+export type EgressScreenResult =
+  | { outcome: "not-public" }
+  | { outcome: "public-benign" }
+  | { outcome: "public-raw-ip" }
+  | { outcome: "screened"; signal: EgressScreenSignal };
+
+/**
+ * Grade one `web_fetch` invocation from its arguments alone.
+ *
+ * HOST-DERIVED end to end: every input is the URL the host is about to fetch,
+ * and nothing a tool or a plugin asserts about itself participates. The
+ * credential test reuses {@link scrubSecretsForLLM}, the same pattern set the
+ * audit and LLM-egress paths redact with, so "credential-shaped" means one
+ * thing in this codebase rather than two.
+ *
+ * Signal order decides only which reason is reported, never whether the call
+ * escalates: the most definitive shapes are named first so the message a
+ * person reads is the most specific true one.
+ */
+export function screenEgressRequest(input: Record<string, unknown>): EgressScreenResult {
+  // An explicit private-network opt-in is the caller stating the fetch is
+  // aimed inside the perimeter. That request has its own approval identity and
+  // its own answer; this screen abstains rather than grading it.
+  if (input.allowPrivateNetwork === true) return { outcome: "not-public" };
+
+  const target = extractNetworkTarget(input);
+  // A bare hostname is a destination with no request around it, and an absent
+  // tail is not a clean tail. An unparseable URL lands here too and keeps the
+  // verdict it has today.
+  if (!target || target.kind !== "url" || target.host.length === 0) {
+    return { outcome: "not-public" };
+  }
+  if (LOCALHOST_HOSTS.has(target.host)) return { outcome: "not-public" };
+  const address = classifyAddressLiteral(target.host);
+  if (address.literal && !address.routable) return { outcome: "not-public" };
+
+  if (target.hasUserInfo) return { outcome: "screened", signal: "url-userinfo" };
+
+  const tail = `${target.path}${target.query}${target.fragment}`;
+  if (scrubSecretsForLLM(tail) !== tail) {
+    return { outcome: "screened", signal: "credential-in-url" };
+  }
+  if (tail.length > EXFIL_URL_TAIL_MAX_CHARS) {
+    return { outcome: "screened", signal: "oversized-url-tail" };
+  }
+  if (carriesOpaquePayload(target)) {
+    return { outcome: "screened", signal: "high-entropy-blob" };
+  }
+
+  // A public address literal is a destination nobody named. That is not by
+  // itself a signal of data leaving, so it does not reach HIGH; it is also not
+  // the ordinary documentation fetch this lane exists for, so it does not
+  // reach LOW.
+  if (address.literal) return { outcome: "public-raw-ip" };
+  return { outcome: "public-benign" };
+}
+
 function extractNetworkMethod(input: Record<string, unknown>): string | null {
   for (const key of ["method", "httpMethod", "verb"]) {
     const value = input[key];
@@ -570,6 +763,41 @@ const RULES: Array<(ctx: ToolInvocationContext) => RiskVerdict | null> = [
   },
 
   // ── network rules ──────────────────────────────────────
+  //
+  // The screened-egress lane comes first, and only `web_fetch` enters it.
+  //
+  // `web_fetch` sends a model-chosen string to a model-chosen destination, so
+  // it stays `category: "network"` and keeps every exclusion that rests on
+  // that: the registry withholds it from unattended lanes, an away-authority
+  // read grant does not cover it, and it holds no standing allow rule. What
+  // changes here is only the VERDICT for a request the host has screened and
+  // found to carry no payload: grading every public documentation fetch HIGH
+  // put a dialog in front of ordinary reading, and a dialog answered dozens of
+  // times a day is answered with "always" — which is auto-allow with extra
+  // steps, and buys nothing the screen does not.
+  //
+  // So the boundary moved from the destination to the request. A fetch that
+  // carries a credential, an oversized tail, an opaque blob or userinfo is
+  // exactly the shape that exfiltrates, and it still escalates.
+  (ctx) => {
+    if (ctx.category !== "network") return null;
+    if (ctx.source !== "builtin" || ctx.toolName !== SCREENED_EGRESS_TOOL) return null;
+    const screen = screenEgressRequest(ctx.finalInput);
+    switch (screen.outcome) {
+      case "screened":
+        return {
+          level: "high",
+          reason: `${EXFIL_VERDICT_REASON_PREFIX} (${screen.signal})`,
+        };
+      case "public-raw-ip":
+        return { level: "medium", reason: PUBLIC_RAW_IP_FETCH_REASON };
+      case "public-benign":
+        return { level: "low", reason: PUBLIC_FETCH_REASON };
+      // Not a public request: the rules below grade it exactly as before.
+      case "not-public":
+        return null;
+    }
+  },
   (ctx) => {
     if (ctx.category !== "network") return null;
     const target = extractNetworkTarget(ctx.finalInput);

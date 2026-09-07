@@ -24,19 +24,32 @@ function webFetchPrivateNetworkPolicy(
   return false;
 }
 
-function webFetchPrivateNetworkApprovalCacheKey(input: unknown): string | undefined {
+/**
+ * The identity an approval of this fetch is remembered under: the DESTINATION,
+ * not the URL.
+ *
+ * A key per URL would make "always allow" mean "allow this exact page", which
+ * no one wants often enough to click; a key of the tool name alone would make
+ * it mean "allow every fetch anywhere", which is the standing egress primitive
+ * this tool must not have. The host it reaches is the unit a person can
+ * actually decide about, and it is the unit that bounds where data can go.
+ *
+ * The private-network discriminant stays in the key, so authorizing an
+ * internal host for a private-network fetch never silently answers for the
+ * public one, or the reverse.
+ */
+function webFetchApprovalCacheKey(input: unknown): string | undefined {
   const args = input && typeof input === "object"
     ? input as Record<string, unknown>
     : {};
-  if (!webFetchRequiresPrivateNetwork(input) || typeof args.url !== "string") {
-    return undefined;
-  }
+  if (typeof args.url !== "string") return undefined;
   try {
     const parsed = new URL(args.url);
-    if ((parsed.protocol !== "http:" && parsed.protocol !== "https:") || !parsed.host) {
+    if ((parsed.protocol !== "http:" && parsed.protocol !== "https:") || !parsed.hostname) {
       return undefined;
     }
-    return `private-network:${parsed.protocol}//${parsed.host.toLowerCase()}`;
+    const scope = webFetchRequiresPrivateNetwork(input) ? "private-network:" : "";
+    return `web_fetch:host:${scope}${parsed.hostname.toLowerCase()}`;
   } catch {
     return undefined;
   }
@@ -44,9 +57,19 @@ function webFetchPrivateNetworkApprovalCacheKey(input: unknown): string | undefi
 
 function webFetchCategoryForInput(input: unknown): "network" {
   // Always `network`, whether or not the URL is private. The destination is
-  // model-chosen, so a public URL is an exfiltration channel just as much as a
-  // private one — classifying the public case as `read` made every public
-  // fetch auto-allow under the builtin read policy.
+  // model-chosen, so a public URL is an egress channel just as much as a
+  // private one, and every exclusion that rests on this category — withheld
+  // from unattended lanes, not covered by an away-authority read grant, no
+  // standing allow rule — must keep applying to both.
+  //
+  // What separates an ordinary public fetch from an exfiltrating one is the
+  // REQUEST, not the destination, and the host screens for that in
+  // `screenEgressRequest` (permissions/reviewer/risk-classifier.ts): a
+  // screened-clean public fetch rates LOW and runs unprompted, while a
+  // credential, an oversized tail, an opaque blob or userinfo in the URL still
+  // escalates. Grading the destination instead put a dialog in front of
+  // ordinary reading, and a dialog answered that often is answered with
+  // "always".
   void webFetchRequiresPrivateNetwork(input);
   return "network";
 }
@@ -117,7 +140,7 @@ export function createWebFetchTool(networkFetch: typeof fetch): Tool {
     categoryForInput: (input) => webFetchCategoryForInput(input),
     isReadOnly: () => true,
     arbitraryEgress: true,
-    approvalCacheKey: (input) => webFetchPrivateNetworkApprovalCacheKey(input),
+    approvalCacheKey: (input) => webFetchApprovalCacheKey(input),
     jsonSchema: {
       type: "object",
       properties: {

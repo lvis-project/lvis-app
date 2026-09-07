@@ -29,10 +29,38 @@
 export const NETWORK_TARGET_FIELDS: readonly string[] = ["url", "endpoint", "host", "uri"];
 
 export interface NetworkTarget {
+  /**
+   * Which shape the argument had. `"url"` is a parseable http(s)/ws(s) URL;
+   * `"hostname"` is a bare host taken from a `host` field or a hostname-shaped
+   * string.
+   *
+   * A consumer that grades the REQUEST rather than only the destination needs
+   * this: a bare hostname carries no path, query or fragment to grade, and an
+   * ABSENT tail must not be read as a clean one.
+   */
+  kind: "url" | "hostname";
   /** Lowercased hostname. Empty string for a network URL with no authority. */
   host: string;
   /** URL pathname, or "" when the value was a bare hostname. */
   path: string;
+  /** URL search string including the leading `?`, or "" when there is none. */
+  query: string;
+  /** URL fragment including the leading `#`, or "" when there is none. */
+  fragment: string;
+  /** True when the URL carried userinfo in front of the authority. */
+  hasUserInfo: boolean;
+}
+
+/** A destination named without a request around it. */
+function hostnameTarget(host: string): NetworkTarget {
+  return {
+    kind: "hostname",
+    host: host.toLowerCase(),
+    path: "",
+    query: "",
+    fragment: "",
+    hasUserInfo: false,
+  };
 }
 
 /**
@@ -53,7 +81,14 @@ function parseNetworkUrl(value: string): NetworkTarget | null {
     if (u.protocol !== "http:" && u.protocol !== "https:" && u.protocol !== "ws:" && u.protocol !== "wss:") {
       return null;
     }
-    return { host: u.hostname.toLowerCase(), path: u.pathname };
+    return {
+      kind: "url",
+      host: u.hostname.toLowerCase(),
+      path: u.pathname,
+      query: u.search,
+      fragment: u.hash,
+      hasUserInfo: u.username.length > 0 || u.password.length > 0,
+    };
   } catch {
     return null;
   }
@@ -61,7 +96,7 @@ function parseNetworkUrl(value: string): NetworkTarget | null {
 
 /** Bare hostname shape — letters, digits, dots and hyphens only. */
 function parseBareHost(value: string): NetworkTarget | null {
-  return /^[a-zA-Z0-9.-]+$/.test(value) ? { host: value.toLowerCase(), path: "" } : null;
+  return /^[a-zA-Z0-9.-]+$/.test(value) ? hostnameTarget(value) : null;
 }
 
 /**
@@ -76,7 +111,7 @@ export function extractNetworkTarget(input: Record<string, unknown>): NetworkTar
     // A field literally named `host` declares a hostname; take it as one even
     // when it is not well-formed, so a junk value cannot demote the call out of
     // the network domain. It matches no trusted entry, so it rates HIGH.
-    if (field === "host") return { host: value.toLowerCase(), path: "" };
+    if (field === "host") return hostnameTarget(value);
     const bare = parseBareHost(value);
     if (bare) return bare;
   }
