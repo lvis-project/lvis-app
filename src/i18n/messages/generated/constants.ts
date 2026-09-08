@@ -25,10 +25,11 @@ export const en = {
   "constants.execModeAllowLabel": "Allow all",
   "constants.execModeAllowDesc": "Tools outside hard blocks are auto-allowed; access outside allowed directories requires separate approval",
 
-  // REASONING_EFFORT_STEPS
+  // REASONING_DEPTHS
   "constants.reasoningEffortLow": "Low",
   "constants.reasoningEffortMedium": "Medium",
   "constants.reasoningEffortHigh": "High",
+  "constants.reasoningEffortXHigh": "X-High",
   "constants.reasoningEffortMax": "Max",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
@@ -57,9 +58,10 @@ export const ko: Record<keyof typeof en, string> = {
   "constants.execModeAllowLabel": "모두 허용",
   "constants.execModeAllowDesc": "하드 차단 밖 도구는 자동 허용하고 허용 디렉터리 밖 접근은 별도 승인",
 
-  // REASONING_EFFORT_STEPS
+  // REASONING_DEPTHS
   "constants.reasoningEffortLow": "낮음",
   "constants.reasoningEffortMedium": "보통",
   "constants.reasoningEffortHigh": "높음",
+  "constants.reasoningEffortXHigh": "매우높음",
   "constants.reasoningEffortMax": "최대",
 };

@@ -147,23 +147,33 @@ export const WEB_PROVIDERS: { id: AppSettings["webSearch"]["provider"]; label: s
   { id: "google", label: "Google Search", get placeholder() { return t("constants.webProviderGooglePlaceholder"); }, needsKey: true },
 ];
 
-// Reasoning effort slider steps. Budget values are chosen to land cleanly in
-// both `mapReasoningEffort()` (OpenAI: ≤3000=low, ≤8000=medium, >8000=high)
-// and `mapBudgetToEffort()` (Claude adaptive: ≤3000=low, ≤6000=medium,
-// ≤16000=high, >16000=max) in vercel/adapter.ts. Keep values in sync if those
-// thresholds change.
-export const REASONING_EFFORT_STEPS = [
-  { get label() { return t("constants.reasoningEffortLow"); }, budget: 2000 },
-  { get label() { return t("constants.reasoningEffortMedium"); }, budget: 6000 },
-  { get label() { return t("constants.reasoningEffortHigh"); }, budget: 12_000 },
-  { get label() { return t("constants.reasoningEffortMax"); }, budget: 24_000 },
+// How deep the model thinks, as ONE ladder. The settings tab and the
+// composer both write `thinkingBudgetTokens` on the same vendor, and until
+// they shared this array they disagreed about what the stored number meant:
+// picking "High" in settings wrote 12,000, which the composer then displayed
+// as "Medium" because 12,000 was nearest its own 10,000 rung. Two controls,
+// one value, two answers.
+//
+// The budget is what is stored and sent. Vendors that take a coarse effort
+// enum instead get it from `mapReasoningEffort()` / `mapBudgetToEffort()` in
+// vercel/adapter.ts, and those enums have fewer levels than this ladder has
+// rungs, so neighbouring rungs can map to the same effort. That is the enum
+// being coarse, not the ladder being wrong -- for a vendor that accepts a
+// budget, every rung is distinct.
+export const REASONING_DEPTHS = [
+  { key: "low", get label() { return t("constants.reasoningEffortLow"); }, budget: 4_000 },
+  { key: "medium", get label() { return t("constants.reasoningEffortMedium"); }, budget: 10_000 },
+  { key: "high", get label() { return t("constants.reasoningEffortHigh"); }, budget: 16_000 },
+  { key: "xhigh", get label() { return t("constants.reasoningEffortXHigh"); }, budget: 24_000 },
+  { key: "max", get label() { return t("constants.reasoningEffortMax"); }, budget: 32_000 },
 ] as const;
 
-export function budgetToEffortIndex(budget: number): number {
+/** The rung a stored budget sits closest to. Any persisted value resolves. */
+export function budgetToDepthIndex(budget: number): number {
   let closest = 0;
-  let minDiff = Math.abs(REASONING_EFFORT_STEPS[0]!.budget - budget);
-  for (let i = 1; i < REASONING_EFFORT_STEPS.length; i++) {
-    const diff = Math.abs(REASONING_EFFORT_STEPS[i]!.budget - budget);
+  let minDiff = Math.abs(REASONING_DEPTHS[0]!.budget - budget);
+  for (let i = 1; i < REASONING_DEPTHS.length; i++) {
+    const diff = Math.abs(REASONING_DEPTHS[i]!.budget - budget);
     if (diff < minDiff) {
       minDiff = diff;
       closest = i;

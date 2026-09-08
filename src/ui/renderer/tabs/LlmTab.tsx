@@ -23,9 +23,9 @@ import {
   DropdownMenuTrigger,
 } from "../../../components/ui/dropdown-menu.js";
 import {
-  REASONING_EFFORT_STEPS,
+  REASONING_DEPTHS,
   VENDORS,
-  budgetToEffortIndex,
+  budgetToDepthIndex,
   getVendorOption,
   visibleVendorsFor,
   type VendorOption,
@@ -3082,7 +3082,7 @@ export function LlmTab(props: LlmTabProps) {
                   </SettingsHelpPopover>
                 </span>
                 <span className="text-xs font-medium tabular-nums">
-                  {REASONING_EFFORT_STEPS[budgetToEffortIndex(thinkingBudget)]!.label}
+                  {REASONING_DEPTHS[budgetToDepthIndex(thinkingBudget)]!.label}
                   <span className="ml-2 text-muted-foreground">
                     · {t("llmTab.reasoningBudgetTokens", { count: formatTokensExact(thinkingBudget) })}
                   </span>
@@ -3090,17 +3090,17 @@ export function LlmTab(props: LlmTabProps) {
               </div>
               <Slider
                 min={0}
-                max={REASONING_EFFORT_STEPS.length - 1}
+                max={REASONING_DEPTHS.length - 1}
                 step={1}
-                value={[budgetToEffortIndex(thinkingBudget)]}
+                value={[budgetToDepthIndex(thinkingBudget)]}
                 onValueChange={([value]) => {
-                  setThinkingBudget(REASONING_EFFORT_STEPS[value ?? 0]!.budget);
+                  setThinkingBudget(REASONING_DEPTHS[value ?? 0]!.budget);
                   onImmediateChange?.();
                 }}
                 aria-label={t("llmTab.reasoningEffortAriaLabel")}
               />
               <div className="flex justify-between text-[10px] text-muted-foreground">
-                {REASONING_EFFORT_STEPS.map((s) => (
+                {REASONING_DEPTHS.map((s) => (
                   <span key={s.label}>{s.label}</span>
                 ))}
               </div>

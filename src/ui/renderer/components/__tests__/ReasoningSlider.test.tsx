@@ -3,6 +3,8 @@ import "../../../../../test/renderer/setup.js";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { DEPTH_BUDGET, useReasoningLevel } from "../ReasoningSlider.js";
+import { REASONING_DEPTHS, budgetToDepthIndex } from "../../constants.js";
+import { readRepoFile } from "../../../../__tests__/test-helpers.js";
 import { DEFAULT_LLM_VENDOR } from "../../../../shared/llm-vendor-defaults.js";
 
 const getSettings = vi.fn();
@@ -17,6 +19,33 @@ describe("ReasoningSlider depth budget", () => {
     getSettings.mockReset();
     updateSettings.mockReset();
     updateSettings.mockResolvedValue({ ok: true });
+  });
+
+  it("is the same ladder the settings tab writes, not a second copy", () => {
+    // The composer and the settings tab both persist `thinkingBudgetTokens` on
+    // the same vendor. When each carried its own budgets they disagreed about
+    // what a stored number meant: settings wrote 12,000 for "High" and the
+    // composer showed "Medium", because 12,000 was nearest its own 10,000
+    // rung. One ladder is the fix; this asserts the settings tab still reads
+    // it rather than growing new numbers of its own.
+    expect(DEPTH_BUDGET).toEqual(
+      Object.fromEntries(REASONING_DEPTHS.map((d) => [d.key, d.budget])),
+    );
+    const settingsTab = readRepoFile("src/ui/renderer/tabs/LlmTab.tsx");
+    expect(settingsTab).toContain("REASONING_DEPTHS");
+    expect(settingsTab).toContain("budgetToDepthIndex");
+    expect(settingsTab).not.toMatch(/budget:\s*[\d_]+/u);
+  });
+
+  it("resolves a budget that sits between rungs to the nearest one", () => {
+    // Anything already persisted has to land somewhere -- including the
+    // 12,000 the old settings ladder wrote, and the 2,000 below its bottom.
+    // 12,000 is 2,000 from medium and 4,000 from high, so it lands on medium --
+    // which is what the composer already showed for it. The two surfaces now
+    // agree on that instead of only one of them being right.
+    expect(REASONING_DEPTHS[budgetToDepthIndex(12_000)]!.key).toBe("medium");
+    expect(REASONING_DEPTHS[budgetToDepthIndex(2_000)]!.key).toBe("low");
+    expect(REASONING_DEPTHS[budgetToDepthIndex(999_999)]!.key).toBe("max");
   });
 
   it("maps the five depths to their token budgets", () => {
