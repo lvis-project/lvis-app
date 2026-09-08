@@ -31,3 +31,25 @@ describe("shell ASRT source contracts", () => {
     expectShellDialectContracts(powershellSection);
   });
 });
+
+describe("background shell lifetime contract", () => {
+  // A background child is registered with the managed-child registry, and app
+  // shutdown force-kills everything in it. That is deliberate. What was not
+  // stated anywhere the MODEL can read is that the process therefore does not
+  // outlive the session -- so a benchmark trial started a gRPC server with
+  // run_in_background and reported it as "still running for the client to
+  // connect to" after the turn had already killed it. These assertions tie the
+  // two surfaces the model reads to the mechanism that makes the claim true.
+  it("registers the background child with the managed-child registry", () => {
+    expect(bashSection).toContain('trackManagedChildProcess(child, { label: "tool:bash:background" })');
+  });
+
+  it("states the lifetime in the parameter the model chooses from", () => {
+    expect(bashSection).toContain("The shell is bound to this session and is ");
+    expect(bashSection).toContain("terminated when the session ends");
+  });
+
+  it("states the lifetime again in the result the model reads back", () => {
+    expect(bashSection).toContain("This shell ends when the session does; nothing it starts survives to be ");
+  });
+});
