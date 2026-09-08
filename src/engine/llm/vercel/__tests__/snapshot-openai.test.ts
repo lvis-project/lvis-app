@@ -928,7 +928,14 @@ describe("VercelUnifiedProvider openai-compatible", () => {
               chat_template_kwargs: { enable_thinking: enableThinking },
               // A budget only means something while thinking is on; with the
               // switch off there are no reasoning tokens to limit.
-              ...(enableThinking ? { thinking_token_budget: 10_000 } : {}),
+              // Both spellings travel: vLLM reads the first, llama.cpp (and
+              // ollama and LM Studio on top of it) reads the second.
+              ...(enableThinking
+                ? {
+                    thinking_token_budget: 10_000,
+                    thinking_budget_tokens: 10_000,
+                  }
+                : {}),
             },
           }),
         }),
@@ -984,6 +991,14 @@ describe("VercelUnifiedProvider openai-compatible", () => {
           providerOptions: expect.objectContaining({
             lvisCompat: expect.objectContaining({
               thinking_token_budget: thinkingBudgetTokens,
+              // The same vendor class fronts two servers that spell the budget
+              // differently. llama.cpp -- and so ollama and LM Studio, which
+              // are built on it -- reads `thinking_budget_tokens`; vLLM reads
+              // the transposition above. Neither errors on the other's key, so
+              // sending only one spelling means the user's configured budget
+              // silently reaches nothing on half the backends this vendor
+              // covers, and nothing in the config distinguishes them.
+              thinking_budget_tokens: thinkingBudgetTokens,
             }),
           }),
         }),

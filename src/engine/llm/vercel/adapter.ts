@@ -367,6 +367,30 @@ export class VercelUnifiedProvider implements LLMProvider {
         // chat-template kwargs above.
         if (params.enableThinking === true) {
           compatOptions.thinking_token_budget = budget;
+          // The same spelling does not reach both servers this vendor class
+          // fronts. vLLM reads `thinking_token_budget`; llama.cpp reads the
+          // transposition, `thinking_budget_tokens` -- and so do ollama and
+          // LM Studio, which are built on it. Nothing in a saved endpoint's
+          // config says which one is listening, and neither server errors on
+          // the other's key: it is simply dropped. Sending one spelling
+          // therefore left a configured budget reaching nothing on half the
+          // backends here, with no failure to notice. llama.cpp honours the
+          // request field only when no server-side `--reasoning-budget` was
+          // given, which is the right precedence: the operator's ceiling wins.
+          //
+          // Both spellings travel rather than one chosen by detection because
+          // the thing to detect is not knowable at request time. A directly
+          // connected server does identify itself -- llama.cpp 404s `/version`
+          // and answers `/props`, and its model list is a `models` array of
+          // `format: "gguf"` where vLLM returns OpenAI's `data` array of
+          // `owned_by: "vllm"`. But a gateway erases exactly that: pointed at
+          // one fronting both, the catalogue lists a vLLM model and a llama.cpp
+          // model side by side, each `owned_by: "openai"`, and which stack
+          // serves a request is a property of the MODEL, not of the endpoint
+          // the settings hold. Neither server errors on the other's key -- it
+          // is dropped -- so carrying both is what makes the budget arrive in
+          // every case, and detection would only narrow the cases where it does.
+          compatOptions.thinking_budget_tokens = budget;
         }
         // finish_reason=length CONTINUATION. The conversation loop appended a
         // partial assistant turn as the FINAL message and set this flag. vLLM's
