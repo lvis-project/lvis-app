@@ -1034,7 +1034,17 @@ export class SystemPromptBuilder {
           // signal that run has.
           ...(execTurnRequested(process.argv)
             ? [t("be_systemPromptBuilder.headlessResponseLanguage")]
-            : [`Locale: ${Intl.DateTimeFormat().resolvedOptions().locale}`]),
+            : [
+                `Locale: ${Intl.DateTimeFormat().resolvedOptions().locale}`,
+                // Naming the locale is not the same as saying what to do with
+                // it, and the packaged documents in this prompt are written in
+                // one fixed language regardless of who is reading. Without this
+                // line the model takes the language it is READING as the
+                // language to answer in; state instead that the person's own
+                // message decides, with the locale above as the fallback for a
+                // request that carries no language of its own.
+                t("be_systemPromptBuilder.interactiveResponseLanguage"),
+              ]),
           t("be_systemPromptBuilder.environmentDateTimeNote"),
           "</environment>",
         ].join("\n");

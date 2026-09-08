@@ -659,6 +659,21 @@ describe("SystemPromptBuilder — response language", () => {
     expect(prompt).not.toContain(t("be_systemPromptBuilder.headlessResponseLanguage"));
   });
 
+  it("tells an interactive run to answer in the user's language, not the prompt's", () => {
+    // Naming the locale is not the same as saying what to do with it. The
+    // packaged documents in this prompt are written in one fixed language, and
+    // without this rule the model answers in the language it is READING.
+    process.argv = ["electron", "."];
+    const prompt = makeSystemPromptBuilder().build();
+    expect(prompt).toContain(t("be_systemPromptBuilder.interactiveResponseLanguage"));
+  });
+
+  it("keeps the interactive language rule out of a headless run", () => {
+    process.argv = ["electron", ".", "--exec", "do the task"];
+    const prompt = makeSystemPromptBuilder().build();
+    expect(prompt).not.toContain(t("be_systemPromptBuilder.interactiveResponseLanguage"));
+  });
+
   it("replaces the host locale with a request-language rule for a headless run", () => {
     // A one-shot run has no interactive user, so the machine's locale says
     // nothing about who is reading the answer.

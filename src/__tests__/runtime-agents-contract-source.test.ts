@@ -18,6 +18,22 @@ describe("packaged runtime AGENTS.md contract", () => {
     expect(Buffer.byteLength(runtimeContract, "utf8")).toBeLessThanOrEqual(8_000);
   });
 
+  it("carries no language of its own for the model to answer in", () => {
+    // This document is in EVERY system prompt, so whatever language it is
+    // written in is the language the model is reading on every turn -- and it
+    // answers in what it reads. A Korean contract had 26% of an all-English
+    // benchmark answered in Korean, overriding the environment section's
+    // explicit instruction to use the request's language. The contract is the
+    // host speaking to the model, never a signal about who is reading, so it
+    // stays in the default locale's language and the request decides.
+    const cjk = runtimeContract.match(/[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]/gu);
+    expect(cjk ?? []).toEqual([]);
+  });
+
+  it("tells the reply to follow the request rather than the contract", () => {
+    expect(runtimeContract).toContain("Write the reply in the language of the request.");
+  });
+
   it("keeps durable runtime sources of truth without stale implementation notes", () => {
     expect(runtimeContract).toContain("# LVIS Runtime Assistant Contract");
     expect(runtimeContract).toContain("~/.lvis/plugins/<pluginId>/data/");
