@@ -240,7 +240,7 @@ describe("main bundle budget", () => {
   it("keeps window creation ahead of asynchronous boot loading", () => {
     const mainSource = readFileSync(resolve("src/main.ts"), "utf8");
     expect(mainSource).not.toMatch(/^import .* from "\.\/boot\.js";$/m);
-    const createWindowAt = mainSource.indexOf("createWindow();");
+    const createWindowAt = mainSource.indexOf("createWindow({");
     const loadBootAt = mainSource.indexOf('import("./boot.js")');
     const attachStartupAt = mainSource.indexOf("loadMainStartupDependencies(", createWindowAt);
     // Matched from the boot import onwards, and by identifier rather than by a
