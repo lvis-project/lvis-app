@@ -577,14 +577,16 @@ describe("model card (status-row model cell)", () => {
   });
 
   it("colours the bulb by level, and draws no fill at all when off", async () => {
-    // Three depths, three different yellows, and OFF is the absence of the
-    // fill layer rather than a fourth colour — an unlit bulb has to be
+    // Five depths, five different yellows, and OFF is the absence of the
+    // fill layer rather than a sixth colour — an unlit bulb has to be
     // unmistakable, and any colour at level 0 reads as another depth.
     const cases: Array<{ budget: number; enabled: boolean; level: string; fill: string | null }> = [
       { budget: 10_000, enabled: false, level: "0", fill: null },
       { budget: 4_000, enabled: true, level: "1", fill: "var(--reasoning-fill-1)" },
       { budget: 10_000, enabled: true, level: "2", fill: "var(--reasoning-fill-2)" },
-      { budget: 24_000, enabled: true, level: "3", fill: "var(--reasoning-fill-3)" },
+      { budget: 16_000, enabled: true, level: "3", fill: "var(--reasoning-fill-3)" },
+      { budget: 24_000, enabled: true, level: "4", fill: "var(--reasoning-fill-4)" },
+      { budget: 32_000, enabled: true, level: "5", fill: "var(--reasoning-fill-5)" },
     ];
     const seen = new Set<string>();
     for (const testCase of cases) {
@@ -620,8 +622,10 @@ describe("model card (status-row model cell)", () => {
     }
     // Each depth is its own step of the ladder — one shared token for two
     // levels would leave the pair indistinguishable, which is the failure the
-    // rising fill line already had.
-    expect(seen.size).toBe(3);
+    // rising fill line already had. Counted off the cases rather than written
+    // out, so a rung added to the ladder is checked here without this line
+    // having to be found and edited.
+    expect(seen.size).toBe(cases.filter((c) => c.fill !== null).length);
   });
 
   it("the reasoning chip is a second way into the same card, and goes with reasoning", async () => {

@@ -5,27 +5,29 @@ import {
   getLlmVendorSettings,
   narrowLlmVendor,
 } from "../../../shared/llm-vendor-defaults.js";
+import { REASONING_DEPTHS, budgetToDepthIndex } from "../constants.js";
 
-type Depth = "low" | "medium" | "high";
+type Depth = (typeof REASONING_DEPTHS)[number]["key"];
 
-/** Depth → the per-vendor `thinkingBudgetTokens` it persists as. */
-export const DEPTH_BUDGET: Record<Depth, number> = {
-  low: 4_000,
-  medium: 10_000,
-  high: 24_000,
-};
+/**
+ * Depth → the per-vendor `thinkingBudgetTokens` it persists as.
+ *
+ * Derived from the one ladder in constants rather than written out again: the
+ * settings tab writes the same `thinkingBudgetTokens`, and a second copy of
+ * these numbers is exactly how the two surfaces came to disagree about what a
+ * stored budget meant. The budget is the stored value and the label only names
+ * it, so a vendor already holding 24,000 keeps thinking exactly as deeply as
+ * before and simply reads as the rung that budget now belongs to.
+ */
+export const DEPTH_BUDGET = Object.fromEntries(
+  REASONING_DEPTHS.map((d) => [d.key, d.budget]),
+) as Record<Depth, number>;
 
-const LEVEL_DEPTH: Record<1 | 2 | 3, Depth> = { 1: "low", 2: "medium", 3: "high" };
-const DEPTH_LEVEL: Record<Depth, 1 | 2 | 3> = { low: 1, medium: 2, high: 3 };
+/** Level 0 is off, so a rung's level is its index in the ladder plus one. */
+const LEVEL_DEPTH = REASONING_DEPTHS.map((d) => d.key);
 
 function budgetToDepth(budget: number): Depth {
-  let best: Depth = "medium";
-  let bestDelta = Number.POSITIVE_INFINITY;
-  for (const d of ["low", "medium", "high"] as Depth[]) {
-    const delta = Math.abs(DEPTH_BUDGET[d] - budget);
-    if (delta < bestDelta) { best = d; bestDelta = delta; }
-  }
-  return best;
+  return LEVEL_DEPTH[budgetToDepthIndex(budget)]!;
 }
 
 export interface ReasoningLevelOptions {
@@ -34,21 +36,22 @@ export interface ReasoningLevelOptions {
   onToggle: (next: boolean) => void | Promise<void>;
 }
 
-export type ReasoningLevel = 0 | 1 | 2 | 3;
+export type ReasoningLevel = 0 | 1 | 2 | 3 | 4 | 5;
 
 /**
- * Top of the ladder. The slider's range, the clamp that pairs with it, and the
- * composer's gauge all read this one number. The type above and `levelLabels`
- * below still spell the rungs out, so adding one is still a deliberate edit in
- * three places — this constant removes the pair that could silently disagree,
- * where the slider offers a level the clamp then throws away.
+ * Top of the ladder. The slider's range, the clamp that pairs with it, the
+ * labels and the gauge all count off `REASONING_DEPTHS`, so a rung added there
+ * arrives in every one of them at once; the pair that could silently disagree
+ * — a slider offering a level the clamp then throws away — cannot form. The
+ * one thing still written out is `ReasoningLevel`, which the type system
+ * checks against `REASONING_FILL` in the composer.
  */
-const REASONING_LEVEL_MAX = 3;
+const REASONING_LEVEL_MAX = REASONING_DEPTHS.length;
 
 /**
  * The reasoning level as ONE value the composer's controls all read.
  *
- * Level 0 is thinking off; 1–3 are the depths, persisted per vendor as a
+ * Level 0 is thinking off; 1–5 are the depths, persisted per vendor as a
  * token budget. The depth follows the settings broadcast rather than a
  * one-time seed, because more than one surface shows it — the status-row
  * chip, the model card it opens, and every other tile's composer — and a
@@ -92,14 +95,12 @@ export function useReasoningLevel({ enabled, onToggle }: ReasoningLevelOptions):
     }
   }, []);
 
-  const level: ReasoningLevel = enabled ? DEPTH_LEVEL[depth] : 0;
+  const level: ReasoningLevel = enabled ? ((LEVEL_DEPTH.indexOf(depth) + 1) as ReasoningLevel) : 0;
 
-  const levelLabels = [
-    t("bottomActionRow.reasoningNone"),
-    t("bottomActionRow.thinkingDepthLow"),
-    t("bottomActionRow.thinkingDepthMedium"),
-    t("bottomActionRow.thinkingDepthHigh"),
-  ];
+  // The same names the settings tab shows, off the same ladder — the composer
+  // used to carry its own copies, and in Korean they had already drifted
+  // ("중간" here against "보통" there) for what is one setting.
+  const levelLabels = [t("bottomActionRow.reasoningNone"), ...REASONING_DEPTHS.map((d) => d.label)];
 
   const apply = useCallback(
     (next: number) => {
@@ -109,7 +110,7 @@ export function useReasoningLevel({ enabled, onToggle }: ReasoningLevelOptions):
         return;
       }
       if (!enabled) void onToggle(true);
-      const d = LEVEL_DEPTH[lvl as 1 | 2 | 3];
+      const d = LEVEL_DEPTH[lvl - 1]!;
       setDepth(d);
       void persistDepth(d);
     },
@@ -119,7 +120,7 @@ export function useReasoningLevel({ enabled, onToggle }: ReasoningLevelOptions):
   return { level, levelLabels, apply };
 }
 
-/** The range and its four labels — the same control wherever the level is set. */
+/** The range and its six labels — the same control wherever the level is set. */
 export function ReasoningLevelControl({
   level,
   levelLabels,
