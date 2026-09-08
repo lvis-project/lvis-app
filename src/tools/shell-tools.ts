@@ -314,7 +314,10 @@ export const BashToolInputSchema = z.object({
     .describe(
       "Run the command in the background and return a shellId immediately instead of waiting. " +
         "Read incremental output with bash_output and stop it with bash_kill. `timeoutSeconds` " +
-        "does not apply to a background shell. Only available on the plain host-shell path: under " +
+        "does not apply to a background shell. The shell is bound to this session and is " +
+        "terminated when the session ends, so it is for work you will read back during this " +
+        "session -- not for leaving a server, daemon or worker running for something that " +
+        "inspects it afterwards. Only available on the plain host-shell path: under " +
         "the OS sandbox (ASRT) the command runs synchronously and the result is flagged " +
         "backgroundUnavailable, because the sandbox cannot safely run concurrent commands.",
     ),
@@ -546,7 +549,16 @@ function spawnBackground(command: string, cwd: string, sessionId: string): Spawn
       backgrounded: true,
       shellId,
       status: "running",
-      hint: "Read output with bash_output({ shellId }); stop it with bash_kill({ shellId }).",
+      // The lifetime belongs in the result, not only in the schema: this is the
+      // last thing the model reads before it decides whether the process is
+      // still there later. Saying only how to read and stop it left the model
+      // free to assume it outlives the session -- on a benchmark it reported a
+      // gRPC server as "still running for the client to connect to" after the
+      // turn had already killed it.
+      hint:
+        "Read output with bash_output({ shellId }); stop it with bash_kill({ shellId }). " +
+        "This shell ends when the session does; nothing it starts survives to be " +
+        "inspected afterwards.",
     }),
     isError: false,
     metadata: { backgrounded: true, shellId },
