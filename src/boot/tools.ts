@@ -105,6 +105,15 @@ export interface WorkflowToolDeps {
    * rather than Node's global `fetch`.
    */
   networkFetch: typeof fetch;
+  /**
+   * The same Chromium stack, but stopping at each redirect and handing the hop
+   * back as an ordinary Response. `net.fetch` has no such mode -- `manual` and
+   * `error` both throw -- so a caller that wants to inspect the next URL before
+   * following it has to be given this one. `fetchPublicHttpResponse` is exactly
+   * that caller: it re-runs its SSRF gate per hop, which it can only do if the
+   * transport lets the hop come back.
+   */
+  singleHopNetworkFetch: typeof fetch;
   emitAgentSpawn?: (event: AgentSpawnEvent) => void;
   emitSkillLoad?: (event: SkillLoadEvent) => void;
   acquirePluginSkillGeneration?: NonNullable<SkillLoadToolDeps["acquirePluginGeneration"]>;
@@ -121,10 +130,14 @@ export function registerBuiltinTools(
   settingsService: SettingsService,
   workflowDeps: WorkflowToolDeps,
 ): void {
-  const { networkFetch } = workflowDeps;
+  const { networkFetch, singleHopNetworkFetch } = workflowDeps;
   const builtins: Tool[] = [
     createWebSearchTool(settingsService, networkFetch),
-    createWebFetchTool(networkFetch),
+    // web_fetch guards every hop of a redirect chain, so it needs the transport
+    // that returns a hop instead of throwing on it. Handed `net.fetch`, the
+    // guard's `redirect: "manual"` came back as "Redirect was cancelled" and
+    // any redirecting URL was simply unreachable.
+    createWebFetchTool(singleHopNetworkFetch),
     createRenderHtmlTool(),
   ];
 

@@ -51,6 +51,7 @@ export async function setupWorkflowStores(
     notificationService,
     approvalGate,
     networkFetch,
+    singleHopNetworkFetch,
     toolRegistry,
     settingsService,
   } = ctx;
@@ -135,6 +136,7 @@ export async function setupWorkflowStores(
       return lifecycle.acquire(owner.pluginId);
     },
     networkFetch,
+    singleHopNetworkFetch,
     // Resolved lazily: `ctx.mcpManager` is assigned by the MCP boot step, which runs
     // AFTER this one. Between the two, this returns undefined and the tools say so
     // rather than reporting a generic failure — the tools are registered either way,

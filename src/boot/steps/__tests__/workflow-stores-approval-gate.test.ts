@@ -20,6 +20,17 @@ import { cleanupTmpDir } from "../../../__tests__/support/tmp-dir-teardown.js";
 const TEST_HOME = mkdtempSync(join(tmpdir(), "lvis-wf-gate-"));
 process.env.LVIS_HOME = TEST_HOME;
 
+// The SSRF guard resolves DNS before it fetches, which would make this test ask
+// the network what it thinks of a hostname. The wiring is the claim under test,
+// so the guard is replaced by a recorder for the transport it was handed.
+const guardCalls: { fetchImpl: unknown }[] = [];
+vi.mock("../../../core/network-guard.js", () => ({
+  fetchPublicHttpResponse: async (_url: string, opts: { fetchImpl: unknown }) => {
+    guardCalls.push({ fetchImpl: opts.fetchImpl });
+    return new Response("<html><body>ok</body></html>", { status: 200 });
+  },
+}));
+
 const { setupWorkflowStores } = await import("../workflow-stores.js");
 const { ToolRegistry } = await import("../../../tools/registry.js");
 import type { BootContext } from "../../context.js";
@@ -197,6 +208,47 @@ describe("setupWorkflowStores — ask_user_question on a headless turn", () => {
     expect(result.isError).toBe(false);
     expect(JSON.parse(result.output).dismissed).toBe(true);
     expect(sent, "no card may reach a renderer nobody is watching").toHaveLength(0);
+
+    ctx.idleScheduler?.stop();
+  });
+});
+
+/**
+ * `net.fetch` throws on a redirect in every mode that would let the caller see
+ * it, so a tool that guards each hop has to be handed the single-hop transport
+ * instead. Nothing in a Node-run test can exercise that Electron behaviour, but
+ * the wiring is what broke, and the wiring is checkable here.
+ */
+describe("setupWorkflowStores — web_fetch transport", () => {
+  beforeEach(() => {
+    guardCalls.length = 0;
+  });
+
+  it("builds web_fetch on the transport that returns a redirect hop", async () => {
+    const registry = new ToolRegistry();
+    const plain = (async () => new Response("plain")) as unknown as typeof fetch;
+    const singleHop = (async () => new Response("single-hop")) as unknown as typeof fetch;
+    const ctx = {
+      getMainWindow: () => null,
+      approvalGate: { requestAndWait: async () => ({ choice: "allow" }) },
+      networkFetch: plain,
+      singleHopNetworkFetch: singleHop,
+      toolRegistry: registry,
+      settingsService: { get: () => undefined, getAll: () => ({}) },
+    } as unknown as BootContext;
+
+    await setupWorkflowStores(ctx, []);
+    const tool = registry.findByName("web_fetch");
+    expect(tool, "web_fetch must be registered by the boot step").toBeDefined();
+
+    await tool!.execute({ url: "https://example.com/" }, toolCtx("sess-fetch"));
+
+    expect(guardCalls).toHaveLength(1);
+    expect(
+      guardCalls[0]?.fetchImpl,
+      "web_fetch must guard hops on the single-hop transport, not net.fetch",
+    ).toBe(singleHop);
+    expect(guardCalls[0]?.fetchImpl).not.toBe(plain);
 
     ctx.idleScheduler?.stop();
   });
