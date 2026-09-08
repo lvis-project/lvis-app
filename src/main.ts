@@ -133,6 +133,10 @@ const pluginSmokeIds = parsePluginSmokeFlag(process.argv);
 // `--exec` / `--set-secret`. Parsed at module load beside the smoke flag so a
 // malformed command line is already known when the branch below is reached.
 const execRequest = parseExecFlags(process.argv, launchCwd);
+// The single fact that separates a run with a viewer from a one-shot run
+// without one. `bootstrap()` names it `BootLaunch`; the window needs the same
+// answer, so it is derived once here rather than re-tested at each site.
+const bootLaunch = execRequest === null ? "interactive" : "headless";
 
 async function main() {
   // A malformed `--exec` / `--set-secret` command line is answered before a
@@ -156,7 +160,7 @@ async function main() {
   setWindowManager(windowManager);
 
 
-  createWindow();
+  createWindow({ headless: bootLaunch === "headless" });
 
   updateSplashStatus(t("be_main.splashCheckingCerts"));
   const { bootstrap } = await loadMainStartupDependencies(
@@ -172,14 +176,9 @@ async function main() {
   // the wordmark matches what's actually happening rather than cycling
   // through a setInterval list. The fallback idle cycle inside the splash
   // still runs until the first explicit update lands.
-  // `execRequest` is the single fact boot derives every service-connection
+  // `bootLaunch` is the single fact boot derives every service-connection
   // decision from: a headless one-shot run opens none of its own.
-  const services = await bootstrap(
-    projectRoot,
-    getMainWindow()!,
-    () => getMainWindow(),
-    execRequest === null ? "interactive" : "headless",
-  );
+  const services = await bootstrap(projectRoot, getMainWindow()!, () => getMainWindow(), bootLaunch);
   setServices(services);
 
   updateSplashStatus(t("be_main.splashOpeningWorkspace"));

@@ -153,8 +153,14 @@ function initialAppModeArgs(): string[] {
   return [`${INITIAL_APP_MODE_ARG_PREFIX}${readPersistedAppMode()}`];
 }
 
-export function createWindow(options: { showBootstrapSplash?: boolean } = {}) {
-  const showBootstrapSplash = options.showBootstrapSplash ?? true;
+export function createWindow(options: { showBootstrapSplash?: boolean; headless?: boolean } = {}) {
+  // A headless run (`--exec`) never has a viewer. The window still has to
+  // exist because `bootstrap()` takes one, but nothing may reveal or paint
+  // it: the splash animates continuously (breathing logo + gradient) and the
+  // GPU process is already disabled on Linux, so every one of those frames
+  // would be rasterized on the CPU that the run itself needs.
+  const headless = options.headless ?? false;
+  const showBootstrapSplash = !headless && (options.showBootstrapSplash ?? true);
   const preloadPath = resolve(mainDir, "..", "preload.cjs");
   if (!existsSync(preloadPath)) {
     throw new Error(`[lvis] preload.cjs not found at ${preloadPath} — run 'npm run build:preload' first`);
@@ -164,7 +170,7 @@ export function createWindow(options: { showBootstrapSplash?: boolean } = {}) {
     ...initialMainWindowBounds(),
     minWidth: MAIN_WINDOW_MIN_WIDTH,
     minHeight: MAIN_WINDOW_MIN_HEIGHT,
-    show: true,
+    show: !headless,
     icon: resolveAppIconPath(),
     autoHideMenuBar: false,
     // Cross-platform titlebar — see `src/main/window-chrome.ts` for the
@@ -210,6 +216,10 @@ export function createWindow(options: { showBootstrapSplash?: boolean } = {}) {
 
   win.once("ready-to-show", () => {
     log.info("window ready-to-show");
+    // The headless window is the one window that must never be revealed —
+    // otherwise this listener undoes `show: false` the moment anything
+    // navigates the renderer.
+    if (headless) return;
     showMainWindow(win);
   });
   win.on("close", (event) => {
