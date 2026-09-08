@@ -10,6 +10,7 @@ import {
   type AskUserQuestionGate,
   type AskUserQuestionItem,
 } from "../main/ask-user-question-gate.js";
+import { execTurnRequested } from "../main/exec-mode.js";
 
 export interface AskUserQuestionToolDeps {
   getGate: () => AskUserQuestionGate | undefined;
@@ -107,6 +108,25 @@ export function createAskUserQuestionTool(deps: AskUserQuestionToolDeps): Tool {
       },
     },
     execute: async (rawInput, ctx) => {
+      // A headless turn builds a window like any other launch, so the card
+      // renders into a renderer nobody is watching and the gate sits on its
+      // five-minute timer until the host's tool ceiling cuts the call --
+      // minutes charged to the turn for a question asked of no one. There is
+      // no shape of input that changes that, so this answers ahead of
+      // validation, and it says what the model should do instead: the run is
+      // unattended, so the model is the one who decides.
+      if (execTurnRequested(process.argv)) {
+        return {
+          output: JSON.stringify({
+            answers: [],
+            dismissed: true,
+            reason: "unattended run: no user is present to answer",
+            guidance:
+              "Choose the option you judge best, say which one you chose and why, and continue.",
+          }),
+          isError: false,
+        };
+      }
       const gate = deps.getGate();
       if (!gate) {
         return {

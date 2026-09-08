@@ -6,7 +6,7 @@
  * — rather than hand-assembling `WorkflowToolDeps`, so a wiring regression in
  * the boot step (not just in the tool) is what turns it red.
  */
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
@@ -121,6 +121,83 @@ describe("setupWorkflowStores — tool and idle-scheduler wiring", () => {
     expect(result.isError).toBe(true);
     expect(result.output).toContain("user denied skill load");
     expect(result.output).not.toContain("demo body");
+    ctx.idleScheduler?.stop();
+  });
+});
+
+/**
+ * A headless turn builds a window like any other launch, so "is there a
+ * surface" cannot answer "is there anyone to ask". These two run the same card
+ * through the same producer and differ only in argv — without the pair, a fix
+ * that silenced the card everywhere would still look green.
+ */
+describe("setupWorkflowStores — ask_user_question on a headless turn", () => {
+  const CARD = {
+    questions: [{ question: "Which way?", choices: ["left", "right"] }],
+  };
+
+  function ctxWithWindow(): {
+    ctx: BootContext;
+    registry: InstanceType<typeof ToolRegistry>;
+    sent: string[];
+  } {
+    const registry = new ToolRegistry();
+    const sent: string[] = [];
+    const ctx = {
+      getMainWindow: () => ({
+        webContents: {
+          send: (channel: string) => {
+            sent.push(channel);
+          },
+        },
+      }),
+      approvalGate: { requestAndWait: async () => ({ choice: "allow" }) },
+      toolRegistry: registry,
+      settingsService: { get: () => undefined, getAll: () => ({}) },
+    } as unknown as BootContext;
+    return { ctx, registry, sent };
+  }
+
+  let realArgv: string[];
+  beforeEach(() => {
+    realArgv = process.argv;
+  });
+  afterEach(() => {
+    process.argv = realArgv;
+  });
+
+  it("hands the card to the window on an interactive launch", async () => {
+    process.argv = ["electron", "main.js"];
+    const { ctx, registry, sent } = ctxWithWindow();
+
+    await setupWorkflowStores(ctx, []);
+    const tool = registry.findByName("ask_user_question");
+    expect(tool, "ask_user_question must be registered by the boot step").toBeDefined();
+
+    // The interactive call parks on the gate by design, so abort it rather
+    // than leave a five-minute timer behind.
+    const abort = new AbortController();
+    const pending = tool!.execute(CARD, { ...toolCtx("sess-ask"), abortSignal: abort.signal });
+    await vi.waitFor(() => expect(sent.length).toBeGreaterThan(0));
+    abort.abort();
+    await pending;
+
+    ctx.idleScheduler?.stop();
+  });
+
+  it("answers a headless turn itself instead of opening a gate no one can close", async () => {
+    process.argv = ["electron", "main.js", "--exec"];
+    const { ctx, registry, sent } = ctxWithWindow();
+
+    await setupWorkflowStores(ctx, []);
+    const tool = registry.findByName("ask_user_question");
+
+    const result = await tool!.execute(CARD, toolCtx("sess-headless"));
+
+    expect(result.isError).toBe(false);
+    expect(JSON.parse(result.output).dismissed).toBe(true);
+    expect(sent, "no card may reach a renderer nobody is watching").toHaveLength(0);
+
     ctx.idleScheduler?.stop();
   });
 });
