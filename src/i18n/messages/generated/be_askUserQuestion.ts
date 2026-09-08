@@ -15,7 +15,7 @@ export const en = {
     "The user answers them one by one via pagination and submits all at once on the final confirm page.",
   "be_askUserQuestion.questionItemDesc": "The question text shown to the user (one or two lines).",
   "be_askUserQuestion.choicesDesc":
-    "Answer choices shown as buttons. Provide 1–3, ≤ 20 chars per item. " +
+    "Answer choices shown as buttons. Provide 1–3. Each must fit the chip: at most 40 display columns, i.e. about 40 Latin characters or 20 CJK ones. " +
     "If there are more than 3 candidates, provide the 3 most useful choices for this decision. " +
     "Static fallbacks ('Yes'/'No'/'Not sure') are prohibited — provide specific choices appropriate to the context of that branch. " +
     "A choice is a button, so a label naming the act of typing ('입력', '직접 입력', '기타', 'Other', 'Custom') is not a choice: use allowFreeText for that. " +
@@ -60,7 +60,7 @@ export const ko: Record<keyof typeof en, string> = {
     "사용자는 페이지네이션으로 차례로 답하고 마지막 컨펌 페이지에서 한꺼번에 제출.",
   "be_askUserQuestion.questionItemDesc": "사용자에게 보여줄 질문 본문 (한 줄 또는 두 줄).",
   "be_askUserQuestion.choicesDesc":
-    "버튼으로 보여줄 선택지. 1~3개, 항목당 한국어 ≤ 20자. " +
+    "버튼으로 보여줄 선택지. 1~3개. 항목당 칩에 들어가야 합니다 — 최대 40열, 즉 한국어 20자 또는 영문 40자 정도. " +
     "후보가 3개보다 많으면 이 결정에 가장 유용한 3개를 제시하세요. " +
     "정적 폴백('네'/'아니오'/'잘 모르겠어요')은 금지 — 그 분기점의 맥락에 맞는 구체적 선택지를 제시하세요. " +
     "선택지는 버튼이므로 입력 행위를 가리키는 라벨('입력' · '직접 입력' · '기타' · 'Other' · 'Custom')은 선택지가 아닙니다. 그런 경우 allowFreeText 를 쓰세요. " +
