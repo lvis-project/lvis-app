@@ -56,6 +56,7 @@ export const en = {
   // OS / Environment section
   "be_systemPromptBuilder.environmentDateTimeNote": "NOTE: When making tool calls related to date/time, always use the host's local time in ISO 8601 format with the UTC offset shown above.",
   "be_systemPromptBuilder.headlessResponseLanguage": "Response language: write your reply in the language of the request itself. This run has no interactive user, so the machine's locale says nothing about who is reading and must not decide the language.",
+  "be_systemPromptBuilder.interactiveResponseLanguage": "Response language: write your reply in the language the user wrote to you in, falling back to the locale above when their message carries no language of its own. The documents included in this prompt are written in a fixed language and are not a signal about the reader.",
   "be_systemPromptBuilder.completionDiscipline": "## Completion Discipline\n\n- Do not claim a task is complete on inspection alone. Before you say the work is done, run the task's own checks, or run the thing you produced, at least once in this turn.\n- Reading back your own output, restating the requirement, or reasoning that the change looks right is not verification. Only an execution whose result you saw counts.\n- State in the final message exactly what you executed and what it reported. If you could not execute anything, say that plainly instead of describing the work as verified, tested, or confirmed.\n- If a check fails, say so and show the failure. A reported failure is a finished turn; a hidden one is not.",
 
   // Conversation Continuity Guard section
@@ -134,6 +135,7 @@ export const ko: Record<keyof typeof en, string> = {
   // OS / Environment section
   "be_systemPromptBuilder.environmentDateTimeNote": "NOTE: 날짜/시간 관련 도구 호출 시 반드시 위에 표시된 호스트 로컬 시간을 기준으로, UTC 오프셋을 포함한 ISO 8601 형식으로 전달하세요.",
   "be_systemPromptBuilder.headlessResponseLanguage": "응답 언어: 요청문 자체가 쓰인 언어로 답변을 작성하세요. 이 실행에는 대화 중인 사용자가 없으므로, 기계의 로캘은 읽는 사람에 대해 아무것도 알려주지 않으며 언어를 결정해서는 안 됩니다.",
+  "be_systemPromptBuilder.interactiveResponseLanguage": "응답 언어: 사용자가 보낸 메시지에 쓰인 언어로 답변을 작성하고, 메시지 자체에 언어 신호가 없으면 위 로캘을 따르세요. 이 프롬프트에 포함된 문서들은 고정된 언어로 작성되어 있으며 읽는 사람에 대한 신호가 아닙니다.",
   "be_systemPromptBuilder.completionDiscipline": "## 완료 판정 규율\n\n- 검토만으로 작업이 완료됐다고 선언하지 마세요. 작업이 끝났다고 말하기 전에, 해당 작업의 검사를 실행하거나 산출물을 직접 실행하는 일을 이번 턴 안에서 최소 한 번 수행하세요.\n- 자신의 출력을 다시 읽는 것, 요구사항을 다시 진술하는 것, 변경이 맞아 보인다고 판단하는 것은 검증이 아닙니다. 결과를 직접 확인한 실행만 검증으로 인정됩니다.\n- 무엇을 실행했고 그 결과가 무엇이었는지 최종 답변에 명시하세요. 아무것도 실행하지 못했다면, 검증했다·테스트했다·확인했다고 서술하지 말고 실행하지 못했다고 그대로 밝히세요.\n- 검사가 실패하면 실패했다고 말하고 실패 내용을 보여주세요. 보고된 실패는 완결된 턴이지만, 감춰진 실패는 그렇지 않습니다.",
 
   // Conversation Continuity Guard section
