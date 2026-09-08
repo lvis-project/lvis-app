@@ -38,6 +38,41 @@ export const FREE_TEXT_STAND_IN_LABELS: readonly string[] = [
   "custom",
 ];
 
+/**
+ * A choice is a chip on a card, and what a chip spends is columns, not
+ * characters. The original cap was 20 *Korean* characters -- the width that
+ * fills a chip in the language this was written for -- but counting characters
+ * charges Latin labels the same 20 for half the ink, so ordinary options came
+ * back rejected one character over and the model spent turns shortening prose
+ * that already fit. Counting columns keeps the Korean ceiling exactly where it
+ * was (20 characters, 40 columns) and gives every other script the same chip.
+ */
+const MAX_CHOICE_WIDTH = 40;
+
+/**
+ * Columns a choice occupies in a monospace-ish chip: two for the East Asian
+ * Wide and Fullwidth ranges, one for everything else. This is the same rule a
+ * terminal applies, and it is deliberately coarse -- a chip that wraps is fine,
+ * a chip nobody can scan is not.
+ */
+function choiceDisplayWidth(choice: string): number {
+  let width = 0;
+  for (const character of choice) {
+    const code = character.codePointAt(0) ?? 0;
+    const wide =
+      (code >= 0x1100 && code <= 0x115f) || // Hangul Jamo
+      (code >= 0x2e80 && code <= 0xa4cf) || // CJK radicals through Yi
+      (code >= 0xac00 && code <= 0xd7a3) || // Hangul syllables
+      (code >= 0xf900 && code <= 0xfaff) || // CJK compatibility ideographs
+      (code >= 0xfe30 && code <= 0xfe6f) || // CJK compatibility forms
+      (code >= 0xff00 && code <= 0xff60) || // Fullwidth forms
+      (code >= 0xffe0 && code <= 0xffe6) ||
+      (code >= 0x20000 && code <= 0x3fffd); // CJK extension planes
+    width += wide ? 2 : 1;
+  }
+  return width;
+}
+
 const FREE_TEXT_STAND_IN_SET = new Set(
   FREE_TEXT_STAND_IN_LABELS.map((label) => label.toLowerCase()),
 );
@@ -191,12 +226,15 @@ export function createAskUserQuestionTool(deps: AskUserQuestionToolDeps): Tool {
             (choice) =>
               typeof choice !== "string" ||
               choice.trim().length === 0 ||
-              choice.trim().length > 20,
+              choiceDisplayWidth(choice.trim()) > MAX_CHOICE_WIDTH,
           )
         ) {
           return {
             output: JSON.stringify({
-              error: "each choice must be a non-empty string of at most 20 characters",
+              error:
+                "each choice must be a non-empty string that fits the chip: " +
+                `at most ${MAX_CHOICE_WIDTH} display columns ` +
+                "(a Latin character is one, a CJK character two)",
             }),
             isError: true,
           };

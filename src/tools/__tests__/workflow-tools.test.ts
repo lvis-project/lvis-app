@@ -247,7 +247,7 @@ describe("ask_user_question tool", () => {
     for (const choices of [
       ["same", " same "],
       ["A", "B", "C", "D"],
-      ["x".repeat(21)],
+      ["x".repeat(41)],
     ]) {
       const result = await tool.execute(
         { questions: [{ question: "Pick", choices }] },
@@ -256,6 +256,37 @@ describe("ask_user_question tool", () => {
       expect(result.isError).toBe(true);
     }
     expect(ask).not.toHaveBeenCalled();
+  });
+
+  it("budgets a choice by display width, so Korean and Latin get the same chip", async () => {
+    // The 20-character cap was written against Korean, where 20 characters
+    // fill a chip. Applied to Latin it rejects ordinary option labels one
+    // character over -- the model then spends round trips shortening prose
+    // that was already the right size on screen. Width is what the chip
+    // actually spends, so that is what the budget counts: CJK two columns,
+    // Latin one, and 20 Korean characters remains exactly the ceiling.
+    const ask = vi.fn().mockResolvedValue({ requestId: "r", answers: [] });
+    const tool = createAskUserQuestionTool({ getGate: () => ({ ask }) as never });
+
+    const accepted = await tool.execute(
+      { questions: [{ question: "Pick", choices: ["No, working tree only"] }] },
+      ctx(),
+    );
+    expect(accepted.isError).toBeFalsy();
+
+    const koreanAtCeiling = "가".repeat(20);
+    const atCeiling = await tool.execute(
+      { questions: [{ question: "Pick", choices: [koreanAtCeiling] }] },
+      ctx(),
+    );
+    expect(atCeiling.isError).toBeFalsy();
+
+    const koreanOverCeiling = "가".repeat(21);
+    const over = await tool.execute(
+      { questions: [{ question: "Pick", choices: [koreanOverCeiling] }] },
+      ctx(),
+    );
+    expect(over.isError).toBe(true);
   });
 
   it("rejects when more than 4 questions are supplied", async () => {
