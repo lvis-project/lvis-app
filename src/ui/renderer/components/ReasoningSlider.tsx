@@ -6,22 +6,39 @@ import {
   narrowLlmVendor,
 } from "../../../shared/llm-vendor-defaults.js";
 
-type Depth = "low" | "medium" | "high";
+type Depth = "low" | "medium" | "high" | "xhigh" | "max";
 
-/** Depth → the per-vendor `thinkingBudgetTokens` it persists as. */
+/**
+ * Depth → the per-vendor `thinkingBudgetTokens` it persists as.
+ *
+ * The budget is the stored value and the label is only a name for it, so a
+ * vendor already holding 24,000 keeps thinking exactly as deeply as before and
+ * simply reads as `xhigh` now — nothing to migrate. The top rung sits at the
+ * ceiling the models themselves stop at, so `max` is the real maximum rather
+ * than a round number above it.
+ */
 export const DEPTH_BUDGET: Record<Depth, number> = {
   low: 4_000,
   medium: 10_000,
-  high: 24_000,
+  high: 16_000,
+  xhigh: 24_000,
+  max: 32_000,
 };
 
-const LEVEL_DEPTH: Record<1 | 2 | 3, Depth> = { 1: "low", 2: "medium", 3: "high" };
-const DEPTH_LEVEL: Record<Depth, 1 | 2 | 3> = { low: 1, medium: 2, high: 3 };
+const DEPTHS = ["low", "medium", "high", "xhigh", "max"] as const;
+
+type LevelIndex = 1 | 2 | 3 | 4 | 5;
+const LEVEL_DEPTH: Record<LevelIndex, Depth> = {
+  1: "low", 2: "medium", 3: "high", 4: "xhigh", 5: "max",
+};
+const DEPTH_LEVEL: Record<Depth, LevelIndex> = {
+  low: 1, medium: 2, high: 3, xhigh: 4, max: 5,
+};
 
 function budgetToDepth(budget: number): Depth {
   let best: Depth = "medium";
   let bestDelta = Number.POSITIVE_INFINITY;
-  for (const d of ["low", "medium", "high"] as Depth[]) {
+  for (const d of DEPTHS) {
     const delta = Math.abs(DEPTH_BUDGET[d] - budget);
     if (delta < bestDelta) { best = d; bestDelta = delta; }
   }
@@ -34,7 +51,7 @@ export interface ReasoningLevelOptions {
   onToggle: (next: boolean) => void | Promise<void>;
 }
 
-export type ReasoningLevel = 0 | 1 | 2 | 3;
+export type ReasoningLevel = 0 | 1 | 2 | 3 | 4 | 5;
 
 /**
  * Top of the ladder. The slider's range, the clamp that pairs with it, and the
@@ -43,12 +60,12 @@ export type ReasoningLevel = 0 | 1 | 2 | 3;
  * three places — this constant removes the pair that could silently disagree,
  * where the slider offers a level the clamp then throws away.
  */
-const REASONING_LEVEL_MAX = 3;
+const REASONING_LEVEL_MAX = 5;
 
 /**
  * The reasoning level as ONE value the composer's controls all read.
  *
- * Level 0 is thinking off; 1–3 are the depths, persisted per vendor as a
+ * Level 0 is thinking off; 1–5 are the depths, persisted per vendor as a
  * token budget. The depth follows the settings broadcast rather than a
  * one-time seed, because more than one surface shows it — the status-row
  * chip, the model card it opens, and every other tile's composer — and a
@@ -99,6 +116,8 @@ export function useReasoningLevel({ enabled, onToggle }: ReasoningLevelOptions):
     t("bottomActionRow.thinkingDepthLow"),
     t("bottomActionRow.thinkingDepthMedium"),
     t("bottomActionRow.thinkingDepthHigh"),
+    t("bottomActionRow.thinkingDepthXHigh"),
+    t("bottomActionRow.thinkingDepthMax"),
   ];
 
   const apply = useCallback(
@@ -109,7 +128,7 @@ export function useReasoningLevel({ enabled, onToggle }: ReasoningLevelOptions):
         return;
       }
       if (!enabled) void onToggle(true);
-      const d = LEVEL_DEPTH[lvl as 1 | 2 | 3];
+      const d = LEVEL_DEPTH[lvl as LevelIndex];
       setDepth(d);
       void persistDepth(d);
     },
@@ -119,7 +138,7 @@ export function useReasoningLevel({ enabled, onToggle }: ReasoningLevelOptions):
   return { level, levelLabels, apply };
 }
 
-/** The range and its four labels — the same control wherever the level is set. */
+/** The range and its six labels — the same control wherever the level is set. */
 export function ReasoningLevelControl({
   level,
   levelLabels,

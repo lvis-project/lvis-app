@@ -575,11 +575,13 @@ function PermissionQuickPicker({
  */
 // One step of the yellow ladder per level; level 0 has no entry because it
 // draws no fill at all — an unlit bulb is the value, and giving it a colour
-// would make "off" look like a fourth depth.
+// would make "off" look like a sixth depth.
 const REASONING_FILL: Record<Exclude<ReasoningLevel, 0>, string> = {
   1: "var(--reasoning-fill-1)",
   2: "var(--reasoning-fill-2)",
   3: "var(--reasoning-fill-3)",
+  4: "var(--reasoning-fill-4)",
+  5: "var(--reasoning-fill-5)",
 };
 
 function ReasoningGauge({ level }: { level: ReasoningLevel }): React.JSX.Element {
