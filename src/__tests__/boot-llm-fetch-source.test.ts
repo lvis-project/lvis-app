@@ -47,17 +47,19 @@ describe("boot LLM fetch wiring regression guards", () => {
     expect(bootSource).toMatch(/parentDeps: \{[\s\S]*?llmFetch,/);
   });
 
-  it("keeps builtin web_fetch on the injected Electron network fetch", async () => {
+  it("keeps builtin web_fetch on the single-hop Electron transport", async () => {
     const bootToolsSource = readRepoFile("src/boot/tools.ts");
     const webFetchSource = readRepoFile("src/tools/web-fetch.ts");
 
-    // Boot injects the Electron network-stack fetch into the tool factory…
-    expect(bootToolsSource).toContain("createWebFetchTool(networkFetch)");
+    // Boot injects an Electron network-stack fetch into the tool factory — the
+    // single-hop one, because the guard validates each redirect hop and can
+    // only do that if the transport hands the hop back instead of throwing.
+    expect(bootToolsSource).toContain("createWebFetchTool(singleHopNetworkFetch)");
     // …and the tool threads it straight into the SSRF guard rather than the
     // global fetch, so tool traffic uses Chromium's network stack.
     expect(webFetchSource).toContain(
-      "export function createWebFetchTool(networkFetch: typeof fetch)",
+      "export function createWebFetchTool(singleHopFetch: typeof fetch)",
     );
-    expect(webFetchSource).toContain("fetchImpl: networkFetch,");
+    expect(webFetchSource).toContain("fetchImpl: singleHopFetch,");
   });
 });

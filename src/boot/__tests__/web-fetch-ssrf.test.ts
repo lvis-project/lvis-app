@@ -16,6 +16,7 @@ describe("web_fetch SSRF guard", () => {
   function makeWebFetchTool(
     workflowDeps: Parameters<typeof registerBuiltinTools>[2] = {
       networkFetch: unusedNetworkFetch,
+      singleHopNetworkFetch: unusedNetworkFetch,
     },
   ) {
     const registry = new ToolRegistry();
@@ -141,11 +142,18 @@ describe("web_fetch SSRF guard", () => {
     expect(result.output).toMatch(/non-public address/i);
   });
 
-  it("uses the injected Electron network fetch for tool calls", async () => {
-    const networkFetch = vi.fn(async () =>
+  // The guard validates each hop itself, so its transport has to be the one
+  // that hands a redirect back rather than throwing on it. Asserting that the
+  // plain `net.fetch` stays untouched is the half that catches a re-wiring.
+  it("runs tool calls on the injected single-hop Electron transport", async () => {
+    const singleHopNetworkFetch = vi.fn(async () =>
       new Response("<html><body>resolved through electron</body></html>", { status: 200 }),
     );
-    const tool = makeWebFetchTool({ networkFetch: networkFetch as typeof fetch });
+    const networkFetch = vi.fn(async () => new Response("must not be used"));
+    const tool = makeWebFetchTool({
+      networkFetch: networkFetch as unknown as typeof fetch,
+      singleHopNetworkFetch: singleHopNetworkFetch as unknown as typeof fetch,
+    });
 
     const result = await tool.execute(
       { url: "http://10.185.177.209/page", allowPrivateNetwork: true },
@@ -153,7 +161,8 @@ describe("web_fetch SSRF guard", () => {
     );
 
     expect(result.isError).toBe(false);
-    expect(networkFetch).toHaveBeenCalledOnce();
+    expect(singleHopNetworkFetch).toHaveBeenCalledOnce();
+    expect(networkFetch).not.toHaveBeenCalled();
     expect(result.output).toContain("resolved through electron");
   });
 

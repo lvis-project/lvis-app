@@ -131,7 +131,13 @@ function decodeCommonHtmlEntities(value: string): string {
  * assembler) is threaded straight into the SSRF guard so the definition holds
  * no boot wiring of its own.
  */
-export function createWebFetchTool(networkFetch: typeof fetch): Tool {
+/**
+ * @param singleHopFetch a transport that returns a redirect as a Response
+ * instead of following or throwing on it. The SSRF guard below validates
+ * each hop itself, which it can only do if the hop comes back; `net.fetch`
+ * throws on every mode that would allow that.
+ */
+export function createWebFetchTool(singleHopFetch: typeof fetch): Tool {
   return createDynamicTool({
     name: "web_fetch",
     description: t("be_tools.webFetchDescription"),
@@ -162,7 +168,7 @@ export function createWebFetchTool(networkFetch: typeof fetch): Tool {
         // chain) and bad schemes / embedded credentials are refused up front.
         const response = await fetchPublicHttpResponse(url, {
           allowPrivateNetworks: allowPrivateNetwork,
-          fetchImpl: networkFetch,
+          fetchImpl: singleHopFetch,
           headers: { "User-Agent": "LVIS-Assistant/0.1.0" },
         });
         const html = await response.text();
