@@ -217,6 +217,14 @@ jobs:
           key: ${{ runner.os }}-${{ runner.arch }}-ci-nm-${{ hashFiles('lvis-app/bun.lock') }}
       - run: bun install --frozen-lockfile
         working-directory: lvis-app
+      - name: Verify native background process ownership
+        working-directory: lvis-app
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows-job.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows-job.ps1 -FailureFixture
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/test-windows-job.mjs
       - name: Run Windows permission regressions
         working-directory: lvis-app
         run: >
@@ -235,6 +243,7 @@ jobs:
           src/audit/__tests__/hmac-chain.test.ts
           src/audit/__tests__/rationale-audit-adapter.test.ts
           src/boot/__tests__/plugin-surface-permissions.test.ts
+          src/main/__tests__/windows-job-launcher.test.ts
           src/permissions/__tests__/windows-sandbox-logic.test.ts
           src/permissions/__tests__/asrt-windows-support.test.ts
           src/tools/__tests__/shell-windows-partial-plan-b.test.ts

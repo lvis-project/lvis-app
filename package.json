@@ -108,7 +108,8 @@
     "dist:mac:fast": "node scripts/build-installers.mjs --mac --fast",
     "dist:linux:fast": "node scripts/build-installers.mjs --linux --fast",
     "dist:win:fast": "node scripts/build-installers.mjs --win --fast",
-    "release": "node scripts/release.mjs"
+    "release": "node scripts/release.mjs",
+    "build:windows-job": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows-job.ps1"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "~4.0.49",
@@ -380,6 +381,12 @@
     "win": {
       "target": [
         "nsis"
+      ],
+      "extraResources": [
+        {
+          "from": "resources/windows-job/${arch}/lvis-job.exe",
+          "to": "windows-job/${arch}/lvis-job.exe"
+        }
       ]
     },
     "nsis": {
@@ -396,6 +403,7 @@
       "uninstallDisplayName": "LVIS",
       "shortcutName": "LVIS",
       "artifactName": "${productName}-${version}-windows-${arch}-setup.${ext}"
-    }
+    },
+    "beforePack": "scripts/electron-before-pack.cjs"
   }
 }

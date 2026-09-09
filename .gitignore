@@ -77,3 +77,5 @@ main.js
 /.lvis-dlp-stats-*/
 smoke-live-model.status.txt
 smoke-live-app.status.txt
+
+/resources/windows-job/
