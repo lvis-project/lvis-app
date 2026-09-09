@@ -7,6 +7,9 @@ The helper's stdin is a private owner-lifetime pipe. Closing it or terminating
 the helper kills the job. The job handle is non-inheritable. Root command exit also closes the job and returns the
 root exit code. Descendants cannot opt out of job inheritance through the job's
 breakaway flags. This is lifecycle ownership, not an OS security sandbox.
+Guest Linux processes are outside this Windows job. The Bash tool rejects
+background mode for a WSL-backed interpreter before starting the command;
+distribution-wide termination would also affect unrelated work.
 
 Call `spawnWindowsJobProcess` with an absolute executable path already selected
 by the shell resolver. Keep its stdin open until disposal; never expose that pipe

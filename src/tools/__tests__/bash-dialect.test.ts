@@ -11,6 +11,7 @@ vi.mock("../../permissions/asrt-sandbox.js", () => ({
 }));
 
 import * as shellResolver from "../../lib/shell-resolver.js";
+import * as windowsJobLauncher from "../../main/windows-job-launcher.js";
 import { wrapToolCommand } from "../../permissions/asrt-sandbox.js";
 import { BashTool, backgroundShellManager, spawnWithSandbox } from "../shell-tools.js";
 
@@ -52,6 +53,18 @@ describe("Bash dialect across execution paths", () => {
     expect(result.isError).toBe(true);
     expect(result.output).toContain("requires Bash");
     expect(wrapToolCommand).not.toHaveBeenCalled();
+  });
+
+  it.skipIf(process.platform !== "win32")("rejects guest background execution before creating a handle", async () => {
+    const shell = shellResolver.resolveShell("bash");
+    const spawn = vi.spyOn(windowsJobLauncher, "spawnWindowsJobProcess");
+    vi.spyOn(shellResolver, "resolveShell").mockReturnValue({ ...shell, windowsFlavor: "wsl" });
+    const result = await new BashTool().execute({ command: "printf unexpected", run_in_background: true }, context);
+    expect(result.isError).toBe(true);
+    expect(result.metadata?.backgroundUnavailable).toBe(true);
+    expect(result.metadata?.backgrounded).toBeUndefined();
+    expect(result.output).toContain("this command was not started");
+    expect(spawn).not.toHaveBeenCalled();
   });
 
   it.skipIf(process.platform === "win32")("passes the same Bash interpreter into the sandbox wrapper", async () => {
