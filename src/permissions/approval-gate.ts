@@ -1351,7 +1351,7 @@ function verifyApprovalIntegrity(
 
 export class ApprovalGate {
   private readonly pending = new Map<string, PendingEntry>();
-  private readonly webContents: WebContents;
+  private readonly webContents: WebContents | null;
   /** Timeout in milliseconds. Defaults to five minutes. */
   private readonly timeoutMs: number;
   /** Active policy, replaceable at runtime via setPolicy(). */
@@ -1410,14 +1410,19 @@ export class ApprovalGate {
    */
   private readonly deferredEscalationEntries = new Map<string, string>();
 
+  private readonly headlessDenied?: (requestId: string, toolName: string) => void;
+
   constructor(
-    webContents: WebContents,
+    webContents: WebContents | null,
     initialPolicy?: PolicyFile,
     timeoutMs = TOOL_TIMEOUT_POLICY.approvalGateUserWaitMs,
     auditLogger?: AuditLogger,
     notificationService?: NotificationService,
     parentAdjudication?: ParentAdjudicationGateDeps,
+    headlessExec?: { onDenied: (requestId: string, toolName: string) => void },
   ) {
+    if (headlessExec && webContents !== null) throw new Error("Headless approval mode requires no desktop surface");
+    this.headlessDenied = headlessExec?.onDenied;
     this.webContents = webContents;
     this.timeoutMs = timeoutMs;
     this.auditLogger = auditLogger;
@@ -1525,7 +1530,7 @@ export class ApprovalGate {
    * is left to the answer.
    */
   private announceSettledToRenderer(requestId: string): void {
-    if (this.webContents.isDestroyed()) return;
+    if (!this.webContents || this.webContents.isDestroyed()) return;
     try {
       this.webContents.send(IPC_APPROVAL_SETTLED, { requestId });
     } catch {
@@ -2366,13 +2371,17 @@ export class ApprovalGate {
     }
 
     // §A2: webContents destruction check — deny once if the renderer is already closed.
-    if (this.webContents.isDestroyed()) {
+    if (!this.webContents || this.webContents.isDestroyed()) {
+      const headless = this.headlessDenied !== undefined;
       this.auditLogger?.log({
         timestamp: new Date().toISOString(),
         sessionId: fullReq.sessionId ?? UNATTRIBUTED_APPROVAL_SESSION_ID,
         type: "approval",
-        output: `[approval:send-failed] ${fullReq.id} ${auditFieldsFor(fullReq, executionPlanAudit)} — webContents already destroyed → deny-once`,
+        output: headless
+          ? `[approval:decided] ${fullReq.id} ${auditFieldsFor({ ...fullReq, answeredBy: "headless-exec" }, executionPlanAudit)} choice=deny-once rememberPattern=none`
+          : `[approval:send-failed] ${fullReq.id} ${auditFieldsFor(fullReq, executionPlanAudit)} — desktop surface unavailable → deny-once`,
       });
+      try { this.headlessDenied?.(fullReq.id, fullReq.toolName); } catch { /* Notification cannot change a deny. */ }
       return markHostApprovalRejectedDecision({
         requestId: fullReq.id,
         choice: "deny-once",
@@ -2766,6 +2775,7 @@ export class ApprovalGate {
       if (parked !== undefined) parked.rendererRequest = maskedSignedReq;
       // §F2: on send failure (webContents destruction race), clear pending and deny once.
       try {
+        if (!this.webContents) throw new Error("Approval surface unavailable");
         this.webContents.send(IPC_APPROVAL_REQUEST, maskedSignedReq);
       } catch (sendErr) {
         clearTimeout(timer);

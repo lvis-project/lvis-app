@@ -98,7 +98,7 @@ describe("main process plugin lifecycle regression guards", () => {
     const bootSource = await readBootWiring();
 
     expect(mainSource).toContain("registerMainWindowPluginEventBridge(mainWindow)");
-    expect(bootSource).toContain("replacePluginEventBridge = (win: BrowserWindow) => {");
+    expect(bootSource).toContain("replacePluginEventBridge = (win: BrowserWindow | null) => {");
     expect(bootSource).toContain("pluginEventBridgeWindow = mainWindow;");
     expect(bootSource).toContain("pluginEventBridgeWindow = win;");
     expect(bootSource).toContain("disposePluginEventBridge();");

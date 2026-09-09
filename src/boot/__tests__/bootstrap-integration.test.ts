@@ -993,11 +993,10 @@ describe("bootstrap() headless launch opens no discretionary service connection"
     vi.mocked(wireAnnouncementCheck).mockClear();
     h.order.length = 0;
     (h.captured["shutdownHooks"] as string[]).length = 0;
-    const win = fakeWindow();
     headlessServices = await bootstrap(
       "/tmp/lvis-boot-test/project",
-      win,
-      () => win,
+      null,
+      () => null,
       "headless",
     );
   }, 180_000);

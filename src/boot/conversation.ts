@@ -149,7 +149,7 @@ export function createPostTurnHookChain(opts: {
 }
 
 export async function createApprovalGate(
-  mainWindow: BrowserWindow,
+  mainWindow: BrowserWindow | null,
   auditLogger: AuditLogger,
   notificationService?: NotificationService,
   /**
@@ -163,12 +163,17 @@ export async function createApprovalGate(
 
   const bootPolicy = await loadPolicy();
   return new ApprovalGate(
-    mainWindow.webContents,
+    mainWindow?.webContents ?? null,
     bootPolicy,
     5 * 60 * 1000,
     auditLogger,
     notificationService,
     parentAdjudication,
+    mainWindow === null ? {
+      onDenied: (requestId, toolName) => {
+        process.stderr.write(`exec: auto-denied approval ${requestId} tool=${toolName}\n`);
+      },
+    } : undefined,
   );
 }
 

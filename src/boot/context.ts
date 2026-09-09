@@ -87,14 +87,14 @@ type WorkBoardStorage = ReturnType<typeof import("../work-board/storage.js").cre
 
 export interface BootContextInputs {
   projectRoot: string;
-  mainWindow: BrowserWindow;
+  mainWindow: BrowserWindow | null;
   getMainWindow: () => BrowserWindow | null;
 }
 
 export class BootContext {
   // ── Inputs (available immediately) ─────────────────────────────────────────
   declare readonly projectRoot: string;
-  declare readonly mainWindow: BrowserWindow;
+  declare readonly mainWindow: BrowserWindow | null;
   declare readonly getMainWindow: () => BrowserWindow | null;
 
   // ── Tracing (configureTracing) ─────────────────────────────────────────────
@@ -240,8 +240,8 @@ export class BootContext {
   // ── Plugin IPC bridges (mutable disposers) ─────────────────────────────────
   declare disposePluginNotifications: () => void;
   declare disposePluginEventBridge: () => void;
-  declare pluginEventBridgeWindow: BrowserWindow;
-  declare replacePluginEventBridge: (win: BrowserWindow) => void;
+  declare pluginEventBridgeWindow: BrowserWindow | null;
+  declare replacePluginEventBridge: (win: BrowserWindow | null) => void;
 
   // ── MCP + signed-artifact stores ───────────────────────────────────────────
   declare mcpGovernance: McpGovernance;

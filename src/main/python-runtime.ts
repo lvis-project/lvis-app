@@ -248,7 +248,7 @@ export class PythonRuntimeBootstrapper {
 
 
 
-  async ensureReady(mainWindow: BrowserWindow): Promise<RuntimeResult> {
+  async ensureReady(mainWindow: BrowserWindow | null): Promise<RuntimeResult> {
     this.mainWindow = mainWindow;
     this.getCurrentUvTarget();
     const pythonPath = this.getPythonPath();
@@ -272,7 +272,7 @@ export class PythonRuntimeBootstrapper {
    */
   async ensureReadyForPluginManifest(
     manifestPath: string,
-    mainWindow: BrowserWindow,
+    mainWindow: BrowserWindow | null,
     onStatus?: (status: PythonRuntimeBootstrapStatus) => void,
   ): Promise<RuntimeResult | null> {
     const lockFileName = this.options.lockFileName ?? LOCK_FILE_RESOURCE_NAME;

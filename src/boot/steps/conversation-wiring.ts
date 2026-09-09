@@ -291,7 +291,7 @@ export async function wireConversation(
   ctx.disposePluginEventBridge = registerPluginEventBridge(pluginRuntime, mainWindow,
   );
   ctx.pluginEventBridgeWindow = mainWindow;
-  ctx.replacePluginEventBridge = (win: BrowserWindow) => {
+  ctx.replacePluginEventBridge = (win: BrowserWindow | null) => {
     ctx.pluginEventBridgeWindow = win;
     ctx.disposePluginEventBridge();
     ctx.disposePluginEventBridge = registerPluginEventBridge(pluginRuntime, win,

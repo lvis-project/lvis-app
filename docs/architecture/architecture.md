@@ -46,6 +46,22 @@ primary-product contract.
 
 ## Process Boundaries
 
+One-shot `--exec` and `--set-secret` launches construct the host service graph
+without a main window or renderer. The boot window is explicitly nullable;
+interactive boot requires a window. Desktop event bridges have no subscription
+when that surface is absent. A request that reaches the approval gate without
+a live desktop follows its existing deny-once path, and UI-only HostApi calls
+fail before consuming proposal state. Activation and protocol events cannot
+open the desktop during a one-shot run.
+
+Foreground shell execution shares the output collector, timeout input schema,
+and deadline/cancellation owner in `src/tools/shell-tools.ts`. Timer conversion
+is owned by `resolveShellTimeoutMs` in `src/shared/tool-timeout-policy.ts`, which
+the executor ceiling also references. Cancellation terminates the managed child
+tree; output capture keeps a bounded prefix while draining both pipes. Child
+environment filtering stays in `src/tools/safe-env.ts`. Background incremental
+output and structured parser output have separate contracts.
+
 The renderer is a presentation surface. It does not read arbitrary files, mutate
 settings directly, or execute tools. It calls preload APIs, which map to IPC
 handlers in the main process. The main process validates arguments, resolves

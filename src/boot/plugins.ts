@@ -159,11 +159,11 @@ export function buildManifestEventHints(
  */
 export function registerPluginNotifications(
   pluginRuntime: PluginRuntime,
-  mainWindow: BrowserWindow,
+  mainWindow: BrowserWindow | null,
   notificationService: NotificationService,
   auditLogger?: Pick<AuditLogger, "log">,
 ): () => void {
-  if (!Notification.isSupported()) return () => {};
+  if (!mainWindow || !Notification.isSupported()) return () => {};
 
   const registered: Array<{ type: string; handler: EventHandler }> = [];
   // Manifests come from JSON, so runtime validation is required. Multiple plugins

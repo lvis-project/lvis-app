@@ -16,6 +16,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import type { Readable } from "node:stream";
+import { StringDecoder } from "node:string_decoder";
 import { z } from "zod";
 
 import { resolveShell, shellEnvForChild } from "../lib/shell-resolver.js";
@@ -28,7 +29,6 @@ import {
   type ToolExecutionResult,
 } from "./base.js";
 import { buildSafeChildEnv, buildSandboxedChildEnv } from "./safe-env.js";
-import { terminateChildProcess } from "./terminate-child-process.js";
 import { createSandboxProcessHome } from "../permissions/sandbox-process-home.js";
 import {
   validateShellCommandPathPolicy,
@@ -54,9 +54,10 @@ import {
   resolveHostShellWorkingDirectory,
 } from "../permissions/host-shell-execution-permit.js";
 import { deriveSandboxWritePaths } from "../permissions/sandbox-write-jail.js";
-import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
+import { resolveShellTimeoutMs, TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
 import {
   assertManagedChildProcessAdmissionOpen,
+  forceKillManagedChildProcess,
   trackManagedChildProcess,
 } from "../main/managed-child-processes.js";
 import { sha256Hex } from "../lib/hex-digest-equal.js";
@@ -67,12 +68,84 @@ type PipedChild = ChildProcessByStdio<null, Readable, Readable>;
 const OUTPUT_CAP = 12_000;
 const TRUNCATION_MARKER = "\n...[truncated]...";
 
-function formatOutput(raw: string): string {
+function formatOutput(raw: string, captureTruncated = false): string {
   const text = raw.replace(/\r\n/g, "\n").trim();
-  if (text.length === 0) return "(no output)";
-  if (text.length > OUTPUT_CAP) return text.slice(0, OUTPUT_CAP) + TRUNCATION_MARKER;
+  if (text.length === 0) return captureTruncated ? TRUNCATION_MARKER.trimStart() : "(no output)";
+  if (text.length > OUTPUT_CAP || captureTruncated) return text.slice(0, OUTPUT_CAP) + TRUNCATION_MARKER;
   return text;
 }
+
+/** Keep a bounded UTF-8 prefix while continuing to drain both child pipes. */
+function createOutputCollector() {
+  // Four bytes cover any UTF-8 code point. The display cap remains in UTF-16
+  // characters; raw whitespace also counts against this capture budget.
+  const buffer = Buffer.alloc(OUTPUT_CAP * 4);
+  let size = 0;
+  let truncated = false;
+  return {
+    collect(chunk: Buffer): void {
+      const retained = Math.min(chunk.length, buffer.length - size);
+      if (retained > 0) chunk.copy(buffer, size, 0, retained);
+      size += retained;
+      if (retained < chunk.length) truncated = true;
+    },
+    format(): string {
+      const prefix = buffer.subarray(0, size);
+      // An incomplete final code point belongs to the discarded suffix.
+      const text = truncated ? new StringDecoder("utf8").write(prefix) : prefix.toString("utf8");
+      return formatOutput(text, truncated);
+    },
+  };
+}
+
+/** Own the deadline and cancellation subscription until the child settles. */
+function watchShellLifetime(
+  child: ChildProcess,
+  timeoutSeconds: number,
+  signal?: AbortSignal,
+  abortSandbox?: () => void,
+) {
+  let timedOut = false;
+  let aborted = false;
+  const stop = (): void => {
+    abortSandbox?.();
+    forceKillManagedChildProcess(child, timedOut ? "shell-timeout" : "shell-cancelled");
+  };
+  const cancel = (): void => {
+    if (timedOut || aborted) return;
+    aborted = true;
+    stop();
+  };
+  const timer = setTimeout(() => {
+    if (aborted) return;
+    timedOut = true;
+    stop();
+  }, resolveShellTimeoutMs(timeoutSeconds));
+  signal?.addEventListener("abort", cancel, { once: true });
+  if (signal?.aborted) cancel();
+  return {
+    get timedOut() { return timedOut; },
+    get aborted() { return aborted; },
+    dispose(): void {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", cancel);
+    },
+    output(text: string): string {
+      return aborted ? `Shell command cancelled.\n${text}` : text;
+    },
+    metadata(): { aborted?: true } {
+      return aborted ? { aborted: true } : {};
+    },
+  };
+}
+
+const shellTimeoutSchema = z.number().int().min(1)
+  .default(TOOL_TIMEOUT_POLICY.shellDefaultMs / 1000)
+  .describe(
+    "Seconds to wait before the command is killed. Positive integer; defaults to " +
+    `${TOOL_TIMEOUT_POLICY.shellDefaultMs / 1000}. Start with the default and only pass a ` +
+    "larger value when a previous call timed out.",
+  );
 
 /**
  * Session-scoped registry for background shell processes started by the `bash`
@@ -298,16 +371,7 @@ export const BashToolInputSchema = z.object({
   // Optional-but-defaulted and strictly positive: a command always has a
   // deadline, so nothing waits forever. No upper bound — a timeout is a clean,
   // retryable error whose retry exists precisely to name a LARGER budget.
-  timeoutSeconds: z
-    .number()
-    .int()
-    .min(1)
-    .default(TOOL_TIMEOUT_POLICY.shellDefaultMs / 1000)
-    .describe(
-      "Seconds to wait before the command is killed. Positive integer; defaults to " +
-        `${TOOL_TIMEOUT_POLICY.shellDefaultMs / 1000}. Start with the default and only pass a ` +
-        "larger value when a previous call timed out.",
-    ),
+  timeoutSeconds: shellTimeoutSchema,
   run_in_background: z
     .boolean()
     .optional()
@@ -376,6 +440,7 @@ export class BashTool extends ZodTool<typeof BashToolInputSchema> {
     input: z.infer<typeof BashToolInputSchema>,
     ctx: ToolExecutionContext,
   ): Promise<ToolExecutionResult> {
+    ctx.abortSignal?.throwIfAborted();
     // Preflight: interactive scaffolds would hang on stdin.
     const preflightError = preflightInteractiveCommand(input.command);
     if (preflightError !== null) {
@@ -469,7 +534,7 @@ export class BashTool extends ZodTool<typeof BashToolInputSchema> {
         input.command,
         resolvedCwd,
         writePaths,
-        input.timeoutSeconds,
+        input.timeoutSeconds, ctx.abortSignal,
       );
       return withBackgroundUnavailable(sandboxResult, input.run_in_background === true);
     }
@@ -485,7 +550,7 @@ export class BashTool extends ZodTool<typeof BashToolInputSchema> {
       return spawnBackground(input.command, resolvedCwd, sessionIdFromContext(ctx));
     }
 
-    const plainResult = await spawnWithTimeout(input.command, resolvedCwd, input.timeoutSeconds);
+    const plainResult = await spawnWithTimeout(input.command, resolvedCwd, input.timeoutSeconds, ctx.abortSignal);
     if (!hostShellPlan.requiresExplicitUserApproval) {
       return withBackgroundUnavailable(plainResult, input.run_in_background === true);
     }
@@ -624,7 +689,9 @@ export async function spawnWithSandbox(
   resolvedCwd: string,
   writePaths: readonly string[],
   timeoutSeconds: number,
+  signal?: AbortSignal,
 ): Promise<SpawnResult> {
+  signal?.throwIfAborted();
   let sandboxHome: ReturnType<typeof createSandboxProcessHome>;
   try {
     sandboxHome = createSandboxProcessHome();
@@ -674,7 +741,7 @@ export async function spawnWithSandbox(
   try {
     wrapped = await wrapToolCommand(command, {
       filesystem,
-      abortSignal: abortController.signal,
+      abortSignal: signal ? AbortSignal.any([signal, abortController.signal]) : abortController.signal,
       ...(binShell !== undefined ? { binShell } : {}),
     });
   } catch (err) {
@@ -687,6 +754,11 @@ export async function spawnWithSandbox(
   }
 
   const [cmd, ...args] = wrapped.argv;
+  if (signal?.aborted) {
+    void cleanupAsrtSandboxAfterCommand();
+    sandboxHome.cleanup();
+    return { output: "Shell command cancelled.", isError: true, metadata: { aborted: true, sandboxed: false } };
+  }
   if (cmd === undefined) {
     void cleanupAsrtSandboxAfterCommand();
     sandboxHome.cleanup();
@@ -713,6 +785,7 @@ export async function spawnWithSandbox(
     try {
       assertManagedChildProcessAdmissionOpen("tool:bash:asrt");
       child = spawn(cmd, args, {
+        detached: process.platform !== "win32",
         cwd: resolvedCwd,
         stdio: ["ignore", "pipe", "pipe"],
         shell: false,
@@ -728,17 +801,14 @@ export async function spawnWithSandbox(
       });
       return;
     }
-    trackManagedChildProcess(child, { label: "tool:bash:asrt" });
+    trackManagedChildProcess(child, { killProcessGroup: process.platform !== "win32", label: "tool:bash:asrt" });
 
-    const chunks: Buffer[] = [];
-    const collect = (c: Buffer): void => {
-      chunks.push(c);
-    };
-    child.stdout.on("data", collect);
-    child.stderr.on("data", collect);
+    const outputCollector = createOutputCollector();
+    child.stdout.on("data", outputCollector.collect);
+    child.stderr.on("data", outputCollector.collect);
 
     let settled = false;
-    let timedOut = false;
+
     let lifecycleCleaned = false;
     const cleanupAfterTermination = (): void => {
       if (lifecycleCleaned) return;
@@ -746,31 +816,26 @@ export async function spawnWithSandbox(
       void cleanupAsrtSandboxAfterCommand();
       sandboxHome.cleanup();
     };
-    const timer = setTimeout(() => {
-      timedOut = true;
-      abortController.abort();
-      terminateChildProcess(child);
-    }, timeoutSeconds * 1000);
+    const lifetime = watchShellLifetime(child, timeoutSeconds, signal, () => abortController.abort());
 
     const finish = (code: number | null): void => {
       cleanupAfterTermination();
+      lifetime.dispose();
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
       // Per-command cleanup (proxy/helper state) after the wrapped command ends.
-      const combined = Buffer.concat(chunks).toString("utf-8");
-      const formatted = formatOutput(combined);
-      if (timedOut) {
+      const formatted = lifetime.output(outputCollector.format());
+      if (lifetime.timedOut) {
         resolveResult({
           output: formatTimeoutOutput(formatted, command, timeoutSeconds),
           isError: true,
-          metadata: { returncode: code, timedOut: true, sandboxed: true },
+          metadata: { ...lifetime.metadata(), returncode: code, timedOut: true, sandboxed: true },
         });
       } else {
         resolveResult({
           output: formatted,
-          isError: code !== 0,
-          metadata: { returncode: code, sandboxed: true },
+          isError: lifetime.aborted || code !== 0,
+          metadata: { ...lifetime.metadata(), returncode: code, sandboxed: true },
         });
       }
     };
@@ -779,7 +844,6 @@ export async function spawnWithSandbox(
     child.on("error", (err) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
       // Node can emit `error` for a failed process operation while the child
       // remains alive. The later `close` event owns ASRT/HOME finalization.
       resolveResult({
@@ -795,11 +859,14 @@ async function spawnWithTimeout(
   command: string,
   cwd: string,
   timeoutSeconds: number,
+  signal?: AbortSignal,
 ): Promise<SpawnResult> {
+  signal?.throwIfAborted();
   return new Promise((resolve) => {
     const shell = resolveShell();
     assertManagedChildProcessAdmissionOpen("tool:bash");
     const child: PipedChild = spawn(shell.cmd, shell.shellArgs(command), {
+      detached: process.platform !== "win32",
       cwd,
       stdio: ["ignore", "pipe", "pipe"],
       // Strip secrets (LVIS_*, *_API_KEY, GITHUB_TOKEN, AWS_*, etc.) from
@@ -807,39 +874,32 @@ async function spawnWithTimeout(
       env: shellEnvForChild(shell, buildSafeChildEnv()),
       shell: false,
     });
-    trackManagedChildProcess(child, { label: "tool:bash" });
+    trackManagedChildProcess(child, { killProcessGroup: process.platform !== "win32", label: "tool:bash" });
 
-    const chunks: Buffer[] = [];
-    const collect = (c: Buffer): void => {
-      chunks.push(c);
-    };
-    child.stdout.on("data", collect);
-    child.stderr.on("data", collect);
+    const outputCollector = createOutputCollector();
+    child.stdout.on("data", outputCollector.collect);
+    child.stderr.on("data", outputCollector.collect);
 
     let settled = false;
-    let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      terminateChildProcess(child);
-    }, timeoutSeconds * 1000);
+
+    const lifetime = watchShellLifetime(child, timeoutSeconds, signal);
 
     const finish = (code: number | null): void => {
+      lifetime.dispose();
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
-      const combined = Buffer.concat(chunks).toString("utf-8");
-      const formatted = formatOutput(combined);
-      if (timedOut) {
+      const formatted = lifetime.output(outputCollector.format());
+      if (lifetime.timedOut) {
         resolve({
           output: formatTimeoutOutput(formatted, command, timeoutSeconds),
           isError: true,
-          metadata: { returncode: code, timedOut: true },
+          metadata: { ...lifetime.metadata(), returncode: code, timedOut: true },
         });
       } else {
         resolve({
           output: formatted,
-          isError: code !== 0,
-          metadata: { returncode: code },
+          isError: lifetime.aborted || code !== 0,
+          metadata: { ...lifetime.metadata(), returncode: code },
         });
       }
     };
@@ -848,7 +908,6 @@ async function spawnWithTimeout(
     child.on("error", (err) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
       resolve({
         output: `spawn failed: ${err.message}`,
         isError: true,
@@ -1016,16 +1075,7 @@ export const PowerShellToolInputSchema = z.object({
   command: z.string().min(1).describe("PowerShell command to execute"),
   cwd: z.string().optional().describe("Working directory override"),
   // Optional-but-defaulted and strictly positive — see BashToolInputSchema.
-  timeoutSeconds: z
-    .number()
-    .int()
-    .min(1)
-    .default(TOOL_TIMEOUT_POLICY.shellDefaultMs / 1000)
-    .describe(
-      "Seconds to wait before the command is killed. Positive integer; defaults to " +
-        `${TOOL_TIMEOUT_POLICY.shellDefaultMs / 1000}. Start with the default and only pass a ` +
-        "larger value when a previous call timed out.",
-    ),
+  timeoutSeconds: shellTimeoutSchema,
 });
 
 const POWERSHELL_ALIASES = new Map<string, string>([
@@ -1149,6 +1199,7 @@ export class PowerShellTool extends ZodTool<typeof PowerShellToolInputSchema> {
     input: z.infer<typeof PowerShellToolInputSchema>,
     ctx: ToolExecutionContext,
   ): Promise<ToolExecutionResult> {
+    ctx.abortSignal?.throwIfAborted();
     const resolvedCwd = resolveHostShellWorkingDirectory(ctx.cwd, input.cwd);
     const cwdViolation = validateShellWorkingDirectory(resolvedCwd, ctx.cwd, ctx.extraAllowedDirectories);
     if (cwdViolation) {
@@ -1233,11 +1284,11 @@ export class PowerShellTool extends ZodTool<typeof PowerShellToolInputSchema> {
         input.command,
         resolvedCwd,
         writePaths,
-        input.timeoutSeconds,
+        input.timeoutSeconds, ctx.abortSignal,
       );
     }
 
-    const plainResult = await spawnPowerShell(input.command, resolvedCwd, input.timeoutSeconds);
+    const plainResult = await spawnPowerShell(input.command, resolvedCwd, input.timeoutSeconds, ctx.abortSignal);
     if (!hostShellPlan.requiresExplicitUserApproval) return plainResult;
     return {
       ...plainResult,
@@ -1499,7 +1550,9 @@ async function spawnPowerShellWithSandbox(
   cwd: string,
   writePaths: readonly string[],
   timeoutSeconds: number,
+  signal?: AbortSignal,
 ): Promise<ToolExecutionResult> {
+  signal?.throwIfAborted();
   // Resolve before allocating the temporary profile so a missing PowerShell
   // executable cannot leave an orphaned sandbox HOME behind.
   const executable = resolvePowerShellExecutable();
@@ -1557,7 +1610,7 @@ async function spawnPowerShellWithSandbox(
   try {
     wrapped = await wrapToolCommand(sandboxCommand, {
       filesystem,
-      abortSignal: abortController.signal,
+      abortSignal: signal ? AbortSignal.any([signal, abortController.signal]) : abortController.signal,
       ...(binShell !== undefined ? { binShell } : {}),
     });
   } catch (err) {
@@ -1570,6 +1623,11 @@ async function spawnPowerShellWithSandbox(
   }
 
   const [cmd, ...args] = wrapped.argv;
+  if (signal?.aborted) {
+    void cleanupAsrtSandboxAfterCommand();
+    sandboxHome.cleanup();
+    return { output: "Shell command cancelled.", isError: true, metadata: { aborted: true, sandboxed: false } };
+  }
   if (cmd === undefined) {
     void cleanupAsrtSandboxAfterCommand();
     sandboxHome.cleanup();
@@ -1596,6 +1654,7 @@ async function spawnPowerShellWithSandbox(
     try {
       assertManagedChildProcessAdmissionOpen("tool:powershell:asrt");
       child = spawn(cmd, args, {
+        detached: process.platform !== "win32",
         cwd,
         stdio: ["ignore", "pipe", "pipe"],
         shell: false,
@@ -1611,17 +1670,14 @@ async function spawnPowerShellWithSandbox(
       });
       return;
     }
-    trackManagedChildProcess(child, { label: "tool:powershell:asrt" });
+    trackManagedChildProcess(child, { killProcessGroup: process.platform !== "win32", label: "tool:powershell:asrt" });
 
-    const chunks: Buffer[] = [];
-    const collect = (chunk: Buffer): void => {
-      chunks.push(chunk);
-    };
-    child.stdout.on("data", collect);
-    child.stderr.on("data", collect);
+    const outputCollector = createOutputCollector();
+    child.stdout.on("data", outputCollector.collect);
+    child.stderr.on("data", outputCollector.collect);
 
     let settled = false;
-    let timedOut = false;
+
     let lifecycleCleaned = false;
     const cleanupAfterTermination = (): void => {
       if (lifecycleCleaned) return;
@@ -1629,24 +1685,20 @@ async function spawnPowerShellWithSandbox(
       void cleanupAsrtSandboxAfterCommand();
       sandboxHome.cleanup();
     };
-    const timer = setTimeout(() => {
-      timedOut = true;
-      abortController.abort();
-      terminateChildProcess(child);
-    }, timeoutSeconds * 1000);
+    const lifetime = watchShellLifetime(child, timeoutSeconds, signal, () => abortController.abort());
 
     const finish = (code: number | null): void => {
       cleanupAfterTermination();
+      lifetime.dispose();
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
-      const output = formatOutput(Buffer.concat(chunks).toString("utf-8"));
+      const output = lifetime.output(outputCollector.format());
       resolveResult({
-        output: timedOut
+        output: lifetime.timedOut
           ? `PowerShell command timed out after ${timeoutSeconds} seconds.\n${output}`
           : output,
-        isError: timedOut || code !== 0,
-        metadata: { returncode: code, timedOut, sandboxed: true },
+        isError: lifetime.aborted || lifetime.timedOut || code !== 0,
+        metadata: { ...lifetime.metadata(), returncode: code, timedOut: lifetime.timedOut, sandboxed: true },
       });
     };
 
@@ -1654,7 +1706,6 @@ async function spawnPowerShellWithSandbox(
     child.on("error", (err) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
       // `error` may be a failed operation on a live process. The definitive
       // `close` event retains ASRT/HOME cleanup ownership.
       resolveResult({
@@ -1672,7 +1723,9 @@ async function spawnPowerShell(
   command: string,
   cwd: string,
   timeoutSeconds: number,
+  signal?: AbortSignal,
 ): Promise<ToolExecutionResult> {
+  signal?.throwIfAborted();
   return new Promise((resolve) => {
     const executable = resolvePowerShellExecutable();
     assertManagedChildProcessAdmissionOpen("tool:powershell");
@@ -1680,39 +1733,34 @@ async function spawnPowerShell(
       executable,
       ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command],
       {
+        detached: process.platform !== "win32",
         cwd,
         stdio: ["ignore", "pipe", "pipe"],
         env: buildSafeChildEnv(),
         shell: false,
       },
     );
-    trackManagedChildProcess(child, { label: "tool:powershell" });
+    trackManagedChildProcess(child, { killProcessGroup: process.platform !== "win32", label: "tool:powershell" });
 
-    const chunks: Buffer[] = [];
-    const collect = (chunk: Buffer): void => {
-      chunks.push(chunk);
-    };
-    child.stdout.on("data", collect);
-    child.stderr.on("data", collect);
+    const outputCollector = createOutputCollector();
+    child.stdout.on("data", outputCollector.collect);
+    child.stderr.on("data", outputCollector.collect);
 
     let settled = false;
-    let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      terminateChildProcess(child);
-    }, timeoutSeconds * 1000);
+
+    const lifetime = watchShellLifetime(child, timeoutSeconds, signal);
 
     const finish = (code: number | null): void => {
+      lifetime.dispose();
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
-      const output = formatOutput(Buffer.concat(chunks).toString("utf-8"));
+      const output = lifetime.output(outputCollector.format());
       resolve({
-        output: timedOut
+        output: lifetime.timedOut
           ? `PowerShell command timed out after ${timeoutSeconds} seconds.\n${output}`
           : output,
-        isError: timedOut || code !== 0,
-        metadata: { returncode: code, timedOut },
+        isError: lifetime.aborted || lifetime.timedOut || code !== 0,
+        metadata: { ...lifetime.metadata(), returncode: code, timedOut: lifetime.timedOut },
       });
     };
 
@@ -1720,7 +1768,6 @@ async function spawnPowerShell(
     child.on("error", (err) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
       resolve({
         output: err && "code" in err && err.code === "ENOENT"
           ? `PowerShell executable not found: ${executable}`

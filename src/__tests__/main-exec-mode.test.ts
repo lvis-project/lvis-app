@@ -144,7 +144,7 @@ describe("main.ts — headless exec branch", () => {
     // either site would let the window and the services disagree about which
     // kind of run this is.
     expect(mainSource).toContain(
-      "bootstrap(projectRoot, getMainWindow()!, () => getMainWindow(), bootLaunch)",
+      "bootstrap(projectRoot, getMainWindow(), () => getMainWindow(), bootLaunch)",
     );
   });
 
@@ -176,31 +176,17 @@ describe("logger.ts — console destination in exec mode", () => {
   });
 });
 
-describe("main-window.ts — a headless run opens no visible window", () => {
-  it("ties the window's visibility to the headless flag rather than a literal", () => {
-    expect(windowSource).toContain("show: !headless,");
-    expect(windowSource).not.toContain("show: true,");
-  });
-
-  it("suppresses the splash entirely when headless, whatever the caller asked for", () => {
-    // `showBootstrapSplash` defaults to true, so a headless caller that only
-    // passed `headless: true` would still animate a splash nobody sees.
-    expect(windowSource).toContain(
-      "const showBootstrapSplash = !headless && (options.showBootstrapSplash ?? true);",
-    );
-  });
-
-  it("keeps ready-to-show from undoing show: false", () => {
-    const start = windowSource.indexOf('win.once("ready-to-show"');
+describe("main-window.ts — headless creation allocates no window", () => {
+  it("returns before checking desktop assets or constructing a renderer", () => {
+    const start = windowSource.indexOf("export function createWindow(");
     expect(start).toBeGreaterThanOrEqual(0);
-    const handler = windowSource.slice(start, windowSource.indexOf('win.on("close"', start));
-    // Existence first: `indexOf` returns -1 for a deleted guard, and -1 is
-    // less than any real offset, so the ordering check alone passes vacuously
-    // on exactly the regression it exists to catch.
-    expect(handler).toContain("if (headless) return;");
-    expect(handler.indexOf("if (headless) return;")).toBeLessThan(
-      handler.indexOf("showMainWindow(win)"),
-    );
+    const body = windowSource.slice(start);
+    const guard = body.indexOf("if (options.headless) return;");
+    const preload = body.indexOf("const preloadPath");
+    const window = body.indexOf("new BrowserWindow(");
+    expect(guard).toBeGreaterThanOrEqual(0);
+    expect(preload).toBeGreaterThan(guard);
+    expect(window).toBeGreaterThan(preload);
   });
 });
 

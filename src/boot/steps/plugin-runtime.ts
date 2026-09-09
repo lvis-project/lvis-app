@@ -132,7 +132,7 @@ export interface InitPluginRuntimeInput {
   pythonPath: string | undefined;
   pythonRuntime?: PythonRuntimeBootstrapper;
   bootAuditLogger: AuditLogger;
-  mainWindow: BrowserWindow;
+  mainWindow: BrowserWindow | null;
   /**
    * Electron `net`-backed fetch (Chromium stack: OS proxy incl. PAC/WPAD + OS
    * trust store). Backs the capability-gated `hostApi.hostFetch`. Eager (exists
