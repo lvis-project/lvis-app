@@ -244,6 +244,8 @@ jobs:
           src/audit/__tests__/rationale-audit-adapter.test.ts
           src/boot/__tests__/plugin-surface-permissions.test.ts
           src/main/__tests__/windows-job-launcher.test.ts
+          src/tools/__tests__/background-shell-windows-job.test.ts
+          src/tools/__tests__/bash-dialect.test.ts
           src/permissions/__tests__/windows-sandbox-logic.test.ts
           src/permissions/__tests__/asrt-windows-support.test.ts
           src/tools/__tests__/shell-windows-partial-plan-b.test.ts
