@@ -140,7 +140,7 @@ describe("shell-resolver", () => {
     vi.mocked(execFileSync).mockImplementation((cmd, args) => {
       if (cmd === "where") return `${executable}\r\nE:\\Other\\bash.exe\r\n`;
       if (cmd !== executable) throw new Error("not installed");
-      return args[1] === "uname -s" ? "MSYS_NT" : "__lvis_shell_ok__";
+      return Array.isArray(args) && args[1] === "uname -s" ? "MSYS_NT" : "__lvis_shell_ok__";
     });
 
     const shell = resolveShell("bash");
@@ -182,7 +182,7 @@ describe("shell-resolver", () => {
     vi.mocked(execFileSync).mockImplementation((cmd, args) => {
       if (cmd === "where") return executable;
       if (cmd !== executable) throw new Error("not installed");
-      return args[1] === "uname -s" ? "MSYS_NT" : "__lvis_shell_ok__";
+      return Array.isArray(args) && args[1] === "uname -s" ? "MSYS_NT" : "__lvis_shell_ok__";
     });
 
     expect(resolveShell(dialect).cmd).toBe(executable);
