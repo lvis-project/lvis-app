@@ -26,6 +26,10 @@ const mainSource = readFileSync(resolve(process.cwd(), "src/main.ts"), "utf-8")
   .replace(/\r\n/g, "\n");
 const loggerSource = readFileSync(resolve(process.cwd(), "src/lib/logger.ts"), "utf-8")
   .replace(/\r\n/g, "\n");
+const windowSource = readFileSync(resolve(process.cwd(), "src/main/main-window.ts"), "utf-8")
+  .replace(/\r\n/g, "\n");
+const bootSource = readFileSync(resolve(process.cwd(), "src/boot.ts"), "utf-8")
+  .replace(/\r\n/g, "\n");
 
 /** Body of the `if (execRequest !== null) { ... }` branch in `main()`. */
 function extractExecBranch(text: string): string | null {
@@ -126,9 +130,22 @@ describe("main.ts — headless exec branch", () => {
 
   it("rejects a malformed command line before a window exists", () => {
     const usageBranch = mainSource.indexOf('"error" in execRequest');
-    const createWindow = mainSource.indexOf("createWindow();");
+    const createWindow = mainSource.indexOf("createWindow({");
     expect(usageBranch).toBeGreaterThanOrEqual(0);
     expect(createWindow).toBeGreaterThan(usageBranch);
+  });
+
+  it("derives the launch mode once and hands the same fact to the window and to boot", () => {
+    expect(mainSource).toContain(
+      'const bootLaunch = execRequest === null ? "interactive" : "headless";',
+    );
+    expect(mainSource).toContain('createWindow({ headless: bootLaunch === "headless" });');
+    // Both consumers read the derived const. Re-testing `execRequest` at
+    // either site would let the window and the services disagree about which
+    // kind of run this is.
+    expect(mainSource).toContain(
+      "bootstrap(projectRoot, getMainWindow()!, () => getMainWindow(), bootLaunch)",
+    );
   });
 
   it("reports a held single-instance lock instead of exiting silently", () => {
@@ -156,5 +173,62 @@ describe("logger.ts — console destination in exec mode", () => {
   it("sends both the JSON and the pretty console stream to stderr", () => {
     expect(loggerSource).toContain("execHeadless ? process.stderr : process.stdout");
     expect(loggerSource).toContain("destination: process.stderr");
+  });
+});
+
+describe("main-window.ts — a headless run opens no visible window", () => {
+  it("ties the window's visibility to the headless flag rather than a literal", () => {
+    expect(windowSource).toContain("show: !headless,");
+    expect(windowSource).not.toContain("show: true,");
+  });
+
+  it("suppresses the splash entirely when headless, whatever the caller asked for", () => {
+    // `showBootstrapSplash` defaults to true, so a headless caller that only
+    // passed `headless: true` would still animate a splash nobody sees.
+    expect(windowSource).toContain(
+      "const showBootstrapSplash = !headless && (options.showBootstrapSplash ?? true);",
+    );
+  });
+
+  it("keeps ready-to-show from undoing show: false", () => {
+    const start = windowSource.indexOf('win.once("ready-to-show"');
+    expect(start).toBeGreaterThanOrEqual(0);
+    const handler = windowSource.slice(start, windowSource.indexOf('win.on("close"', start));
+    // Existence first: `indexOf` returns -1 for a deleted guard, and -1 is
+    // less than any real offset, so the ordering check alone passes vacuously
+    // on exactly the regression it exists to catch.
+    expect(handler).toContain("if (headless) return;");
+    expect(handler.indexOf("if (headless) return;")).toBeLessThan(
+      handler.indexOf("showMainWindow(win)"),
+    );
+  });
+});
+
+describe("boot.ts — a headless run reports nobody at the desk", () => {
+  /** Body of the `isDeskAttended` closure, so a match elsewhere cannot stand in. */
+  function deskAttendedBody(): string {
+    const start = bootSource.indexOf("isDeskAttended: () => {");
+    expect(start, "isDeskAttended closure not found in boot.ts").toBeGreaterThan(-1);
+    const end = bootSource.indexOf("\n      },", start);
+    expect(end).toBeGreaterThan(start);
+    return bootSource.slice(start, end);
+  }
+
+  it("answers no from the launch mode before consulting the window", () => {
+    const body = deskAttendedBody();
+    // Window visibility is a proxy that reports whatever the boot window
+    // happens to be doing. It read `true` while a bootstrap splash was up, and
+    // `second-instance` / `activate` can still reveal that window mid-run.
+    expect(body.indexOf("if (headless) return false;")).toBeGreaterThan(-1);
+    expect(body.indexOf("if (headless) return false;")).toBeLessThan(
+      body.indexOf("getMainWindow()"),
+    );
+  });
+
+  it("still asks the window when a launch has an operator", () => {
+    // The guard must narrow the headless case only — an interactive launch
+    // that drops to `false` would route every tier-3 escalation of a running
+    // app into the deferred queue instead of asking the user.
+    expect(deskAttendedBody()).toContain("win.isVisible() && !win.isMinimized()");
   });
 });

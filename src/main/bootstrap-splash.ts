@@ -167,6 +167,11 @@ export const BOOTSTRAP_SPLASH = `<!DOCTYPE html>
  *  Best-effort — silently no-ops if the splash has already navigated away
  *  to the real renderer or if executeJavaScript rejects. */
 export function updateSplashStatus(message: string): void {
+  // No splash was shown (headless run, or a re-created window that passed
+  // `showBootstrapSplash: false`), so there is no status line to drive.
+  // `bootstrapSplashShownAt` is the same fact `waitForMinimumBootstrapSplash`
+  // reads — asking it here keeps both answers derived from one place.
+  if (bootstrapSplashShownAt <= 0) return;
   const mainWindow = getMainWindow();
   if (!mainWindow || mainWindow.isDestroyed()) return;
   const escaped = JSON.stringify(message);

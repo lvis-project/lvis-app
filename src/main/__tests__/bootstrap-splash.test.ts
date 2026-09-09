@@ -11,7 +11,7 @@
  * them, so adding or renaming a splash message is covered without editing the
  * test.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { generatedEn } from "../../i18n/messages/generated/index.js";
@@ -51,5 +51,39 @@ describe("bootstrap splash status messages", () => {
         `splash markup is missing the translation of ${key}`,
       ).toContain(t(key));
     }
+  });
+});
+
+// `vi.mock` is hoisted above every const in this file, so the spy has to be
+// created by `vi.hoisted` to exist when the factory runs.
+const { executeJavaScript } = vi.hoisted(() => ({
+  executeJavaScript: vi.fn((_script: string) => Promise.resolve(undefined)),
+}));
+vi.mock("../app-state.js", () => ({
+  getMainWindow: () => ({ isDestroyed: () => false, webContents: { executeJavaScript } }),
+}));
+
+describe("updateSplashStatus", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    executeJavaScript.mockClear();
+  });
+
+  it("stays silent when no splash was ever shown", async () => {
+    // A headless run, or any window created with `showBootstrapSplash: false`,
+    // has no status line — evaluating script in that renderer is pure waste.
+    const { updateSplashStatus } = await import("../bootstrap-splash.js");
+    updateSplashStatus("checking certs");
+    expect(executeJavaScript).not.toHaveBeenCalled();
+  });
+
+  it("drives the status line once the splash has been marked shown", async () => {
+    const { markBootstrapSplashShown, updateSplashStatus } = await import(
+      "../bootstrap-splash.js"
+    );
+    markBootstrapSplashShown();
+    updateSplashStatus("checking certs");
+    expect(executeJavaScript).toHaveBeenCalledTimes(1);
+    expect(executeJavaScript.mock.calls[0]![0]).toContain('"checking certs"');
   });
 });
