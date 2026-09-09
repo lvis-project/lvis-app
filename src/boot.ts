@@ -350,7 +350,16 @@ export async function bootstrap(
         readParentContextTurns(memoryManager, parentSessionId, maxTurns),
       // Whether a dock would be seen by anyone. Visible and not minimised, not
       // focused: a user reading the window beside another app is still there.
+      //
+      // A headless run answers no before asking the window. Window visibility
+      // is the right signal for a launch that has an operator, but it is the
+      // wrong one for `--exec`, where it reports whatever the boot window
+      // happens to be doing: it read `true` while a bootstrap splash was up,
+      // and the `second-instance` and `activate` handlers can still reveal
+      // that window mid-run, flipping the answer under a run nobody joined.
+      // The launch mode is the fact; the window is a proxy for it.
       isDeskAttended: () => {
+        if (headless) return false;
         const win = getMainWindow();
         if (!win || win.isDestroyed()) return false;
         return win.isVisible() && !win.isMinimized();
