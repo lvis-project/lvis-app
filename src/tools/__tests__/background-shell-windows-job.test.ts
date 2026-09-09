@@ -1,10 +1,10 @@
 import { existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, win32 } from "node:path";
+import { dirname, join, win32 } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
-import { resolveShell, shellPathForHostPath, shellQuote } from "../../lib/shell-resolver.js";
+import { shellQuote } from "../../lib/shell-resolver.js";
 import { resolveWindowsJobLauncher } from "../../main/windows-job-launcher.js";
 import { backgroundShellManager as manager, BashTool } from "../shell-tools.js";
 
@@ -81,17 +81,17 @@ describe.skipIf(process.platform !== "win32")("BashTool Windows background job o
   });
 
   async function start(mode: "wait" | "root-exit") {
-    const shell = resolveShell("bash");
     // Quote paths, not inline program text, so the shell cannot reinterpret
-    // the fixture's JavaScript, quotes, or Windows path separators.
-    const executable = shellQuote(shellPathForHostPath(shell, nodeExecutable));
-    const fixture = shellQuote(shellPathForHostPath(shell, join(dir, "child fixture.cjs")));
+    // the fixture's JavaScript. Native drive paths with forward slashes are
+    // understood by both the host path policy and the installed shell.
+    const executable = shellQuote(nodeExecutable.replaceAll("\\", "/"));
+    const fixture = shellQuote(join(dir, "child fixture.cjs").replaceAll("\\", "/"));
     const command = `${executable} ${fixture} ${shellQuote(mode)}; exit $?`;
     const result = await new BashTool().execute(
       { command, run_in_background: true },
-      { cwd: dir, extraAllowedDirectories: [], metadata: { sessionId: dir } },
+      { cwd: dir, extraAllowedDirectories: [dirname(nodeExecutable)], metadata: { sessionId: dir } },
     );
-    expect(result.isError).toBe(false);
+    expect(result.isError, result.output).toBe(false);
     expect(result.metadata?.backgrounded).toBe(true);
     const shellId = JSON.parse(result.output).shellId as string;
     expect(typeof shellId).toBe("string");
