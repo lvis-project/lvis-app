@@ -147,9 +147,22 @@ interface RawLeaf {
  *    commands.
  *
  * Fails closed (`parseError: true`) on unbalanced quotes or parentheses.
+ * `heredocBodies: "preserve"` retains stdin text for structural guards.
+ * `literalDataProof` additionally rejects unresolved heredocs, here-strings,
+ * unquoted escapes, and unbalanced ordinary grouping before relaxing a deny.
  */
-export function tokenizeShell(command: string): TokenizeResult {
-  const scan = scanLeaves(redactHeredocBodies(command));
+export function tokenizeShell(
+  command: string,
+  options: { heredocBodies?: "redact" | "preserve"; literalDataProof?: boolean } = {},
+): TokenizeResult {
+  // Structural guards can retain stdin text conservatively: a shell consumer
+  // may execute it. Default risk/path callers continue to omit those bodies.
+  const redacted = redactHeredocBodies(command, options.literalDataProof ?? false);
+  if (redacted === null) return { leaves: [], parseError: true };
+  const scan = scanLeaves(
+    options.heredocBodies === "preserve" ? command : redacted,
+    options.literalDataProof,
+  );
   if (scan.parseError) {
     return { leaves: [], parseError: true };
   }
@@ -183,9 +196,10 @@ export function tokenizeShell(command: string): TokenizeResult {
  * `$(…)` there really does execute and the body must keep being scanned. Those
  * are left exactly as they were.
  *
- * Every failure is a no-op that returns the input unchanged — an unbalanced
+ * By default every failure returns the input unchanged — an unbalanced
  * quote, a heredoc whose terminator never arrives — so a command this cannot
- * read confidently keeps the behaviour it had before.
+ * read confidently keeps the behaviour it had before. The opt-in
+ * `literalDataProof` mode returns null instead and rejects unsupported forms.
  *
  * A terminator is recognised by comparing the TRIMMED line to the delimiter,
  * which is laxer than plain `<<` (where the terminator must start at column 0).
@@ -205,16 +219,18 @@ export function tokenizeShell(command: string): TokenizeResult {
  * `rm -rf /` is refused by the raw-string layer, not the leaf guard), and the
  * read verdict fails closed on `hasInputRedirect` before it ever looks at what
  * the body says. Both of those are load-bearing for this redaction being safe.
- * If either is ever narrowed — the raw-string patterns replaced by leaf-only
- * matching, or `hasInputRedirect` stopped being disqualifying — a heredoc body
- * becomes unexamined and this function has to grow a way to hand the body back.
+ * A structural rule that narrows its raw-string match must request
+ * `heredocBodies: "preserve"`, as the eval guard does, so its inspection still
+ * receives the body. Default read classification keeps the redirect guard.
  *
  * A `#` comment is honoured, and that is a security property rather than a
  * nicety: a `<<'X'` written inside a comment opens no heredoc in bash, so
  * treating it as one would erase every following line up to `X` from the scan
  * while the shell went on running those lines.
  */
-export function redactHeredocBodies(command: string): string {
+export function redactHeredocBodies(command: string): string;
+export function redactHeredocBodies(command: string, literalDataProof: boolean): string | null;
+export function redactHeredocBodies(command: string, literalDataProof = false): string | null {
   if (!command.includes("<<")) return command;
   const n = command.length;
   // Delimiters opened on the current line, in the order their bodies follow it.
@@ -230,21 +246,21 @@ export function redactHeredocBodies(command: string): string {
     }
     if (ch === "'") {
       const close = command.indexOf("'", i + 1);
-      if (close === -1) return command;
+      if (close === -1) return literalDataProof ? null : command;
       out += command.slice(i, close + 1);
       i = close + 1;
       continue;
     }
     if (ch === '"') {
       const res = consumeDoubleQuote(command, i);
-      if (res === null) return command;
+      if (res === null) return literalDataProof ? null : command;
       out += command.slice(i, res.next);
       i = res.next;
       continue;
     }
     if (ch === "`") {
       const close = command.indexOf("`", i + 1);
-      if (close === -1) return command;
+      if (close === -1) return literalDataProof ? null : command;
       out += command.slice(i, close + 1);
       i = close + 1;
       continue;
@@ -261,6 +277,7 @@ export function redactHeredocBodies(command: string): string {
       i = end;
       continue;
     }
+    if (literalDataProof && ch === "<" && command.slice(i, i + 3) === "<<<") return null;
     // `<<` heredoc, but NOT `<<<` (a here-STRING, whose operand is one word on
     // the same line and therefore has no body to remove).
     if (ch === "<" && command[i + 1] === "<" && command[i + 2] !== "<") {
@@ -271,6 +288,7 @@ export function redactHeredocBodies(command: string): string {
         i = opened.next;
         continue;
       }
+      if (literalDataProof) return null;
       out += "<<";
       i += 2;
       continue;
@@ -280,7 +298,7 @@ export function redactHeredocBodies(command: string): string {
       i += 1;
       for (const delimiter of pending) {
         const bodyEnd = findHeredocTerminator(command, i, delimiter);
-        if (bodyEnd === null) return command;
+        if (bodyEnd === null) return literalDataProof ? null : command;
         i = bodyEnd;
       }
       pending.length = 0;
@@ -289,6 +307,7 @@ export function redactHeredocBodies(command: string): string {
     out += ch;
     i += 1;
   }
+  if (literalDataProof && pending.length > 0) return null;
   return out;
 }
 
@@ -357,7 +376,9 @@ function findHeredocTerminator(command: string, from: number, delimiter: string)
  * tracking quote and substitution nesting. Returns `parseError` when a quote or
  * paren never closes.
  */
-function scanLeaves(command: string): { leaves: RawLeaf[]; parseError: boolean } {
+function scanLeaves(command: string, literalDataProof = false): { leaves: RawLeaf[]; parseError: boolean } {
+  let parentheses = 0;
+  let braces = 0;
   const leaves: RawLeaf[] = [];
   let words: RawWord[] = [];
   let leafStart = 0;
@@ -603,6 +624,17 @@ function scanLeaves(command: string): { leaves: RawLeaf[]; parseError: boolean }
       continue;
     }
 
+    // A caller relaxing a raw structural deny needs stronger lexical proof.
+    // Unquoted escapes are outside this scanner's grammar; never guess how
+    // they change a comment/word boundary. Balance ordinary grouping too.
+    if (literalDataProof) {
+      if (ch === "\\") return { leaves: [], parseError: true };
+      if (ch === "(") parentheses += 1;
+      if (ch === ")" && --parentheses < 0) return { leaves: [], parseError: true };
+      if (ch === "{") braces += 1;
+      if (ch === "}" && --braces < 0) return { leaves: [], parseError: true };
+    }
+
     // Ordinary character — part of the current word. A `$` never reaches here;
     // it is claimed by the expansion branch above, which sets the flag.
     current += ch;
@@ -610,6 +642,7 @@ function scanLeaves(command: string): { leaves: RawLeaf[]; parseError: boolean }
     i += 1;
   }
 
+  if (literalDataProof && (parentheses !== 0 || braces !== 0)) return { leaves: [], parseError: true };
   endLeaf(command.length, command.length);
   // Drop leaves that are entirely empty (e.g. trailing separators).
   const nonEmpty = leaves.filter((l) => l.words.length > 0 || l.raw.length > 0);

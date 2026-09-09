@@ -116,6 +116,7 @@ export class BashAstValidator {
 
     for (const p of patterns) {
       if (p.regex.test(command)) {
+        if (p.id === "eval-untrusted" && this._evalIsOnlyLiteralData(command)) continue;
         return {
           decision: this.opts.mode === "warn" ? "warn" : "deny",
           reason: p.reason,
@@ -138,6 +139,45 @@ export class BashAstValidator {
     }
 
     return { decision: "allow" };
+  }
+
+  /** Relax a raw eval hit only within the shared lexical model.
+   * Keep quoted stdin bodies visible and scan them conservatively as shell
+   * text; this does not model another consumer's programming language.
+   * Unresolved syntax, substitutions and shell consumers retain the raw deny.
+   */
+  private _evalIsOnlyLiteralData(command: string): boolean {
+    const { leaves, parseError } = tokenizeShell(command, { heredocBodies: "preserve", literalDataProof: true });
+    if (parseError) return false;
+    // A raw hit in a comment does not establish that opaque shell-code
+    // operands or substitutions elsewhere are safe to execute.
+    for (const leaf of leaves) {
+      if (leaf.hasCommandSubstitution || leaf.hasProcessSubstitution
+        || leaf.argvHasExpandableDollar.some(Boolean)
+        || leaf.assignments.some((assignment) => /[$`]/.test(assignment))) return false;
+      const verb = this._basename(leaf.argv[0] ?? "");
+      if (/^(?:eval|sh|bash|dash|ash|zsh|ksh|fish|csh|tcsh|source|\.|exec|builtin)$/.test(verb)) return false;
+      // printf -v interprets an array subscript in its variable-name operand;
+      // even a single-quoted subscript can execute command substitution there.
+      if (leaf.argv[0] === "printf" && leaf.argv[1]?.startsWith("-") && leaf.argv[1] !== "--") return false;
+    }
+    const mentionsEval = (word: string): boolean => /\beval(?:\s|$)/i.test(word);
+    const carryingEval = leaves.filter((leaf) => [
+      ...leaf.argv, ...leaf.assignments, ...leaf.redirectTargets, ...leaf.inputRedirectTargets,
+    ].some(mentionsEval));
+    // No argument, assignment, or file target carries the raw match.
+    if (carryingEval.length === 0) return true;
+    // These shell builtins do not execute ordinary output operands. Unknown
+    // consumers may execute an argument or formatted output; retain their deny.
+    for (const leaf of leaves) {
+      if (leaf.assignments.some(mentionsEval)
+        || leaf.redirectTargets.some(mentionsEval)
+        || leaf.inputRedirectTargets.some(mentionsEval)) return false;
+      if (leaf.argv.length === 0) continue;
+      if (leaf.argv[0] !== "printf" && leaf.argv[0] !== "echo") return false;
+      if (leaf.strippedWrappers.some((wrapper) => wrapper !== "command")) return false;
+    }
+    return true;
   }
 
   /**
