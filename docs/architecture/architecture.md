@@ -62,6 +62,16 @@ tree; output capture keeps a bounded prefix while draining both pipes. Child
 environment filtering stays in `src/tools/safe-env.ts`. Background incremental
 output and structured parser output have separate contracts.
 
+The Bash tool resolves the same Bash dialect for foreground, background, and
+sandbox execution through `src/lib/shell-resolver.ts`; discovery probes use the
+same filtered child environment. Background handles belong to a session and
+retain bounded incremental output. `bash_output` can wait for an output or
+lifecycle event without extending the command's lifetime. POSIX background
+commands own process groups; Windows background commands use the native job
+launcher described in `native/windows-job/README.md`. Session disposal and root
+exit release those owned descendants. The native job is a lifecycle mechanism,
+not a security sandbox.
+
 The renderer is a presentation surface. It does not read arbitrary files, mutate
 settings directly, or execute tools. It calls preload APIs, which map to IPC
 handlers in the main process. The main process validates arguments, resolves
