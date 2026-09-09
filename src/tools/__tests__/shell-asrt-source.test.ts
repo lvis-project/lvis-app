@@ -42,7 +42,8 @@ describe("background shell lifetime contract", () => {
   // two surfaces the model reads to the mechanism that makes the claim true.
   it("registers the background child with the managed-child registry", () => {
     expect(bashSection).toMatch(/trackManagedChildProcess\(child,\s*\{\s*label:\s*"tool:bash:background",\s*killProcessGroup,?\s*\}\)/);
-    expect(bashSection).toContain('detached: process.platform !== "win32"');
+    expect(bashSection).toContain('spawnWindowsJobProcess(shell.cmd, shell.shellArgs(command), { cwd, env })');
+    expect(bashSection).toContain("detached: true");
     expect(bashSection).toContain('killProcessGroup: process.platform !== "win32"');
   });
 

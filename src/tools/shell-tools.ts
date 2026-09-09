@@ -20,6 +20,7 @@ import { StringDecoder } from "node:string_decoder";
 import { z } from "zod";
 
 import { resolveShell, shellEnvForChild } from "../lib/shell-resolver.js";
+import { spawnWindowsJobProcess } from "../main/windows-job-launcher.js";
 import {
   createDynamicTool,
   ZodTool,
@@ -649,13 +650,16 @@ function withBackgroundUnavailable(result: SpawnResult, requested: boolean): Spa
 function spawnBackground(command: string, cwd: string, sessionId: string): SpawnResult {
   const shell = resolveShell("bash");
   assertManagedChildProcessAdmissionOpen("tool:bash:background");
-  const child: PipedChild = spawn(shell.cmd, shell.shellArgs(command), {
-    cwd,
-    stdio: ["ignore", "pipe", "pipe"],
-    env: shellEnvForChild(shell, buildSafeChildEnv()),
-    shell: false,
-    detached: process.platform !== "win32",
-  });
+  const env = shellEnvForChild(shell, buildSafeChildEnv());
+  const child = process.platform === "win32"
+    ? spawnWindowsJobProcess(shell.cmd, shell.shellArgs(command), { cwd, env })
+    : spawn(shell.cmd, shell.shellArgs(command), {
+      cwd,
+      stdio: ["ignore", "pipe", "pipe"],
+      env,
+      shell: false,
+      detached: true,
+    });
   const shellId = backgroundShellManager.register({
     sessionId,
     command,
