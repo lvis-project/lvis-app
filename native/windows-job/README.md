@@ -39,5 +39,8 @@ node scripts/test-windows-job.mjs
 The failure fixture is a separate executable compiled with an invalid job handle;
 it is never packaged. Tests launch only owned synthetic processes, check their
 actual OS lifetime after disposal, and exercise the installed Bash executable.
-The Windows CI job runs this gate. Performance output reports median command
+The gate also builds twice from a path containing Unicode, spaces, and literal
+percent signs, compares binary hashes, and executes that output. Test cleanup
+waits for owned process handles to close before removing fixtures. The Windows
+CI job runs this gate. Performance output reports median command
 latency and helper working set as observations, without a machine-specific budget.

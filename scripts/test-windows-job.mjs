@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { spawn, execFileSync } from "node:child_process";
 import { once } from "node:events";
-import { copyFileSync, mkdtempSync, writeFileSync, existsSync, rmSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
+import { createHash } from "node:crypto";
 import { performance } from "node:perf_hooks";
 
 if (process.platform !== "win32") throw new Error("This test requires Windows");
@@ -18,7 +19,7 @@ child.stdout.once('data',data=>{process.stdout.write(data); if(process.argv[2]==
 setInterval(()=>{},1000)}`);
 function launch(exe, args, binary = helper) {
   const child = spawn(binary, [exe, ...args], { cwd: directory, stdio: ['pipe','pipe','pipe'], windowsHide:true });
-  active.push(child);
+  track(child);
   let stdout='', stderr='';
   child.stdout.on('data', data=>{stdout+=data}); child.stderr.on('data',data=>{stderr+=data});
   const done = once(child,'close').then(([code])=>({code,stdout,stderr}));
@@ -38,7 +39,27 @@ async function gone(pid) {
   throw new Error(`Owned descendant ${pid} survived`);
 }
 const active=[];
+function track(child) {
+  active.push({ child, closed: new Promise(resolve => child.once('close', resolve)) });
+}
 try {
+  const buildRoot = join(directory, '검증 %TEST% path');
+  mkdirSync(join(buildRoot, 'scripts'), { recursive: true });
+  mkdirSync(join(buildRoot, 'native/windows-job'), { recursive: true });
+  const buildScript = join(buildRoot, 'scripts/build-windows-job.ps1');
+  copyFileSync(new URL('./build-windows-job.ps1', import.meta.url), buildScript);
+  copyFileSync(new URL('../native/windows-job/launcher.cpp', import.meta.url), join(buildRoot, 'native/windows-job/launcher.cpp'));
+  const build = () => execFileSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', buildScript, '-Arch', process.arch], {
+    env: { ...process.env, TEST: 'must-not-expand' }, encoding: 'utf8',
+  });
+  const pathHelper = join(buildRoot, `resources/windows-job/${process.arch}/lvis-job.exe`);
+  build();
+  const firstHash = createHash('sha256').update(readFileSync(pathHelper)).digest('hex');
+  build();
+  assert.equal(createHash('sha256').update(readFileSync(pathHelper)).digest('hex'), firstHash);
+  const pathRun = await deadline(launch(process.execPath, ['-e', 'process.stdout.write("literal-path-ok");process.exit(19)'], pathHelper).done);
+  assert.equal(pathRun.code, 19); assert.equal(pathRun.stdout, 'literal-path-ok');
+  console.log('PASS reproducible native build and execution from Unicode, spaces, and literal percent path');
   const spacedHelper=join(directory,'launcher with spaces.exe');
   copyFileSync(helper,spacedHelper);
   const spaced=await deadline(launch(process.execPath,['-e','process.stdout.write("ok")'],spacedHelper).done);
@@ -71,12 +92,12 @@ try {
   const owner=join(directory,'owner.cjs');
   writeFileSync(owner,`const{spawn}=require('node:child_process');const c=spawn(${JSON.stringify(helper)},[process.execPath,${JSON.stringify(fixture)},'wait'],{stdio:['pipe','pipe','inherit']});c.stdout.once('data',d=>{process.stdout.write(d);process.exit(0)})`);
   const parent=spawn(process.execPath,[owner],{stdio:['ignore','pipe','pipe']});
-  active.push(parent);
+  track(parent);
   const [output]=await deadline(once(parent.stdout,'data'));await deadline(once(parent,'close'));await gone(Number(output.toString().trim()));
   console.log('PASS actual owner process exit terminates descendant');
   writeFileSync(owner,`const{spawn}=require('node:child_process');const c=spawn(${JSON.stringify(helper)},[process.execPath,${JSON.stringify(fixture)},'wait'],{stdio:['pipe','pipe','inherit']});c.stdout.once('data',d=>process.stdout.write(d));setInterval(()=>{},1000)`);
   const killedOwner=spawn(process.execPath,[owner],{stdio:['ignore','pipe','pipe']});
-  active.push(killedOwner);
+  track(killedOwner);
   const killedOwnerDone=once(killedOwner,'close');
   const [killedOutput]=await deadline(once(killedOwner.stdout,'data'));
   killedOwner.kill();await deadline(killedOwnerDone);await gone(Number(killedOutput.toString().trim()));
@@ -96,6 +117,9 @@ try {
   const median=values=>values.sort((a,b)=>a-b)[Math.floor(values.length/2)];
   console.log(JSON.stringify({helperMedianMs:median(elapsed),directMedianMs:median(direct),helperWorkingSetBytes:Number(rss)}));
 } finally {
-  for(const child of active)if(child.exitCode===null)child.kill();
+  await Promise.all(active.map(async ({ child, closed }) => {
+    if (child.exitCode === null && child.signalCode === null) child.kill();
+    await closed;
+  }));
   rmSync(directory,{recursive:true,force:true});
 }
