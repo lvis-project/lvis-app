@@ -108,9 +108,9 @@ try {
   result=await deadline(run.done);assert.equal(result.code,125);assert.equal(existsSync(marker),false);assert.match(result.stderr,/failed/);
   console.log('PASS job assignment failure never runs command');
   const elapsed=[];
-  for(let i=0;i<15;i++){const start=performance.now();await deadline(launch(process.execPath,['-e','']).done);elapsed.push(performance.now()-start)}
+  for(let i=0;i<15;i++){const start=performance.now();await deadline(launch(process.execPath,['-e','']).done);elapsed.push(performance.now()-start);}
   const direct=[];
-  for(let i=0;i<15;i++){const start=performance.now();await once(spawn(process.execPath,['-e',''],{stdio:'ignore'}),'close');direct.push(performance.now()-start)}
+  for(let i=0;i<15;i++){const start=performance.now();await once(spawn(process.execPath,['-e',''],{stdio:'ignore'}),'close');direct.push(performance.now()-start);}
   run=launch(process.execPath,['-e','setInterval(()=>{},1000)']);
   const rss=execFileSync('powershell.exe',['-NoProfile','-Command',`(Get-Process -Id ${run.child.pid}).WorkingSet64`],{encoding:'utf8'}).trim();
   run.child.stdin.end();await deadline(run.done);
