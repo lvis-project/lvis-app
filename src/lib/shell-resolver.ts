@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { delimiter, dirname, isAbsolute, join } from "node:path";
+import { buildSafeChildEnv } from "../tools/safe-env.js";
 
 export class ShellMismatchError extends Error {
   readonly code = "SHELL_MISMATCH" as const;
@@ -51,6 +52,7 @@ export function resolveShell(dialect: ShellDialect = "posix"): ResolvedShellComm
         stdio: "pipe",
         encoding: "utf-8",
         timeout: SHELL_PROBE_TIMEOUT_MS,
+        env: buildSafeChildEnv(),
       });
       if (probe !== "__lvis_shell_ok__") {
         throw new Error(`unexpected shell probe output: ${JSON.stringify(probe)}`);
@@ -87,7 +89,7 @@ function windowsShellCandidates(): ResolvedShellCommand[] {
 
 function assertWindowsShellCandidateExists(cmd: string): void {
   if (/^[A-Za-z]:[\\/]/.test(cmd)) return;
-  execFileSync("where", [cmd], { stdio: "pipe", encoding: "utf-8" });
+  execFileSync("where", [cmd], { stdio: "pipe", encoding: "utf-8", env: buildSafeChildEnv() });
 }
 
 function detectWindowsShellFlavor(shell: ResolvedShellCommand): WindowsShellFlavor {
@@ -99,6 +101,7 @@ function detectWindowsShellFlavor(shell: ResolvedShellCommand): WindowsShellFlav
       stdio: "pipe",
       encoding: "utf-8",
       timeout: SHELL_PROBE_TIMEOUT_MS,
+      env: buildSafeChildEnv(),
     }).trim();
     if (/^(MINGW|MSYS|CYGWIN)/i.test(output)) return "msys";
     if (/linux/i.test(output)) return "wsl";

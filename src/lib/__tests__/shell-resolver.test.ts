@@ -11,6 +11,7 @@ afterEach(() => {
   __resetShellResolverCache();
   vi.mocked(execFileSync).mockReset();
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
 });
 
 describe("shell-resolver", () => {
@@ -131,6 +132,43 @@ describe("shell-resolver", () => {
     expect(bash.shellArgs("echo hi")).toEqual(["-c", "echo hi"]);
     expect(execFileSync).toHaveBeenLastCalledWith(bash.cmd,
       ["-c", expect.stringContaining("<<<")], expect.any(Object));
+  });
+
+  it.each([
+    { platform: "linux", dialect: "bash", executable: "/bin/bash" },
+    { platform: "win32", dialect: "bash", executable: "bash" },
+    { platform: "win32", dialect: "posix", executable: "sh" },
+  ] as const)("filters every $platform $dialect probe environment", ({ platform, dialect, executable }) => {
+    vi.spyOn(process, "platform", "get").mockReturnValue(platform);
+    vi.stubEnv("OPENAI_API_KEY", "sentinel-provider-secret");
+    vi.stubEnv("LVIS_INTERNAL_SECRET", "sentinel-host-secret");
+    vi.stubEnv("BASH_ENV", "/sentinel-startup-script");
+    vi.stubEnv("PATH", "sentinel-runtime-path");
+    vi.stubEnv("SystemRoot", "sentinel-system-root");
+    vi.stubEnv("USERPROFILE", "sentinel-user-profile");
+    vi.stubEnv("LANG", "sentinel-locale");
+    vi.mocked(execFileSync).mockImplementation((cmd, args) => {
+      if (cmd === "where") return "sentinel-resolved-path";
+      if (cmd !== executable) throw new Error("not installed");
+      return args[1] === "uname -s" ? "MSYS_NT" : "__lvis_shell_ok__";
+    });
+
+    expect(resolveShell(dialect).cmd).toBe(executable);
+    if (platform === "win32") {
+      expect(execFileSync).toHaveBeenCalledWith("where", [executable], expect.any(Object));
+      expect(execFileSync).toHaveBeenCalledWith(executable, ["-c", "uname -s"], expect.any(Object));
+    }
+    for (const [, , options] of vi.mocked(execFileSync).mock.calls) {
+      const env = (options as { env?: NodeJS.ProcessEnv }).env;
+      expect(env).toBeDefined();
+      expect(env?.OPENAI_API_KEY).toBeUndefined();
+      expect(env?.LVIS_INTERNAL_SECRET).toBeUndefined();
+      expect(env?.BASH_ENV).toBeUndefined();
+      expect(env?.PATH).toBe("sentinel-runtime-path");
+      expect(env?.SystemRoot).toBe("sentinel-system-root");
+      expect(env?.USERPROFILE).toBe("sentinel-user-profile");
+      expect(env?.LANG).toBe("sentinel-locale");
+    }
   });
 
   it("ShellMismatchError exposes a stable code", () => {
