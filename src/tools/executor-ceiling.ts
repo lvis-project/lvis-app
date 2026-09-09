@@ -11,7 +11,7 @@
  */
 
 import type { Tool } from "./base.js";
-import { MAX_TIMER_DELAY_MS, TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
+import { MAX_TIMER_DELAY_MS, resolveShellTimeoutMs, TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
 
 /** Termination reason recorded for audit and error message branching. */
 export type ToolCeilingTerminationReason = "ceiling" | "user-abort" | "error";
@@ -23,7 +23,7 @@ export type ToolCeilingTerminationReason = "ceiling" | "user-abort" | "error";
  * ceiling would race that formatting and replace a retryable tool error with
  * an opaque ceiling abort.
  */
-const SHELL_CEILING_GRACE_MS = 10_000;
+const SHELL_CEILING_GRACE_MS = TOOL_TIMEOUT_POLICY.shellCeilingGraceMs;
 
 /**
  * Ceiling for one tool invocation.
@@ -77,7 +77,7 @@ function resolveRequestedCeilingMs(
   }
   return Math.max(
     TOOL_TIMEOUT_POLICY.globalCeilingMs + SHELL_CEILING_GRACE_MS,
-    Math.ceil(requested * 1000) + SHELL_CEILING_GRACE_MS,
+    resolveShellTimeoutMs(requested) + SHELL_CEILING_GRACE_MS,
   );
 }
 

@@ -17,7 +17,7 @@
  * Uses Node stdlib only (`node:fs`, `node:path`, `node:os`) — zero
  * external dependencies.
  */
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, realpathSync } from "node:fs";
 import {
   basename,
   dirname,
@@ -46,35 +46,83 @@ export function validateSandboxPath(
   cwd: string,
   extraAllowed: string[] = [],
 ): SandboxValidationResult {
-  const resolved = canonicalize(path);
-  const resolvedCwd = canonicalize(cwd);
+  try {
+    const resolved = canonicalize(path);
+    const resolvedCwd = canonicalize(cwd);
 
-  if (isWithin(resolvedCwd, resolved)) {
-    return { allowed: true, reason: "" };
-  }
-
-  for (const allowed of extraAllowed) {
-    const resolvedAllowed = canonicalize(expandLeadingTilde(allowed));
-    if (isWithin(resolvedAllowed, resolved)) {
+    if (isWithin(resolvedCwd, resolved)) {
       return { allowed: true, reason: "" };
     }
-  }
 
-  return {
-    allowed: false,
-    reason: `path ${resolved} is outside the sandbox boundary (${resolvedCwd})`,
-  };
+    for (const allowed of extraAllowed) {
+      const resolvedAllowed = canonicalize(expandLeadingTilde(allowed));
+      if (isWithin(resolvedAllowed, resolved)) {
+        return { allowed: true, reason: "" };
+      }
+    }
+
+    return {
+      allowed: false,
+      reason: `path ${resolved} is outside the sandbox boundary (${resolvedCwd})`,
+    };
+  } catch (error) {
+    // Filesystem resolution is an external boundary: disappearing entries,
+    // inaccessible directories and process-backed links cannot be authorized.
+    if (error instanceof PathResolutionError) {
+      return { allowed: false, reason: error.message };
+    }
+    throw error;
+  }
+}
+
+class PathResolutionError extends Error {}
+const PATH_RESOLUTION_ERRNOS: ReadonlySet<string> = new Set([
+  "ENOENT",
+  "ENOTDIR",
+  "EACCES",
+  "EPERM",
+  "ELOOP",
+  "EINVAL",
+  "ENAMETOOLONG",
+  "EIO",
+  "ESTALE",
+]);
+
+function filesystemResolution<T>(read: () => T): T {
+  try {
+    return read();
+  } catch (error) {
+    if (
+      error instanceof Error && "code" in error &&
+      typeof error.code === "string" && PATH_RESOLUTION_ERRNOS.has(error.code)
+    ) {
+      throw new PathResolutionError(`cannot resolve sandbox path (${error.code})`);
+    }
+    throw error;
+  }
+}
+
+function resolveExistingPath(path: string): string {
+  return filesystemResolution(() => realpathSync.native(path));
+}
+
+function readPathEntry(path: string) {
+  return filesystemResolution(() => lstatSync(path, { throwIfNoEntry: false }));
 }
 
 function canonicalize(path: string): string {
   const absolute = pathResolve(expandLeadingTilde(path));
   if (existsSync(absolute)) {
-    return realpathSync.native(absolute);
+    return resolveExistingPath(absolute);
   }
 
   const suffix: string[] = [];
   let cursor = absolute;
   while (!existsSync(cursor)) {
+    // A dangling link exists as an entry even though its target does not. It
+    // cannot be treated as a new file beneath the link's parent directory.
+    const entry = readPathEntry(cursor);
+    if (entry?.isSymbolicLink()) return resolveExistingPath(cursor);
     const parent = dirname(cursor);
     if (parent === cursor) {
       return absolute;
@@ -83,7 +131,7 @@ function canonicalize(path: string): string {
     cursor = parent;
   }
 
-  const canonicalParent = realpathSync.native(cursor);
+  const canonicalParent = resolveExistingPath(cursor);
   return suffix.length > 0 ? join(canonicalParent, ...suffix) : canonicalParent;
 }
 

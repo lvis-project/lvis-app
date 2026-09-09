@@ -5,13 +5,13 @@
  * realpath-based traversal defense. Tempdirs are cleaned up in
  * afterEach to keep the test environment hermetic.
  */
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   mkdtempSync,
   mkdirSync,
   writeFileSync,
   symlinkSync,
-  realpathSync
+  realpathSync,
 } from "node:fs";
 import { join } from "node:path";
 import { homedir, tmpdir } from "node:os";
@@ -38,6 +38,39 @@ describe("validateSandboxPath", () => {
       const dir = cleanup.pop()!;
       await cleanupTmpDir(dir);
     }
+  });
+
+  it.each(["ENOENT", "EACCES", "ELOOP"])("denies unresolved filesystem paths (%s)", (code) => {
+    const spy = vi.spyOn(realpathSync, "native").mockImplementation(() => {
+      throw Object.assign(new Error("filesystem resolution failed"), { code });
+    });
+    try {
+      expect(validateSandboxPath(sandboxCwd, sandboxCwd)).toEqual({
+        allowed: false,
+        reason: `cannot resolve sandbox path (${code})`,
+      });
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("does not hide an internal resolver exception", () => {
+    const spy = vi.spyOn(realpathSync, "native").mockImplementation(() => {
+      throw Object.assign(new TypeError("resolver contract violated"), { code: "ERR_INTERNAL_ASSERTION" });
+    });
+    try {
+      expect(() => validateSandboxPath(sandboxCwd, sandboxCwd)).toThrow("resolver contract violated");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it.each(["file", "directory"])("denies a dangling %s symlink before creating outside the sandbox", (kind) => {
+    const link = join(sandboxCwd, "link");
+    const target = join(outsideDir, "missing");
+    symlinkSync(target, link, kind === "directory" ? dirLinkType : "file");
+    const candidate = kind === "directory" ? join(link, "created.txt") : link;
+    expect(validateSandboxPath(candidate, sandboxCwd).allowed).toBe(false);
   });
 
   it("allows a path inside the sandbox cwd", () => {

@@ -111,7 +111,7 @@ export async function applyBootLocale(
   setLocale(loaded ? bootLocale : DEFAULT_LOCALE);
 }
 
-export async function bootstrapCoreServices(mainWindow: BrowserWindow,
+export async function bootstrapCoreServices(mainWindow: BrowserWindow | null,
 ): Promise<CoreServices> {
   // #1499 PR-0: production log file sink — attach FIRST, before any other core
   // service. It depends only on `lvisHome()` (no SettingsService / locale), so

@@ -120,8 +120,9 @@ function collectPluginEventTypes(pluginRuntime: PluginRuntime): Set<string> {
  */
 export function registerPluginEventBridge(
   pluginRuntime: PluginRuntime,
-  win: BrowserWindow,
+  win: BrowserWindow | null,
 ): () => void {
+  if (!win) return () => {};
   const unsubs: Array<() => void> = [];
   const eventTypes = collectPluginEventTypes(pluginRuntime);
 

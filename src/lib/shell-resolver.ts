@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { delimiter, dirname, isAbsolute, join } from "node:path";
+import { delimiter, dirname, isAbsolute, join, win32 } from "node:path";
+import { buildSafeChildEnv } from "../tools/safe-env.js";
 
 export class ShellMismatchError extends Error {
   readonly code = "SHELL_MISMATCH" as const;
@@ -18,44 +19,59 @@ export type ResolvedShellCommand = {
   windowsFlavor?: WindowsShellFlavor;
 };
 
-let cachedShell: ResolvedShellCommand | null = null;
-let cachedError: ShellMismatchError | null = null;
-const WINDOWS_SHELL_PROBE_TIMEOUT_MS = 20_000;
+type ShellDialect = "posix" | "bash";
 
-export function resolveShell(): ResolvedShellCommand {
-  if (process.platform !== "win32") {
+const cachedShells = new Map<ShellDialect, ResolvedShellCommand>();
+const cachedErrors = new Map<ShellDialect, ShellMismatchError>();
+const SHELL_PROBE_TIMEOUT_MS = 20_000;
+
+export function resolveShell(dialect: ShellDialect = "posix"): ResolvedShellCommand {
+  if (process.platform !== "win32" && dialect === "posix") {
     return { cmd: "sh", shellArgs: (script: string) => ["-c", script] };
   }
 
+  const cachedShell = cachedShells.get(dialect);
+  const cachedError = cachedErrors.get(dialect);
   if (cachedShell) return cachedShell;
   if (cachedError) throw cachedError;
 
-  const candidates = windowsShellCandidates();
+  const candidates: ResolvedShellCommand[] = process.platform === "win32"
+    ? windowsShellCandidates().filter((candidate) => dialect !== "bash" || /(?:^|[\\/])bash(?:\.exe)?$/.test(candidate.cmd))
+    : ["/bin/bash", "/usr/bin/bash"].map((cmd) => ({ cmd, shellArgs: (script: string) => ["-c", script] }));
+  const probeCommand = dialect === "bash"
+    ? 'test -n "$BASH_VERSION" && values=(__lvis_shell_ok__) && read -r value <<< "${values[0]}" && printf "%s" "$value"'
+    : "printf __lvis_shell_ok__";
 
   let lastError: unknown;
   for (const candidate of candidates) {
     try {
-      assertWindowsShellCandidateExists(candidate.cmd);
-      const probe = execFileSync(candidate.cmd, candidate.shellArgs("printf __lvis_shell_ok__"), {
+      if (process.platform === "win32") candidate.cmd = resolveWindowsShellCandidate(candidate.cmd, dialect);
+      // Bash tools are non-interactive and must not acquire login-profile behavior.
+      if (dialect === "bash") candidate.shellArgs = (script: string) => ["-c", script];
+      const probe = execFileSync(candidate.cmd, candidate.shellArgs(probeCommand), {
         stdio: "pipe",
         encoding: "utf-8",
-        timeout: WINDOWS_SHELL_PROBE_TIMEOUT_MS,
+        timeout: SHELL_PROBE_TIMEOUT_MS,
+        env: buildSafeChildEnv(),
       });
       if (probe !== "__lvis_shell_ok__") {
         throw new Error(`unexpected shell probe output: ${JSON.stringify(probe)}`);
       }
-      candidate.windowsFlavor = detectWindowsShellFlavor(candidate);
-      cachedShell = candidate;
+      if (process.platform === "win32") candidate.windowsFlavor = detectWindowsShellFlavor(candidate);
+      cachedShells.set(dialect, candidate);
       return candidate;
     } catch (err) {
       lastError = err;
     }
   }
 
-  cachedError = new ShellMismatchError(
-    `This feature requires a POSIX shell (sh or bash). On Windows, install Git for Windows or WSL to provide sh.exe or bash.exe in PATH.${lastError instanceof Error ? ` (${lastError.message})` : ""}`,
+  const error = new ShellMismatchError(
+    dialect === "bash"
+      ? `The bash tool requires Bash. Install Bash${process.platform === "win32" ? " (Git for Windows or WSL)" : " at /bin/bash or /usr/bin/bash"}.${lastError instanceof Error ? ` (${lastError.message})` : ""}`
+      : `This feature requires a POSIX shell (sh or bash). On Windows, install Git for Windows or WSL to provide sh.exe or bash.exe in PATH.${lastError instanceof Error ? ` (${lastError.message})` : ""}`,
   );
-  throw cachedError;
+  cachedErrors.set(dialect, error);
+  throw error;
 }
 
 function windowsShellCandidates(): ResolvedShellCommand[] {
@@ -71,9 +87,17 @@ function windowsShellCandidates(): ResolvedShellCommand[] {
   ];
 }
 
-function assertWindowsShellCandidateExists(cmd: string): void {
-  if (/^[A-Za-z]:[\\/]/.test(cmd)) return;
-  execFileSync("where", [cmd], { stdio: "pipe", encoding: "utf-8" });
+function resolveWindowsShellCandidate(cmd: string, dialect: ShellDialect): string {
+  if (/^[A-Za-z]:[\\/]/.test(cmd)) return cmd;
+  const matches = execFileSync("where", [cmd], { stdio: "pipe", encoding: "utf-8", env: buildSafeChildEnv() });
+  if (dialect === "posix") return cmd;
+  // Pin the first search result before probing so later execution cannot repeat
+  // PATH lookup under a different working directory or environment.
+  const executable = matches.split(/\r?\n/)[0]?.trim();
+  if (!executable || !/^(?:[A-Za-z]:[\\/]|\\\\[^\\]+\\[^\\]+\\)/.test(executable) || !/\.exe$/i.test(executable)) {
+    throw new Error("Bash lookup did not return an absolute executable path");
+  }
+  return win32.normalize(executable);
 }
 
 function detectWindowsShellFlavor(shell: ResolvedShellCommand): WindowsShellFlavor {
@@ -84,7 +108,8 @@ function detectWindowsShellFlavor(shell: ResolvedShellCommand): WindowsShellFlav
     const output = execFileSync(shell.cmd, shell.shellArgs("uname -s"), {
       stdio: "pipe",
       encoding: "utf-8",
-      timeout: WINDOWS_SHELL_PROBE_TIMEOUT_MS,
+      timeout: SHELL_PROBE_TIMEOUT_MS,
+      env: buildSafeChildEnv(),
     }).trim();
     if (/^(MINGW|MSYS|CYGWIN)/i.test(output)) return "msys";
     if (/linux/i.test(output)) return "wsl";
@@ -152,6 +177,6 @@ function msysPathEntriesForShell(shell: ResolvedShellCommand): string[] {
 
 /** Test-only: reset memoization so test cases exercising different PATH states stay isolated. */
 export function __resetShellResolverCache(): void {
-  cachedShell = null;
-  cachedError = null;
+  cachedShells.clear();
+  cachedErrors.clear();
 }

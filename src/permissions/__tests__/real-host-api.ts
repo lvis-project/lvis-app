@@ -103,7 +103,7 @@ export async function buildRealHostApi(
     } as never,
     pythonPath: undefined,
     bootAuditLogger: bootAuditLogger as never,
-    mainWindow: {} as never,
+    mainWindow: { isDestroyed: () => false } as never,
     networkFetch: vi.fn(async () => new Response("")) as never,
     openAuthWindowService: vi.fn(),
     openLinkWindowService: vi.fn(),

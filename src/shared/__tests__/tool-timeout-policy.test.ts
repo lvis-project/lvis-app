@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   MAX_TIMER_DELAY_MS,
+  resolveShellTimeoutMs,
   TOOL_TIMEOUT_POLICY,
   normalizeShutdownCleanupTimeoutMs,
   resolveSubAgentCeilingMs,
@@ -11,6 +12,10 @@ import {
 } from "../subagent-policy.js";
 
 describe("TOOL_TIMEOUT_POLICY — single source of truth invariants", () => {
+  it("reserves executor cleanup headroom for an oversized shell timeout", () => {
+    expect(resolveShellTimeoutMs(3_000_000)).toBe(MAX_TIMER_DELAY_MS - TOOL_TIMEOUT_POLICY.shellCeilingGraceMs);
+    expect(resolveShellTimeoutMs(120)).toBe(120_000);
+  });
   it("no shell max exists — a timed-out call must be able to retry with a larger budget", () => {
     expect("shellMaxMs" in TOOL_TIMEOUT_POLICY).toBe(false);
   });

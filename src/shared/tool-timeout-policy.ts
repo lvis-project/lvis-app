@@ -85,8 +85,17 @@ import { SUBAGENT_MAX_ROUNDS_DEFAULT } from "./subagent-policy.js";
  */
 export const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
+/** Convert a validated shell budget to a timer delay without integer overflow. */
+export function resolveShellTimeoutMs(timeoutSeconds: number): number {
+  if (!Number.isFinite(timeoutSeconds) || timeoutSeconds <= 0) {
+    throw new Error("Shell timeout must be a positive finite number");
+  }
+  return Math.min(MAX_TIMER_DELAY_MS - TOOL_TIMEOUT_POLICY.shellCeilingGraceMs, Math.ceil(timeoutSeconds * 1000));
+}
+
 export const TOOL_TIMEOUT_POLICY = {
   shellDefaultMs: 120_000,
+  shellCeilingGraceMs: 10_000,
   globalCeilingMs: 120_000,
   pluginImportMs: 10_000,
   pluginFactoryMs: 10_000,

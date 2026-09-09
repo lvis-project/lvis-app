@@ -46,7 +46,7 @@ export interface ReleasePrepOutput {
 }
 
 export interface ReleasePrepInput {
-  mainWindow: BrowserWindow;
+  mainWindow: BrowserWindow | null;
   settingsService: SettingsService;
   bootAuditLogger: AuditLogger;
   /** The host's outbound transport — both telemetry uploads run on it. */
@@ -104,6 +104,7 @@ export function wireReleasePrep(input: ReleasePrepInput): ReleasePrepOutput {
       log.info("boot: release prep wired (local crash dumps only)");
       return { telemetry, pluginTelemetry, autoUpdaterStop };
     }
+    if (!mainWindow) throw new Error("Interactive release services require a main window");
     telemetry = new TelemetryService({
       settings: () => settingsService.get("telemetry"),
       appVersion: app.getVersion(),
@@ -218,7 +219,7 @@ export function wireReleasePrep(input: ReleasePrepInput): ReleasePrepOutput {
 }
 
 export interface UpdateCheckInput {
-  mainWindow: BrowserWindow;
+  mainWindow: BrowserWindow | null;
   settingsService: SettingsService;
   marketplaceFetcher: MarketplaceFetcher;
   /** SoT — registry path resolved once at boot from userDataDir. */

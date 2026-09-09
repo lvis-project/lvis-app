@@ -178,7 +178,7 @@ async function main() {
   // still runs until the first explicit update lands.
   // `bootLaunch` is the single fact boot derives every service-connection
   // decision from: a headless one-shot run opens none of its own.
-  const services = await bootstrap(projectRoot, getMainWindow()!, () => getMainWindow(), bootLaunch);
+  const services = await bootstrap(projectRoot, getMainWindow(), () => getMainWindow(), bootLaunch);
   setServices(services);
 
   updateSplashStatus(t("be_main.splashOpeningWorkspace"));
@@ -573,6 +573,7 @@ if (
 // macOS: URI delivered via open-url event (register before whenReady to avoid missing cold-start)
 app.on("open-url", (event, url) => {
   event.preventDefault();
+  if (bootLaunch === "headless") return;
   void handleLvisUri(url);
 });
 
@@ -609,6 +610,7 @@ if (!gotSingleInstanceLock) {
     setPendingLvisUri(coldStartUri);
   }
   app.on("second-instance", (_event, argv) => {
+    if (bootLaunch === "headless") return;
     // Redact `--user-data-dir=<absolute path>` before logging — the path
     // contains the OS username and on shared/VDI/corp boxes that's PII that
     // would otherwise land in screenshots, support bundles, and stdout
@@ -745,6 +747,7 @@ app.on("window-all-closed", () => {
 // macOS: re-create window on Dock icon click when all windows are closed.
 // Re-register the plugin event bridge for the new window (Issue 5).
 app.on("activate", () => {
+  if (bootLaunch === "headless") return;
   showOrCreateMainWindow("activate");
 });
 

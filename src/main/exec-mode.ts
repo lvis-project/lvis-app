@@ -300,40 +300,6 @@ function exitCodeForTurnResult(result: TurnResult): number {
   return 0;
 }
 
-/**
- * Answer every parked approval with a deny, and say so on stderr.
- *
- * A headless run has nobody to ask. Without this the gate parks the request
- * until its five-minute timeout, so a benchmark that trips one approval spends
- * its whole budget waiting. Deny rather than allow because the run is
- * unattended: an unattended process must not be the thing that authorizes a
- * call the owner never saw.
- */
-function denyPendingApprovals(
-  approvalGate: ApprovalGate,
-  stderr: NodeJS.WritableStream,
-): () => void {
-  return approvalGate.observePendingApprovals({
-    onPending(view) {
-      stderr.write(`exec: auto-denied approval ${view.requestId} tool=${view.toolName}\n`);
-      approvalGate.resolve(
-        view.requestId,
-        {
-          requestId: view.requestId,
-          choice: "deny-once",
-          nonce: view.nonce,
-          hmac: view.hmac,
-        },
-        "headless-exec",
-      );
-    },
-    onSettled() {
-      // The deny above is the only settlement this observer causes, and the
-      // gate has already dropped the entry by the time it is announced.
-    },
-  });
-}
-
 async function applySecret(deps: ExecDeps, request: ExecSecretRequest): Promise<number> {
   const value = stripOneTrailingNewline(await deps.readStdin());
   if (value.length === 0) {
@@ -369,6 +335,10 @@ async function runTurnRequest(deps: ExecDeps, request: ExecTurnRequest): Promise
     );
     return EXEC_FAILURE_EXIT_CODE;
   }
+  if (!approvalGate.isHeadlessExec) {
+    deps.stderr.write("exec: approval gate is not configured for headless execution; refusing to run\n");
+    return EXEC_FAILURE_EXIT_CODE;
+  }
   const prompt = request.prompt ?? stripOneTrailingNewline(await deps.readStdin());
   if (prompt.trim().length === 0) {
     deps.stderr.write("exec: --exec read an empty prompt\n");
@@ -382,7 +352,6 @@ async function runTurnRequest(deps: ExecDeps, request: ExecTurnRequest): Promise
     return EXEC_USAGE_EXIT_CODE;
   }
   if (request.approveMode === "allow") permissionManager.setMode("allow");
-  const stopDenying = denyPendingApprovals(approvalGate, deps.stderr);
   try {
     deps.conversationLoop.newConversation("main", {
       projectRoot: request.cwd,
@@ -406,8 +375,6 @@ async function runTurnRequest(deps: ExecDeps, request: ExecTurnRequest): Promise
   } catch (err) {
     deps.stderr.write(`exec: turn failed: ${errorMessage(err)}\n`);
     return EXEC_FAILURE_EXIT_CODE;
-  } finally {
-    stopDenying();
   }
 }
 

@@ -141,7 +141,7 @@ type CreateHostApi = (
  * is the live registry `showOrCreateMainWindow` re-registers into.
  */
 async function overlayHostApi(input: {
-  bootWindow: FakeWindow;
+  bootWindow: FakeWindow | null;
   getMainWindow?: () => FakeWindow | null;
 }): Promise<OverlayHostApi> {
   runtimeTestState.capturedRuntimeOptions = null;
@@ -207,6 +207,29 @@ beforeEach(() => {
 afterEach(() => tmpDirs.cleanup());
 
 describe("hostApi.triggerConversation overlay send targets the live main window", () => {
+  it("validates invalid proposals even when no desktop exists", async () => {
+    const api = await overlayHostApi({ bootWindow: null, getMainWindow: () => null });
+    await expect(api.triggerConversation({ source: "invalid", prompt: "Review this." }))
+      .resolves.toMatchObject({ accepted: false, reason: "invalid_source" });
+  });
+  it("rejects without a desktop before consuming the proposal dedupe key", async () => {
+    let current: FakeWindow | null = null;
+    const api = await overlayHostApi({ bootWindow: null, getMainWindow: () => current });
+    const spec = { source: "overlay:test", prompt: "Review this.", dedupeKey: "windowless-retry" };
+    await expect(api.triggerConversation(spec)).rejects.toThrow("Host UI requires an active main window");
+    current = makeWindow();
+    expect((await api.triggerConversation(spec)).accepted).toBe(true);
+    expect(current.webContents.send).toHaveBeenCalledOnce();
+  });
+
+  it("does not reuse the boot capture when the live registry is empty", async () => {
+    const bootWindow = makeWindow();
+    const api = await overlayHostApi({ bootWindow, getMainWindow: () => null });
+    await expect(api.triggerConversation({ source: "overlay:test", prompt: "Review this.", dedupeKey: "no-live-window" }))
+      .rejects.toThrow("Host UI requires an active main window");
+    expect(bootWindow.webContents.send).not.toHaveBeenCalled();
+  });
+
   it("sends to the window created AFTER a close+reopen, not the boot capture", async () => {
     const bootWindow = makeWindow();
     let current: FakeWindow = bootWindow;

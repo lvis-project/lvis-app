@@ -46,6 +46,32 @@ primary-product contract.
 
 ## Process Boundaries
 
+One-shot `--exec` and `--set-secret` launches construct the host service graph
+without a main window or renderer. The boot window is explicitly nullable;
+interactive boot requires a window. Desktop event bridges have no subscription
+when that surface is absent. A request that reaches the approval gate without
+a live desktop follows its existing deny-once path, and UI-only HostApi calls
+fail before consuming proposal state. Activation and protocol events cannot
+open the desktop during a one-shot run.
+
+Foreground shell execution shares the output collector, timeout input schema,
+and deadline/cancellation owner in `src/tools/shell-tools.ts`. Timer conversion
+is owned by `resolveShellTimeoutMs` in `src/shared/tool-timeout-policy.ts`, which
+the executor ceiling also references. Cancellation terminates the managed child
+tree; output capture keeps a bounded prefix while draining both pipes. Child
+environment filtering stays in `src/tools/safe-env.ts`. Background incremental
+output and structured parser output have separate contracts.
+
+The Bash tool resolves the same Bash dialect for foreground, background, and
+sandbox execution through `src/lib/shell-resolver.ts`; discovery probes use the
+same filtered child environment. Background handles belong to a session and
+retain bounded incremental output. `bash_output` can wait for an output or
+lifecycle event without extending the command's lifetime. POSIX background
+commands own process groups; Windows background commands use the native job
+launcher described in `native/windows-job/README.md`. Session disposal and root
+exit release those owned descendants. The native job is a lifecycle mechanism,
+not a security sandbox.
+
 The renderer is a presentation surface. It does not read arbitrary files, mutate
 settings directly, or execute tools. It calls preload APIs, which map to IPC
 handlers in the main process. The main process validates arguments, resolves

@@ -26,7 +26,7 @@ const log = createLogger("lvis");
 export interface LifecycleDeps {
   lateBinding: LateBindingRefs;
   getMainWindow?: () => BrowserWindow | null;
-  mainWindow: BrowserWindow;
+  mainWindow: BrowserWindow | null;
   pythonRuntime?: PythonRuntimeBootstrapper;
   installLoadedPluginPartitionPolicy: (pluginId: string) => void;
   getBundleLifecycle: () => PluginBundleLifecycleHandler | undefined;

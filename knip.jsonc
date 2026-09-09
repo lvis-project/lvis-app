@@ -31,6 +31,8 @@
       "entry": [
         "scripts/smoke-live-model.mjs",
         "scripts/smoke-live-app.mjs",
+        // Loaded by the installer packager through build.beforePack.
+        "scripts/electron-before-pack.cjs",
         "scripts/hooks/run-local-checks.mjs"
       ]
     },

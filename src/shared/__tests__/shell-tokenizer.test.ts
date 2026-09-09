@@ -8,6 +8,7 @@
  * and fail-closed parse errors on unbalanced quotes/parens.
  */
 import { describe, it, expect } from "vitest";
+import { execFileSync } from "node:child_process";
 import { redactHeredocBodies, tokenizeShell } from "../shell-tokenizer.js";
 
 describe("tokenizeShell — quoting", () => {
@@ -33,6 +34,28 @@ describe("tokenizeShell — quoting", () => {
     const { leaves, parseError } = tokenizeShell('echo "a \\" b"');
     expect(parseError).toBe(false);
     expect(leaves[0]!.argv).toEqual(["echo", 'a " b']);
+  });
+
+  it.each([String.raw`C:\tools\file.txt`, String.raw`a\q\%\!\?`])(
+    "preserves literal backslashes in a double-quoted operand: %s",
+    (operand) => {
+      const { leaves, parseError } = tokenizeShell(`cat "${operand}"`);
+      expect(parseError).toBe(false);
+      expect(leaves[0]!.argv).toEqual(["cat", operand]);
+    },
+  );
+
+  it("removes a double-quoted line continuation", () => {
+    const { leaves } = tokenizeShell('cat "a\\\nb"');
+    expect(leaves[0]!.argv).toEqual(["cat", "ab"]);
+  });
+
+  it.skipIf(process.platform === "win32")("matches the shell for double-quoted backslash operands", () => {
+    for (const operand of [String.raw`C:\tools\file.txt`, String.raw`a\q\%\!\?`, String.raw`a\\b`, "a\\\nb"]) {
+      const command = `printf '%s' "${operand}"`;
+      const actual = execFileSync("/bin/sh", ["-c", command], { encoding: "utf8" });
+      expect(tokenizeShell(command).leaves[0]!.argv[2]).toBe(actual);
+    }
   });
 });
 

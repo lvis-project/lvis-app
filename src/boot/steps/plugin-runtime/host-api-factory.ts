@@ -253,7 +253,7 @@ export interface CreateHostApiFactoryDeps {
    * route through `showOrCreateMainWindow`, which calls `createWindow()` and
    * re-registers a NEW BrowserWindow).
    */
-  mainWindow: BrowserWindow;
+  mainWindow: BrowserWindow | null;
   /**
    * Live main-window getter — the same authority `createLifecycleCallbacks`
    * and every `boot/steps/*` sender already read. Optional so minimal test
@@ -346,9 +346,14 @@ export function createHostApiFactory(
    * (`routines-wiring`, `reviewer-permission-wiring`, `workflow-stores`,
    * `plugin-runtime/lifecycle`), so reading it here keeps one answer to
    * "which window" across the host. Falls back to the capture when the getter
-   * is absent (minimal hosts) or returns null.
+   * is absent (minimal hosts). A null result means no desktop surface.
    */
-  const liveMainWindow = (): BrowserWindow => getMainWindow?.() ?? mainWindow;
+  const liveMainWindow = (): BrowserWindow | null => getMainWindow ? getMainWindow() : mainWindow;
+  const requireMainWindow = (): BrowserWindow => {
+    const win = liveMainWindow();
+    if (!win || win.isDestroyed()) throw new Error("Host UI requires an active main window");
+    return win;
+  };
 
   return (
     pluginId: string,
@@ -411,7 +416,7 @@ export function createHostApiFactory(
       change: WorkProposalChangedEventPayload["change"],
     ): void => {
       const target = liveMainWindow();
-      if (target.isDestroyed()) return;
+      if (!target || target.isDestroyed()) return;
       target.webContents.send(WORK_BOARD.proposalChanged, {
         proposalId: id,
         change,
@@ -1117,7 +1122,7 @@ export function createHostApiFactory(
           pluginId,
           settingsService,
           bootAuditLogger,
-          openLinkWindowService: (opts) => openLinkWindowService(liveMainWindow(), opts),
+          openLinkWindowService: (opts) => openLinkWindowService(requireMainWindow(), opts),
           shellOpenExternal,
         });
       },
@@ -1311,7 +1316,7 @@ export function createHostApiFactory(
         const effectiveOpts = requested
           ? opts
           : { ...opts, persistPartition: defaultPartition };
-        return openAuthWindowService(ElectronBrowserWindow.getFocusedWindow() ?? liveMainWindow(), effectiveOpts);
+        return openAuthWindowService(ElectronBrowserWindow.getFocusedWindow() ?? requireMainWindow(), effectiveOpts);
       }) as PluginHostApi["openAuthWindow"],
 
       // ─── Issue #649 — Auth-partition viewer ───────────────────────────
@@ -1371,13 +1376,13 @@ export function createHostApiFactory(
           );
         }
         return openAuthPartitionViewerService(
-          ElectronBrowserWindow.getFocusedWindow() ?? liveMainWindow(),
+          ElectronBrowserWindow.getFocusedWindow() ?? requireMainWindow(),
           {
             pluginId,
             url: opts.url,
             allowedHosts,
             windowTitle: opts.windowTitle,
-            parent: ElectronBrowserWindow.getFocusedWindow() ?? liveMainWindow(),
+            parent: ElectronBrowserWindow.getFocusedWindow() ?? requireMainWindow(),
             audit: (event) => {
               try {
                 bootAuditLogger.log({
@@ -1601,6 +1606,7 @@ export function createHostApiFactory(
       //
       triggerConversation: async (spec: ConversationTriggerSpec) => {
         const decision = evaluateTriggerSpec({
+          assertDeliveryAvailable: () => { requireMainWindow(); },
           spec,
           pluginId,
           capabilities: manifest.capabilities ?? [],
@@ -1613,6 +1619,7 @@ export function createHostApiFactory(
         if (decision.kind === "deny") {
           return decision.result;
         }
+        const overlayTarget = requireMainWindow();
 
         // Allow path — push to renderer OverlayContext via IPC instead of
         // spawning a fresh ConversationLoop.
@@ -1629,10 +1636,7 @@ export function createHostApiFactory(
           pendingPrompt: formatPluginPendingPrompt(spec.prompt, decision.source),
           createdAt: new Date().toISOString(),
         };
-        const overlayTarget = liveMainWindow();
-        if (!overlayTarget.isDestroyed()) {
-          overlayTarget.webContents.send(OVERLAY_V1.show, overlayItem);
-        }
+        overlayTarget.webContents.send(OVERLAY_V1.show, overlayItem);
 
         return { accepted: true, source: decision.source, eventId };
       },

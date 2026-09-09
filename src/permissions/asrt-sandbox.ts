@@ -279,9 +279,9 @@ export interface WrapOptions {
    *     -Command '…'` string (pre-rendering + a default `cmd` binShell produced
    *     a `cmd /c "powershell.exe -Command …"` DOUBLE shell).
    *   - macOS/Linux: the POSIX shell to run `-c <wrapped>` under (defaults to
-   *     `/bin/bash` inside ASRT when omitted). LVIS leaves this undefined on
-   *     POSIX — the wrapped command already names the shell — so the historical
-   *     mac/linux behaviour is unchanged.
+   *     `/bin/bash` inside ASRT when omitted). The Bash tool passes its resolved
+   *     Bash executable so sandboxed, foreground and background execution use
+   *     the same dialect.
    *
    * TRUST: on Windows the inner shell runs INSIDE the restricted-token sandbox,
    * so an unexpected value is not a sandbox escape; but a bash `path` must still

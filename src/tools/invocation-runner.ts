@@ -1428,7 +1428,9 @@ export async function runToolInvocation(
     // command classified `read` was also a way to erase containment. A low-risk
     // judgement is never a reason to skip a control documented as
     // unoverridable.
-    if (invocationCategory === "shell" || hasShellCommandArgument(finalInput)) {
+    // Session-control calls carry a shell handle rather than a command; their
+    // shell category still requires authorization, but has no paths to parse.
+    if (hasShellCommandArgument(finalInput)) {
       while (true) {
         const shellPathViolation = shellPathPolicyViolation(
           finalInput,

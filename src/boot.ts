@@ -200,12 +200,13 @@ export type BootLaunch = "interactive" | "headless";
  */
 export async function bootstrap(
   projectRoot: string,
-  mainWindow: BrowserWindow,
+  mainWindow: BrowserWindow | null,
   getMainWindow: () => BrowserWindow | null,
   launch: BootLaunch,
 ): Promise<AppServices> {
   log.info("boot: starting...");
   const headless = launch === "headless";
+  if (!headless && !mainWindow) throw new Error("Interactive boot requires a main window");
   if (headless) {
     log.info(
       "boot: headless launch — no catalog sync, admission warm-up, release check, polling or telemetry",
@@ -875,7 +876,7 @@ export async function bootstrap(
           commitRegistryRemoval,
           pluginStateCleanupDeps,
         ),
-      mainWindow,
+      mainWindow: mainWindow!,
       marketplace: ctx.settingsService.get("marketplace"),
       mode: "pre-start-sync",
       admitPreStartOperation,

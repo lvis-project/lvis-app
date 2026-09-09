@@ -782,6 +782,38 @@ describe("ApprovalGate", () => {
     expect(gate.pendingCount).toBe(0);
   });
 
+  it("denies a mutation immediately when no desktop surface exists", async () => {
+    const gate = new ApprovalGate(null);
+    const observer = vi.fn();
+    const dispose = gate.observePendingApprovals({ onPending: observer, onSettled: observer });
+    observer.mockClear();
+    const result = await gate.requestAndWait(makeRequest({
+      category: "agent-action", kind: "agent-action", toolCategory: "meta",
+    }));
+    expect(result.choice).toBe("deny-once");
+    expect(isHostApprovalRejectedDecision(result)).toBe(true);
+    expect(gate.pendingCount).toBe(0);
+    expect(observer).not.toHaveBeenCalled();
+    dispose();
+  });
+
+  it("attributes unattended denials and notifies without exposing an approval surface", async () => {
+    const log = vi.fn();
+    const onDenied = vi.fn(() => { throw new Error("stderr unavailable"); });
+    const gate = new ApprovalGate(null, undefined, undefined, { log } as never, undefined, undefined, { onDenied });
+    const onPending = vi.fn();
+    const dispose = gate.observePendingApprovals({ onPending, onSettled: vi.fn() });
+    const request = makeRequest({ category: "agent-action", kind: "agent-action", toolCategory: "meta" });
+    const decision = await gate.requestAndWait(request);
+    expect(decision.choice).toBe("deny-once");
+    expect(isHostApprovalRejectedDecision(decision)).toBe(true);
+    expect(onDenied).toHaveBeenCalledWith(request.id, request.toolName);
+    expect(log).toHaveBeenCalledWith(expect.objectContaining({ output: expect.stringContaining("answeredBy=headless-exec") }));
+    expect(onPending).not.toHaveBeenCalled();
+    expect(gate.pendingCount).toBe(0);
+    dispose();
+  });
+
   // ── F2: webContents lifecycle guards ─────────────
 
   it("isDestroyed() true → deny-once immediately, no pending entry", async () => {

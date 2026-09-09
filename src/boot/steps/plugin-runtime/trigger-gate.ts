@@ -286,6 +286,8 @@ export const triggerDenyAuditThrottle = new TriggerDenyAuditThrottle();
  * stays simple (no double-bookkeeping).
  */
 export interface EvaluateTriggerSpecInput {
+  /** Host delivery precondition, checked after input validation and before state changes. */
+  assertDeliveryAvailable?: () => void;
   spec: ConversationTriggerSpec | undefined | null;
   pluginId: string;
   capabilities: readonly string[];
@@ -382,6 +384,7 @@ export function evaluateTriggerSpec(
       result: { accepted: false, reason: "invalid_source", source },
     };
   }
+  input.assertDeliveryAvailable?.();
   if (rateLimiter.isOverCap(pluginId, now())) {
     auditDeny("reason=rate_limited");
     return {

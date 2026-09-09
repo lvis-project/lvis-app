@@ -10,7 +10,7 @@
  */
 
 import { EventEmitter } from "node:events";
-import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -82,6 +82,26 @@ describe("bash tool", () => {
   });
 
   describe("BashTool — output cap", () => {
+    it("drains a large stdout and stderr stream so the child can finish", async () => {
+      const tool = new BashTool();
+      const result = await tool.execute(
+        { command: "yes x | head -c 1048576; yes y | head -c 1048576 >&2; exit 7", timeoutSeconds: SHELL_TIMEOUT_SECONDS },
+        ctx(),
+      );
+      expect(result.metadata?.returncode).toBe(7);
+      expect(result.metadata?.timedOut).not.toBe(true);
+      expect(result.output.length).toBeLessThan(12_100);
+      expect(result.output.endsWith("...[truncated]...")).toBe(true);
+    });
+
+    it("marks discarded output even when the retained prefix is whitespace", async () => {
+      const result = await new BashTool().execute(
+        { command: "printf '%60000s' ''; printf tail", timeoutSeconds: SHELL_TIMEOUT_SECONDS }, ctx(),
+      );
+      expect(result.metadata?.returncode).toBe(0);
+      expect(result.output).toBe("...[truncated]...");
+    });
+
     it("truncates very large output to ~12_000 chars + marker", async () => {
       const tool = new BashTool();
       const result = await tool.execute(
@@ -97,6 +117,52 @@ describe("bash tool", () => {
   });
 
   describe("BashTool — timeout", () => {
+    it.skipIf(process.platform === "win32")("does not overflow a large explicit timeout into an immediate kill", async () => {
+      const result = await new BashTool().execute(
+        { command: "sleep 0.05; printf complete", timeoutSeconds: 3_000_000 }, ctx(),
+      );
+      expect(result.isError).toBe(false);
+      expect(result.output).toBe("complete");
+    });
+
+    it.skipIf(process.platform === "win32")("cancels the running shell and its child before the command deadline", async () => {
+      const dir = mkdtempSync(join(tmpdir(), "lvis-shell-cancel-"));
+      const controller = new AbortController();
+      const pidFile = join(dir, "child.pid");
+      const pending = new BashTool().execute(
+        { command: 'sleep 30 & printf "%s" "$!" > child.pid; wait', timeoutSeconds: 60 },
+        { ...ctx(dir), abortSignal: controller.signal },
+      );
+      try {
+        await vi.waitFor(() => expect(existsSync(pidFile)).toBe(true));
+        const pid = Number(readFileSync(pidFile, "utf8"));
+        controller.abort();
+        const result = await pending;
+        expect(result.isError).toBe(true);
+        expect(result.metadata?.aborted).toBe(true);
+        expect(result.output).toContain("cancelled");
+        await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow());
+      } finally {
+        controller.abort();
+        await pending;
+        cleanupTmpDir(dir);
+      }
+    }, 8_000);
+
+    it("does not spawn a command whose caller is already cancelled", async () => {
+      const dir = mkdtempSync(join(tmpdir(), "lvis-shell-preabort-"));
+      try {
+        const controller = new AbortController();
+        controller.abort();
+        await expect(new BashTool().execute(
+          { command: "echo unexpected > spawned.txt" },
+          { ...ctx(dir), abortSignal: controller.signal },
+        )).rejects.toThrow();
+        expect(existsSync(join(dir, "spawned.txt"))).toBe(false);
+      } finally {
+        cleanupTmpDir(dir);
+      }
+    });
     it(
       "kills a long sleep and reports timedOut metadata",
       { timeout: 8000 },
@@ -441,6 +507,50 @@ describe("powershell tool", () => {
     metadata: {},
   });
 
+  describe.skipIf(process.platform !== "win32")("native process resource handling", () => {
+    it("drains both large output streams and preserves the exit status", async () => {
+      const result = await new PowerShellTool().execute({
+        command: "[Console]::Out.Write('x' * 1048576); [Console]::Error.Write('y' * 1048576); exit 7",
+        timeoutSeconds: 30,
+      }, ctx());
+      expect(result.metadata?.returncode).toBe(7);
+      expect(result.output.length).toBeLessThan(12_100);
+      expect(result.output.endsWith("...[truncated]...")).toBe(true);
+    }, 40_000);
+
+    it("reports an expired deadline and accepts a large explicit budget", async () => {
+      const tool = new PowerShellTool();
+      const expired = await tool.execute({ command: "Start-Sleep -Seconds 30", timeoutSeconds: 1 }, ctx());
+      expect(expired.metadata?.timedOut).toBe(true);
+      const completed = await tool.execute({ command: "Write-Output complete", timeoutSeconds: 3_000_000 }, ctx());
+      expect(completed.isError).toBe(false);
+      expect(completed.output).toBe("complete");
+    }, 20_000);
+
+    it("cancels a running command and its native child", async () => {
+      const dir = mkdtempSync(join(tmpdir(), "lvis-native-cancel-"));
+      const controller = new AbortController();
+      const pidFile = join(dir, "child.pid");
+      const pending = new PowerShellTool().execute({
+        command: "$child = Start-Process powershell.exe -ArgumentList '-NoProfile','-Command','Start-Sleep 30' -PassThru; $child.Id | Set-Content child.pid; $child.WaitForExit()",
+        timeoutSeconds: 60,
+      }, { ...ctx(dir), abortSignal: controller.signal });
+      try {
+        await vi.waitFor(() => expect(existsSync(pidFile)).toBe(true), { timeout: 10_000 });
+        const pid = Number(readFileSync(pidFile, "utf8").replace(/^\uFEFF/, "").trim());
+        controller.abort();
+        const result = await pending;
+        expect(result.metadata?.aborted).toBe(true);
+        expect(result.isError).toBe(true);
+        await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow());
+      } finally {
+        controller.abort();
+        await pending;
+        cleanupTmpDir(dir);
+      }
+    }, 20_000);
+  });
+
   function ast(commands: Array<Partial<PowerShellAstSummary["commands"][number]>>, errors: string[] = []): PowerShellAstSummary {
     return {
       errors,
@@ -774,7 +884,7 @@ describe("background shells", () => {
     const stderr = new EventEmitter();
     const emitter = new EventEmitter() as unknown as import("node:child_process").ChildProcess;
     const kill = vi.fn(() => true);
-    Object.assign(emitter, { stdout, stderr, kill, exitCode: null, pid: 1234 });
+    Object.assign(emitter, { stdout, stderr, kill, exitCode: null });
     return {
       child: emitter,
       stdout,
@@ -834,11 +944,11 @@ describe("background shells", () => {
       expect(r?.output).toContain("ENOENT");
     });
 
-    it("kill sends SIGTERM and marks the shell killed", () => {
+    it("kill terminates the process tree and marks the shell killed", () => {
       const f = fakeChild();
       const id = backgroundShellManager.register({ sessionId: "s1", command: "x", child: f.child, startedAt: "t" });
       const r = backgroundShellManager.kill("s1", id);
-      expect(f.kill).toHaveBeenCalledWith("SIGTERM");
+      expect(f.kill).toHaveBeenCalledWith("SIGKILL");
       expect(r?.status).toBe("killed");
     });
 
@@ -933,7 +1043,7 @@ describe("background shells", () => {
       const tool = createBashKillTool();
       const res = await tool.execute({ shellId: id }, ctx("s1"));
       expect(res.isError).toBe(false);
-      expect(f.kill).toHaveBeenCalledWith("SIGTERM");
+      expect(f.kill).toHaveBeenCalledWith("SIGKILL");
       expect(JSON.parse(res.output).status).toBe("killed");
     });
 
