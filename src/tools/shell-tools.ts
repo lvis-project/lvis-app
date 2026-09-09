@@ -595,7 +595,7 @@ function withBackgroundUnavailable(result: SpawnResult, requested: boolean): Spa
  * background shell runs until it exits, bash_kill, session end, or app quit.
  */
 function spawnBackground(command: string, cwd: string, sessionId: string): SpawnResult {
-  const shell = resolveShell();
+  const shell = resolveShell("bash");
   assertManagedChildProcessAdmissionOpen("tool:bash:background");
   const child: PipedChild = spawn(shell.cmd, shell.shellArgs(command), {
     cwd,
@@ -719,30 +719,14 @@ export async function spawnWithSandbox(
     denyWrite: getDefaultSensitiveWriteDenyPaths(),
   };
 
-  // binShell threading: the bash tool runs a POSIX shell command. On
-  // mac/linux ASRT defaults to `/bin/bash` for the `-c` wrapper, so we leave
-  // binShell undefined (unchanged behaviour). The win32 branch below is
-  // defensive only: executeTyped refuses partial Windows ASRT before this
-  // function because shell execution requires process isolation and per-exec
-  // allow grants.
-  let binShell: string | undefined;
-  if (process.platform === "win32") {
-    try {
-      const resolved = resolveShell().cmd;
-      if (/^[A-Za-z]:[\\/]/.test(resolved)) binShell = resolved;
-    } catch {
-      // Shell resolution failed (no POSIX shell on PATH); let ASRT default and
-      // surface any resulting error through the normal spawn path.
-    }
-  }
-
   const abortController = new AbortController();
   let wrapped: { argv: string[]; env: NodeJS.ProcessEnv };
   try {
+    const binShell = resolveShell("bash").cmd;
     wrapped = await wrapToolCommand(command, {
       filesystem,
       abortSignal: signal ? AbortSignal.any([signal, abortController.signal]) : abortController.signal,
-      ...(binShell !== undefined ? { binShell } : {}),
+      binShell,
     });
   } catch (err) {
     sandboxHome.cleanup();
@@ -863,7 +847,7 @@ async function spawnWithTimeout(
 ): Promise<SpawnResult> {
   signal?.throwIfAborted();
   return new Promise((resolve) => {
-    const shell = resolveShell();
+    const shell = resolveShell("bash");
     assertManagedChildProcessAdmissionOpen("tool:bash");
     const child: PipedChild = spawn(shell.cmd, shell.shellArgs(command), {
       detached: process.platform !== "win32",

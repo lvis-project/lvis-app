@@ -18,44 +18,58 @@ export type ResolvedShellCommand = {
   windowsFlavor?: WindowsShellFlavor;
 };
 
-let cachedShell: ResolvedShellCommand | null = null;
-let cachedError: ShellMismatchError | null = null;
-const WINDOWS_SHELL_PROBE_TIMEOUT_MS = 20_000;
+type ShellDialect = "posix" | "bash";
 
-export function resolveShell(): ResolvedShellCommand {
-  if (process.platform !== "win32") {
+const cachedShells = new Map<ShellDialect, ResolvedShellCommand>();
+const cachedErrors = new Map<ShellDialect, ShellMismatchError>();
+const SHELL_PROBE_TIMEOUT_MS = 20_000;
+
+export function resolveShell(dialect: ShellDialect = "posix"): ResolvedShellCommand {
+  if (process.platform !== "win32" && dialect === "posix") {
     return { cmd: "sh", shellArgs: (script: string) => ["-c", script] };
   }
 
+  const cachedShell = cachedShells.get(dialect);
+  const cachedError = cachedErrors.get(dialect);
   if (cachedShell) return cachedShell;
   if (cachedError) throw cachedError;
 
-  const candidates = windowsShellCandidates();
+  const candidates: ResolvedShellCommand[] = process.platform === "win32"
+    ? windowsShellCandidates().filter((candidate) => dialect !== "bash" || /(?:^|[\\/])bash(?:\.exe)?$/.test(candidate.cmd))
+    : ["/bin/bash", "/usr/bin/bash"].map((cmd) => ({ cmd, shellArgs: (script: string) => ["-c", script] }));
+  const probeCommand = dialect === "bash"
+    ? 'test -n "$BASH_VERSION" && values=(__lvis_shell_ok__) && read -r value <<< "${values[0]}" && printf "%s" "$value"'
+    : "printf __lvis_shell_ok__";
 
   let lastError: unknown;
   for (const candidate of candidates) {
     try {
-      assertWindowsShellCandidateExists(candidate.cmd);
-      const probe = execFileSync(candidate.cmd, candidate.shellArgs("printf __lvis_shell_ok__"), {
+      if (process.platform === "win32") assertWindowsShellCandidateExists(candidate.cmd);
+      // Bash tools are non-interactive and must not acquire login-profile behavior.
+      if (dialect === "bash") candidate.shellArgs = (script: string) => ["-c", script];
+      const probe = execFileSync(candidate.cmd, candidate.shellArgs(probeCommand), {
         stdio: "pipe",
         encoding: "utf-8",
-        timeout: WINDOWS_SHELL_PROBE_TIMEOUT_MS,
+        timeout: SHELL_PROBE_TIMEOUT_MS,
       });
       if (probe !== "__lvis_shell_ok__") {
         throw new Error(`unexpected shell probe output: ${JSON.stringify(probe)}`);
       }
-      candidate.windowsFlavor = detectWindowsShellFlavor(candidate);
-      cachedShell = candidate;
+      if (process.platform === "win32") candidate.windowsFlavor = detectWindowsShellFlavor(candidate);
+      cachedShells.set(dialect, candidate);
       return candidate;
     } catch (err) {
       lastError = err;
     }
   }
 
-  cachedError = new ShellMismatchError(
-    `This feature requires a POSIX shell (sh or bash). On Windows, install Git for Windows or WSL to provide sh.exe or bash.exe in PATH.${lastError instanceof Error ? ` (${lastError.message})` : ""}`,
+  const error = new ShellMismatchError(
+    dialect === "bash"
+      ? `The bash tool requires Bash. Install Bash${process.platform === "win32" ? " (Git for Windows or WSL)" : " at /bin/bash or /usr/bin/bash"}.${lastError instanceof Error ? ` (${lastError.message})` : ""}`
+      : `This feature requires a POSIX shell (sh or bash). On Windows, install Git for Windows or WSL to provide sh.exe or bash.exe in PATH.${lastError instanceof Error ? ` (${lastError.message})` : ""}`,
   );
-  throw cachedError;
+  cachedErrors.set(dialect, error);
+  throw error;
 }
 
 function windowsShellCandidates(): ResolvedShellCommand[] {
@@ -84,7 +98,7 @@ function detectWindowsShellFlavor(shell: ResolvedShellCommand): WindowsShellFlav
     const output = execFileSync(shell.cmd, shell.shellArgs("uname -s"), {
       stdio: "pipe",
       encoding: "utf-8",
-      timeout: WINDOWS_SHELL_PROBE_TIMEOUT_MS,
+      timeout: SHELL_PROBE_TIMEOUT_MS,
     }).trim();
     if (/^(MINGW|MSYS|CYGWIN)/i.test(output)) return "msys";
     if (/linux/i.test(output)) return "wsl";
@@ -152,6 +166,6 @@ function msysPathEntriesForShell(shell: ResolvedShellCommand): string[] {
 
 /** Test-only: reset memoization so test cases exercising different PATH states stay isolated. */
 export function __resetShellResolverCache(): void {
-  cachedShell = null;
-  cachedError = null;
+  cachedShells.clear();
+  cachedErrors.clear();
 }

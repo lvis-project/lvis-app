@@ -94,6 +94,45 @@ describe("shell-resolver", () => {
     expect(execFileSync).not.toHaveBeenCalled();
   });
 
+  it("resolves Bash separately from the generic POSIX dialect", () => {
+    vi.spyOn(process, "platform", "get").mockReturnValue("linux");
+    vi.mocked(execFileSync).mockReturnValue("__lvis_shell_ok__");
+    expect(resolveShell().cmd).toBe("sh");
+    const bash = resolveShell("bash");
+    expect(bash.cmd).toBe("/bin/bash");
+    expect(bash.shellArgs("echo hi")).toEqual(["-c", "echo hi"]);
+    expect(resolveShell("bash")).toBe(bash);
+    expect(execFileSync).toHaveBeenCalledTimes(1);
+    expect(resolveShell().cmd).toBe("sh");
+  });
+
+  it("reports missing Bash without falling back to sh or poisoning POSIX resolution", () => {
+    vi.spyOn(process, "platform", "get").mockReturnValue("linux");
+    vi.mocked(execFileSync).mockImplementation(() => { throw new Error("missing executable"); });
+    expect(() => resolveShell("bash")).toThrow(/requires Bash/);
+    expect(() => resolveShell("bash")).toThrow(ShellMismatchError);
+    expect(execFileSync).toHaveBeenCalledTimes(2);
+    expect(resolveShell().cmd).toBe("sh");
+  });
+
+  it("rejects executables that do not prove the Bash dialect", () => {
+    vi.spyOn(process, "platform", "get").mockReturnValue("linux");
+    vi.mocked(execFileSync).mockReturnValue("");
+    expect(() => resolveShell("bash")).toThrow(/requires Bash/);
+  });
+
+  it("selects a Windows Bash executable even when generic sh is available", () => {
+    vi.spyOn(process, "platform", "get").mockReturnValue("win32");
+    vi.mocked(execFileSync).mockReturnValue("__lvis_shell_ok__");
+    expect(resolveShell().cmd).toMatch(/sh\.exe$/);
+    const bash = resolveShell("bash");
+    expect(bash.cmd).toBe("C:\\Program Files\\Git\\bin\\bash.exe");
+    expect(bash.windowsFlavor).toBe("msys");
+    expect(bash.shellArgs("echo hi")).toEqual(["-c", "echo hi"]);
+    expect(execFileSync).toHaveBeenLastCalledWith(bash.cmd,
+      ["-c", expect.stringContaining("<<<")], expect.any(Object));
+  });
+
   it("ShellMismatchError exposes a stable code", () => {
     expect(new ShellMismatchError("x").code).toBe("SHELL_MISMATCH");
   });
