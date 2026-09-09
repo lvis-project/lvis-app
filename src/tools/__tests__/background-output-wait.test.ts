@@ -10,7 +10,7 @@ function register() {
   const stdout = new EventEmitter();
   const stderr = new EventEmitter();
   const kill = vi.fn(() => true);
-  Object.assign(child, { stdout, stderr, kill, exitCode: null, pid: 1234 });
+  Object.assign(child, { stdout, stderr, kill, exitCode: null });
   const shellId = manager.register({ child, sessionId: "owner", command: "work", startedAt: "t" });
   return { child, stdout, stderr, kill, shellId };
 }

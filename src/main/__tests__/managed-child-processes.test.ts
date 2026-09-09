@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import type { ChildProcess } from "node:child_process";
+import { spawnSync, type ChildProcess } from "node:child_process";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 // These unit tests hand FAKE children with real-looking pids (4321, 5432) to a
@@ -186,6 +186,22 @@ describe("managed child process tracking", () => {
     expect(child.kill).not.toHaveBeenCalled();
     expect(getManagedChildProcessCount()).toBe(0);
   });
+  it.each([false, true])("never signals a signal-exited root with no owned group (tracked: %s)", (tracked) => {
+    const child = makeChild();
+    child.pid = 4321;
+    Object.assign(child, { signalCode: "SIGTERM" });
+    if (tracked) trackManagedChildProcess(child, { label: "signal-exited" });
+    vi.mocked(spawnSync).mockClear();
+    const signal = vi.spyOn(process, "kill");
+
+    forceKillManagedChildProcess(child, "already-exited");
+
+    expect(spawnSync).not.toHaveBeenCalled();
+    expect(signal).not.toHaveBeenCalled();
+    expect(child.kill).not.toHaveBeenCalled();
+    expect(getManagedChildProcessCount()).toBe(0);
+  });
+
   itPosix("keeps a detached process group tracked after the root exits", () => {
     const child = makeChild();
     child.pid = 1234;

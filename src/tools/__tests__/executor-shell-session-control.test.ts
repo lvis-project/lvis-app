@@ -78,7 +78,7 @@ describe("ToolExecutor background shell session control", () => {
       status: "killed",
       output: "remaining output",
     });
-    expect(child.kill).toHaveBeenCalledExactlyOnceWith("SIGTERM");
+    expect(child.kill).toHaveBeenCalledExactlyOnceWith("SIGKILL");
     expect(backgroundShellManager.read("owner", shellId)?.status).toBe("killed");
   });
 

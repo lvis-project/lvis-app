@@ -884,7 +884,7 @@ describe("background shells", () => {
     const stderr = new EventEmitter();
     const emitter = new EventEmitter() as unknown as import("node:child_process").ChildProcess;
     const kill = vi.fn(() => true);
-    Object.assign(emitter, { stdout, stderr, kill, exitCode: null, pid: 1234 });
+    Object.assign(emitter, { stdout, stderr, kill, exitCode: null });
     return {
       child: emitter,
       stdout,
@@ -944,11 +944,11 @@ describe("background shells", () => {
       expect(r?.output).toContain("ENOENT");
     });
 
-    it("kill sends SIGTERM and marks the shell killed", () => {
+    it("kill terminates the process tree and marks the shell killed", () => {
       const f = fakeChild();
       const id = backgroundShellManager.register({ sessionId: "s1", command: "x", child: f.child, startedAt: "t" });
       const r = backgroundShellManager.kill("s1", id);
-      expect(f.kill).toHaveBeenCalledWith("SIGTERM");
+      expect(f.kill).toHaveBeenCalledWith("SIGKILL");
       expect(r?.status).toBe("killed");
     });
 
@@ -1043,7 +1043,7 @@ describe("background shells", () => {
       const tool = createBashKillTool();
       const res = await tool.execute({ shellId: id }, ctx("s1"));
       expect(res.isError).toBe(false);
-      expect(f.kill).toHaveBeenCalledWith("SIGTERM");
+      expect(f.kill).toHaveBeenCalledWith("SIGKILL");
       expect(JSON.parse(res.output).status).toBe("killed");
     });
 

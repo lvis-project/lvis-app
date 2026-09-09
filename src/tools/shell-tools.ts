@@ -180,6 +180,7 @@ interface BackgroundShellEntry {
   readCursor: number;
   startedAt: string;
   stopTracking: () => void;
+  terminate: () => void;
   waiters: Set<() => void>;
 }
 
@@ -200,6 +201,8 @@ export interface BackgroundShellManager {
     command: string;
     child: ChildProcess;
     startedAt: string;
+    /** True only when this child was spawned as a detached POSIX group leader. */
+    killProcessGroup?: boolean;
   }): string;
   read(sessionId: string, shellId: string): BackgroundShellReadResult | undefined;
   waitForOutput(sessionId: string, shellId: string, waitMs: number, signal?: AbortSignal): Promise<void>;
@@ -254,7 +257,7 @@ function createManager(): BackgroundShellManager {
   };
 
   return {
-    register({ sessionId, command, child, startedAt }): string {
+    register({ sessionId, command, child, startedAt, killProcessGroup = false }): string {
       // Keep the registry lean within a long-lived session: drop this session's
       // already-finished shells whose output has been fully read before adding a
       // new one. Never-read terminal shells are preserved (the model may still
@@ -268,11 +271,23 @@ function createManager(): BackgroundShellManager {
           e.readCursor > 0 &&
           e.readCursor >= e.output.length
         ) {
+          e.terminate();
           e.stopTracking();
           shells.delete(e.shellId);
         }
       }
       const shellId = randomUUID();
+      const stopTracking = trackManagedChildProcess(child, {
+        label: "tool:bash:background",
+        killProcessGroup,
+      });
+      let terminationRequested = false;
+      const terminate = (): void => {
+        // Never re-signal a released handle: its numeric PID may be reused.
+        if (terminationRequested) return;
+        terminationRequested = true;
+        forceKillManagedChildProcess(child, "background-shell-ended");
+      };
       const entry: BackgroundShellEntry = {
         shellId,
         sessionId,
@@ -284,7 +299,8 @@ function createManager(): BackgroundShellManager {
         outputTruncated: false,
         readCursor: 0,
         startedAt,
-        stopTracking: trackManagedChildProcess(child, { label: "tool:bash:background" }),
+        stopTracking,
+        terminate,
         waiters: new Set(),
       };
       shells.set(shellId, entry);
@@ -293,6 +309,12 @@ function createManager(): BackgroundShellManager {
       const onStderr = (c: Buffer): void => append(entry, c.toString("utf-8"));
       child.stdout?.on("data", onStdout);
       child.stderr?.on("data", onStderr);
+      // A descendant may retain the output pipes after its parent exits, so
+      // close is too late to own cleanup. End the owned group at root exit.
+      child.once("exit", () => {
+        if (killProcessGroup) terminate();
+        else terminationRequested = true;
+      });
       child.on("close", (code) => {
         if (entry.status === "running") {
           entry.status = "exited";
@@ -346,12 +368,8 @@ function createManager(): BackgroundShellManager {
       if (!entry) return undefined;
       if (entry.status === "running") {
         entry.status = "killed";
-        try {
-          entry.child.kill("SIGTERM");
-        } catch {
-          // already gone
-        }
       }
+      entry.terminate();
       notify(entry);
       return snapshot(entry);
     },
@@ -360,13 +378,7 @@ function createManager(): BackgroundShellManager {
       let disposed = 0;
       for (const entry of [...shells.values()]) {
         if (entry.sessionId !== sessionId) continue;
-        if (entry.status === "running") {
-          try {
-            entry.child.kill("SIGKILL");
-          } catch {
-            // already gone
-          }
-        }
+        entry.terminate();
         entry.stopTracking();
         shells.delete(entry.shellId);
         notify(entry);
@@ -642,12 +654,14 @@ function spawnBackground(command: string, cwd: string, sessionId: string): Spawn
     stdio: ["ignore", "pipe", "pipe"],
     env: shellEnvForChild(shell, buildSafeChildEnv()),
     shell: false,
+    detached: process.platform !== "win32",
   });
   const shellId = backgroundShellManager.register({
     sessionId,
     command,
     child,
     startedAt: new Date().toISOString(),
+    killProcessGroup: process.platform !== "win32",
   });
   return {
     output: JSON.stringify({
@@ -662,8 +676,8 @@ function spawnBackground(command: string, cwd: string, sessionId: string): Spawn
       // turn had already killed it.
       hint:
         "Read output with bash_output({ shellId }); stop it with bash_kill({ shellId }). " +
-        "This shell ends when the session does; nothing it starts survives to be " +
-        "inspected afterwards.",
+        "This shell is managed by the session and is stopped when the session ends. " +
+        "Descendants that leave the owned process group may survive its cleanup.",
     }),
     isError: false,
     metadata: { backgrounded: true, shellId },
@@ -1069,7 +1083,7 @@ export function createBashOutputTool(
 
 /**
  * `bash_kill` — terminate a background shell started by `bash` with
- * `run_in_background: true`. Sends SIGTERM and returns the shell's final
+ * `run_in_background: true`. Terminates the shell and its managed descendants, returning its final
  * status plus any remaining unread output.
  */
 export function createBashKillTool(

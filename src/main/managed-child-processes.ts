@@ -310,7 +310,7 @@ export function forceKillManagedChildProcess(child: ChildProcess, reason: string
     entry.dispose();
     return;
   }
-  if (!entry && child.exitCode !== null && child.exitCode !== undefined) return;
+  if (!entry && (child.exitCode != null || child.signalCode != null)) return;
 
   try {
     forceKillProcessTree(child, entry?.killProcessGroup ?? false, entry?.processGroupId);
@@ -338,7 +338,7 @@ export function __resetManagedChildProcessesForTest(): void {
 
 function isKillable(entry: ManagedChildProcess): boolean {
   if (entry.processGroupId !== undefined && processGroupExists(entry.processGroupId)) return true;
-  return entry.child.exitCode === null;
+  return entry.child.exitCode === null && entry.child.signalCode == null;
 }
 
 function scheduleProcessGroupDisposal(entry: ManagedChildProcess): void {
