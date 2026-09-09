@@ -180,6 +180,7 @@ interface BackgroundShellEntry {
   readCursor: number;
   startedAt: string;
   stopTracking: () => void;
+  waiters: Set<() => void>;
 }
 
 interface BackgroundShellReadResult {
@@ -201,6 +202,7 @@ export interface BackgroundShellManager {
     startedAt: string;
   }): string;
   read(sessionId: string, shellId: string): BackgroundShellReadResult | undefined;
+  waitForOutput(sessionId: string, shellId: string, waitMs: number, signal?: AbortSignal): Promise<void>;
   kill(sessionId: string, shellId: string): BackgroundShellReadResult | undefined;
   /** Kill + drop every shell owned by a session (call on session end). */
   disposeSession(sessionId: string): number;
@@ -211,6 +213,10 @@ export interface BackgroundShellManager {
 
 function createManager(): BackgroundShellManager {
   const shells = new Map<string, BackgroundShellEntry>();
+
+  const notify = (entry: BackgroundShellEntry): void => {
+    for (const wake of [...entry.waiters]) wake();
+  };
 
   const append = (entry: BackgroundShellEntry, chunk: string): void => {
     if (entry.outputTruncated) return;
@@ -225,6 +231,7 @@ function createManager(): BackgroundShellManager {
       entry.output += chunk.slice(0, remaining);
       entry.outputTruncated = true;
     }
+    if (entry.output.length > entry.readCursor) notify(entry);
   };
 
   const snapshot = (entry: BackgroundShellEntry): BackgroundShellReadResult => {
@@ -278,6 +285,7 @@ function createManager(): BackgroundShellManager {
         readCursor: 0,
         startedAt,
         stopTracking: trackManagedChildProcess(child, { label: "tool:bash:background" }),
+        waiters: new Set(),
       };
       shells.set(shellId, entry);
 
@@ -290,12 +298,14 @@ function createManager(): BackgroundShellManager {
           entry.status = "exited";
           entry.exitCode = code;
         }
+        notify(entry);
       });
       child.on("error", (err) => {
         if (entry.status === "running") {
           entry.status = "failed";
           append(entry, `\n[spawn error] ${err.message}\n`);
         }
+        notify(entry);
       });
       return shellId;
     },
@@ -303,6 +313,32 @@ function createManager(): BackgroundShellManager {
     read(sessionId, shellId): BackgroundShellReadResult | undefined {
       const entry = owned(sessionId, shellId);
       return entry ? snapshot(entry) : undefined;
+    },
+
+    async waitForOutput(sessionId, shellId, waitMs, signal): Promise<void> {
+      const delay = backgroundOutputWaitSchema.parse(waitMs);
+      signal?.throwIfAborted();
+      const entry = owned(sessionId, shellId);
+      if (!entry || delay === 0 || entry.status !== "running" || entry.output.length > entry.readCursor) return;
+      await new Promise<void>((resolve, reject) => {
+        const cleanup = (): void => {
+          clearTimeout(timer);
+          entry.waiters.delete(wake);
+          signal?.removeEventListener("abort", abort);
+        };
+        const wake = (): void => {
+          cleanup();
+          resolve();
+        };
+        const abort = (): void => {
+          cleanup();
+          reject(signal?.reason);
+        };
+        const timer = setTimeout(wake, delay);
+        entry.waiters.add(wake);
+        signal?.addEventListener("abort", abort, { once: true });
+        if (signal?.aborted) abort();
+      });
     },
 
     kill(sessionId, shellId): BackgroundShellReadResult | undefined {
@@ -316,6 +352,7 @@ function createManager(): BackgroundShellManager {
           // already gone
         }
       }
+      notify(entry);
       return snapshot(entry);
     },
 
@@ -332,6 +369,7 @@ function createManager(): BackgroundShellManager {
         }
         entry.stopTracking();
         shells.delete(entry.shellId);
+        notify(entry);
         disposed += 1;
       }
       return disposed;
@@ -341,7 +379,9 @@ function createManager(): BackgroundShellManager {
       for (const entry of [...shells.values()]) {
         entry.stopTracking();
       }
+      const entries = [...shells.values()];
       shells.clear();
+      for (const entry of entries) notify(entry);
     },
     _size(): number {
       return shells.size;
@@ -971,6 +1011,12 @@ function present(result: BackgroundShellReadResult): { output: string; isError: 
 const NOT_FOUND =
   "no background shell with that id is running in this session (it may have already been reaped, or belongs to another session)";
 
+// Leave room for the executor to deliver the result before its existing ceiling.
+const backgroundOutputWaitSchema = z.number().int().min(0)
+  .max(Math.min(30_000, TOOL_TIMEOUT_POLICY.globalCeilingMs - TOOL_TIMEOUT_POLICY.shellCeilingGraceMs))
+  .default(0)
+  .describe("Milliseconds to wait for new output or completion; 0 returns immediately.");
+
 /**
  * `bash_output` — read newly-accumulated output (and current status/exit code)
  * from a background shell started by `bash` with `run_in_background: true`.
@@ -984,7 +1030,7 @@ export function createBashOutputTool(
     description:
       "Read output produced since your last check from a background shell started by `bash` " +
       "with run_in_background: true. Returns the new output plus the shell's status " +
-      "(running | exited | killed | failed) and exit code. Poll this to follow a long-running command.",
+      "(running | exited | killed | failed) and exit code. Set waitMs to wait for new output or completion.",
     source: "builtin",
     category: "read",
     isReadOnly: () => true,
@@ -993,12 +1039,24 @@ export function createBashOutputTool(
       required: ["shellId"],
       properties: {
         shellId: { type: "string", description: "The shell id returned by the background bash call." },
+        waitMs: z.toJSONSchema(backgroundOutputWaitSchema),
       },
     },
     execute: async (rawInput, ctx) => {
       const shellId = shellIdOf(rawInput);
       if (shellId === "") {
         return { output: "bash_output: `shellId` is required.", isError: true };
+      }
+      const wait = backgroundOutputWaitSchema.safeParse((rawInput as Record<string, unknown>)?.waitMs);
+      if (!wait.success) {
+        return { output: `bash_output: invalid waitMs: ${wait.error.message}`, isError: true };
+      }
+      try {
+        await manager.waitForOutput(sessionIdOf(ctx), shellId, wait.data, ctx?.abortSignal);
+        ctx?.abortSignal?.throwIfAborted();
+      } catch (error) {
+        if (!ctx?.abortSignal?.aborted) throw error;
+        return { output: "bash_output: wait cancelled.", isError: true, metadata: { aborted: true } };
       }
       const result = manager.read(sessionIdOf(ctx), shellId);
       if (!result) {
