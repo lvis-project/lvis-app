@@ -971,12 +971,12 @@ function formatTimeoutOutput(
   command: string,
   timeoutSeconds: number,
 ): string {
-  // Expiry is retryable, and saying so is what makes the unbounded
-  // `timeoutSeconds` usable: the caller escalates the budget instead of
-  // treating the timeout as a dead end.
+  const effectiveSeconds = resolveShellTimeoutMs(timeoutSeconds) / 1000;
   const parts = [
-    `Command timed out after ${timeoutSeconds} seconds. Retry with a larger ` +
-      "`timeoutSeconds` if the command legitimately needs longer.",
+    `Command timed out after ${effectiveSeconds} seconds. ` +
+      (effectiveSeconds < timeoutSeconds
+        ? "The native timer limit was reached; split the work into smaller steps."
+        : "Retry with a larger `timeoutSeconds` if the command legitimately needs longer."),
   ];
   if (partial !== "(no output)") {
     parts.push("", "Partial output:", partial);
@@ -1762,7 +1762,7 @@ async function spawnPowerShellWithSandbox(
       const output = lifetime.output(outputCollector.format());
       resolveResult({
         output: lifetime.timedOut
-          ? `PowerShell command timed out after ${timeoutSeconds} seconds.\n${output}`
+          ? `PowerShell command timed out after ${resolveShellTimeoutMs(timeoutSeconds) / 1000} seconds.\n${output}`
           : output,
         isError: lifetime.aborted || lifetime.timedOut || code !== 0,
         metadata: { ...lifetime.metadata(), returncode: code, timedOut: lifetime.timedOut, sandboxed: true },
@@ -1824,7 +1824,7 @@ async function spawnPowerShell(
       const output = lifetime.output(outputCollector.format());
       resolve({
         output: lifetime.timedOut
-          ? `PowerShell command timed out after ${timeoutSeconds} seconds.\n${output}`
+          ? `PowerShell command timed out after ${resolveShellTimeoutMs(timeoutSeconds) / 1000} seconds.\n${output}`
           : output,
         isError: lifetime.aborted || lifetime.timedOut || code !== 0,
         metadata: { ...lifetime.metadata(), returncode: code, timedOut: lifetime.timedOut },
