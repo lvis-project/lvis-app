@@ -134,11 +134,43 @@ describe("shell-resolver", () => {
       ["-c", expect.stringContaining("<<<")], expect.any(Object));
   });
 
+  it("pins and probes the first absolute Bash path returned by Windows lookup", () => {
+    vi.spyOn(process, "platform", "get").mockReturnValue("win32");
+    const executable = "D:\\Shell Runtime\\bash.exe";
+    vi.mocked(execFileSync).mockImplementation((cmd, args) => {
+      if (cmd === "where") return `${executable}\r\nE:\\Other\\bash.exe\r\n`;
+      if (cmd !== executable) throw new Error("not installed");
+      return args[1] === "uname -s" ? "MSYS_NT" : "__lvis_shell_ok__";
+    });
+
+    const shell = resolveShell("bash");
+    expect(shell.cmd).toBe(executable);
+    expect(shell.windowsFlavor).toBe("msys");
+    expect(execFileSync).toHaveBeenCalledWith(executable,
+      ["-c", expect.stringContaining("<<<")], expect.any(Object));
+    expect(execFileSync).toHaveBeenCalledWith(executable,
+      ["-c", "uname -s"], expect.any(Object));
+    expect(vi.mocked(execFileSync).mock.calls.some(([cmd]) => cmd === "bash")).toBe(false);
+    expect(resolveShell("bash")).toBe(shell);
+  });
+
+  it.each(["", "bash.exe", "C:bash.exe", "C:\\Runtime\\bash.cmd"])(
+    "rejects unusable Windows Bash lookup result %j without probing a bare command", (lookup) => {
+      vi.spyOn(process, "platform", "get").mockReturnValue("win32");
+      vi.mocked(execFileSync).mockImplementation((cmd) => {
+        if (cmd === "where") return lookup;
+        throw new Error("not installed");
+      });
+      expect(() => resolveShell("bash")).toThrow(/absolute executable path/);
+      expect(vi.mocked(execFileSync).mock.calls.some(([cmd]) => cmd === "bash" || cmd === "sh")).toBe(false);
+    },
+  );
+
   it.each([
-    { platform: "linux", dialect: "bash", executable: "/bin/bash" },
-    { platform: "win32", dialect: "bash", executable: "bash" },
-    { platform: "win32", dialect: "posix", executable: "sh" },
-  ] as const)("filters every $platform $dialect probe environment", ({ platform, dialect, executable }) => {
+    { platform: "linux", dialect: "bash", executable: "/bin/bash", lookup: "bash" },
+    { platform: "win32", dialect: "bash", executable: "D:\\Runtime\\bash.exe", lookup: "bash" },
+    { platform: "win32", dialect: "posix", executable: "sh", lookup: "sh" },
+  ] as const)("filters every $platform $dialect probe environment", ({ platform, dialect, executable, lookup }) => {
     vi.spyOn(process, "platform", "get").mockReturnValue(platform);
     vi.stubEnv("OPENAI_API_KEY", "sentinel-provider-secret");
     vi.stubEnv("LVIS_INTERNAL_SECRET", "sentinel-host-secret");
@@ -148,14 +180,14 @@ describe("shell-resolver", () => {
     vi.stubEnv("USERPROFILE", "sentinel-user-profile");
     vi.stubEnv("LANG", "sentinel-locale");
     vi.mocked(execFileSync).mockImplementation((cmd, args) => {
-      if (cmd === "where") return "sentinel-resolved-path";
+      if (cmd === "where") return executable;
       if (cmd !== executable) throw new Error("not installed");
       return args[1] === "uname -s" ? "MSYS_NT" : "__lvis_shell_ok__";
     });
 
     expect(resolveShell(dialect).cmd).toBe(executable);
     if (platform === "win32") {
-      expect(execFileSync).toHaveBeenCalledWith("where", [executable], expect.any(Object));
+      expect(execFileSync).toHaveBeenCalledWith("where", [lookup], expect.any(Object));
       expect(execFileSync).toHaveBeenCalledWith(executable, ["-c", "uname -s"], expect.any(Object));
     }
     for (const [, , options] of vi.mocked(execFileSync).mock.calls) {

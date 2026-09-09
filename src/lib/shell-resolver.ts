@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { delimiter, dirname, isAbsolute, join } from "node:path";
+import { delimiter, dirname, isAbsolute, join, win32 } from "node:path";
 import { buildSafeChildEnv } from "../tools/safe-env.js";
 
 export class ShellMismatchError extends Error {
@@ -45,7 +45,7 @@ export function resolveShell(dialect: ShellDialect = "posix"): ResolvedShellComm
   let lastError: unknown;
   for (const candidate of candidates) {
     try {
-      if (process.platform === "win32") assertWindowsShellCandidateExists(candidate.cmd);
+      if (process.platform === "win32") candidate.cmd = resolveWindowsShellCandidate(candidate.cmd, dialect);
       // Bash tools are non-interactive and must not acquire login-profile behavior.
       if (dialect === "bash") candidate.shellArgs = (script: string) => ["-c", script];
       const probe = execFileSync(candidate.cmd, candidate.shellArgs(probeCommand), {
@@ -87,9 +87,17 @@ function windowsShellCandidates(): ResolvedShellCommand[] {
   ];
 }
 
-function assertWindowsShellCandidateExists(cmd: string): void {
-  if (/^[A-Za-z]:[\\/]/.test(cmd)) return;
-  execFileSync("where", [cmd], { stdio: "pipe", encoding: "utf-8", env: buildSafeChildEnv() });
+function resolveWindowsShellCandidate(cmd: string, dialect: ShellDialect): string {
+  if (/^[A-Za-z]:[\\/]/.test(cmd)) return cmd;
+  const matches = execFileSync("where", [cmd], { stdio: "pipe", encoding: "utf-8", env: buildSafeChildEnv() });
+  if (dialect === "posix") return cmd;
+  // Pin the first search result before probing so later execution cannot repeat
+  // PATH lookup under a different working directory or environment.
+  const executable = matches.split(/\r?\n/)[0]?.trim();
+  if (!executable || !/^(?:[A-Za-z]:[\\/]|\\\\[^\\]+\\[^\\]+\\)/.test(executable) || !/\.exe$/i.test(executable)) {
+    throw new Error("Bash lookup did not return an absolute executable path");
+  }
+  return win32.normalize(executable);
 }
 
 function detectWindowsShellFlavor(shell: ResolvedShellCommand): WindowsShellFlavor {
