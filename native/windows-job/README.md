@@ -8,7 +8,8 @@ the helper kills the job. The job handle is non-inheritable. Root command exit a
 root exit code. Descendants cannot opt out of job inheritance through the job's
 breakaway flags. This is lifecycle ownership, not an OS security sandbox.
 Guest Linux processes are outside this Windows job. The Bash tool rejects
-background mode for a WSL-backed interpreter before starting the command;
+background mode unless discovery positively identifies a native interpreter.
+WSL-backed and unknown interpreters are refused before starting the command;
 distribution-wide termination would also affect unrelated work.
 
 Call `spawnWindowsJobProcess` with an absolute executable path already selected

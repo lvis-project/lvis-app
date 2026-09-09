@@ -55,10 +55,10 @@ describe("Bash dialect across execution paths", () => {
     expect(wrapToolCommand).not.toHaveBeenCalled();
   });
 
-  it.skipIf(process.platform !== "win32")("rejects guest background execution before creating a handle", async () => {
+  it.skipIf(process.platform !== "win32").each(["wsl", "unknown"] as const)("rejects %s background execution before creating a handle", async (windowsFlavor) => {
     const shell = shellResolver.resolveShell("bash");
     const spawn = vi.spyOn(windowsJobLauncher, "spawnWindowsJobProcess");
-    vi.spyOn(shellResolver, "resolveShell").mockReturnValue({ ...shell, windowsFlavor: "wsl" });
+    vi.spyOn(shellResolver, "resolveShell").mockReturnValue({ ...shell, windowsFlavor });
     const result = await new BashTool().execute({ command: "printf unexpected", run_in_background: true }, context);
     expect(result.isError).toBe(true);
     expect(result.metadata?.backgroundUnavailable).toBe(true);

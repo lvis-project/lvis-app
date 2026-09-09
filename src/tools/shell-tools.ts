@@ -649,9 +649,9 @@ function withBackgroundUnavailable(result: SpawnResult, requested: boolean): Spa
  */
 function spawnBackground(command: string, cwd: string, sessionId: string): SpawnResult {
   const shell = resolveShell("bash");
-  if (process.platform === "win32" && shell.windowsFlavor === "wsl") {
+  if (process.platform === "win32" && shell.windowsFlavor !== "msys") {
     return {
-      output: "Background Bash requires a native Windows shell. The WSL launcher cannot retain ownership of Linux guest descendants; this command was not started.",
+      output: "Background Bash requires a confirmed native Windows shell. Process ownership is unavailable for this interpreter; this command was not started.",
       isError: true,
       metadata: { backgroundUnavailable: true },
     };
