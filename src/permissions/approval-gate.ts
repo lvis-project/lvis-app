@@ -1507,6 +1507,10 @@ export class ApprovalGate {
     };
   }
 
+  get isHeadlessExec(): boolean {
+    return this.headlessDenied !== undefined;
+  }
+
   /** Fan one parked request out to observers; a throwing observer is inert. */
   private notifyPendingParked(view: PendingApprovalView): void {
     for (const observer of [...this.pendingObservers]) {

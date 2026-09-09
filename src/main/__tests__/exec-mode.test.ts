@@ -25,7 +25,7 @@ import {
   SecretEncryptionUnavailableError,
 } from "../../data/secret-document-store.js";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
-import type { ApprovalGate, PendingApprovalObserver } from "../../permissions/approval-gate.js";
+import { ApprovalGate } from "../../permissions/approval-gate.js";
 import type { PermissionManager } from "../../permissions/permission-manager.js";
 import type { SettingsService } from "../../data/settings-store.js";
 import type { ConversationLoop, TurnResult } from "../../engine/conversation-loop.js";
@@ -71,25 +71,19 @@ function makeDeps(overrides: {
     ? overrides.permissionManager
     : ({ setMode } as unknown as PermissionManager);
 
-  const observers: PendingApprovalObserver[] = [];
-  const resolve = vi.fn();
+  const stdout = collectingStream();
+  const stderr = collectingStream();
   const approvalGate = "approvalGate" in overrides
     ? overrides.approvalGate
-    : ({
-      observePendingApprovals: (observer: PendingApprovalObserver) => {
-        observers.push(observer);
-        return () => {
-          observers.splice(observers.indexOf(observer), 1);
-        };
+    : new ApprovalGate(null, undefined, undefined, undefined, undefined, undefined, {
+      onDenied: (requestId, toolName) => {
+        stderr.stream.write(`exec: auto-denied approval ${requestId} tool=${toolName}\n`);
       },
-      resolve,
-    } as unknown as ApprovalGate);
+    });
 
   const setSecret = vi.fn(overrides.setSecret ?? (async () => undefined));
   const settingsService = { setSecret } as unknown as SettingsService;
 
-  const stdout = collectingStream();
-  const stderr = collectingStream();
   const deps: ExecDeps = {
     conversationLoop,
     permissionManager,
@@ -108,8 +102,6 @@ function makeDeps(overrides: {
     newConversation,
     setMode,
     setSecret,
-    observers,
-    resolve,
   };
 }
 
@@ -377,35 +369,34 @@ describe("runExecTurn — permission mode", () => {
 });
 
 describe("runExecTurn — headless approvals", () => {
-  it("denies every parked request and notes it on stderr", async () => {
+  it("uses the headless gate to deny requests and note them on stderr", async () => {
     const harness = makeDeps({
       runTurn: async () => {
-        harness.observers[0]!.onPending({
-          requestId: "req-1",
+        const decision = await harness.deps.approvalGate!.requestAndWait({
+          id: "req-1",
           toolName: "bash",
           category: "tool",
-          nonce: "nonce-1",
-          hmac: "hmac-1",
+          toolCategory: "shell",
+          args: { command: "echo hello" },
+          reason: "Approval required",
+          createdAt: Date.now(),
         });
+        expect(decision.choice).toBe("deny-once");
         return COMPLETED_TURN;
       },
     });
 
     await runExecTurn(harness.deps, turnRequest());
 
-    expect(harness.resolve).toHaveBeenCalledWith(
-      "req-1",
-      { requestId: "req-1", choice: "deny-once", nonce: "nonce-1", hmac: "hmac-1" },
-      "headless-exec",
-    );
     expect(harness.stderr.text()).toContain("auto-denied approval req-1 tool=bash");
     expect(harness.stdout.text()).not.toContain("auto-denied");
   });
 
-  it("unsubscribes the observer once the turn is over", async () => {
-    const harness = makeDeps();
-    await runExecTurn(harness.deps, turnRequest());
-    expect(harness.observers).toHaveLength(0);
+  it("rejects a gate that was not constructed for headless execution", async () => {
+    const harness = makeDeps({ approvalGate: new ApprovalGate(null) });
+    expect(await runExecTurn(harness.deps, turnRequest())).toBe(1);
+    expect(harness.runTurn).not.toHaveBeenCalled();
+    expect(harness.stderr.text()).toContain("not configured for headless execution");
   });
 });
 
