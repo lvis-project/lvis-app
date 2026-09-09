@@ -901,6 +901,82 @@ function classifyGrepOperandSlots(argv: readonly string[], verbIndex: number): O
   return { nonPathIndices, extraCandidates, nestedCommands: [], dynamicExecution: null };
 }
 
+type FindOperandRole = "literal" | "path";
+
+/** Arity and operand roles of find expression primaries, not shell options.
+ * A predicate's value can itself look like another primary, so each is
+ * consumed before looking for the next primary. Unlisted syntax stays checked.
+ */
+const FIND_PRIMARY_OPERANDS: ReadonlyMap<string, readonly FindOperandRole[]> = new Map([
+  ...[
+    "-name", "-iname", "-path", "-ipath", "-wholename", "-iwholename",
+    "-lname", "-ilname", "-regex", "-iregex", "-printf", "-context",
+    "-amin", "-atime", "-cmin", "-ctime", "-mmin", "-mtime", "-used",
+    "-inum", "-links", "-size", "-uid", "-gid", "-user", "-group",
+    "-perm", "-type", "-xtype", "-fstype", "-maxdepth", "-mindepth", "-regextype",
+  ].map((primary): [string, readonly FindOperandRole[]] => [primary, ["literal"]]),
+  ...[
+    "-newer", "-anewer", "-cnewer", "-samefile", "-fprint", "-fprint0",
+    "-fls", "-files0-from",
+  ].map((primary): [string, readonly FindOperandRole[]] => [primary, ["path"]]),
+  ["-fprintf", ["path", "literal"]],
+  ...[
+    "-true", "-false", "-empty", "-readable", "-writable", "-executable",
+    "-nouser", "-nogroup", "-print", "-print0", "-ls", "-quit", "-prune",
+    "-delete", "-depth", "-daystart", "-follow", "-mount", "-xdev", "-noleaf",
+    "-ignore_readdir_race", "-noignore_readdir_race", "-warn", "-nowarn",
+    "!", "-not", "-a", "-and", "-o", "-or", ",",
+  ].map((primary): [string, readonly FindOperandRole[]] => [primary, []]),
+]);
+
+function classifyFindOperandSlots(argv: readonly string[], verbIndex: number): OperandSlotClassification {
+  const nonPathIndices = new Set<number>();
+  const unclassified: OperandSlotClassification = {
+    nonPathIndices: new Set(), extraCandidates: [], nestedCommands: [], dynamicExecution: null,
+  };
+  let i = verbIndex + 1;
+  // Global execution options precede the starting points; they do not consume
+  // path operands. Debugging categories are a separate literal argument.
+  while (i < argv.length) {
+    const token = argv[i]!;
+    if (["-H", "-L", "-P", "--"].includes(token) || /^-O[0-3]$/.test(token)) { i += 1; continue; }
+    if (token !== "-D") break;
+    if (argv[i + 1] === undefined) return unclassified;
+    nonPathIndices.add(i + 1);
+    i += 2;
+  }
+  // Starting points end at the first expression primary/operator. Every
+  // starting point stays a path, including multiple roots and relative roots.
+  while (i < argv.length && !argv[i]!.startsWith("-")
+    && !["!", "(", "\\(", ")", "\\)", ","].includes(argv[i]!)) i += 1;
+  let groups = 0;
+  for (; i < argv.length; i += 1) {
+    const primary = argv[i]!;
+    // The flat scanner still carries shell redirects. Leave that suffix to
+    // its ordinary path checks; the shared leaf pass checks redirects alone.
+    if (/^(?:[0-9]*[<>]|&>)/.test(primary)) break;
+    if (primary === "(" || primary === "\\(") { groups += 1; continue; }
+    if (primary === ")" || primary === "\\)") {
+      if (--groups < 0) return unclassified;
+      continue;
+    }
+    // The last letter determines whether -newerXY compares a reference FILE
+    // or parses a literal timestamp (Y=t).
+    const roles = /^-newer[acmB][acmBt]$/.test(primary)
+      ? [primary.endsWith("t") ? "literal" : "path"] as const
+      : FIND_PRIMARY_OPERANDS.get(primary);
+    // In particular, -exec/-execdir/-ok carry command argv of variable length.
+    // Never read their arguments as find primaries or invent exemptions.
+    if (roles === undefined || i + roles.length >= argv.length) return unclassified;
+    for (const role of roles) {
+      i += 1;
+      if (role === "literal") nonPathIndices.add(i);
+    }
+  }
+  if (groups !== 0) return unclassified;
+  return { nonPathIndices, extraCandidates: [], nestedCommands: [], dynamicExecution: null };
+}
+
 /**
  * Read `argv` (`argv[0]` is the head verb) and say which slots are not paths,
  * plus any path recovered from inside one that is not.
@@ -918,6 +994,7 @@ function classifyOperandSlots(argv: readonly string[]): OperandSlotClassificatio
   const head = argv[verbIndex];
   if (head === undefined) return empty;
   const verb = stripCommandPath(head).toLowerCase();
+  if (verb === "find") return classifyFindOperandSlots(argv, verbIndex);
   if (["grep", "egrep", "fgrep"].includes(verb)) return classifyGrepOperandSlots(argv, verbIndex);
   const spec = NON_PATH_OPERAND_SPECS.get(verb);
   if (!spec) return empty;

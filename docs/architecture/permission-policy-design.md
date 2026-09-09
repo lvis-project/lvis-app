@@ -43,6 +43,16 @@ anchors. Input files, pattern files supplied with `-f`/`--file`, exclusion files
 and redirection targets remain subject to path checks. Shell substitutions are
 checked separately because they execute commands before argument passing.
 
+For `find`, starting points and file-valued primaries remain paths. Name/path
+patterns, regular expressions, timestamps, numeric tests, and output formats
+are expression values. In particular, `-printf` takes one format, while
+`-fprintf` takes an output file followed by a format. Each primary consumes
+its documented operands before the next primary is read. Unsupported or
+incomplete expression syntax keeps conservative path checking. In the flat
+scan, a shell redirection ends expression-role classification; the remaining
+tokens keep ordinary path checks. This role classification does not relax recursive mutation/execution restrictions or
+shell redirection and substitution checks.
+
 ## Policy Modes
 
 | Mode | Behavior |
