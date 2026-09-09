@@ -659,8 +659,7 @@ interface NonPathOperandSpec {
   /**
    * Decline the exemption when the value is a BARE path — one word, shaped like
    * a path. Set for slots whose value the command will open or execute if it
-   * happens to be one: `sh -c /etc/evil.sh` runs that file, and a grep pattern
-   * that is a lone path is the same string a filename operand would be.
+   * happens to be one: `sh -c /etc/evil.sh` runs that file.
    *
    * NOT set for `sed`/`awk`, where a lone `/…/` is address or regex syntax and
    * declining would refuse `sed -e '/^class/p'`. Their real file access is
@@ -747,7 +746,7 @@ const NON_PATH_OPERAND_SPECS: ReadonlyMap<string, NonPathOperandSpec> = new Map<
   // grep-family: the first positional is the PATTERN; `--include`/`--exclude`
   // are filename globs matched against what the walk finds, not operands the
   // command opens.
-  ...(["grep", "egrep", "fgrep", "rg", "ag", "ack"] as const).map((verb) => [verb, {
+  ...(["rg", "ag", "ack"] as const).map((verb) => [verb, {
     valueOptions: new Set([
       "-e", "--regexp", "-g", "--glob",
       "--include", "--exclude", "--include-dir", "--exclude-dir",
@@ -831,6 +830,77 @@ interface OperandSlotClassification {
   dynamicExecution: string | null;
 }
 
+const GREP_LITERAL_OPTIONS = new Set([
+  "-e", "--regexp", "-A", "--after-context", "-B", "--before-context",
+  "-C", "--context", "-m", "--max-count", "-d", "--directories",
+  "-D", "--devices", "--binary-files", "--label", "--include", "--exclude",
+  "--exclude-dir", "--group-separator",
+]);
+const GREP_FILE_OPTIONS = new Set(["-f", "--file", "--exclude-from"]);
+const GREP_SWITCHES = new Set([
+  ..."abcEFGHIhiLlnoPqRrsUuVvwxyZz".split("").map((flag) => `-${flag}`),
+  "--basic-regexp", "--extended-regexp", "--fixed-strings", "--perl-regexp",
+  "--ignore-case", "--no-ignore-case", "--invert-match", "--word-regexp",
+  "--line-regexp", "--count", "--files-without-match", "--files-with-matches",
+  "--only-matching", "--quiet", "--silent", "--no-messages", "--byte-offset",
+  "--with-filename", "--no-filename", "--line-number", "--initial-tab",
+  "--null", "--recursive", "--dereference-recursive", "--text", "--binary",
+  "--unix-byte-offsets", "--null-data", "--no-group-separator", "--help", "--version",
+]);
+
+/** Pattern text never opens a file; -f and later positionals do. */
+function classifyGrepOperandSlots(argv: readonly string[], verbIndex: number): OperandSlotClassification {
+  const nonPathIndices = new Set<number>();
+  const extraCandidates: string[] = [];
+  const positionals: number[] = [];
+  const unclassified: OperandSlotClassification = {
+    nonPathIndices: new Set(), extraCandidates: [], nestedCommands: [], dynamicExecution: null,
+  };
+  let suppliedPattern = false;
+  let optionsEnded = false;
+  for (let i = verbIndex + 1; i < argv.length; i += 1) {
+    const token = argv[i]!;
+    if (!optionsEnded && token === "--") {
+      optionsEnded = true;
+      continue;
+    }
+    if (optionsEnded || !token.startsWith("-") || token === "-") {
+      positionals.push(i);
+      continue;
+    }
+    if (/^-\d+$/.test(token)) continue;
+    const long = token.startsWith("--");
+    const equals = token.indexOf("=");
+    const options = long
+      ? [equals < 0 ? token : token.slice(0, equals)]
+      : token.slice(1).split("").map((flag) => `-${flag}`);
+    for (let j = 0; j < options.length; j += 1) {
+      const option = options[j]!;
+      if (option === "--color" || option === "--colour") {
+        nonPathIndices.add(i);
+        continue;
+      }
+      const fileValue = GREP_FILE_OPTIONS.has(option);
+      if (!fileValue && !GREP_LITERAL_OPTIONS.has(option)) {
+        // Unknown options may consume a following word. Do not guess its role.
+        if (!GREP_SWITCHES.has(option) || (long && equals >= 0)) return unclassified;
+        continue;
+      }
+      const attached = long ? equals >= 0 : j + 2 < token.length;
+      const value = attached ? token.slice(long ? equals + 1 : j + 2) : argv[i + 1];
+      if (value === undefined) return unclassified;
+      nonPathIndices.add(i);
+      if (!attached) nonPathIndices.add(++i);
+      if (fileValue) extraCandidates.push(value);
+      if (["-e", "--regexp", "-f", "--file"].includes(option)) suppliedPattern = true;
+      // A short option's attached remainder is its value, never more flags.
+      break;
+    }
+  }
+  if (!suppliedPattern && positionals[0] !== undefined) nonPathIndices.add(positionals[0]);
+  return { nonPathIndices, extraCandidates, nestedCommands: [], dynamicExecution: null };
+}
+
 /**
  * Read `argv` (`argv[0]` is the head verb) and say which slots are not paths,
  * plus any path recovered from inside one that is not.
@@ -848,6 +918,7 @@ function classifyOperandSlots(argv: readonly string[]): OperandSlotClassificatio
   const head = argv[verbIndex];
   if (head === undefined) return empty;
   const verb = stripCommandPath(head).toLowerCase();
+  if (["grep", "egrep", "fgrep"].includes(verb)) return classifyGrepOperandSlots(argv, verbIndex);
   const spec = NON_PATH_OPERAND_SPECS.get(verb);
   if (!spec) return empty;
   const isSed = verb === "sed";
@@ -939,10 +1010,8 @@ function classifyOperandSlots(argv: readonly string[]): OperandSlotClassificatio
  * "import os; print(os.sep)"` and `sed -n '/a b/,/c d/p'` are prose with a
  * slash in them, while `/etc/evil.sh` is a filename and nothing else.
  *
- * A compact regex has no whitespace either, so the whitespace test alone let
- * `grep -v -E "\.(o$|cmx$|a$)"` through as a filename: a backslash reads as a
- * Windows separator, which made the pattern path-shaped, and its `$` anchors
- * then read as unresolved variables. Dropping regex escapes and re-testing
+ * A compact regex has no whitespace either. A backslash can look like a
+ * Windows separator and make a pattern path-shaped. Dropping regex escapes and re-testing
  * separates them — a path keeps its shape (`C:\tools\x` has no escapes to
  * drop, `\\server\share` keeps a separator, `\/etc/x` keeps its slashes)
  * while a pattern loses the only thing that made it look like one.
