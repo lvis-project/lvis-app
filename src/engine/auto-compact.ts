@@ -14,7 +14,6 @@ import { buildToolResultStrippedStub, buildToolResultTruncatedStub } from "../sh
 import {
   estimateMultimodalTokenOverhead,
   estimateUserMessageTokens,
-  vendorCarriesToolResultImage,
 } from "../shared/multimodal-token-estimate.js";
 import { estimateTokens } from "../shared/token-estimate.js";
 
@@ -172,10 +171,12 @@ export function getRuntimePreflightOverride(): number | null {
 /**
  * Estimate one message from the provider-wire shape.
  *
- * `vendor` is the serving vendor when the caller knows it. Omitting it keeps
- * the historical Claude-shaped answer (the wire mapper defaults the same way).
+ * `vendor` remains an input for request projection callers. Every API-key route
+ * sends a live tool-result image, either natively or as a derived user image,
+ * so image accounting no longer varies by serving route.
  */
 export function estimateMessageTokensForWire(message: GenericMessage, vendor?: LLMVendor): number {
+  void vendor;
   if (message.role === "user") return estimateUserMessageTokens(message.content);
 
   // Marked tool_results keep raw content in memory for UI and checkpoint
@@ -192,9 +193,8 @@ export function estimateMessageTokensForWire(message: GenericMessage, vendor?: L
   if (
     message.role === "tool_result" &&
     message.image !== undefined &&
-    // Same authority the wire mapper applies: on a vendor whose tool role is
-    // text-only the image never leaves the host, so it costs nothing.
-    vendorCarriesToolResultImage(vendor) &&
+    // Every API-key route sends a live image either in the native tool result or
+    // in the host-derived user image that follows its tool-result group.
     message.meta?.compactedAt === undefined &&
     message.meta?.truncated === undefined &&
     message.meta?.serializedStub !== true

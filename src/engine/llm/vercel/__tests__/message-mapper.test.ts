@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { genericToModelMessages, fullStreamToStreamEvent } from "../adapter.js";
+import {
+  genericToModelMessages,
+  fullStreamToStreamEvent,
+} from "../adapter.js";
 import type { GenericMessage, StreamEvent, ToolCallBlock } from "../../types.js";
 import { MAX_LOCAL_USER_CONTENT_PARTS } from "../../../../main/subscription-attachment-input.js";
 import { collectStreamEvents, streamFromArray } from "./test-helpers.js";
@@ -173,11 +176,19 @@ describe("genericToModelMessages — tool_result image (view_image)", () => {
     });
   });
 
-  it("degrades to a text placeholder on non-Claude vendors (tool results are text-only there)", () => {
+  it("defaults Chat routes to a host-origin user image instead of dropping it", () => {
     const out = genericToModelMessages([imageMsg], "openai");
+    expect(out).toHaveLength(2);
     expect(out[0]).toMatchObject({
       role: "tool",
-      content: [{ type: "tool-result", output: { type: "text", value: "[image loaded]" } }],
+      content: [{ output: { type: "text", value: "[image loaded]" } }],
+    });
+    expect(out[1]).toMatchObject({
+      role: "user",
+      content: [
+        { type: "text", text: expect.stringContaining('call "tu_1"') },
+        { type: "file", data: "QUJD", mediaType: "image/png" },
+      ],
     });
   });
 

@@ -209,6 +209,16 @@ asserting role alternation rejects. The assembly point is also where each
 instruction's bookkeeping is spent, so a recorded notification always
 corresponds to one the model was actually handed.
 
+Tool-produced images remain tool-result data in stored history. The API adapter
+owns their wire representation. A route with text-only tool output sends the
+paired tool results first, then derives one visual input with explicit tool
+provenance for that result group. A following user or host instruction shares
+that row to preserve role alternation. This translation does not create a user
+turn, dispatch commands, or grant tool output additional authority. Error status
+and attached images are both retained. Request estimates include transmitted
+images and exclude images removed by tool-result compaction. Transports with
+their own request projection retain ownership of their attachment policy.
+
 ## Memory
 
 Memory is host-owned and project-aware. User preferences, long-term memories,
