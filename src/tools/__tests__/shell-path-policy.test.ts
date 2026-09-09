@@ -404,6 +404,30 @@ describe("shell-path-policy", () => {
     });
   });
 
+  it.skipIf(process.platform === "win32").each(["/dev/stdin", "/dev/stdout", "/dev/stderr"])(
+    "accepts the shell standard-stream operand %s",
+    (stream) => {
+      withRoot((root) => {
+        expect(validateShellCommandPathPolicy(`python3 ${stream}`, root, root, [], true)).toBeNull();
+      });
+    },
+  );
+
+  it("denies writing through a dangling symlink outside the workspace", () => {
+    withRoot((root) => {
+      const link = join(root, "dangling");
+      symlinkSync(join(root, "..", "uncreated-target.txt"), link, "file");
+      expect(validateShellCommandPathPolicy(`printf hello > "${link}"`, root, root, []))
+        .toContain("cannot resolve sandbox path");
+    });
+  });
+
+  it("keeps arbitrary file descriptors inside the directory boundary", () => {
+    withRoot((root) => {
+      expect(validateShellCommandPathPolicy("python3 /dev/fd/9", root, root, [], true)).not.toBeNull();
+    });
+  });
+
   it("does not treat the shell OR operator as a filesystem root operand", () => {
     withRoot((root) => {
       expect(validateShellCommandPathPolicy("false || echo ok", root, root, [])).toBeNull();
@@ -947,7 +971,7 @@ describe("shell-path-policy", () => {
       withRoot((root) => {
         const result = validateShellCommandPathPolicy(command, root, root, []);
         if (wide === null) expect(result).toBeNull();
-        else expect(result).toContain(wide);
+        else expect(result?.replaceAll("\\", "/")).toContain(wide);
       });
     });
 
@@ -955,7 +979,7 @@ describe("shell-path-policy", () => {
       withRoot((root) => {
         const result = validateShellCommandPathPolicy(command, root, root, [], true);
         if (fenced === null) expect(result).toBeNull();
-        else expect(result).toContain(fenced);
+        else expect(result?.replaceAll("\\", "/")).toContain(fenced);
       });
     });
 

@@ -632,9 +632,13 @@ function consumeDoubleQuote(
   while (i < n) {
     const ch = command[i]!;
     if (ch === "\\") {
-      // Backslash escapes the next char inside double quotes.
+      // Double quotes preserve a backslash before ordinary characters. Only
+      // shell expansion/quoting characters and newline consume the backslash.
       if (i + 1 < n) {
-        text += command[i + 1]!;
+        const next = command[i + 1]!;
+        if (next !== "\n") {
+          text += '$`"\\'.includes(next) ? next : `\\${next}`;
+        }
         i += 2;
         continue;
       }

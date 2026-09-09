@@ -84,7 +84,11 @@ const RECURSIVE_FLAG_COMMANDS = new Map<string, readonly string[]>([
   ["mv", ["-r", "-R", "--recursive"]],
 ]);
 
-const SHELL_NULL_DEVICE_PATH = "/dev/null";
+// These operands address the child shell's standard streams, not host files.
+// Do not extend this to arbitrary descriptor paths: they can expose other files.
+const SHELL_DEVICE_PATHS: ReadonlySet<string> = new Set([
+  "/dev/null", "/dev/stdin", "/dev/stdout", "/dev/stderr",
+]);
 
 export function validateShellWorkingDirectory(
   cwd: string,
@@ -553,12 +557,13 @@ function resolveCdDestination(args: readonly string[], from: string): string | n
 }
 
 function isIgnoredShellDevicePath(canonicalPath: string): boolean {
-  return canonicalPath === SHELL_NULL_DEVICE_PATH;
+  return canonicalPath === "/dev/null" ||
+    (process.platform !== "win32" && SHELL_DEVICE_PATHS.has(canonicalPath));
 }
 
 function isIgnoredShellDeviceCandidate(candidate: string): boolean {
-  const normalized = candidate.replace(/\\/g, "/").toLowerCase();
-  return normalized === SHELL_NULL_DEVICE_PATH || normalized === "nul";
+  const normalized = candidate.replace(/\\/g, "/");
+  return isIgnoredShellDevicePath(normalized) || normalized.toLowerCase() === "nul";
 }
 
 export function validateShellCommandPathPolicy(
