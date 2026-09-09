@@ -41,7 +41,9 @@ describe("background shell lifetime contract", () => {
   // connect to" after the turn had already killed it. These assertions tie the
   // two surfaces the model reads to the mechanism that makes the claim true.
   it("registers the background child with the managed-child registry", () => {
-    expect(bashSection).toContain('trackManagedChildProcess(child, { label: "tool:bash:background" })');
+    expect(bashSection).toMatch(/trackManagedChildProcess\(child,\s*\{\s*label:\s*"tool:bash:background",\s*killProcessGroup,?\s*\}\)/);
+    expect(bashSection).toContain('detached: process.platform !== "win32"');
+    expect(bashSection).toContain('killProcessGroup: process.platform !== "win32"');
   });
 
   it("states the lifetime in the parameter the model chooses from", () => {
@@ -50,6 +52,7 @@ describe("background shell lifetime contract", () => {
   });
 
   it("states the lifetime again in the result the model reads back", () => {
-    expect(bashSection).toContain("This shell ends when the session does; nothing it starts survives to be ");
+    expect(bashSection).toContain("This shell is managed by the session and is stopped when the session ends.");
+    expect(bashSection).toContain("Descendants that leave the owned process group may survive its cleanup.");
   });
 });
