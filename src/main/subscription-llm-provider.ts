@@ -353,10 +353,9 @@ function serializedMessage(
           : {}),
       };
     case "tool_result":
-      // API-key paths only replay tool-result image bytes for the Claude
-      // mapper. Preserve the model-visible text placeholder on subscription
-      // paths, but never silently turn a historic tool output into new raw
-      // external image egress.
+      // This transport preserves tool-result text. Its native attachment
+      // channel accepts original user images only; historic tool outputs do
+      // not create new attachment egress.
       return {
         role: message.role,
         toolUseId: message.toolUseId,

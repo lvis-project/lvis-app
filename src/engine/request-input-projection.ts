@@ -58,9 +58,9 @@ export function estimateRequestInputProjection(
   const systemPromptTokens = input.systemPrompt.trim().length > 0
     ? estimateTokens(JSON.stringify({ role: "system", content: input.systemPrompt }))
     : 0;
-  // The serving vendor decides whether a tool_result image is on the wire at
-  // all. Providers that own their projection answered above; this fallback runs
-  // for every API-key vendor, so it must not charge for bytes the mapper drops.
+  // Providers with a separate transport own their projection above. API-key
+  // routes carry live tool-result images in the selected wire representation;
+  // the shared estimate counts those images and excludes compacted stubs.
   const messageTokens = estimateMessagesTokens(input.messages, provider?.vendor);
   const toolSchemaTokens = input.toolSchemas.length > 0
     ? estimateTokens(JSON.stringify({ tools: input.toolSchemas }))

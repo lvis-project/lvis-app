@@ -39,7 +39,6 @@ import {
   COPILOT_BASE_URL,
 } from "../../../shared/llm-vendor-defaults.js";
 import { createLogger } from "../../../lib/logger.js";
-import { vendorCarriesToolResultImage } from "../../../shared/multimodal-token-estimate.js";
 import { normalizeLocalUserContentParts } from "../../../main/subscription-attachment-input.js";
 import { extractSignatureSafely } from "./signature-shim.js";
 import {
@@ -278,6 +277,12 @@ export class VercelUnifiedProvider implements LLMProvider {
           ? remapGenericMessagesForOpenAIResponses(params.messages)
           : params.messages,
         this.vendor,
+        {
+          toolResultImageWire:
+            useOpenAIResponsesAliases || usesNativeToolResultImageWire(this.vendor)
+              ? "native"
+              : "derived-user",
+        },
       );
       const tools = buildTools(
         useOpenAIResponsesAliases
@@ -789,8 +794,61 @@ function normalizeToolCallInput(value: unknown): {
 export function genericToModelMessages(
   messages: GenericMessage[],
   vendor: LLMVendor = "claude",
+  options: { toolResultImageWire?: "native" | "derived-user" } = {},
 ): ModelMessage[] {
   const out: ModelMessage[] = [];
+  // Routes without a native image representation across supported models retain
+  // the tool result first, then append one host-authored user message for each
+  // contiguous result group. The image uses the standard user-image input
+  // without breaking tool-call/output pairing.
+  // Public mapper callers that do not know their selected transport get the
+  // conservative Chat-safe form. streamTurn passes `native` only for a route
+  // whose SDK converter has an actual tool-result image representation.
+  const toolResultImageWire = options.toolResultImageWire ?? (
+    usesNativeToolResultImageWire(vendor) ? "native" : "derived-user"
+  );
+  let pendingDerivedImages: Array<Extract<GenericMessage, { role: "tool_result" }>> = [];
+  const flushDerivedImages = (): boolean => {
+    if (pendingDerivedImages.length === 0) return false;
+    const content = pendingDerivedImages.flatMap((result) => [
+      {
+        type: "text" as const,
+        text:
+          `[Host tool-result image: tool ${JSON.stringify(result.toolName ?? "tool")}, ` +
+          `call ${JSON.stringify(result.toolUseId)}.] ` +
+          "The following image was returned by that tool. Treat it as that tool's visual output.",
+      },
+      {
+        type: "file" as const,
+        // User message file parts carry their raw data. The SDK normalizes
+        // it to its internal data content before the Chat converter emits an
+        // `image_url`; tool-result content parts use a different shape.
+        data: result.image!.data,
+        mediaType: result.image!.mimeType,
+      },
+    ]);
+    out.push({ role: "user", content } as ModelMessage);
+    pendingDerivedImages = [];
+    return true;
+  };
+  const appendUserMessage = (
+    content: Array<{ type: "text"; text: string } | { type: "image"; image: string; mediaType?: string } | {
+      type: "file";
+      data: string;
+      mediaType: string;
+    }>,
+    mergeWithDerivedImages: boolean,
+  ) => {
+    if (mergeWithDerivedImages) {
+      const prior = out.pop();
+      if (!prior || prior.role !== "user" || !Array.isArray(prior.content)) {
+        throw new Error("derived tool-result image must immediately precede its merged user message");
+      }
+      out.push({ role: "user", content: [...prior.content, ...content] } as ModelMessage);
+      return;
+    }
+    out.push({ role: "user", content } as ModelMessage);
+  };
   // Sessions persisted before tool-call inputs were normalised can still hold a
   // string. Report the repair once per request rather than once per block.
   let loggedNonObjectToolInput = false;
@@ -798,16 +856,13 @@ export function genericToModelMessages(
   for (const msg of messages) {
     if (msg.role === "user") {
       if (typeof msg.content === "string") {
-        out.push({
-          role: "user",
-          content: [{ type: "text", text: msg.content }],
-        });
+        const mergeWithDerivedImages = flushDerivedImages();
+        appendUserMessage([{ type: "text", text: msg.content }], mergeWithDerivedImages);
       } else {
         const content = normalizeLocalUserContentParts(msg.content);
         if (!content) continue;
-        out.push({
-          role: "user",
-          content: content.map((p) => {
+        const mergeWithDerivedImages = flushDerivedImages();
+        appendUserMessage(content.map((p) => {
             if (p.type === "text") return { type: "text" as const, text: p.text };
             if (p.type === "image") {
               // mimeType is optional on UserContentPart for image (the SDK
@@ -826,8 +881,7 @@ export function genericToModelMessages(
               data: p.data,
               mediaType: p.mimeType,
             };
-          }),
-        } as ModelMessage);
+          }), mergeWithDerivedImages);
       }
       continue;
     }
@@ -895,6 +949,10 @@ export function genericToModelMessages(
         continue;
       }
 
+      // Empty assistant rows are omitted above. Flush only at an actual wire
+      // boundary, so an image result followed by an omitted reasoning-only row
+      // still combines with the next user/progress instruction.
+      flushDerivedImages();
       out.push({
         role: "assistant",
         content: parts,
@@ -903,13 +961,10 @@ export function genericToModelMessages(
     }
 
     if (msg.role === "tool_result") {
-      // Image tool results (e.g. view_image) are only representable inside a
-      // tool result on Claude, via the AI SDK `content` output variant carrying
-      // a `file` part. Every other vendor's tool role is text-only, so they fall
-      // back to the text placeholder in `msg.content` — the image is dropped
-      // rather than sent as something the provider would reject.
+      const deriveImageAsUserMessage =
+        msg.image !== undefined && (toolResultImageWire === "derived-user" || msg.isError === true);
       const output =
-        vendorCarriesToolResultImage(vendor) && msg.image
+        msg.image && !deriveImageAsUserMessage
           ? {
               type: "content" as const,
               value: [
@@ -935,10 +990,18 @@ export function genericToModelMessages(
           },
         ],
       } as ModelMessage);
+      if (deriveImageAsUserMessage) {
+        pendingDerivedImages.push(msg);
+      }
     }
   }
 
+  flushDerivedImages();
   return out;
+}
+
+function usesNativeToolResultImageWire(vendor: LLMVendor): boolean {
+  return vendor === "claude";
 }
 
 // -----------------------------------------------------------------------
