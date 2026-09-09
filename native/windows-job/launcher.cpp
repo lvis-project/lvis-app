@@ -91,9 +91,11 @@ int wmain(int argc, wchar_t** argv) {
   DWORD result = WaitForMultipleObjects(2, waits, FALSE, INFINITE);
   DWORD code = 125;
   if (result == WAIT_OBJECT_0) {
-    if (!GetExitCodeProcess(child.hProcess, &code)) code = 125;
+    if (!GetExitCodeProcess(child.hProcess, &code)) code = fail("GetExitCodeProcess");
   } else if (result == WAIT_OBJECT_0 + 1) {
     code = 130;
+  } else {
+    code = fail("WaitForMultipleObjects");
   }
   // A completed root command must not leave descendants retaining its pipes.
   CloseHandle(job);
