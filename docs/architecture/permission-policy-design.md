@@ -37,6 +37,12 @@ rules, asks the user or reviewer where required, and records the result.
 Hard-deny rules always run before reviewer or user approval. A user approval
 does not make an invalid tool definition valid.
 
+Shell path checks follow each argument's role. A `grep` pattern remains text
+even when it contains path separators, regular-expression escapes, or dollar
+anchors. Input files, pattern files supplied with `-f`/`--file`, exclusion files,
+and redirection targets remain subject to path checks. Shell substitutions are
+checked separately because they execute commands before argument passing.
+
 ## Policy Modes
 
 | Mode | Behavior |

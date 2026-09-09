@@ -242,6 +242,8 @@ describe("shell-path-policy", () => {
         expect(validateShellCommandPathPolicy("sh -c \\/etc/shadow", root, root, []))
           .toContain("Sensitive path:");
         expect(validateShellCommandPathPolicy("grep /etc/shadow", root, root, []))
+          .toBeNull();
+        expect(validateShellCommandPathPolicy("grep needle /etc/shadow", root, root, []))
           .toContain("Sensitive path:");
       });
     });
@@ -717,19 +719,58 @@ describe("shell-path-policy", () => {
       });
     });
 
-    it("checks a bare path handed to a grep pattern slot", () => {
+    it("distinguishes path-shaped grep patterns from files", () => {
       withRoot((root) => {
-        // Re-fenced, because the claim is about the SLOT — that a bare path in
-        // the pattern position is still read as an operand — and `grep` is a
-        // read verb, so under the shipped policy the operand is seen and then
-        // admitted. Fencing reads is what makes "seen" observable here.
         expect(validateShellCommandPathPolicy("grep -- /etc/passwd notes.txt", root, root, [], true))
-          .toContain("Sandbox:");
+          .toBeNull();
         expect(validateShellCommandPathPolicy("grep --regexp=/etc/passwd notes.txt", root, root, [], true))
+          .toBeNull();
+        expect(validateShellCommandPathPolicy("grep needle /etc/passwd", root, root, [], true))
           .toContain("Sandbox:");
-        // A pattern that is not path-shaped keeps its exemption.
         expect(validateShellCommandPathPolicy("grep needle notes.txt", root, root, []))
           .toBeNull();
+      });
+    });
+
+    it.each([
+      String.raw`grep -cvP '^\s*[A-Za-z0-9]+\s*$' notes.txt`,
+      String.raw`grep -c $'^\s' notes.txt`,
+      String.raw`grep -E '^\w+\s+\d+$' notes.txt`,
+      String.raw`grep -e '^\s*$' notes.txt`,
+      String.raw`grep -ne'^\s*$' notes.txt`,
+      String.raw`grep --regexp='^\s*$' notes.txt`,
+      String.raw`grep -m 2 -C3 '^\s*$' notes.txt`,
+      String.raw`grep --max-count=2 --context 3 '^\s*$' notes.txt`,
+      String.raw`grep --color=never --exclude-dir='@/unused' '^\s*$' notes.txt`,
+      String.raw`grep -e '@/etc/shadow' notes.txt`,
+      String.raw`egrep -e '^\s*$' notes.txt`,
+      String.raw`fgrep -e '\path\value$' notes.txt`,
+    ])("admits literal search text in %s", (command) => {
+      withRoot((root) => {
+        expect(validateShellCommandPathPolicy(command, root, root, [], true)).toBeNull();
+      });
+    });
+
+    it.each([
+      "grep -e needle /etc/shadow",
+      "grep -eneedle /etc/shadow",
+      "grep -qf/etc/shadow notes.txt",
+      "grep -qf /etc/shadow notes.txt",
+      "grep --file=/etc/shadow notes.txt",
+      "grep --exclude-from /etc/shadow needle notes.txt",
+      "grep --exclude-from=/etc/shadow needle notes.txt",
+      "grep -f patterns.txt /etc/shadow",
+      "grep /etc/shadow -e needle",
+      "grep -- needle /etc/shadow",
+      "grep --color /etc/shadow /etc/shadow",
+      "grep -e needle notes.txt < /etc/shadow",
+      "grep -e needle notes.txt > /etc/shadow",
+      'grep "$(cat /etc/shadow)" notes.txt',
+      'grep -e "$(cat /etc/shadow)" notes.txt',
+    ])("still checks actual file access in %s", (command) => {
+      withRoot((root) => {
+        expect(validateShellCommandPathPolicy(command, root, root, [], true))
+          .toContain("Sensitive path:");
       });
     });
 
