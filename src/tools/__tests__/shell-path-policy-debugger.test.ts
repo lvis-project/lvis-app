@@ -10,7 +10,6 @@ describe("debugger command operand roles", () => {
   let root: string;
   beforeEach(() => { root = mkdtempSync(join(tmpdir(), "lvis-debugger-operands-")); });
   afterEach(async () => { await cleanupTmpDir(root); });
-  const check = (command: string) => findShellPathPolicyViolation(command, root, root, [], false);
 
   it.each([
     "gdb -q -batch -ex 'x/4xw $sp' ./program",
@@ -24,7 +23,7 @@ describe("debugger command operand roles", () => {
     "gdb --early-init-eval-command='set data-directory /usr/share/debugger' ./program",
     "gdb -ex 'x/4xw $sp' ./program > ./report",
   ])("classifies documented command values as program text: %s", (command) => {
-    expect(check(command)).toBeNull();
+    expect(findShellPathPolicyViolation(command, root, root, [], false)).toBeNull();
     expect(isReadOnlyCommand(command)).toBe(false);
   });
 
@@ -42,18 +41,18 @@ describe("debugger command operand roles", () => {
     "gdb -ex 'x/4xw $sp' ./program > /etc/shadow",
     'gdb -ex "$(cat /etc/shadow)" ./program',
   ])("continues checking files, redirects and shell substitutions: %s", (command) => {
-    expect(check(command)?.kind).toBe("sensitive-path");
+    expect(findShellPathPolicyViolation(command, root, root, [], false)?.kind).toBe("sensitive-path");
   });
 
   it.each(["--args", "-args", "--arg", "--no-escape-args", "-no-escape-args", "--no-escape-a", "--"])(
     "does not apply debugger option roles to forwarded arguments after %s", (separator) => {
-      expect(check(`gdb ${separator} ./program -ex '$UNRESOLVED_INPUT/file'`)).not.toBeNull();
+      expect(findShellPathPolicyViolation(`gdb ${separator} ./program -ex '$UNRESOLVED_INPUT/file'`, root, root, [], false)).not.toBeNull();
     },
   );
 
   it.each(["-x", "--command", "--comm", "-ix", "--init-command", "-eix", "--early-init-command", "--eval", "--init-eval-comm", "--ty"])(
     "consumes the file operand before reading later options: %s", (option) => {
-      expect(check(`gdb ${option} -ex '$UNRESOLVED_INPUT/file'`)).not.toBeNull();
+      expect(findShellPathPolicyViolation(`gdb ${option} -ex '$UNRESOLVED_INPUT/file'`, root, root, [], false)).not.toBeNull();
     },
   );
 });
