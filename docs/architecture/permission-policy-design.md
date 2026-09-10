@@ -48,6 +48,18 @@ including file-sequence formats. The resulting path still receives normal
 containment and sensitive-path checks. Supported variables expand before those
 checks; unresolved dollar expressions and paired percent variables remain denied.
 
+Debugger command options (`-ex`, `-iex`, `-eiex` and their documented long
+forms) carry program text. Executable, symbol, core, directory and command-file
+options remain path operands. After an argument-forwarding option or a possible
+abbreviation, later arguments receive no debugger option exemptions because
+they may belong to the child program.
+Potential abbreviations of value-taking options consume their value
+conservatively so that an option-looking filename cannot claim a later operand.
+Program-text classification does not make debugger execution read-only: tool
+risk review and the execution sandbox govern the program's internal effects,
+as they do for other interpreters. Shell substitutions are still checked before
+the debugger receives the resulting argument.
+
 For `find`, starting points and file-valued primaries remain paths. Name/path
 patterns, regular expressions, timestamps, numeric tests, and output formats
 are expression values. In particular, `-printf` takes one format, while

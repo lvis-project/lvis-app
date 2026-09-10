@@ -650,6 +650,10 @@ interface NonPathOperandSpec {
    * otherwise be mistaken for the awk program and exempted.
    */
   pathValueOptions?: ReadonlySet<string>;
+  /** Possible value-option abbreviations consume their operand without exempting it. */
+  abbreviatedValueOptions?: true;
+  /** Forwarding options; possible abbreviations conservatively end option roles. */
+  forwardingOptions?: ReadonlySet<string>;
   /** Cluster form of a code-carrying option, e.g. perl's `-ne` / `-lpe`. */
   clusteredCodeOption?: RegExp;
   /** True when the first non-option operand is the program/pattern. */
@@ -698,8 +702,29 @@ const EXPRESSION_CODE_OPTIONS = new Set(["-e", "--eval"]);
 const PERL_CODE_OPTIONS = new Set(["-e", "-E"]);
 /** perl/ruby cluster options ending in `e` take the program as the next word (`-ne`, `-lpe`). */
 const PERL_CLUSTERED_CODE_OPTION = /^-[A-Za-z]*[eE]$/;
+const DEBUGGER_CODE_OPTIONS = new Set([
+  "-ex", "-eval-command", "--eval-command",
+  "-iex", "-init-eval-command", "--init-eval-command",
+  "-eiex", "-early-init-eval-command", "--early-init-eval-command",
+]);
+const DEBUGGER_PATH_OPTIONS = new Set([
+  "-x", "-command", "--command",
+  "-ix", "-init-command", "--init-command",
+  "-eix", "-early-init-command", "--early-init-command",
+  "-e", "-exec", "--exec", "-s", "-symbols", "--symbols", "-se", "--se",
+  "-c", "-core", "--core", "-d", "-directory", "--directory",
+  "-cd", "--cd", "-data-directory", "--data-directory",
+  "-t", "-tty", "--tty",
+]);
 
 const NON_PATH_OPERAND_SPECS: ReadonlyMap<string, NonPathOperandSpec> = new Map<string, NonPathOperandSpec>([
+  ["gdb", {
+    valueOptions: DEBUGGER_CODE_OPTIONS,
+    pathValueOptions: DEBUGGER_PATH_OPTIONS,
+    abbreviatedValueOptions: true,
+    forwardingOptions: new Set(["--args", "--no-escape-args"]),
+    declineBarePathValue: true,
+  }],
   // Shell family: `-c` carries a command LINE, so its value is re-entered as a
   // command rather than merely exempted — see `nestedCommandOption`.
   ...(["sh", "bash", "zsh", "dash", "ksh"] as const).map((verb) => [verb, {
@@ -1040,7 +1065,13 @@ function classifyOperandSlots(argv: readonly string[]): OperandSlotClassificatio
   let optionsEnded = false;
   for (let i = verbIndex + 1; i < argv.length; i += 1) {
     const token = argv[i]!;
-    if (!optionsEnded && token === "--") {
+    // A potential forwarding abbreviation must not grant debugger roles to
+    // arguments the child might receive. Normalize only the option prefix.
+    const optionName = token.replace(/^--?/, "--");
+    const mayForward = token.startsWith("-") && optionName.length > 2
+      && spec.forwardingOptions !== undefined
+      && [...spec.forwardingOptions].some((option) => option.startsWith(optionName));
+    if (!optionsEnded && (token === "--" || mayForward)) {
       optionsEnded = true;
       continue;
     }
@@ -1048,7 +1079,12 @@ function classifyOperandSlots(argv: readonly string[]): OperandSlotClassificatio
       const equals = token.indexOf("=");
       const name = equals > 0 ? token.slice(0, equals) : token;
       if (spec.programSuppliedBy?.has(name)) programTaken = true;
-      if (spec.pathValueOptions?.has(name) === true) {
+      const normalizedName = name.replace(/^--?/, "--");
+      const mayConsumeValue = spec.abbreviatedValueOptions === true
+        && spec.valueOptions?.has(name) !== true
+        && [...spec.pathValueOptions ?? [], ...spec.valueOptions ?? []]
+          .some((option) => option.replace(/^--?/, "--").startsWith(normalizedName));
+      if (spec.pathValueOptions?.has(name) === true || mayConsumeValue) {
         // Consume the value so it is not mistaken for the first positional,
         // but leave it in the candidate set: it is a path.
         if (equals < 0) i += 1;
