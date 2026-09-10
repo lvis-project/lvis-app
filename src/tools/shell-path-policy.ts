@@ -25,6 +25,7 @@ import {
 } from "../permissions/allowed-directories.js";
 import { errorMessage } from "../shared/error-message.js";
 import { expandLeadingTilde } from "../shared/home-tilde.js";
+import { parseTarListing } from "../shared/shell-tar-listing.js";
 
 export type ShellPathPolicyViolationKind =
   | "dynamic-path"
@@ -855,6 +856,31 @@ interface OperandSlotClassification {
   dynamicExecution: string | null;
 }
 
+const COMPILER_COMMANDS = new Set(["cc", "c++", "gcc", "g++", "clang", "clang++"]);
+// Named options precede any shorter option prefix that could claim their value.
+const COMPILER_PATH_OPTIONS = [
+  "-include-pch", "-idirafter", "-isysroot", "-isystem", "-iquote", "-include", "-imacros",
+  "-MF", "-I", "-L", "-B", "-o",
+];
+
+function classifyCompilerOperandSlots(argv: readonly string[], verbIndex: number): OperandSlotClassification {
+  const nonPathIndices = new Set<number>();
+  const extraCandidates: string[] = [];
+  for (let i = verbIndex + 1; i < argv.length; i += 1) {
+    const token = argv[i]!;
+    if (token === "--") break;
+    const option = COMPILER_PATH_OPTIONS.find((prefix) => token.startsWith(prefix));
+    if (!option) continue;
+    const value = token === option ? argv[++i] : token.slice(option.length);
+    // Sysroot-relative values require additional interpretation; keep the
+    // conservative scan for those instead of treating '=' as a directory name.
+    if (!value || value.startsWith("=")) continue;
+    nonPathIndices.add(i);
+    extraCandidates.push(value);
+  }
+  return { nonPathIndices, extraCandidates, nestedCommands: [], dynamicExecution: null };
+}
+
 const GREP_LITERAL_OPTIONS = new Set([
   "-e", "--regexp", "-A", "--after-context", "-B", "--before-context",
   "-C", "--context", "-m", "--max-count", "-d", "--directories",
@@ -1018,6 +1044,15 @@ function classifyOperandSlots(argv: readonly string[]): OperandSlotClassificatio
   const verb = stripCommandPath(head).toLowerCase();
   if (verb === "find") return classifyFindOperandSlots(argv, verbIndex);
   if (["grep", "egrep", "fgrep"].includes(verb)) return classifyGrepOperandSlots(argv, verbIndex);
+  if (COMPILER_COMMANDS.has(verb)) return classifyCompilerOperandSlots(argv, verbIndex);
+  if (verb === "tar") {
+    const listing = parseTarListing(argv.slice(verbIndex));
+    if (listing) {
+      for (let i = verbIndex + 1; i < argv.length; i += 1) skip.add(i);
+      extraCandidates.push(...listing.archivePaths);
+    }
+    return empty;
+  }
   const spec = NON_PATH_OPERAND_SPECS.get(verb);
   if (!spec) return empty;
   const isSed = verb === "sed";
@@ -1364,14 +1399,22 @@ function findUnsafeRecursiveTraversal(
   blockReadsOutsideWorkingDirectories: boolean,
 ): string | null {
   for (const segment of splitCommandSegments(command)) {
-    if (!pathEffectIsConfined(segmentEffect(segment), blockReadsOutsideWorkingDirectories)) {
+    const effect = segmentEffect(segment);
+    if (!pathEffectIsConfined(effect, blockReadsOutsideWorkingDirectories)) {
       continue;
     }
-    const tokens = tokenizeCommand(segment);
-    const commandIndex = tokens.findIndex((token) => !isAssignmentToken(token));
+    const parsed = tokenizeShell(segment);
+    const leaf = !parsed.parseError && parsed.leaves.length === 1 ? parsed.leaves[0] : undefined;
+    const tarIndex = leaf ? leadingKeywordCount(leaf.argv) : -1;
+    const tarLeaf = leaf && stripCommandPath(leaf.argv[tarIndex] ?? "").toLowerCase() === "tar";
+    const tokens = tarLeaf ? leaf.argv : tokenizeCommand(segment);
+    const commandIndex = tarLeaf ? tarIndex : tokens.findIndex((token) => !isAssignmentToken(token));
     if (commandIndex < 0) continue;
     const commandName = normalizeCommandName(tokens[commandIndex]);
     if (!commandName) continue;
+    // Listing reads an archive stream, not the host tree represented by its
+    // entries. The archive file still receives the normal read-path checks.
+    if (commandName === "tar" && effect === "read") continue;
     if (RECURSIVE_TRAVERSAL_COMMANDS.has(commandName)) {
       return buildRecursiveBlockMessage(tokens[commandIndex], commandName);
     }
@@ -1532,16 +1575,18 @@ function extractPathCandidates(
     const effect = segmentEffect(segment);
     const parsed = tokenizeShell(segment);
     const leaf = parsed.leaves.length === 1 ? parsed.leaves[0] : undefined;
-    // Find expression arities apply to argv, never to interleaved redirects.
+    // Option arities apply to argv, never to interleaved redirects.
     // Keep wrapper operands on the conservative flat path, where none are lost.
+    const verb = leaf && stripCommandPath(leaf.argv[leadingKeywordCount(leaf.argv)] ?? "").toLowerCase();
     if (!parsed.parseError && leaf && leaf.strippedWrappers.length === 0
-      && stripCommandPath(leaf.argv[leadingKeywordCount(leaf.argv)] ?? "").toLowerCase() === "find") {
+      && (verb === "find" || verb === "tar" || (verb !== undefined && COMPILER_COMMANDS.has(verb)))) {
       const slots = classifyOperandSlots(leaf.argv);
       for (let i = 0; i < leaf.argv.length; i += 1) {
         if (!slots.nonPathIndices.has(i)) {
           for (const part of splitCandidateParts(leaf.argv[i]!)) record(part, effect);
         }
       }
+      for (const part of slots.extraCandidates) record(part, effect);
       for (const assignment of leaf.assignments) {
         for (const part of splitCandidateParts(assignment)) record(part, effect);
       }
@@ -1648,7 +1693,8 @@ function splitCandidateParts(token: string): string[] {
   }
   parts.push(token);
   const eq = token.indexOf("=");
-  if (eq > 0 && eq < token.length - 1) {
+  // A web query's value is URL data, not an assignment or file-valued option.
+  if (eq > 0 && eq < token.length - 1 && !/^https?:\/\//i.test(token)) {
     const value = token.slice(eq + 1);
     // `NAME=$(cmd)` stores a command's OUTPUT in a variable; it does not open a
     // path. The derived value part is a heuristic split, not an operand the
