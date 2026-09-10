@@ -37,6 +37,7 @@ import type { ToolCategory } from "../../tools/types.js";
 import { stripCommandPath, tokenizeShell, type ShellLeaf } from "../../shared/shell-tokenizer.js";
 import { extractShellCommands } from "../../shared/shell-command-fields.js";
 import { hasNetworkTarget } from "./network-target.js";
+import { parseTarListing } from "../../shared/shell-tar-listing.js";
 import type { ToolSource } from "../../shared/permission-review-status.js";
 
 /**
@@ -336,8 +337,8 @@ const EXECUTION_SELECTING_ENV_NAMES: ReadonlySet<string> = new Set([
   // Language-runtime startup hooks
   "PERL5OPT", "PERL5LIB", "PERLIO", "PYTHONSTARTUP", "PYTHONPATH",
   "PYTHONEXECUTABLE", "NODE_OPTIONS", "NODE_PATH", "RUBYOPT", "RUBYLIB",
-  // grep/find behaviour overrides that can smuggle flags
-  "GREP_OPTIONS", "POSIXLY_CORRECT_EXEC",
+  // Command-option overrides that can smuggle execution or mutation flags
+  "GREP_OPTIONS", "TAR_OPTIONS", "POSIXLY_CORRECT_EXEC",
 ]);
 
 /** Signals the host owns about the observed call. The inspector reads ONLY these. */
@@ -492,6 +493,9 @@ export function isReadOnlyShellLeaf(
   const verb = stripCommandPath(argv[0]!);
   if (verb === "git") {
     return isReadOnlyGitLeaf(argv);
+  }
+  if (verb === "tar") {
+    return !leaf.argvHasExpandableDollar.some(Boolean) && parseTarListing(argv) !== null;
   }
   if (!READ_ONLY_COMMANDS.has(verb)) return false;
   // A read-only verb still MUTATES when carrying a mutating flag (`sed -i`,

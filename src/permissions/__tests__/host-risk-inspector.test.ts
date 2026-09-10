@@ -49,6 +49,31 @@ describe("inspectHostRisk — shell command classification", () => {
     expect(signals({ finalInput: { command: "frobnicate --all" } })).toBe("shell");
   });
 
+  it.each([
+    "tar -tzf archive.tar.gz", "tar tzf archive.tar.gz", "tar tfz archive.tar.gz",
+    "tar --list --file=archive.tar", "tar -t -f archive.tar", "tar -tfassets/archive.tar",
+    "tar -tf archive.tar -- --checkpoint-action=exec=sh", "env LANG=C tar -tf archive.tar",
+  ])("classifies a literal archive listing as read: %s", (command) => {
+    expect(isReadOnlyCommand(command)).toBe(true);
+  });
+
+  it.each([
+    "tar -xf archive.tar", "tar -cf archive.tar ./src", "tar -tf archive.tar --delete",
+    "tar -tf archive.tar --checkpoint-action=exec=sh", "tar -tf archive.tar -I sh",
+    "tar -tf archive.tar --use-compress-program=sh", "tar -tf archive.tar --to-command=sh",
+    "tar -tf archive.tar -T names", "tar -tf archive.tar --files-from=names",
+    "tar -tf archive.tar --rsh-command=sh", "tar -tf host:archive.tar",
+    "tar -tf archive.tar --unknown-option", "tar -t", "tar -tf",
+    "tar -tf archive.tar $OPTIONS", "tar -tf archive.tar *",
+    "tar -tf archive.tar {--checkpoint-action=exec=sh,entry}",
+    "TAR_OPTIONS=--remove-files tar -tf archive.tar",
+    "env TAR_OPTIONS=--remove-files tar -tf archive.tar",
+    "tar -tf archive.tar > listing", "tar -tf - < archive.tar",
+    'tar -tf "$(echo archive.tar)"',
+  ])("does not classify archive mutation or unresolved options as read: %s", (command) => {
+    expect(isReadOnlyCommand(command)).toBe(false);
+  });
+
   it("a compound is read-only only if EVERY leaf is read-only", () => {
     expect(isReadOnlyCommand("ls && cat foo")).toBe(true);
     expect(isReadOnlyCommand("ls | grep foo")).toBe(true);

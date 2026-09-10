@@ -73,6 +73,23 @@ redirect target is a parse failure, distinct from an explicitly empty word.
 This role classification does not relax recursive mutation/execution restrictions
 or shell redirection and substitution checks.
 
+Compiler path options preserve the complete value: `-Iinclude/sub` names
+`include/sub`, and `-ooutput/tool` names `output/tool`. Known options consume
+one argument; unknown and sysroot-dependent forms retain conservative checking.
+Both path scans use the same argv roles and check redirects separately.
+
+HTTP and HTTPS query values remain URL data. An equals sign does not create
+a local path operand. Output options, redirects and shell substitutions keep
+their normal checks.
+
+The [archive-listing parser](../../src/shared/shell-tar-listing.ts) supplies
+both risk and path classification. Only recognized listing options with
+explicit local archive files establish a read operation. Entry names select
+archive contents; archive files retain sensitive-path and optional read-boundary
+checks. Mutation, unknown options, file- or environment-supplied options,
+remote transports and expandable option words remain conservative.
+Redirects and hidden execution still affect risk.
+
 ## Policy Modes
 
 | Mode | Behavior |
