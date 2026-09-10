@@ -200,6 +200,31 @@ describe("shell-path-policy", () => {
     });
   });
 
+  it.each([
+    "cat './progress100%.txt'",
+    "touch './frame_%04d.dat'",
+    "printf value > './complete%.log'",
+    "cat './percent%/notes.txt'",
+  ])("accepts a literal percent marker in a path: %s", (command) => {
+    withRoot((root) => {
+      expect(validateShellCommandPathPolicy(command, root, root, [])).toBeNull();
+    });
+  });
+
+  it("keeps literal percent paths within the write boundary", () => {
+    withRoot((root) => {
+      expect(validateShellCommandPathPolicy("touch '../outside50%.txt'", root, root, []))
+        .toContain("Sandbox:");
+    });
+  });
+
+  it("continues rejecting unresolved paired percent variables", () => {
+    withRoot((root) => {
+      expect(validateShellCommandPathPolicy("cat %UNRESOLVED_DIR%/notes.txt", root, root, []))
+        .toContain("unresolved shell variable");
+    });
+  });
+
   describe("a regex argument is a pattern, not a filename", () => {
     it("stops reading a grep pattern as a Windows path", () => {
       withRoot((root) => {

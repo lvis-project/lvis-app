@@ -103,10 +103,10 @@ describe("find expression operand roles", () => {
   });
 
   it.each([
-    "find . -unknown -printf '%p\\n'",
-    "find . -name -printf '%p\\n'",
-    "find . -printf '%p\\n' -newer",
+    "find . -unknown -printf '/etc/shadow'",
+    "find . -name -printf '/etc/shadow'",
+    "find . -printf '/etc/shadow' -newer",
   ])("does not guess unsupported or incomplete expression roles: %s", (command) => {
-    expect(check(command)).not.toBeNull();
+    expect(check(command)?.kind).toBe("sensitive-path");
   });
 });

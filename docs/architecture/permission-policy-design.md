@@ -43,6 +43,11 @@ anchors. Input files, pattern files supplied with `-f`/`--file`, exclusion files
 and redirection targets remain subject to path checks. Shell substitutions are
 checked separately because they execute commands before argument passing.
 
+A percent marker without a paired variable delimiter remains part of a path,
+including file-sequence formats. The resulting path still receives normal
+containment and sensitive-path checks. Supported variables expand before those
+checks; unresolved dollar expressions and paired percent variables remain denied.
+
 For `find`, starting points and file-valued primaries remain paths. Name/path
 patterns, regular expressions, timestamps, numeric tests, and output formats
 are expression values. In particular, `-printf` takes one format, while

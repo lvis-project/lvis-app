@@ -1769,7 +1769,9 @@ function resolveCandidatePath(value: string, cwd: string): string {
     throw new Error(`Sandbox: unresolved command substitution in path operand ${value}`);
   }
   const expandedVars = expandShellPathVariables(value, cwd);
-  if (expandedVars.includes("$") || expandedVars.includes("%")) {
+  // Percent-style variables need both delimiters. A lone percent marker can
+  // belong to a literal filename or a file-sequence format.
+  if (expandedVars.includes("$") || /%[^%]+%/.test(expandedVars)) {
     throw new Error(`Sandbox: unresolved shell variable in path operand ${value}`);
   }
   // `~user` is the one tilde form nobody expands; `~\x` on POSIX is not that —
