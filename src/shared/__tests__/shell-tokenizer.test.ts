@@ -351,3 +351,46 @@ describe("tokenizeShell — comments", () => {
     expect(leaves.map((l) => l.argv)).toEqual([["ls"], ["cat", "/etc/shadow"]]);
   });
 });
+
+describe("tokenizeShell — redirect operand completeness", () => {
+  it.each(["cmd >", "cmd <", "cmd >>", "cmd > > out", "cmd < | next", "cmd <<<", "cmd <<"])(
+    "rejects a missing target: %s", (command) => {
+      expect(tokenizeShell(command).parseError).toBe(true);
+    },
+  );
+
+  it.each(["2>&1", ">&-", "<&-", "0<&3", "12>&10"])(
+    "keeps following argv after a complete descriptor redirect: %s", (redirect) => {
+      const parsed = tokenizeShell(`find . -printf ${redirect} '%p\\n'`);
+      expect(parsed.parseError).toBe(false);
+      expect(parsed.leaves[0]!.argv).toEqual(["find", ".", "-printf", "%p\\n"]);
+      expect(parsed.leaves[0]!.redirectTargets).toEqual([]);
+      expect(parsed.leaves[0]!.inputRedirectTargets).toEqual([]);
+    },
+  );
+
+  it.each([
+    { command: "cmd >&1\u000b/report", target: "1\u000b/report" },
+    { command: "cmd >&1\u000c/report", target: "1\u000c/report" },
+    { command: "cmd >&1report", target: "1report" },
+    { command: 'cmd >&1"report"', target: "1report" },
+    { command: "cmd >&-/report", target: "-/report" },
+    { command: "cmd > ''", target: "" },
+    { command: 'cmd > ""', target: "" },
+    { command: "cmd > 'report file'", target: "report file" },
+    { command: "cmd > report\\ file", target: "report file" },
+    { command: "cmd > \\>", target: ">" },
+  ])("distinguishes an explicit target from an absent word: $command", ({ command, target }) => {
+    const parsed = tokenizeShell(command);
+    expect(parsed.parseError).toBe(false);
+    expect(parsed.leaves[0]!.redirectTargets).toEqual([target]);
+  });
+
+  it.each(["cat <<< ''", "cat <<'END'\nbody\nEND", "cat 0<<'END'\nbody\nEND"])(
+    "retains valid stdin literal operands: %s", (command) => {
+      const parsed = tokenizeShell(command);
+      expect(parsed.parseError).toBe(false);
+      expect(parsed.leaves[0]!.inputRedirectTargets).toEqual([]);
+    },
+  );
+});

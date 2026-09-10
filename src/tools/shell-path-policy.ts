@@ -952,9 +952,6 @@ function classifyFindOperandSlots(argv: readonly string[], verbIndex: number): O
   let groups = 0;
   for (; i < argv.length; i += 1) {
     const primary = argv[i]!;
-    // The flat scanner still carries shell redirects. Leave that suffix to
-    // its ordinary path checks; the shared leaf pass checks redirects alone.
-    if (/^(?:[0-9]*[<>]|&>)/.test(primary)) break;
     if (primary === "(" || primary === "\\(") { groups += 1; continue; }
     if (primary === ")" || primary === "\\)") {
       if (--groups < 0) return unclassified;
@@ -1497,9 +1494,30 @@ function extractPathCandidates(
   };
   for (const segment of splitCommandSegments(command)) {
     const effect = segmentEffect(segment);
+    const parsed = tokenizeShell(segment);
+    const leaf = parsed.leaves.length === 1 ? parsed.leaves[0] : undefined;
+    // Find expression arities apply to argv, never to interleaved redirects.
+    // Keep wrapper operands on the conservative flat path, where none are lost.
+    if (!parsed.parseError && leaf && leaf.strippedWrappers.length === 0
+      && stripCommandPath(leaf.argv[leadingKeywordCount(leaf.argv)] ?? "").toLowerCase() === "find") {
+      const slots = classifyOperandSlots(leaf.argv);
+      for (let i = 0; i < leaf.argv.length; i += 1) {
+        if (!slots.nonPathIndices.has(i)) {
+          for (const part of splitCandidateParts(leaf.argv[i]!)) record(part, effect);
+        }
+      }
+      for (const assignment of leaf.assignments) {
+        for (const part of splitCandidateParts(assignment)) record(part, effect);
+      }
+      for (const target of leaf.redirectTargets) record(target, "write");
+      for (const target of leaf.inputRedirectTargets) record(target, "read");
+      continue;
+    }
     const tokens = tokenizeCommand(segment);
     const headIndex = tokens.findIndex((token) => !isAssignmentToken(token));
-    const slots = headIndex < 0 ? undefined : classifyOperandSlots(tokens.slice(headIndex));
+    const isFind = headIndex >= 0
+      && stripCommandPath(tokens[headIndex] ?? "").toLowerCase() === "find";
+    const slots = headIndex < 0 || isFind ? undefined : classifyOperandSlots(tokens.slice(headIndex));
     const nonPath = slots === undefined
       ? new Set<number>()
       : new Set([...slots.nonPathIndices].map((index) => index + headIndex));

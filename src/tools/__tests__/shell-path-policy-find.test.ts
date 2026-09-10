@@ -29,6 +29,44 @@ describe("find expression operand roles", () => {
   });
 
   it.each([
+    "find . 2>/dev/null -printf '%p\\n'",
+    "find . -type f 2>/dev/null -printf '%p\\n'",
+    "find . -printf > ./report '%p\\n'",
+    "find . -printf 2>&1 '%p\\n'",
+    "find . -printf >&- '%p\\n'",
+    "find . -printf > 'report file' '%p\\n'",
+    "find . -printf > report\\ file '%p\\n'",
+    "find . -newer 2>/dev/null ./reference -printf '%p\\n'",
+    "find . -printf '%p\\n' 2>/dev/null -name '*.txt'",
+  ])("classifies actual argv with interleaved redirection: %s", (command) => {
+    expect(check(command)).toBeNull();
+  });
+
+  it("retains the recursive traversal restriction for input redirection", () => {
+    expect(check("find . -printf <&- '%p\\n'")?.kind).toBe("recursive-traversal");
+  });
+
+  it.each([
+    "find . -printf >&1/../../../../etc/shadow '%p\\n'",
+    "find . -printf >&-/../../../../etc/shadow '%p\\n'",
+    "find . -printf > /etc/shadow '%p\\n'",
+    "find . -printf < /etc/shadow '%p\\n'",
+    "find . -newer > ./report /etc/shadow -printf '%p\\n'",
+    "find . -newer 2>&1 /etc/shadow -printf '%p\\n'",
+    "find . -printf > '/etc/shadow' '%p\\n'",
+  ])("keeps interleaved redirect and reference targets checked: %s", (command) => {
+    expect(check(command)?.kind).toBe("sensitive-path");
+  });
+
+  it.each([
+    "find . -printf '%p\\n' >",
+    "find . -printf '%p\\n' > > ./report",
+    "find . -printf '%p\\n' < | cat",
+  ])("does not exempt formats when redirection lacks an operand: %s", (command) => {
+    expect(check(command)).not.toBeNull();
+  });
+
+  it.each([
     "find /etc/shadow -printf '%p\\n'",
     "find . -newer /etc/shadow -printf '%p\\n'",
     "find . -samefile /etc/shadow -printf '%p\\n'",

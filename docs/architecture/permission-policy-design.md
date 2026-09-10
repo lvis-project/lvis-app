@@ -48,10 +48,13 @@ patterns, regular expressions, timestamps, numeric tests, and output formats
 are expression values. In particular, `-printf` takes one format, while
 `-fprintf` takes an output file followed by a format. Each primary consumes
 its documented operands before the next primary is read. Unsupported or
-incomplete expression syntax keeps conservative path checking. In the flat
-scan, a shell redirection ends expression-role classification; the remaining
-tokens keep ordinary path checks. This role classification does not relax recursive mutation/execution restrictions or
-shell redirection and substitution checks.
+incomplete expression syntax keeps conservative path checking. Both path scans
+use the shared tokenizer's argv for find roles, so interleaved redirections do
+not consume expression operands. File redirect targets remain independently
+checked; descriptor duplication/closing consumes no argv operand. A missing
+redirect target is a parse failure, distinct from an explicitly empty word.
+This role classification does not relax recursive mutation/execution restrictions
+or shell redirection and substitution checks.
 
 ## Policy Modes
 

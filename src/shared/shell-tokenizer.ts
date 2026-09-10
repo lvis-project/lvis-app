@@ -168,6 +168,13 @@ export function tokenizeShell(
   }
   const leaves: ShellLeaf[] = [];
   for (const rawLeaf of scan.leaves) {
+    for (let i = 0; i < rawLeaf.words.length; i += 1) {
+      const word = rawLeaf.words[i]!;
+      if (!word.isRedirectOperator || isCompleteDescriptorRedirect(word.value)) continue;
+      const target = rawLeaf.words[++i];
+      // An explicitly quoted empty word is present; an operator is not a target.
+      if (!target || target.isRedirectOperator) return { leaves: [], parseError: true };
+    }
     leaves.push(buildLeaf(rawLeaf));
   }
   return { leaves, parseError: false };
@@ -371,6 +378,11 @@ function findHeredocTerminator(command: string, from: number, delimiter: string)
   return null;
 }
 
+/** Descriptor duplication/closing already contains its operand. */
+function isCompleteDescriptorRedirect(operator: string): boolean {
+  return /^\d*[<>]&(?:\d+-?|-)$/.test(operator);
+}
+
 /**
  * Character-level scan that segments the command into raw leaves and words,
  * tracking quote and substitution nesting. Returns `parseError` when a quote or
@@ -434,9 +446,23 @@ function scanLeaves(command: string, literalDataProof = false): { leaves: RawLea
   while (i < n) {
     const ch = command[i]!;
 
+    // Decode escapes only in redirect operands; other unquoted escape grammar
+    // remains conservative, especially for callers requesting literal proof.
+    const pendingRedirect = words.at(-1);
+    if (ch === "\\" && pendingRedirect?.isRedirectOperator
+      && !isCompleteDescriptorRedirect(pendingRedirect.value)) {
+      if (literalDataProof || i + 1 >= n) return { leaves: [], parseError: true };
+      if (command[i + 1] !== "\n") {
+        current += command[i + 1]!;
+        wordActive = true;
+      }
+      i += 2;
+      continue;
+    }
+
     // Comment: `#` where a word could start runs to end of line. The newline is
     // left in place so it still ends the leaf.
-    if (ch === "#" && startsShellComment(command, i)) {
+    if (ch === "#" && !wordActive && startsShellComment(command, i)) {
       pushWord();
       let end = i + 1;
       while (end < n && command[end] !== "\n") end += 1;
@@ -568,59 +594,34 @@ function scanLeaves(command: string, literalDataProof = false): { leaves: RawLea
       continue;
     }
 
-    // Redirects. A leading file-descriptor digit (`2>`, `1>`) is consumed as
-    // part of the operator when immediately followed by `>` (no intervening
-    // space). `<`/`<<` are input reads (recorded, no target).
-    if (ch === ">") {
-      // `>>` append, `>|` clobber, `>` truncate — all output redirects.
-      // NOTE: `>&m` (fd-dup, e.g. `>&2`, `2>&1`) duplicates a file descriptor
-      // rather than naming a FILE target. We recognise it here and record it as
-      // an output redirect operator with NO subsequent word token consumed as a
-      // target, so the fd digit after `>&` stays out of `redirectTargets` and
-      // does not produce a spurious leaf token like `["1"]` or `["2"]`.
-      if (command[i + 1] === "&") {
-        // `>&m` or `>>&m` — consume operator + optional trailing digit(s).
-        let opEnd = i + 2;
-        while (opEnd < n && command[opEnd]! >= "0" && command[opEnd]! <= "9") opEnd += 1;
-        pushOperator(command.slice(i, opEnd), true);
-        i = opEnd;
-        // The fd number was already consumed into the operator string; do NOT
-        // treat it as a redirect-target word. Advance past any trailing space.
-        continue;
-      }
-      const opLen = command[i + 1] === ">" || command[i + 1] === "|" ? 2 : 1;
-      pushOperator(command.slice(i, i + opLen), true);
-      i += opLen;
-      continue;
+    // Redirect operators may have a multi-digit descriptor prefix. Complete
+    // descriptor duplication/closing consumes no following argv word.
+    let operatorStart = i;
+    if (!wordActive) {
+      while (operatorStart < n && /[0-9]/.test(command[operatorStart]!)) operatorStart += 1;
     }
-    if (ch === "<") {
-      // `<<<` is a here-STRING: its operand is a literal word placed on stdin,
-      // not a filename. Recognising it as one 3-character operator is what lets
-      // the leaf builder tell it apart — split into `<<` plus `<`, the trailing
-      // `<` looked like an ordinary input redirect and claimed the string as a
-      // file. `<<` is a heredoc, `<` an ordinary input redirect.
-      const opLen = command[i + 1] === "<" ? (command[i + 2] === "<" ? 3 : 2) : 1;
-      pushOperator(command.slice(i, i + opLen), false);
-      i += opLen;
-      continue;
-    }
-
-    // A digit immediately followed by `>` is a numbered fd output redirect
-    // (e.g. `2>file`, `2>&1`, `2>>file`). When it is `n>&m` (fd-dup), the `m`
-    // digit belongs to the operator and must NOT be consumed as a target word.
-    if (ch >= "0" && ch <= "9" && command[i + 1] === ">" && !wordActive) {
-      const afterDigit = i + 1;
-      // `n>&m` fd-duplication: consume operator + destination-fd digits.
-      if (command[afterDigit + 1] === "&") {
-        let opEnd = afterDigit + 2;
-        while (opEnd < n && command[opEnd]! >= "0" && command[opEnd]! <= "9") opEnd += 1;
-        pushOperator(command.slice(i, opEnd), true);
-        i = opEnd;
-        continue;
+    const direction = command[operatorStart];
+    if (direction === ">" || direction === "<") {
+      let end = operatorStart + 1;
+      if (command[end] === "&") {
+        end += 1;
+        const operandStart = end;
+        while (end < n && /[0-9]/.test(command[end]!)) end += 1;
+        if (command[end] === "-") end += 1;
+        // A numeric prefix is not a complete descriptor when the shell word
+        // continues (e.g. >&1report or >&1"report" names a file).
+        if (end < n && !/[ \t\n;&|<>]/.test(command[end]!)) end = operandStart;
+      } else if (direction === "<" && command[end] === "<") {
+        end += 1;
+        if (command[end] === "<" || command[end] === "-") end += 1;
+      } else if (direction === ">" && (command[end] === ">" || command[end] === "|")) {
+        end += 1;
+      } else if (direction === "<" && command[end] === ">") {
+        // Read/write opening must retain the stricter output-target effect.
+        end += 1;
       }
-      const opLen = command[afterDigit + 1] === ">" || command[afterDigit + 1] === "|" ? 2 : 1;
-      pushOperator(command.slice(i, afterDigit + opLen), true);
-      i = afterDigit + opLen;
+      pushOperator(command.slice(i, end), direction === ">" || command[operatorStart + 1] === ">");
+      i = end;
       continue;
     }
 
@@ -773,6 +774,11 @@ function buildLeaf(raw: RawLeaf): ShellLeaf {
     if (w.hasCommandSubstitution) hasCommandSubstitution = true;
     if (w.hasProcessSubstitution) hasProcessSubstitution = true;
     if (w.isRedirectOperator) {
+      if (isCompleteDescriptorRedirect(w.value)) {
+        if (w.isOutputRedirect) hasOutputRedirect = true;
+        else hasInputRedirect = true;
+        continue;
+      }
       if (w.isOutputRedirect) {
         hasOutputRedirect = true;
         // The next non-operator word is a file target (not a fd-dup digit,
@@ -796,7 +802,7 @@ function buildLeaf(raw: RawLeaf): ShellLeaf {
         if (src && !src.isRedirectOperator) {
           // `<<` (heredoc delimiter) and `<<<` (here-string literal) name no
           // file; only a plain `<` does.
-          if (!w.value.startsWith("<<")) inputRedirectTargets.push(src.value);
+          if (!w.value.replace(/^\d+/, "").startsWith("<<")) inputRedirectTargets.push(src.value);
           if (src.hasCommandSubstitution) hasCommandSubstitution = true;
           if (src.hasProcessSubstitution) hasProcessSubstitution = true;
           i += 1;
