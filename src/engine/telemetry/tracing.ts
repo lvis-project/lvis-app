@@ -35,6 +35,7 @@ export type TelemetrySpec =
 export interface TracingHandle {
   readonly tracer: Tracer;
   readonly enabled: boolean;
+  forceFlush(): Promise<void>;
   shutdown(): Promise<void>;
 }
 
@@ -183,6 +184,7 @@ function offHandle(): TracingHandle {
   return {
     tracer: trace.getTracer("lvis"),
     enabled: false,
+    async forceFlush() {},
     async shutdown() {},
   };
 }
@@ -234,6 +236,9 @@ export async function configureTracing(
   return {
     tracer,
     enabled: true,
+    async forceFlush() {
+      await provider.forceFlush();
+    },
     async shutdown() {
       await provider.shutdown();
     },

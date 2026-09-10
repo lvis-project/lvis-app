@@ -420,7 +420,7 @@ Implementation anchors:
 ## Headless one-shot CLI
 
 The main process accepts two one-shot flags. Each boots the ordinary host
-service graph, performs exactly one action, and quits. Neither opens a
+service graph and performs exactly one action. Both quit by default. Neither opens a
 workspace, and neither is a second conversation runtime: `--exec` runs the same
 `runStreamedTurn` producer the desktop window runs and reads the same closed
 event union, with a sink that serialises instead of projecting to a renderer.
@@ -437,15 +437,26 @@ lvis --exec="<prompt>"              prompt inline; `--exec` or `--exec=-` reads 
      [--exec-approve=default|allow] permission mode for the run (default: default)
      [--exec-output=stream-json|json]  (default: stream-json)
      [--exec-max-rounds=<n>]        round budget for the turn
+     [--exec-keep-alive]            retain a successful streamed session until
+                                    SIGTERM or SIGINT from its caller
 lvis --set-secret=<key>             secret VALUE is read from stdin, never argv
 ```
 
 `stream-json` writes every platform conversation event to **stdout** as one
-`JSON.stringify(event)` per line and nothing else; `json` writes no per-event
+`JSON.stringify(event)` per line; `json` writes no per-event
 line and one final line carrying the turn result. Because a reader parses every
 stdout line, the process logger moves its console destination to stderr for the
 whole run — decided from argv inside `src/lib/logger.ts`, which is the only
 place that can decide it, since the logger is built when it is first imported.
+
+`--exec-keep-alive` requires a streamed turn. After the turn returns a successful
+exit status, the CLI exports buffered completed trace spans, then adds
+`{"kind":"exec.completed","exitCode":0}` to stdout
+and retains the host and its session-owned background services. This record is
+a CLI lifecycle message, not part of the conversation event union or proof of
+process exit. No further model turn runs. The caller owns cancellation and
+eventual termination; SIGTERM or SIGINT releases the request through normal
+shutdown and descendant cleanup. Unsuccessful turns exit without retention.
 
 Exit codes are `0` completed, `1` the turn failed or the secret could not be
 stored, `2` the turn ended asking for input, `64` a malformed command line, `75` another

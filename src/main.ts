@@ -77,6 +77,7 @@ import {
   parseExecFlags,
   readAllStdin,
   runExecTurn,
+  waitForExecRelease,
 } from "./main/exec-mode.js";
 import { isAuthorizedWorkspaceProjectRoot } from "./main/project-root-authorization.js";
 import {
@@ -204,9 +205,9 @@ async function main() {
     return;
   }
 
-  // `--exec` / `--set-secret` are one-shot headless entry points: the process
-  // performs the request against the freshly booted service graph and quits
-  // without opening a workspace.
+  // The headless request runs against the freshly booted service graph. An
+  // explicitly retained session waits for release inside runExecTurn; every
+  // completed request then takes the ordinary shutdown path below.
   //
   // `app.quit()` rather than `app.exit()` — unlike the smoke flag above, this
   // run has WRITTEN things. The `before-quit` handler's runAppShutdownCleanup
@@ -223,6 +224,8 @@ async function main() {
         stderr: process.stderr,
         readStdin: readAllStdin,
         isAuthorizedProjectRoot: isAuthorizedWorkspaceProjectRoot,
+        waitForRelease: waitForExecRelease,
+        flushTelemetry: services.flushTracing,
       },
       execRequest,
     );

@@ -78,6 +78,8 @@ export interface AppServices {
   pluginRuntime: PluginRuntime;
   pluginMarketplace: PluginMarketplaceService;
   settingsService: SettingsService;
+  /** Export completed spans while keeping the host available to its caller. */
+  flushTracing(): Promise<void>;
   /** Optional host-owned P4-5 runtime. Absent means both immutable boot gates were OFF. */
   a2aRemoteRuntime?: A2ARemoteRuntime;
   /** Main-owned renderer action boundary; renderer supplies only target id and user intent. */

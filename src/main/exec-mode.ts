@@ -1,9 +1,9 @@
 /**
  * Headless one-shot CLI modes for the Electron main process.
  *
- * Two requests share this module because they share a shape: the process boots
- * the ordinary host service graph, performs exactly one action, and quits —
- * no workspace, no window interaction, no operator at the keyboard.
+ * The process boots the ordinary host service graph and performs one action
+ * without a window. It quits by default; an explicitly retained turn waits
+ * for its caller to release the session before the ordinary shutdown cleanup.
  *
  *   --exec=<prompt>          run one conversation turn and stream its events
  *   --set-secret=<key>       write one secret through the app's own store
@@ -24,6 +24,7 @@
  * module's static surface stays leaf-shaped.
  */
 import { statSync } from "node:fs";
+import type { EventEmitter } from "node:events";
 import { basename, resolve } from "node:path";
 import { errorMessage } from "../shared/error-message.js";
 import type { ApprovalGate } from "../permissions/approval-gate.js";
@@ -78,6 +79,8 @@ interface ExecTurnRequest {
   readonly approveMode: Extract<ExecutionMode, "default" | "allow">;
   readonly output: ExecOutputFormat;
   readonly maxRounds?: number;
+  /** Retain this session after a successful turn until the caller releases it. */
+  readonly keepAlive?: boolean;
 }
 
 /** The `--set-secret` request. The value never appears here — it is on stdin. */
@@ -105,6 +108,10 @@ export interface ExecDeps {
    * which a headless run must refuse instead of quietly working elsewhere.
    */
   readonly isAuthorizedProjectRoot: (projectRoot: string) => boolean;
+  /** Required for --exec-keep-alive; the caller owns the session's release. */
+  readonly waitForRelease?: () => Promise<void>;
+  /** Required before publishing completion for a retained session. */
+  readonly flushTelemetry?: () => Promise<void>;
 }
 
 /**
@@ -190,6 +197,7 @@ export function parseExecFlags(
   let approveMode: Extract<ExecutionMode, "default" | "allow"> = "default";
   let output: ExecOutputFormat = "stream-json";
   let maxRounds: number | undefined;
+  let keepAlive = false;
   let secretKey: string | null = null;
 
   for (const arg of argv) {
@@ -233,6 +241,10 @@ export function parseExecFlags(
       maxRounds = parsed;
       continue;
     }
+    if (arg === "--exec-keep-alive") {
+      keepAlive = true;
+      continue;
+    }
     if (arg === "--set-secret") {
       return usageError("--set-secret needs a key, as --set-secret=<key>");
     }
@@ -247,6 +259,9 @@ export function parseExecFlags(
     }
   }
 
+  if (keepAlive && (!execRequested || output !== "stream-json")) {
+    return usageError("--exec-keep-alive requires --exec with --exec-output=stream-json");
+  }
   if (!execRequested && secretKey === null) return null;
   // Both requests read the WHOLE of stdin, so a run that combines them has to
   // give the prompt inline. Refusing here beats consuming stdin for the secret
@@ -269,6 +284,7 @@ export function parseExecFlags(
         approveMode,
         output,
         ...(maxRounds === undefined ? {} : { maxRounds }),
+        ...(keepAlive ? { keepAlive: true } : {}),
       }
       : null,
   };
@@ -385,11 +401,46 @@ async function runTurnRequest(deps: ExecDeps, request: ExecTurnRequest): Promise
  * needs the credential in place before the turn asks a provider for anything.
  */
 export async function runExecTurn(deps: ExecDeps, request: ExecRequest): Promise<number> {
+  if (request.turn?.keepAlive && !deps.waitForRelease) {
+    throw new Error("exec: retained session has no release owner");
+  }
+  if (request.turn?.keepAlive && !deps.flushTelemetry) {
+    throw new Error("exec: retained session has no telemetry flush owner");
+  }
   if (request.secret) {
     const code = await applySecret(deps, request.secret);
     if (code !== 0) return code;
   }
   const turn = request.turn;
   if (!turn) return 0;
-  return runTurnRequest(deps, turn);
+  const code = await runTurnRequest(deps, turn);
+  if (code === 0 && turn.keepAlive) {
+    try {
+      await deps.flushTelemetry!();
+    } catch (err) {
+      deps.stderr.write(`exec: telemetry flush failed: ${errorMessage(err)}\n`);
+      return EXEC_FAILURE_EXIT_CODE;
+    }
+    // Register release before publishing completion. This is a CLI lifecycle
+    // record, not another conversation event or a process-exit notification.
+    const released = deps.waitForRelease!();
+    deps.stdout.write(`${JSON.stringify({ kind: "exec.completed", exitCode: code })}\n`);
+    await released;
+  }
+  return code;
+}
+
+/** Release an explicitly retained session through the ordinary app quit path. */
+export function waitForExecRelease(signals: EventEmitter = process): Promise<void> {
+  return new Promise((resolveRelease) => {
+    const keepAlive = setInterval(() => {}, 60_000);
+    const release = () => {
+      clearInterval(keepAlive);
+      signals.removeListener("SIGTERM", release);
+      signals.removeListener("SIGINT", release);
+      resolveRelease();
+    };
+    signals.once("SIGTERM", release);
+    signals.once("SIGINT", release);
+  });
 }
