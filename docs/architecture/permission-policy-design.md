@@ -43,6 +43,24 @@ anchors. Input files, pattern files supplied with `-f`/`--file`, exclusion files
 and redirection targets remain subject to path checks. Shell substitutions are
 checked separately because they execute commands before argument passing.
 
+A percent marker without a paired variable delimiter remains part of a path,
+including file-sequence formats. The resulting path still receives normal
+containment and sensitive-path checks. Supported variables expand before those
+checks; unresolved dollar expressions and paired percent variables remain denied.
+
+For `find`, starting points and file-valued primaries remain paths. Name/path
+patterns, regular expressions, timestamps, numeric tests, and output formats
+are expression values. In particular, `-printf` takes one format, while
+`-fprintf` takes an output file followed by a format. Each primary consumes
+its documented operands before the next primary is read. Unsupported or
+incomplete expression syntax keeps conservative path checking. Both path scans
+use the shared tokenizer's argv for find roles, so interleaved redirections do
+not consume expression operands. File redirect targets remain independently
+checked; descriptor duplication/closing consumes no argv operand. A missing
+redirect target is a parse failure, distinct from an explicitly empty word.
+This role classification does not relax recursive mutation/execution restrictions
+or shell redirection and substitution checks.
+
 ## Policy Modes
 
 | Mode | Behavior |
