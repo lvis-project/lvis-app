@@ -446,18 +446,22 @@ function scanLeaves(command: string, literalDataProof = false): { leaves: RawLea
   while (i < n) {
     const ch = command[i]!;
 
-    // Decode escapes only in redirect operands; other unquoted escape grammar
-    // remains conservative, especially for callers requesting literal proof.
+    // Decode escaped delimiters in redirect operands. Other backslashes retain
+    // the existing path representation, including native path separators.
+    // Callers requesting literal proof still reject all unquoted escapes.
     const pendingRedirect = words.at(-1);
     if (ch === "\\" && pendingRedirect?.isRedirectOperator
       && !isCompleteDescriptorRedirect(pendingRedirect.value)) {
       if (literalDataProof || i + 1 >= n) return { leaves: [], parseError: true };
-      if (command[i + 1] !== "\n") {
-        current += command[i + 1]!;
-        wordActive = true;
+      const next = command[i + 1]!;
+      if (/[ \t\r\n#'"`$;&|<>()]/.test(next)) {
+        if (next !== "\n") {
+          current += next;
+          wordActive = true;
+        }
+        i += 2;
+        continue;
       }
-      i += 2;
-      continue;
     }
 
     // Comment: `#` where a word could start runs to end of line. The newline is

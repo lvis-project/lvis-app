@@ -380,6 +380,8 @@ describe("tokenizeShell — redirect operand completeness", () => {
     { command: "cmd > 'report file'", target: "report file" },
     { command: "cmd > report\\ file", target: "report file" },
     { command: "cmd > \\>", target: ">" },
+    { command: String.raw`cmd > C:\workspace\report.txt`, target: String.raw`C:\workspace\report.txt` },
+    { command: String.raw`cmd > \\server\share\report.txt`, target: String.raw`\\server\share\report.txt` },
   ])("distinguishes an explicit target from an absent word: $command", ({ command, target }) => {
     const parsed = tokenizeShell(command);
     expect(parsed.parseError).toBe(false);
