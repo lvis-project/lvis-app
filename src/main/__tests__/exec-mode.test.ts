@@ -10,6 +10,7 @@ import { describe, expect, it, vi } from "vitest";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
+import { EventEmitter } from "node:events";
 
 import {
   EXEC_USAGE_EXIT_CODE,
@@ -17,6 +18,7 @@ import {
   execTurnRequested,
   parseExecFlags,
   runExecTurn,
+  waitForExecRelease,
   type ExecDeps,
   type ExecRequest,
 } from "../exec-mode.js";
@@ -123,6 +125,64 @@ function expectRequest(parsed: ReturnType<typeof parseExecFlags>): ExecRequest {
   expect(parsed).not.toHaveProperty("error");
   return parsed as ExecRequest;
 }
+
+describe("retained headless session", () => {
+  it("requires an explicit streamed turn", () => {
+    const parsed = expectRequest(parseExecFlags(["--exec=hello", "--exec-keep-alive"], process.cwd()));
+    expect(parsed.turn?.keepAlive).toBe(true);
+    expect(parseExecFlags(["--exec-keep-alive"], process.cwd())).toHaveProperty("error");
+    expect(parseExecFlags(["--set-secret=llm.apiKey.openai", "--exec-keep-alive"], process.cwd()))
+      .toHaveProperty("error");
+    expect(parseExecFlags(["--exec=hello", "--exec-output=json", "--exec-keep-alive"], process.cwd()))
+      .toHaveProperty("error");
+    expect(expectRequest(parseExecFlags(["--exec=hello"], process.cwd())).turn)
+      .not.toHaveProperty("keepAlive");
+  });
+
+  it("publishes completion after registering release and keeps the session pending", async () => {
+    const harness = makeDeps();
+    let release!: () => void;
+    const waitForRelease = vi.fn(() => new Promise<void>((resolveRelease) => { release = resolveRelease; }));
+    let finished = false;
+    const running = runExecTurn({ ...harness.deps, waitForRelease }, turnRequest({ keepAlive: true }))
+      .then((code) => { finished = true; return code; });
+    await vi.waitFor(() => expect(waitForRelease).toHaveBeenCalledTimes(1));
+    expect(harness.stdout.lines().map((line) => JSON.parse(line)).at(-1))
+      .toEqual({ kind: "exec.completed", exitCode: 0 });
+    expect(finished).toBe(false);
+    expect(harness.runTurn).toHaveBeenCalledTimes(1);
+    release();
+    expect(await running).toBe(0);
+    expect(harness.runTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["stream-error", "input-required"] as const)("does not retain an unsuccessful %s turn", async (stopReason) => {
+    const harness = makeDeps({ turnResult: { ...COMPLETED_TURN, stopReason } });
+    const waitForRelease = vi.fn(async () => {});
+    const code = await runExecTurn({ ...harness.deps, waitForRelease }, turnRequest({ keepAlive: true }));
+    expect(code).not.toBe(0);
+    expect(waitForRelease).not.toHaveBeenCalled();
+    expect(harness.stdout.text()).not.toContain('"kind":"exec.completed"');
+  });
+
+  it("refuses a retained request without a release owner before starting work", async () => {
+    const harness = makeDeps();
+    await expect(runExecTurn(harness.deps, turnRequest({ keepAlive: true })))
+      .rejects.toThrow("no release owner");
+    expect(harness.runTurn).not.toHaveBeenCalled();
+  });
+
+  it.each(["SIGTERM", "SIGINT"])("releases on %s and removes both listeners", async (signal) => {
+    const signals = new EventEmitter();
+    const released = waitForExecRelease(signals);
+    expect(signals.listenerCount("SIGTERM")).toBe(1);
+    expect(signals.listenerCount("SIGINT")).toBe(1);
+    signals.emit(signal);
+    await released;
+    expect(signals.listenerCount("SIGTERM")).toBe(0);
+    expect(signals.listenerCount("SIGINT")).toBe(0);
+  });
+});
 
 describe("execModeRequested", () => {
   it.each([

@@ -72,6 +72,12 @@ launcher described in `native/windows-job/README.md`. Session disposal and root
 exit release those owned descendants. The native job is a lifecycle mechanism,
 not a security sandbox.
 
+External controllers can explicitly retain a headless session after its turn
+for later use of its background services. The caller owns eventual release;
+normal shutdown still cleans the session and descendants. The
+[CLI lifecycle contract](multisurface-conversation-runtime.md) owns the flags,
+completion record and signal semantics.
+
 The renderer is a presentation surface. It does not read arbitrary files, mutate
 settings directly, or execute tools. It calls preload APIs, which map to IPC
 handlers in the main process. The main process validates arguments, resolves

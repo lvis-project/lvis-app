@@ -64,6 +64,7 @@ describe("main.ts — headless exec branch", () => {
 
   it("hands the runner the workspace project authorization the app uses everywhere", () => {
     expect(mainSource).toContain("isAuthorizedProjectRoot: isAuthorizedWorkspaceProjectRoot,");
+    expect(mainSource).toContain("waitForRelease: waitForExecRelease,");
   });
 
   it("exits non-zero when bootstrap fails before the turn, keeping a more specific code", () => {
