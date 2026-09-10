@@ -109,6 +109,7 @@ describe("configureTracing", () => {
     const span = handle.tracer.startSpan(TURN_SPAN_NAME);
     expect(span.isRecording()).toBe(false);
     span.end();
+    await expect(handle.forceFlush()).resolves.toBeUndefined();
     await expect(handle.shutdown()).resolves.toBeUndefined();
   });
 
@@ -119,7 +120,7 @@ describe("configureTracing", () => {
     await handle.shutdown();
   });
 
-  it("writes one JSON line per finished span to the file sink", async () => {
+  it("exports completed spans without shutting down, then records subsequent work", async () => {
     const path = join(tempDir(), "spans.jsonl");
     const handle = await configureTracing({ kind: "file", path }, "9.9.9-test");
     expect(handle.enabled).toBe(true);
@@ -129,7 +130,7 @@ describe("configureTracing", () => {
     });
     span.addEvent("lvis.decision", { "lvis.decision.kind": "early_exit" });
     span.end();
-    await handle.shutdown();
+    await handle.forceFlush();
 
     const lines = readFileSync(path, "utf8").trim().split("\n");
     expect(lines).toHaveLength(1);
@@ -152,6 +153,10 @@ describe("configureTracing", () => {
         attributes: { "lvis.decision.kind": "early_exit" },
       }),
     ]);
+    handle.tracer.startSpan("after-flush").end();
+    await handle.shutdown();
+    expect(readFileSync(path, "utf8").trim().split("\n").map((line) => JSON.parse(line).name))
+      .toEqual([TURN_SPAN_NAME, "after-flush"]);
   });
 });
 

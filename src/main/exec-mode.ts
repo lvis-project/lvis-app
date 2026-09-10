@@ -110,6 +110,8 @@ export interface ExecDeps {
   readonly isAuthorizedProjectRoot: (projectRoot: string) => boolean;
   /** Required for --exec-keep-alive; the caller owns the session's release. */
   readonly waitForRelease?: () => Promise<void>;
+  /** Required before publishing completion for a retained session. */
+  readonly flushTelemetry?: () => Promise<void>;
 }
 
 /**
@@ -402,6 +404,9 @@ export async function runExecTurn(deps: ExecDeps, request: ExecRequest): Promise
   if (request.turn?.keepAlive && !deps.waitForRelease) {
     throw new Error("exec: retained session has no release owner");
   }
+  if (request.turn?.keepAlive && !deps.flushTelemetry) {
+    throw new Error("exec: retained session has no telemetry flush owner");
+  }
   if (request.secret) {
     const code = await applySecret(deps, request.secret);
     if (code !== 0) return code;
@@ -410,6 +415,12 @@ export async function runExecTurn(deps: ExecDeps, request: ExecRequest): Promise
   if (!turn) return 0;
   const code = await runTurnRequest(deps, turn);
   if (code === 0 && turn.keepAlive) {
+    try {
+      await deps.flushTelemetry!();
+    } catch (err) {
+      deps.stderr.write(`exec: telemetry flush failed: ${errorMessage(err)}\n`);
+      return EXEC_FAILURE_EXIT_CODE;
+    }
     // Register release before publishing completion. This is a CLI lifecycle
     // record, not another conversation event or a process-exit notification.
     const released = deps.waitForRelease!();

@@ -95,6 +95,7 @@ function makeDeps(overrides: {
     stderr: stderr.stream,
     readStdin: async () => overrides.stdin ?? "",
     isAuthorizedProjectRoot: overrides.isAuthorizedProjectRoot ?? (() => true),
+    flushTelemetry: async () => {},
   };
   return {
     deps,
@@ -169,6 +170,43 @@ describe("retained headless session", () => {
     const harness = makeDeps();
     await expect(runExecTurn(harness.deps, turnRequest({ keepAlive: true })))
       .rejects.toThrow("no release owner");
+    expect(harness.runTurn).not.toHaveBeenCalled();
+  });
+
+  it("waits for trace export before announcing completion or retaining the session", async () => {
+    const harness = makeDeps();
+    let flushed!: () => void;
+    let release!: () => void;
+    const flushTelemetry = vi.fn(() => new Promise<void>((resolveFlush) => { flushed = resolveFlush; }));
+    const waitForRelease = vi.fn(() => new Promise<void>((resolveRelease) => { release = resolveRelease; }));
+    const running = runExecTurn({ ...harness.deps, flushTelemetry, waitForRelease }, turnRequest({ keepAlive: true }));
+    await vi.waitFor(() => expect(flushTelemetry).toHaveBeenCalledTimes(1));
+    expect(waitForRelease).not.toHaveBeenCalled();
+    expect(harness.stdout.text()).not.toContain('"kind":"exec.completed"');
+    flushed();
+    await vi.waitFor(() => expect(waitForRelease).toHaveBeenCalledTimes(1));
+    expect(harness.stdout.text()).toContain('"kind":"exec.completed"');
+    release();
+    expect(await running).toBe(0);
+  });
+
+  it("reports failed trace export without announcing completion or retaining the session", async () => {
+    const harness = makeDeps();
+    const waitForRelease = vi.fn(async () => {});
+    const code = await runExecTurn({ ...harness.deps, waitForRelease,
+      flushTelemetry: async () => { throw new Error("export failed"); },
+    }, turnRequest({ keepAlive: true }));
+    expect(code).toBe(1);
+    expect(waitForRelease).not.toHaveBeenCalled();
+    expect(harness.stdout.text()).not.toContain('"kind":"exec.completed"');
+    expect(harness.stderr.text()).toContain("telemetry flush failed: export failed");
+  });
+
+  it("refuses a retained request without a flush owner before starting work", async () => {
+    const harness = makeDeps();
+    const { flushTelemetry: _unused, ...deps } = harness.deps;
+    await expect(runExecTurn({ ...deps, waitForRelease: async () => {} }, turnRequest({ keepAlive: true })))
+      .rejects.toThrow("no telemetry flush owner");
     expect(harness.runTurn).not.toHaveBeenCalled();
   });
 

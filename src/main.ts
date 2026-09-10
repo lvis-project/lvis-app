@@ -225,6 +225,7 @@ async function main() {
         readStdin: readAllStdin,
         isAuthorizedProjectRoot: isAuthorizedWorkspaceProjectRoot,
         waitForRelease: waitForExecRelease,
+        flushTelemetry: services.flushTracing,
       },
       execRequest,
     );

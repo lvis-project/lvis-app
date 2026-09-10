@@ -38,6 +38,7 @@ export function assembleAppServices(ctx: ReadyBootContext): AppServices {
     pluginRuntime: ctx.pluginRuntime,
     pluginMarketplace: ctx.pluginMarketplace,
     settingsService: ctx.settingsService,
+    flushTracing: () => ctx.tracing.forceFlush(),
     a2aRemoteRuntime: ctx.a2aRemoteRuntime,
     remoteA2AActionController: ctx.remoteA2AActionController,
     memoryManager: ctx.memoryManager,

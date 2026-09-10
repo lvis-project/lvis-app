@@ -450,7 +450,8 @@ whole run — decided from argv inside `src/lib/logger.ts`, which is the only
 place that can decide it, since the logger is built when it is first imported.
 
 `--exec-keep-alive` requires a streamed turn. After the turn returns a successful
-exit status, the CLI adds `{"kind":"exec.completed","exitCode":0}` to stdout
+exit status, the CLI exports buffered completed trace spans, then adds
+`{"kind":"exec.completed","exitCode":0}` to stdout
 and retains the host and its session-owned background services. This record is
 a CLI lifecycle message, not part of the conversation event union or proof of
 process exit. No further model turn runs. The caller owns cancellation and
