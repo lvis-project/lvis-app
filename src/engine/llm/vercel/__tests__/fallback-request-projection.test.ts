@@ -25,7 +25,7 @@ const input: ProviderRequestInputProjectionParams = {
     },
     { role: "user", content: "Continue." },
   ],
-  toolSchemas: [{ name: "read_file", description: "Read a file", inputSchema: { type: "object" } }],
+  toolSchemas: [{ name: "read_file", description: "Read a file", inputSchema: { type: "object", properties: {} } }],
 };
 
 function makeProvider(vendor: LLMVendor): LLMProvider {
