@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
@@ -13,6 +13,7 @@ import { CopyPathTool, ExtractArchiveTool, createFileTools } from "../file-tools
 import { extractTargetFilePaths } from "../pipeline/path-extraction.js";
 import { ToolRegistry } from "../registry.js";
 import { userPermissionContext } from "./tool-context-fixture.js";
+import { readTestFileSnapshot } from "./file-snapshot-fixture.js";
 
 let root: string;
 let workspace: string;
@@ -97,7 +98,7 @@ describe("structured transfer registration and permission routing", () => {
   it("copies exact binary bytes through real write permission checks on both endpoints", async () => {
     const checkScope = vi.spyOn(PermissionManager, "checkPathScope");
     const source = join(workspace, "source.bin");
-    const before = statSync(source);
+    const before = await readTestFileSnapshot(source);
     const result = await invoke(new CopyPathTool(), { sourcePath: "source.bin", destinationPath: "copy.bin" });
     expect(result.is_error).toBeUndefined();
     expect(JSON.parse(result.content)).toMatchObject({
@@ -105,8 +106,10 @@ describe("structured transfer registration and permission routing", () => {
       summary: { sourcePath: source, destinationPath: join(workspace, "copy.bin"), files: 1, bytesWritten: PAYLOAD.length },
     });
     expect(readFileSync(join(workspace, "copy.bin"))).toEqual(PAYLOAD);
-    expect(readFileSync(source)).toEqual(PAYLOAD);
-    expect(statSync(source).mtimeMs).toBe(before.mtimeMs);
+    const after = await readTestFileSnapshot(source);
+    expect(after.bytes).toEqual(PAYLOAD);
+    expect(after.stat.mtimeMs).toBe(before.stat.mtimeMs);
+    expect(after.stat.ino).toBe(before.stat.ino);
     expect(checkScope.mock.calls.some(([request]) => request.effect === "write"
       && request.canonicalTargets.map(target => target.filePath).join("\0") === [source, join(workspace, "copy.bin")].join("\0"))).toBe(true);
   });

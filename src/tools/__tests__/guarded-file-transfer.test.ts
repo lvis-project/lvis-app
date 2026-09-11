@@ -7,6 +7,7 @@ import { copyPath, runOwnedTransfer } from "../guarded-file-transfer.js";
 import { FILE_TRANSFER_LIMITS } from "../file-transfer-policy.js";
 import type { FileTransferLimits, TransferSession } from "../file-transfer-types.js";
 import type { ToolExecutionContext } from "../types.js";
+import { readTestFileSnapshot } from "./file-snapshot-fixture.js";
 
 let root: string;
 let source: string;
@@ -37,13 +38,14 @@ afterEach(async () => { await rm(root, { recursive: true, force: true }); });
 describe("complete binary copy", () => {
   it("copies actual binary bytes at the exact path without modifying the source", async () => {
     await chmod(source, 0o775);
-    const before = await lstat(source);
+    const before = await readTestFileSnapshot(source);
     const result = await copyPath({ sourcePath: "source.bin", destinationPath: "destination" }, context);
     expect(result).toEqual({ ok: true, summary: { sourcePath: source, destinationPath: destination, files: 1, directories: 0, bytesWritten: bytes.length } });
     expect(digest(await readFile(destination))).toBe(digest(bytes));
-    expect(await readFile(source)).toEqual(bytes);
-    const after = await lstat(source);
-    expect([after.mtimeMs, after.ctimeMs, after.mode, after.ino]).toEqual([before.mtimeMs, before.ctimeMs, before.mode, before.ino]);
+    const after = await readTestFileSnapshot(source);
+    expect(after.bytes).toEqual(bytes);
+    expect([after.stat.mtimeMs, after.stat.ctimeMs, after.stat.mode, after.stat.ino])
+      .toEqual([before.stat.mtimeMs, before.stat.ctimeMs, before.stat.mode, before.stat.ino]);
     expect((await lstat(destination)).mode & 0o7777).toBe(0o700);
   });
 
@@ -85,11 +87,16 @@ describe("authority and exclusive destinations", () => {
         await mkdir(target);
         if (kind === "nonempty-directory") await writeFile(join(target, "foreign"), "keep");
       }
-      const before = await lstat(target);
+      const before = kind === "file" ? (await readTestFileSnapshot(target)).stat : await lstat(target);
       const result = await copyPath({ sourcePath: source, destinationPath: target }, context);
       expect(result).toMatchObject({ ok: false, cleanup: "not-created" });
-      expect((await lstat(target)).ino).toBe(before.ino);
-      if (kind === "file") expect(await readFile(target, "utf8")).toBe("foreign");
+      if (kind === "file") {
+        const after = await readTestFileSnapshot(target);
+        expect(after.stat.ino).toBe(before.ino);
+        expect(after.bytes.toString("utf8")).toBe("foreign");
+      } else {
+        expect((await lstat(target)).ino).toBe(before.ino);
+      }
       if (kind === "nonempty-directory") expect(await readFile(join(target, "foreign"), "utf8")).toBe("keep");
     }
   });
