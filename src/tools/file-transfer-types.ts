@@ -5,11 +5,6 @@ export interface CopyPathInput {
   destinationPath: string;
 }
 
-export interface ExtractArchiveInput {
-  archivePath: string;
-  destinationPath: string;
-}
-
 export type ArchiveFormat = "tar" | "tar.gz";
 
 export interface TransferSummary {

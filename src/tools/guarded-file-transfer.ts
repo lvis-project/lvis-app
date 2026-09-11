@@ -5,6 +5,7 @@ import { Readable } from "node:stream";
 import { finished } from "node:stream/promises";
 import { canonicalizePathForMatch, caseFoldForMatch, foldCanonicalPathSeparators } from "../permissions/sensitive-paths.js";
 import { expandLeadingTilde } from "../shared/home-tilde.js";
+import { errorMessage } from "../shared/error-message.js";
 import { ensureFileAccess } from "./file-access-policy.js";
 import { FileTransferError } from "./file-transfer-error.js";
 import { FILE_TRANSFER_LIMITS, validateFileTransferLimits } from "./file-transfer-policy.js";
@@ -38,10 +39,6 @@ class FileTransferCleanupError extends FileTransferError {
 
 function transferError(message: string): FileTransferError {
   return new FileTransferError("source-changed", message);
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 function hasErrno(error: unknown, code: string): boolean {

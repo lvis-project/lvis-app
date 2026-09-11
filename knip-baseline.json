@@ -880,11 +880,6 @@
     {
       "type": "exports",
       "file": "src/tools/tool-result-chunk.ts",
-      "name": "TOOL_RESULT_CHUNK_MAX_CHARS"
-    },
-    {
-      "type": "exports",
-      "file": "src/tools/tool-result-chunk.ts",
       "name": "TOOL_RESULT_CHUNK_MIN_CHARS"
     },
     {
