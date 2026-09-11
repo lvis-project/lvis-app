@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { BashAstValidator } from "../../main/bash-ast-validator.js";
 import { findShellPathPolicyViolation } from "../shell-path-policy.js";
 import { shellQuote } from "../../lib/shell-resolver.js";
+import { BashTool } from "../shell-tools.js";
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -234,5 +235,84 @@ describe.skipIf(process.platform === "win32")("data expansion effects and path a
     const {policy,native,outside}=fixture();const command='VALUE=inside; echo "${VALUE:-$(cp source ../outside/file)}"';
     expect(policy(command)).toBeNull();expect(native(command).stdout).toBe("inside\n");
     expect(readFileSync(join(outside,"file"),"utf8")).toBe("sentinel");
+  });
+});
+
+describe.skipIf(process.platform === "win32")("builtin exit status operands", () => {
+  it.each([
+    ['true; exit $?', 0],
+    ['false; exit $?', 1],
+    ['(exit 23); exit "$?"', 23],
+    ['STATUS=23; exit "$STATUS"', 23],
+    ['STATUS=$(printf 23); exit "$STATUS"', 23],
+    ['exit -- 23', 23],
+    ['command exit 23', 23],
+    ['false && cp source ../outside/file; exit $?', 1],
+    ['true || cp source ../outside/file; exit $?', 0],
+  ] as const)("preserves the native result of %s", (command, status) => {
+    const { policy, native, outside } = fixture();
+    expect(policy(command)).toBeNull();
+    const result = native(command);
+    expect(result.status, result.stderr).toBe(status);
+    expect(result.stdout).toBe("");
+    expect(readFileSync(join(outside, "file"), "utf8")).toBe("sentinel");
+  });
+
+  it.each([
+    'unset UNKNOWN_STATUS; exit "$UNKNOWN_STATUS"',
+    "exit '../outside/file'",
+  ])("preserves the native numeric-argument failure for %s", async command => {
+    const { cwd, policy, native, outside } = fixture();
+    expect(policy(command)).toBeNull();
+    const expected = native(command);
+    expect(expected.error).toBeUndefined();
+    expect(expected.signal).toBeNull();
+    expect(expected.status).toBeTypeOf("number");
+    expect(expected.status).not.toBe(0);
+    expect(expected.stdout).toBe("");
+    expect(expected.stderr).toContain("numeric argument required");
+    // The selected native shell owns its numeric-argument error code.
+    const result = await new BashTool().execute({ command, timeoutSeconds: 5 }, {
+      cwd, extraAllowedDirectories: [], metadata: {},
+    });
+    expect(result.metadata?.returncode, result.output).toBe(expected.status);
+    expect(result.isError).toBe(true);
+    expect(readFileSync(join(outside, "file"), "utf8")).toBe("sentinel");
+  });
+
+  it.each([
+    ['true; exit $?', 0],
+    ['false; exit $?', 1],
+    ['(exit 23); exit "$?"', 23],
+  ] as const)("returns the actual status through the public tool for %s", async (command, status) => {
+    const { cwd } = fixture();
+    const result = await new BashTool().execute({ command, timeoutSeconds: 5 }, {
+      cwd, extraAllowedDirectories: [], metadata: {},
+    });
+    expect(result.metadata?.returncode, result.output).toBe(status);
+    expect(result.isError).toBe(status !== 0);
+  });
+
+  it.each([
+    'exit "$(cp source ../outside/file; printf 23)"',
+    'exit 23 > ../outside/file',
+    'false || cp source ../outside/file; exit $?',
+    'true && cp source ../outside/file; exit $?',
+    'exit(){ cp source "$1"; }; exit ../outside/file',
+  ])("checks an actual owned effect even around exit: %s", command => {
+    const { policy, native, outside } = fixture();
+    expect(policy(command)?.kind).toBe("sandbox-boundary");
+    // The native oracle may touch only this fixture's sibling sentinel.
+    native(command);
+    expect(readFileSync(join(outside, "file"), "utf8")).not.toBe("sentinel");
+  });
+
+  it("does not assign builtin argument roles to an external executable named exit", () => {
+    const { cwd, outside, policy, native } = fixture();
+    writeFileSync(join(cwd, "exit"), '#!/bin/bash\nprintf external > "$1"\n', { mode: 0o700 });
+    const command = './exit ../outside/file';
+    expect(policy(command)?.kind).toBe("sandbox-boundary");
+    expect(native(command).status).toBe(0);
+    expect(readFileSync(join(outside, "file"), "utf8")).toBe("external");
   });
 });

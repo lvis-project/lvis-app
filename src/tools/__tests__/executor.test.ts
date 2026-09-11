@@ -28,6 +28,7 @@ import { userPermissionContext } from "./tool-context-fixture.js";
 import { ToolRegistry } from "../registry.js";
 import { createDynamicTool, type Tool } from "../base.js";
 import { BashTool, PowerShellTool } from "../shell-tools.js";
+import { shellQuote } from "../../lib/shell-resolver.js";
 import { ReadFileTool, WriteFileTool } from "../file-tools.js";
 import { PermissionManager } from "../../permissions/permission-manager.js";
 import {
@@ -605,7 +606,7 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
       const result = await executor.executeAll(
         // A write verb, so the operand is confined; `cat` on the same file is
         // admitted with no queue entry, which is a separate case below.
-        [{ id: "tu-headless-outdir", name: "bash", input: { command: `chmod u+w ${outsideFile}`, timeoutSeconds: 1 } }],
+        [{ id: "tu-headless-outdir", name: "bash", input: { command: `chmod u+w ${shellQuote(process.platform === "win32" ? outsideFile.replaceAll("\\", "/") : outsideFile)}`, timeoutSeconds: 1 } }],
         { sessionId: "sess-headless-outdir", permissionContext: userPermissionContext({ headless: true, trustOrigin: "llm-tool-arg" }) },
       );
 
@@ -3409,7 +3410,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
       const callPromise = executor.executeAll(
         // `chmod` is a write verb, so its operand is confined; `cat` on the same
         // path is admitted with no dialog and could not exercise this path.
-        [{ id: "tu-l1-shell-deny", name: "bash", input: { command: `chmod u+w ${target}`, timeoutSeconds: 1 } }],
+        [{ id: "tu-l1-shell-deny", name: "bash", input: { command: `chmod u+w ${shellQuote(process.platform === "win32" ? target.replaceAll("\\", "/") : target)}`, timeoutSeconds: 1 } }],
         { sessionId: "sess-l1-shell-deny", permissionContext: userPermissionContext() },
       );
 

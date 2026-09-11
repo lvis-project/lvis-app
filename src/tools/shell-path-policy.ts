@@ -756,7 +756,12 @@ export function findShellPathPolicyViolation(
       const verb = stripCommandPath(head);
       if (event.functionCall) return;
       // The state owner checks cd's destination using its -L/-P semantics.
-      const dataOnly = ["echo", "printf", "tr", "true", "false", ":", "pwd", "export", "readonly", "unset", "read", "cd"].includes(verb);
+      // Builtin exit consumes status data, including an unknown status value.
+      // Expansion effects and redirects were inspected separately. External
+      // executables and functions named exit keep their own operand checks.
+      // No numeric result is inferred; the conservative statement scan remains.
+      const dataOnly = ["echo", "printf", "tr", "true", "false", ":", "pwd", "export", "readonly", "unset", "read", "cd"].includes(verb)
+        || (event.builtin && verb === "exit");
       const knownArgv = argv.map((argument,index) => argument ?? displayShellWord(effective.words[index]!));
       const leaf = commandLeaf(node, effective);
       const effect: PathEffect = verb === "cd" ? "write" : isReadOnlyShellLeaf(leaf, {ignoreRedirects:true}) ? "read" : "write";

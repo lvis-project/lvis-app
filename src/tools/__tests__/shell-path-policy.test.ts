@@ -50,6 +50,49 @@ describe("shell-path-policy", () => {
     return fn(root);
   }
 
+  describe("builtin exit status operands", () => {
+    it.each([
+      "true; exit $?",
+      "false; exit $?",
+      '(exit 23); exit "$?"',
+      'STATUS=23; exit "$STATUS"',
+      'exit "$UNKNOWN_STATUS"',
+      'exit "${UNKNOWN_STATUS:-23}"',
+      "exit '../outside/file'",
+      'command exit "$?"',
+      "false && cp source ../outside/file; exit $?",
+      "true || cp source ../outside/file; exit $?",
+    ])("keeps status data distinct from a filesystem operand: %s", command => {
+      withRoot(root => {
+        expect(validateShellCommandPathPolicy(command, root, root, [], true)).toBeNull();
+      });
+    });
+
+    it.each([
+      './exit "$UNKNOWN_STATUS"',
+      'env exit "$UNKNOWN_STATUS"',
+      'timeout 1s exit "$UNKNOWN_STATUS"',
+      './exit ../outside/file',
+      'exit(){ cp source "$1"; }; exit ../outside/file',
+      'exit "$(cp source ../outside/file)"',
+      'exit "$?" > ../outside/file',
+      'false || cp source ../outside/file; exit $?',
+      'true && cp source ../outside/file; exit $?',
+      'unknown-command && cp source ../outside/file; exit $?',
+      'cp source "$?"',
+    ])("retains actual command, expansion and redirect authority: %s", command => {
+      withRoot(root => {
+        expect(validateShellCommandPathPolicy(command, root, root, [], true)).not.toBeNull();
+      });
+    });
+
+    it("keeps the existing conservative scan after exit instead of granting dead-code authority", () => {
+      withRoot(root => {
+        expect(validateShellCommandPathPolicy("exit 0; cp source ../outside/file", root, root, [], true)).not.toBeNull();
+      });
+    });
+  });
+
   it("allows command operands inside the sandbox after canonicalization", () => {
     withRoot((root) => {
       expect(validateShellCommandPathPolicy("cat ./notes.txt", root, root, [])).toBeNull();
