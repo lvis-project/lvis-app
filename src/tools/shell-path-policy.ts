@@ -1484,6 +1484,9 @@ function findUnsafeRecursiveTraversal(
     const recursiveFlags = RECURSIVE_FLAG_COMMANDS.get(commandName);
     if (recursiveFlags) {
       const args = tokens.slice(commandIndex + 1);
+      // An immediate terminator proves all following words are operands.
+      // Elsewhere an option may consume "--" as its value, so retain the scan.
+      if (args[0] === "--") continue;
       const flag = args.find((arg) => recursiveFlags.some((candidate) => hasShellFlag(arg, candidate)));
       if (flag) {
         return buildRecursiveBlockMessage(tokens[commandIndex], commandName, flag);

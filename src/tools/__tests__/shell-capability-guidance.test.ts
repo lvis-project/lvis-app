@@ -28,7 +28,7 @@ function inspect(command: string, fencedReads = false) {
 describe.each(["en", "ko"] as const)("shell capability guidance in %s", (locale) => {
   beforeEach(() => setLocale(locale));
 
-  it.each(["-r", "-R", "--recursive", "-a", "--archive", "-av"])(
+  it.each(["-r", "-R", "--recursive", "-a", "--archive", "-av", "--suffix -- -a"])(
     "states the recursive copying limit for %s without promising a text transfer", (flag) => {
     const denial = inspect(`cp ${flag} ./source ./destination`);
     expect(denial?.kind).toBe("recursive-traversal");
@@ -101,7 +101,12 @@ describe.each(["en", "ko"] as const)("shell capability guidance in %s", (locale)
 });
 
 describe("advertised shell operations retain their policy boundary", () => {
-  it.each(["cp -- ./source.bin ./destination.bin", "tar -tf ./archive.tar"])(
+  it.each([
+    "cp -- ./source.bin ./destination.bin",
+    "cp -- -a ./destination.bin",
+    "cp -- --archive ./destination.bin",
+    "tar -tf ./archive.tar",
+  ])(
     "keeps the distinct supported operation admitted: %s",
     (command) => expect(inspect(command)).toBeNull(),
   );
