@@ -30,13 +30,20 @@ describe("shell path policy across logical lines", () => {
     "cat < /et\\\nc/shadow",
     'openssl req -subj "$\\\n(cat /etc/shadow)" -out ./cert.pem',
     'openssl req -subj "/CN=example.test" \\\n -out /etc/shadow',
-    "cat >/dev/null << END\nEN\\\nD\ncat /etc/shadow",
   ])("retains sensitive-path checks: %s", (command) => {
     expect(check(command)?.kind).toBe("sensitive-path");
   });
 
   it("retains output containment", () => {
     expect(check('openssl req -subj "/CN=example.test" \\\n -out /not-authorized/cert.pem')?.kind).toBe("sandbox-boundary");
+  });
+
+  it.each([
+    "cat <<END\nEND\ncat /et\\\nc/shadow",
+    "cat <<END\nEN\\\nD\ncat /et\\\nc/shadow",
+    "cat <<END\n$(cat /et\\\nc/shadow)\nEND",
+  ])("refuses an unresolved heredoc boundary before granting path exemptions: %s", (command) => {
+    expect(check(command)?.kind).toBe("invalid-path");
   });
 
   it.each(["cp \\\n -r ./source ./copy", "tar \\\n -xf ./archive.tar -C ./output"])(

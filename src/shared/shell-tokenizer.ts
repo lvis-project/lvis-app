@@ -119,7 +119,7 @@ interface ShellSource {
  * map keeps a leaf's raw text tied to the input the caller will execute.
  * Quoted heredoc bodies, single quotes and comments retain their bytes.
  */
-function shellContinuationSource(command: string): ShellSource {
+function shellContinuationSource(command: string): ShellSource | null {
   if (!command.includes("\\\n")) return { text: command, original: command };
   const offsets: number[] = [];
   let text = "";
@@ -209,14 +209,9 @@ function shellContinuationSource(command: string): ShellSource {
         for (const start of context.heredocs) {
           const opened = readHeredocDelimiter(text, start);
           const end = opened ? findHeredocTerminator(command, i, opened.delimiter) : null;
-          // Unsupported heredoc syntax retains the remaining source intact.
-          // Its expansion and path checks must not be weakened by guessing
-          // where stdin data ends and the next shell command begins.
-          if (end === null) {
-            append(i, command.length);
-            i = command.length;
-            break;
-          }
+          // An unknown body boundary cannot leave a partly normalized command:
+          // later continued words could then hide their actual file operands.
+          if (end === null) return null;
           append(i, end);
           i = end;
         }
@@ -232,9 +227,12 @@ function shellContinuationSource(command: string): ShellSource {
   return { text, original: command, offsets };
 }
 
-/** Shared logical-line view for shell policy scanners; execution keeps its original command. */
-export function normalizeShellLineContinuations(command: string): string {
-  return shellContinuationSource(command).text;
+/**
+ * Shared logical-line view for policy scanners; execution keeps the original.
+ * Null means a heredoc boundary prevents complete continuation analysis.
+ */
+export function normalizeShellLineContinuations(command: string): string | null {
+  return shellContinuationSource(command)?.text ?? null;
 }
 
 interface RawWord {
@@ -287,6 +285,7 @@ export function tokenizeShell(
   // Structural guards can retain stdin text conservatively: a shell consumer
   // may execute it. Default risk/path callers continue to omit those bodies.
   const logical = shellContinuationSource(command);
+  if (logical === null) return { leaves: [], parseError: true };
   const removed: Array<{ start: number; end: number }> = [];
   const redacted = redactHeredocCommand(logical.text, options.literalDataProof ?? false, (start, end) => {
     removed.push({ start, end });

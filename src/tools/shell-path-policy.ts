@@ -183,7 +183,11 @@ function findViolationInCommand(
   // A quoted heredoc body is stdin data, not commands — see
   // `redactHeredocBodies`. Removing it here rather than inside each extractor
   // keeps the flat scan and the leaf walk reading the same text.
-  const command = redactHeredocBodies(normalizeShellLineContinuations(rawCommand));
+  const logicalCommand = normalizeShellLineContinuations(rawCommand);
+  if (logicalCommand === null) {
+    return { kind: "invalid-path", reason: "Shell path policy: cannot resolve a continued here-document boundary" };
+  }
+  const command = redactHeredocBodies(logicalCommand);
   // What this text declares, on top of what the text around it declared. A body
   // rebinding a name shadows the outer one, which is what the shell does.
   const loopBindings = mergeLoopBindings(inheritedLoopBindings, collectLiteralLoopBindings(command));

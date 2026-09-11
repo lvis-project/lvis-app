@@ -85,16 +85,16 @@ describe("shell logical lines", () => {
     expect(parsed.leaves.map((leaf) => leaf.raw)).toEqual(["cat <<'END'", "printf \\\n done"]);
   });
 
-  it.skipIf(process.platform === "win32")("keeps commands following a continued unquoted heredoc delimiter visible", () => {
+  it.skipIf(process.platform === "win32")("rejects unresolved continued unquoted heredoc boundaries", () => {
     const command = "cat >/dev/null << END\nEN\\\nD\nprintf witnessed";
     expect(execFileSync("/bin/sh", ["-c", command], { encoding: "utf8" })).toBe("witnessed");
-    expect(normalizeShellLineContinuations(command)).toBe(command);
-    expect(tokenizeShell(command).leaves.at(-1)!.argv).toEqual(["printf", "witnessed"]);
+    expect(normalizeShellLineContinuations(command)).toBeNull();
+    expect(tokenizeShell(command)).toEqual({ leaves: [], parseError: true });
   });
 
-  it("retains the conservative scan of unsupported heredoc bodies", () => {
+  it("rejects a continued command when its heredoc body cannot be delimited", () => {
     const command = "cat << END\n$(printf \\\n value)\nEND\nprintf later";
-    expect(normalizeShellLineContinuations(command)).toBe(command);
-    expect(tokenizeShell(command).leaves.some((leaf) => leaf.hasCommandSubstitution)).toBe(true);
+    expect(normalizeShellLineContinuations(command)).toBeNull();
+    expect(tokenizeShell(command)).toEqual({ leaves: [], parseError: true });
   });
 });
