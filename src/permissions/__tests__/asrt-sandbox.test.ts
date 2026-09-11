@@ -26,7 +26,7 @@ import {
   beforeEach,
   vi,
 } from "vitest";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdtempSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -196,21 +196,38 @@ describe("asrt-sandbox — gate ON wraps a real command under the OS sandbox", (
     async () => {
       if (!(await asrtCanInitialize())) return;
 
-      const cwd = process.cwd();
-      await initializeAsrtSandbox({ allowedDomains: [], strictAllowlist: true });
-      const result = await spawnWithSandbox(
-        `printf '%s\\n' "$HOME"; git -C '${cwd.replace(/'/g, `'\\''`)}' log --oneline -n 1`,
-        cwd,
-        [cwd],
-        15,
+      // A linked checkout stores Git metadata outside its working directory.
+      // This fixture owns both parts inside the admitted root, so it tests the
+      // disposable home without depending on the enclosing checkout layout.
+      const cwd = mkdtempSync(join(tmpdir(), "asrt-git-"));
+      const gitEnv = Object.fromEntries(
+        Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")),
       );
+      gitEnv.GIT_CONFIG_NOSYSTEM = "1";
+      gitEnv.GIT_CONFIG_GLOBAL = "/dev/null";
+      try {
+        execFileSync("git", ["init", "--quiet"], { cwd, env: gitEnv });
+        execFileSync("git", [
+          "-c", "user.name=Fixture Author", "-c", "user.email=fixture@example.test",
+          "-c", "commit.gpgsign=false", "commit", "--allow-empty", "--quiet", "-m", "fixture",
+        ], { cwd, env: gitEnv });
+        await initializeAsrtSandbox({ allowedDomains: [], strictAllowlist: true });
+        const result = await spawnWithSandbox(
+          `printf '%s\\n' "$HOME"; git -C '${cwd.replace(/'/g, `'\\''`)}' log --oneline -n 1`,
+          cwd,
+          [cwd],
+          15,
+        );
 
-      expect(result.isError, result.output).toBe(false);
-      const [sandboxHome, logLine] = result.output.split("\n");
-      expect(sandboxHome).toContain("lvis-sandbox-home-");
-      expect(sandboxHome).not.toBe(process.env.HOME);
-      expect(logLine).toMatch(/^[0-9a-f]+\s+\S/);
-      expect(existsSync(sandboxHome ?? "")).toBe(false);
+        expect(result.isError, result.output).toBe(false);
+        const [sandboxHome, logLine] = result.output.split("\n");
+        expect(sandboxHome).toContain("lvis-sandbox-home-");
+        expect(sandboxHome).not.toBe(process.env.HOME);
+        expect(logLine).toMatch(/^[0-9a-f]+\s+\S/);
+        expect(existsSync(sandboxHome ?? "")).toBe(false);
+      } finally {
+        await cleanupTmpDir(cwd);
+      }
     },
   );
 });

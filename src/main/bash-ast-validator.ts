@@ -143,7 +143,8 @@ export class BashAstValidator {
 
   /** Relax a raw eval hit only within the shared lexical model.
    * Keep quoted stdin bodies visible and scan them conservatively as shell
-   * text; this does not model another consumer's programming language.
+   * text. A documented literal program argument has a separate language
+   * boundary; this rule does not validate that language's code or behavior.
    * Unresolved syntax, substitutions and shell consumers retain the raw deny.
    */
   private _evalIsOnlyLiteralData(command: string): boolean {
@@ -167,6 +168,27 @@ export class BashAstValidator {
     ].some(mentionsEval));
     // No argument, assignment, or file target carries the raw match.
     if (carryingEval.length === 0) return true;
+    // Prove the whole direct command list before attributing an eval spelling
+    // to a literal foreign-language program operand. The shared scanner owns
+    // separator completeness; a flat leaf list alone loses pipes/dangling &&.
+    const simpleList = tokenizeShell(command, { heredocBodies: "preserve", simpleCommandList: true });
+    if (!simpleList.parseError && simpleList.leaves.length > 0 && simpleList.leaves.every((leaf) => {
+      // Complete static output descriptor operators have no file target.
+      // Files and stdin consumers stay outside this proof; other permission
+      // layers still inspect the original command under their own contracts.
+      if (leaf.assignments.length > 0 || leaf.strippedWrappers.length > 0
+        || leaf.hasInputRedirect || leaf.redirectTargets.length > 0) return false;
+      const verb = this._basename(leaf.argv[0] ?? "");
+      if (/^python[23]?$/.test(verb)) {
+        return leaf.argv.length === 3 && leaf.argv[1] === "-c"
+          && !leaf.argv.slice(0, 2).some(mentionsEval);
+      }
+      if (leaf.argv[0] === "cd") {
+        return !leaf.argv.some(mentionsEval) && (leaf.argv.length <= 2
+          || (leaf.argv.length === 3 && leaf.argv[1] === "--"));
+      }
+      return leaf.argv[0] === "printf" || leaf.argv[0] === "echo";
+    })) return true;
     // These shell builtins do not execute ordinary output operands. Unknown
     // consumers may execute an argument or formatted output; retain their deny.
     for (const leaf of leaves) {

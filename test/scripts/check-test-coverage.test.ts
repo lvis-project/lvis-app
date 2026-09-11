@@ -221,7 +221,8 @@ describe("check-test-coverage", () => {
     expect(coverageGateScript).not.toContain("shell: true");
     expect(coverageGateScript).toContain("rmSync(reportsDir");
     expect(vitestRunner).toContain('ELECTRON_RUN_AS_NODE: "1"');
-    expect(vitestRunner).toContain("NODE_OPTIONS: nodeOptions");
+    // Fresh-process and worker tests verify initialization before test imports;
+    // startup no longer depends on environment options the parent can disable.
     expect(vitestRunner).toContain("normalize-electron-node-runtime.mjs");
     expect(runtimeNormalizer).toContain("[electron-node-normalization-failed]");
     expect(runtimeNormalizer).toContain('removeRuntimeMarker(target.versions, "electron")');

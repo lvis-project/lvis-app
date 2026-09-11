@@ -1,4 +1,4 @@
-// AUTO-GENERATED — i18n migration. Source: src/tools/executor.ts. Do not edit by hand.
+// Tool execution message catalog. Aggregate locale barrels are generated.
 export const en = {
   "be_executor.purposeSentence": "Performing the task '{text}' as requested by the user.",
   "be_executor.permHoldStrictHeadless": "[Permission hold — strict headless] Tool '{toolName}' ({source}) — strict mode does not allow headless auto-review.",
@@ -35,7 +35,7 @@ export const en = {
   "be_executor.denialNoAllowedDirectories": "No directory outside the sandbox root is authorized, so ask the user to authorize the directory you need.",
   "be_executor.denialFilesystemRoot": "The filesystem root itself can never be authorized — name the specific subdirectory you need instead.",
   "be_executor.denialReadsNotConfined": "Only writes and command execution are confined to those directories — reading a path outside them is allowed and needs no authorization.",
-  "be_executor.denialRestructureCommand": "This is about the shape of the command, not where it points: running the same command against a different path will be refused again. Use a different command, or the equivalent LVIS built-in tool.",
+  "be_executor.denialRestructureCommand": "Changing the target path does not resolve this command-structure refusal. Use an allowed command or built-in tool only if it supports the requested operation. Otherwise report that operation as unavailable.",
   "be_executor.denialSensitivePathPermanent": "This path is protected in every session and no authorization makes it readable. Do not ask the user to grant it; work from a copy they have placed inside an authorized directory.",
   "be_executor.metaToolAskOverrideReason": "meta tool decisionOverride='ask' — user confirmation required",
   "be_executor.permBlockDeny": "[Permission blocked] Tool '{name}' ({source}, trust:{trust}) — {reason}",
@@ -87,7 +87,7 @@ export const ko: Record<keyof typeof en, string> = {
   "be_executor.denialNoAllowedDirectories": "sandbox root 밖에 허용된 디렉토리가 없습니다. 필요한 디렉토리를 승인해 달라고 사용자에게 요청하세요.",
   "be_executor.denialFilesystemRoot": "파일시스템 루트 자체는 승인 대상이 될 수 없습니다. 필요한 하위 디렉토리를 지정하세요.",
   "be_executor.denialReadsNotConfined": "이 디렉토리 제한은 쓰기와 명령 실행에만 적용됩니다. 바깥 경로를 읽는 것은 승인 없이 허용됩니다.",
-  "be_executor.denialRestructureCommand": "경로가 아니라 명령의 형태가 문제입니다. 같은 명령을 다른 경로로 실행해도 다시 차단됩니다. 다른 명령을 쓰거나 대응하는 LVIS 내장 도구를 사용하세요.",
+  "be_executor.denialRestructureCommand": "대상 경로를 바꿔도 명령 형태에 대한 이 차단은 해제되지 않습니다. 요청한 작업을 지원하는 경우에만 허용된 명령이나 내장 도구를 사용하세요. 그렇지 않으면 해당 작업을 지원하지 않는다고 알리세요.",
   "be_executor.denialSensitivePathPermanent": "이 경로는 모든 세션에서 보호되며 어떤 승인으로도 읽을 수 없습니다. 사용자에게 승인을 요청하지 말고, 허용된 디렉토리에 사용자가 복사해 둔 사본을 사용하세요.",
   "be_executor.metaToolAskOverrideReason": "meta tool decisionOverride='ask' — 사용자 컨펌 필요",
   "be_executor.permBlockDeny": "[권한 차단] 도구 '{name}' ({source}, trust:{trust}) — {reason}",

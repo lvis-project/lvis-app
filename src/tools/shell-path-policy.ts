@@ -3,7 +3,9 @@ import { isAbsolute, resolve as pathResolve } from "node:path";
 
 import { t } from "../i18n/index.js";
 import {
-  redactHeredocBodies,
+  inspectShellHeredocData,
+  findShellSubstitutionEnd,
+  normalizeShellLineContinuations,
   startsShellComment,
   stripCommandPath,
   tokenizeShell,
@@ -76,7 +78,7 @@ const RECURSIVE_TRAVERSAL_COMMANDS = new Set([
 ]);
 
 const RECURSIVE_FLAG_COMMANDS = new Map<string, readonly string[]>([
-  ["cp", ["-r", "-R", "--recursive"]],
+  ["cp", ["-r", "-R", "--recursive", "-a", "--archive"]],
   ["du", ["-a", "--all"]],
   ["egrep", ["-r", "-R", "--recursive", "--dereference-recursive"]],
   ["fgrep", ["-r", "-R", "--recursive", "--dereference-recursive"]],
@@ -158,10 +160,8 @@ function segmentEffect(segment: string): PathEffect {
 
 /**
  * How deep {@link findViolationInCommand} follows `$(…)` nesting before it
- * stops descending. A substitution nested past this is still checked as TEXT by
- * the enclosing scan (its `$` keeps a path operand dynamic); only the extra
- * command-level pass is dropped, so the bound trades depth for termination
- * without giving anything up.
+ * stops descending. An unresolved deeper command is refused: its enclosing
+ * operand may be data, so the flat path scan cannot substitute for inspection.
  */
 const COMMAND_SUBSTITUTION_SCAN_DEPTH = 4;
 
@@ -179,10 +179,17 @@ function findViolationInCommand(
   // operand as unresolvable and refuses a path the outer text fully determines.
   inheritedLoopBindings: ReadonlyMap<string, readonly string[]> = new Map(),
 ): ShellPathPolicyViolation | null {
-  // A quoted heredoc body is stdin data, not commands — see
-  // `redactHeredocBodies`. Removing it here rather than inside each extractor
-  // keeps the flat scan and the leaf walk reading the same text.
-  const command = redactHeredocBodies(rawCommand);
+  // Keep both path scans on one view of heredoc data. Expandable bodies also
+  // expose executed substitutions independently of literal quotes/comments.
+  const logicalCommand = normalizeShellLineContinuations(rawCommand);
+  if (logicalCommand === null) {
+    return { kind: "invalid-path", reason: "Shell path policy: cannot resolve a continued here-document boundary" };
+  }
+  const heredocs = inspectShellHeredocData(logicalCommand);
+  if (heredocs === null) {
+    return { kind: "invalid-path", reason: "Shell path policy: cannot resolve a here-document expansion" };
+  }
+  const command = heredocs.command;
   // What this text declares, on top of what the text around it declared. A body
   // rebinding a name shadows the outer one, which is what the shell does.
   const loopBindings = mergeLoopBindings(inheritedLoopBindings, collectLiteralLoopBindings(command));
@@ -229,22 +236,29 @@ function findViolationInCommand(
   // Re-entering it is what makes `sh -c 'cat /etc/passwd'` visible: the value
   // is program text, so exempting it as such left the operand inside
   // completely unexamined.
-  if (depth < COMMAND_SUBSTITUTION_SCAN_DEPTH) {
-    for (const body of [
-      ...extractCommandSubstitutionBodies(command),
-      ...extractNestedShellCommands(command),
-    ]) {
-      const violation = findViolationInCommand(
-        body,
-        cwd,
-        sandboxRoot,
-        extraAllowedDirectories,
-        blockReadsOutsideWorkingDirectories,
-        depth + 1,
-        loopBindings,
-      );
-      if (violation) return violation;
-    }
+  const substitutions = extractCommandSubstitutionBodies(command);
+  if (substitutions === null) {
+    return { kind: "dynamic-path", reason: "Shell path policy: cannot resolve a command-substitution boundary" };
+  }
+  const nestedCommands = new Set([
+    ...heredocs.expansionCommands,
+    ...substitutions,
+    ...extractNestedShellCommands(command),
+  ]);
+  if (depth >= COMMAND_SUBSTITUTION_SCAN_DEPTH && nestedCommands.size > 0) {
+    return { kind: "dynamic-path", reason: "Shell path policy: nested command inspection depth exceeded" };
+  }
+  for (const body of nestedCommands) {
+    const violation = findViolationInCommand(
+      body,
+      cwd,
+      sandboxRoot,
+      extraAllowedDirectories,
+      blockReadsOutsideWorkingDirectories,
+      depth + 1,
+      loopBindings,
+    );
+    if (violation) return violation;
   }
   // Operands are checked twice, against two different base directories.
   //
@@ -584,41 +598,28 @@ export function validateShellCommandPathPolicy(
 }
 
 /**
- * Map of recursive-traversal shell commands → equivalent LVIS builtin tool.
- *
- * The block message threads this hint through so the LLM agent (or human
- * operator reading the error) can retry with a sandbox-aware alternative
- * instead of re-narrowing into an unrelated subdirectory — the failure mode
- * observed when a model fell back from `find /Users/example/Documents` to
- * `list_files /Users/example/Documents/journals` (a guessed sub-path) rather
- * than `list_files /Users/example/Documents` (the original target).
- *
- * Entries that map to "(no direct LVIS equivalent)" still receive the
- * "preserve the original target path" instruction so the LLM doesn't
- * silently scope down on retry.
+ * A recursive-operation refusal either names an available builtin or states
+ * the missing capability. An unrelated supported operation is not an
+ * equivalent, and no refusal should silently narrow the requested scope.
+ * Keys belong to RECURSIVE_TRAVERSAL_COMMANDS or RECURSIVE_FLAG_COMMANDS.
  */
-/**
- * Map keys MUST be a subset of `RECURSIVE_TRAVERSAL_COMMANDS` ∪
- * `RECURSIVE_FLAG_COMMANDS` — any key outside that union is dead code (the
- * lookup site is only reached when one of those two sets matches). Tests in
- * `__tests__/shell-path-policy.test.ts` lock the mapped-vs-fallback contract.
- */
-const LVIS_ALTERNATIVE_BY_COMMAND: Readonly<Record<string, string>> = {
-  // Traversal commands (RECURSIVE_TRAVERSAL_COMMANDS):
-  find: "be_shellPathPolicy.altFind",
-  fd: "be_shellPathPolicy.altFd",
-  fdfind: "be_shellPathPolicy.altFdfind",
-  rg: "be_shellPathPolicy.altRg",
-  tree: "be_shellPathPolicy.altTree",
-  tar: "be_shellPathPolicy.altTar",
-  unzip: "be_shellPathPolicy.altUnzip",
-  zip: "be_shellPathPolicy.altZip",
-  // Flag-recursive commands (RECURSIVE_FLAG_COMMANDS):
-  grep: "be_shellPathPolicy.altGrep",
-  egrep: "be_shellPathPolicy.altEgrep",
-  fgrep: "be_shellPathPolicy.altFgrep",
-  cp: "be_shellPathPolicy.altCp",
-  mv: "be_shellPathPolicy.altMv",
+const SHELL_TRAVERSAL_GUIDANCE: Readonly<Record<string, {
+  kind: "builtin" | "unavailable";
+  messageKey: string;
+}>> = {
+  find: { kind: "builtin", messageKey: "be_shellPathPolicy.altFind" },
+  fd: { kind: "builtin", messageKey: "be_shellPathPolicy.altFd" },
+  fdfind: { kind: "builtin", messageKey: "be_shellPathPolicy.altFdfind" },
+  rg: { kind: "builtin", messageKey: "be_shellPathPolicy.altRg" },
+  tree: { kind: "builtin", messageKey: "be_shellPathPolicy.altTree" },
+  tar: { kind: "unavailable", messageKey: "be_shellPathPolicy.altTar" },
+  unzip: { kind: "unavailable", messageKey: "be_shellPathPolicy.altUnzip" },
+  zip: { kind: "unavailable", messageKey: "be_shellPathPolicy.altZip" },
+  grep: { kind: "builtin", messageKey: "be_shellPathPolicy.altGrep" },
+  egrep: { kind: "builtin", messageKey: "be_shellPathPolicy.altEgrep" },
+  fgrep: { kind: "builtin", messageKey: "be_shellPathPolicy.altFgrep" },
+  cp: { kind: "unavailable", messageKey: "be_shellPathPolicy.altCp" },
+  mv: { kind: "unavailable", messageKey: "be_shellPathPolicy.altMv" },
 };
 
 /**
@@ -899,6 +900,66 @@ const GREP_SWITCHES = new Set([
   "--unix-byte-offsets", "--null-data", "--no-group-separator", "--help", "--version",
 ]);
 
+const PROCESS_PATTERN_FILE_OPTIONS = new Set(["-F", "--pidfile"]);
+const PROCESS_PATTERN_LITERAL_OPTIONS = new Set([
+  "-d", "--delimiter", "-g", "--pgroup", "-G", "--group", "-O", "--older",
+  "-p", "--pid", "-P", "--parent", "-s", "--session", "--signal", "-t", "--terminal",
+  "-u", "--euid", "-U", "--uid", "-r", "--runstates", "--cgroup", "--ns", "--nslist", "--env",
+]);
+const PROCESS_PATTERN_SWITCHES = new Set([
+  "-a", "--list-full", "-l", "--list-name", "--quiet", "-v", "--inverse",
+  "-w", "--lightweight", "-c", "--count", "-f", "--full", "-i", "--ignore-case",
+  "-n", "--newest", "-o", "--oldest", "-x", "--exact", "-L", "--logpidfile",
+  "-A", "--ignore-ancestors", "-Q", "--shell-quote", "-h", "--help", "-V", "--version",
+]);
+
+/** Process selection patterns are text; pidfile options still open files. */
+function classifyProcessPatternOperandSlots(argv: readonly string[], verbIndex: number): OperandSlotClassification {
+  const nonPathIndices = new Set<number>();
+  const extraCandidates: string[] = [];
+  const positionals: number[] = [];
+  const unclassified: OperandSlotClassification = {
+    nonPathIndices: new Set(), extraCandidates: [], nestedCommands: [], dynamicExecution: null,
+  };
+  let optionsEnded = false;
+  for (let i = verbIndex + 1; i < argv.length; i += 1) {
+    const token = argv[i]!;
+    if (!optionsEnded && token === "--") {
+      optionsEnded = true;
+      continue;
+    }
+    if (optionsEnded || !token.startsWith("-") || token === "-") {
+      positionals.push(i);
+      continue;
+    }
+    const long = token.startsWith("--");
+    const equals = token.indexOf("=");
+    const options = long
+      ? [equals < 0 ? token : token.slice(0, equals)]
+      : token.slice(1).split("").map((flag) => `-${flag}`);
+    for (let j = 0; j < options.length; j += 1) {
+      const option = options[j]!;
+      const fileValue = PROCESS_PATTERN_FILE_OPTIONS.has(option);
+      if (!fileValue && !PROCESS_PATTERN_LITERAL_OPTIONS.has(option)) {
+        if (!PROCESS_PATTERN_SWITCHES.has(option) || (long && equals >= 0)) return unclassified;
+        continue;
+      }
+      const attached = long ? equals >= 0 : j + 2 < token.length;
+      const value = attached ? token.slice(long ? equals + 1 : j + 2) : argv[i + 1];
+      if (value === undefined) return unclassified;
+      nonPathIndices.add(i);
+      if (!attached) nonPathIndices.add(++i);
+      if (fileValue) extraCandidates.push(value);
+      break;
+    }
+  }
+  // An unknown option or extra positional can change which word is the
+  // pattern. Grant no text exemption unless the complete argv is understood.
+  if (positionals.length > 1) return unclassified;
+  if (positionals[0] !== undefined) nonPathIndices.add(positionals[0]);
+  return { nonPathIndices, extraCandidates, nestedCommands: [], dynamicExecution: null };
+}
+
 /** Pattern text never opens a file; -f and later positionals do. */
 function classifyGrepOperandSlots(argv: readonly string[], verbIndex: number): OperandSlotClassification {
   const nonPathIndices = new Set<number>();
@@ -1044,6 +1105,13 @@ function classifyOperandSlots(argv: readonly string[]): OperandSlotClassificatio
   const verb = stripCommandPath(head).toLowerCase();
   if (verb === "find") return classifyFindOperandSlots(argv, verbIndex);
   if (["grep", "egrep", "fgrep"].includes(verb)) return classifyGrepOperandSlots(argv, verbIndex);
+  if (verb === "pgrep") return classifyProcessPatternOperandSlots(argv, verbIndex);
+  if (verb === "kill") {
+    // These are signals and process identifiers, never file operands. Shell
+    // substitutions are inspected recursively, and redirects remain separate.
+    for (let i = verbIndex + 1; i < argv.length; i += 1) skip.add(i);
+    return empty;
+  }
   if (COMPILER_COMMANDS.has(verb)) return classifyCompilerOperandSlots(argv, verbIndex);
   if (verb === "tar") {
     const listing = parseTarListing(argv.slice(verbIndex));
@@ -1215,6 +1283,18 @@ function findDynamicExecutionOperand(command: string): string | null {
   const { leaves, parseError } = tokenizeShell(command);
   if (parseError) return null;
   for (const leaf of leaves) {
+    const verb = stripCommandPath(leaf.argv[leadingKeywordCount(leaf.argv)] ?? "").toLowerCase();
+    // Data roles do not prove process-substitution bodies safe. Until those
+    // executable operands receive complete recursive inspection, retain their
+    // refusal instead of removing them with pattern/PID text exemptions.
+    if (leaf.hasProcessSubstitution && (verb === "pgrep" || verb === "kill")) {
+      return "Sandbox: process substitution cannot be inspected in process data operands";
+    }
+    if ((verb === "pgrep" || verb === "kill")
+      && (leaf.hasCommandSubstitution || leaf.argvHasExpandableDollar.some(Boolean))
+      && extractCommandSubstitutionBodies(leaf.raw, true) === null) {
+      return "Sandbox: command substitution cannot be completely inspected in process data operands";
+    }
     const { dynamicExecution } = classifyOperandSlots(leaf.argv);
     if (dynamicExecution) return dynamicExecution;
   }
@@ -1266,52 +1346,69 @@ function isFileSigilValue(value: string): boolean {
  * level of quoting. Double-quoted regions are descended into because expansion
  * still happens there; single-quoted ones are not, because it does not.
  */
-function extractCommandSubstitutionBodies(command: string): string[] {
+function extractCommandSubstitutionBodies(command: string, strict = false): string[] | null {
   const bodies: string[] = [];
   const n = command.length;
   let i = 0;
   let inDoubleQuote = false;
+  let wordActive = false;
   while (i < n) {
     const ch = command[i]!;
     if (ch === "\\") {
+      wordActive = true;
       i += 2;
+      continue;
+    }
+    // Like the canonical tokenizer, require a word boundary as well as an
+    // unquoted '#': an escaped space can be part of the preceding word.
+    if (ch === "#" && !inDoubleQuote && !wordActive && startsShellComment(command, i)) {
+      const newline = command.indexOf("\n", i);
+      if (newline === -1) return bodies;
+      i = newline + 1;
       continue;
     }
     if (ch === "'" && !inDoubleQuote) {
       const close = command.indexOf("'", i + 1);
       if (close === -1) return bodies;
+      wordActive = true;
       i = close + 1;
       continue;
     }
     if (ch === '"') {
+      wordActive = true;
       inDoubleQuote = !inDoubleQuote;
       i += 1;
       continue;
     }
     if (ch === "`") {
       const close = command.indexOf("`", i + 1);
-      if (close === -1) return bodies;
+      if (close === -1 || (strict && command.slice(i + 1, close).includes("\\"))) return null;
       bodies.push(command.slice(i + 1, close));
+      wordActive = true;
       i = close + 1;
       continue;
     }
+    if (strict && ch === "$" && ("{[".includes(command[i + 1] ?? " ")
+      || (!inDoubleQuote && "'\"".includes(command[i + 1] ?? " ")))) return null;
     if (ch === "$" && command[i + 1] === "(") {
-      const close = matchClosingParen(command, i + 1);
-      if (close === -1) return bodies;
-      // `$((expr))` is arithmetic, not a command. Its body cannot name a file
-      // the shell opens, and reading it as one produced operands out of C-style
-      // integer division.
-      const body = command.slice(i + 2, close);
-      if (!(command[i + 2] === "(" && command[close - 1] === ")")) bodies.push(body);
+      const close = findShellSubstitutionEnd(command, i + 1, { strict });
+      if (close === -1) return null;
+      // General arithmetic keeps its existing non-command treatment. New
+      // process-data exemptions and heredoc expansion proofs request strict
+      // inspection, which refuses arithmetic whose execution cannot be proven.
+      const arithmetic = command[i + 2] === "(" && command[close - 1] === ")";
+      if (!arithmetic) bodies.push(command.slice(i + 2, close));
+      wordActive = true;
       i = close + 1;
       continue;
     }
+    if (!inDoubleQuote) wordActive = !/[ \t\r\n;&|<>()]/.test(ch);
     i += 1;
   }
   return bodies;
 }
 
-/** Index of the `)` matching the `(` at `openParen`, or -1 when unbalanced. */
+/** Parenthesis heuristic for path-candidate text only, never an execution boundary. */
 function matchClosingParen(command: string, openParen: number): number {
   let depth = 0;
   for (let i = openParen; i < command.length; i += 1) {
@@ -1373,12 +1470,12 @@ function buildRecursiveBlockMessage(
   const head = flag
     ? `Sandbox: recursive shell filesystem traversal is not allowed: ${commandToken} ${flag}`
     : `Sandbox: recursive shell filesystem traversal is not allowed: ${commandToken}`;
-  const altKey = LVIS_ALTERNATIVE_BY_COMMAND[commandName];
-  const alt = altKey ? t(altKey) : undefined;
-  const guidance = alt
-    ? ` ${t("be_shellPathPolicy.guidanceWithAlt", { alt })}`
-    : ` ${t("be_shellPathPolicy.guidanceNoAlt")}`;
-  return head + guidance;
+  const capability = SHELL_TRAVERSAL_GUIDANCE[commandName];
+  if (!capability) return `${head} ${t("be_shellPathPolicy.guidanceNoAlt")}`;
+  const guidanceKey = capability.kind === "builtin"
+    ? "be_shellPathPolicy.guidanceWithAlt"
+    : "be_shellPathPolicy.guidanceUnavailable";
+  return `${head} ${t(guidanceKey, { alt: t(capability.messageKey) })}`;
 }
 
 /**
@@ -1421,6 +1518,9 @@ function findUnsafeRecursiveTraversal(
     const recursiveFlags = RECURSIVE_FLAG_COMMANDS.get(commandName);
     if (recursiveFlags) {
       const args = tokens.slice(commandIndex + 1);
+      // An immediate terminator proves all following words are operands.
+      // Elsewhere an option may consume "--" as its value, so retain the scan.
+      if (args[0] === "--") continue;
       const flag = args.find((arg) => recursiveFlags.some((candidate) => hasShellFlag(arg, candidate)));
       if (flag) {
         return buildRecursiveBlockMessage(tokens[commandIndex], commandName, flag);
@@ -1477,10 +1577,10 @@ function splitCommandSegments(command: string): string[] {
     // the segment's head is `cd` and every rule keyed on the verb reads the
     // wrong command, and `ls & find . -name x` hid `find` the same way.
     //
-    // The exclusions are the fd-redirect forms: `2>&1` and `ls &> log` both
+    // The exclusions are fd redirects: `2>&1`, `<&-` and `ls &> log` all
     // spell `&` without ending a command, and splitting them tears an operator
     // in half.
-    if (ch === "&" && command[i + 1] !== ">" && command[i - 1] !== ">") {
+    if (ch === "&" && command[i + 1] !== ">" && command[i - 1] !== ">" && command[i - 1] !== "<") {
       if (segment.trim()) segments.push(segment);
       segment = "";
       if (command[i + 1] === "&") i += 1;
@@ -1579,7 +1679,8 @@ function extractPathCandidates(
     // Keep wrapper operands on the conservative flat path, where none are lost.
     const verb = leaf && stripCommandPath(leaf.argv[leadingKeywordCount(leaf.argv)] ?? "").toLowerCase();
     if (!parsed.parseError && leaf && leaf.strippedWrappers.length === 0
-      && (verb === "find" || verb === "tar" || (verb !== undefined && COMPILER_COMMANDS.has(verb)))) {
+      && (verb === "find" || verb === "tar" || verb === "pgrep" || verb === "kill"
+        || (verb !== undefined && COMPILER_COMMANDS.has(verb)))) {
       const slots = classifyOperandSlots(leaf.argv);
       for (let i = 0; i < leaf.argv.length; i += 1) {
         if (!slots.nonPathIndices.has(i)) {
@@ -1596,9 +1697,9 @@ function extractPathCandidates(
     }
     const tokens = tokenizeCommand(segment);
     const headIndex = tokens.findIndex((token) => !isAssignmentToken(token));
-    const isFind = headIndex >= 0
-      && stripCommandPath(tokens[headIndex] ?? "").toLowerCase() === "find";
-    const slots = headIndex < 0 || isFind ? undefined : classifyOperandSlots(tokens.slice(headIndex));
+    const needsStructuredArgv = headIndex >= 0
+      && ["find", "kill"].includes(stripCommandPath(tokens[headIndex] ?? "").toLowerCase());
+    const slots = headIndex < 0 || needsStructuredArgv ? undefined : classifyOperandSlots(tokens.slice(headIndex));
     const nonPath = slots === undefined
       ? new Set<number>()
       : new Set([...slots.nonPathIndices].map((index) => index + headIndex));

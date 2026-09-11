@@ -63,6 +63,7 @@ import type { MarketplaceInstalledProviderPreset } from "../../../shared/marketp
 import { isGuardedInsecureCredentialedModelProviderFetch } from "../marketplace-provider-fetch.js";
 import { normalizeOutputTokenLimit } from "../output-token-limit.js";
 import { toGrammarSafeToolSchemas } from "../grammar-safe-tool-schema.js";
+import { selectAssistantWireThinkingBlocks } from "../assistant-wire-content.js";
 
 /** Vendor slot recognised by VercelUnifiedProvider. */
 export type VercelVendor = LLMVendor;
@@ -110,8 +111,8 @@ const OPENAI_RESPONSES_TOOL_NAME_ALIAS_REVERSE: Readonly<Record<string, string>>
 /** Detect OpenAI reasoning-model families (Responses API + reasoning_effort support). */
 // Idle ceiling for a streamed response: if no delta arrives within this window
 // the provider stream is treated as stalled and aborted (a hung proxy / dropped
-// upstream would otherwise block the turn forever). Re-armed on every delta, so
-// only a genuine stall — not slow first-token reasoning — trips it.
+// upstream would otherwise block the turn forever). Incremental tool arguments
+// count as activity even before they become a caller-facing tool call.
 const STREAM_IDLE_CEILING_MS = TOOL_TIMEOUT_POLICY.modelStreamIdleCeilingMs;
 
 export function isOpenAIReasoningModel(model: string): boolean {
@@ -474,7 +475,8 @@ export class VercelUnifiedProvider implements LLMProvider {
 
       // Idle ceiling: compose the caller's abortSignal with an idle-deadline
       // controller so a stalled provider stream (no deltas) aborts instead of
-      // hanging the turn forever. resetIdleTimer() re-arms on every delta below.
+      // hanging the turn forever. Observe activity before the mapper drops
+      // incremental tool arguments and other non-caller-facing stream parts.
       const idleController = new AbortController();
       const abortSignal = params.abortSignal
         ? AbortSignal.any([params.abortSignal, idleController.signal])
@@ -484,7 +486,7 @@ export class VercelUnifiedProvider implements LLMProvider {
         if (idleTimer) clearTimeout(idleTimer);
         idleTimer = setTimeout(() => {
           idleController.abort(
-            new DOMException("provider stream idle ceiling exceeded", "TimeoutError"),
+            new DOMException("provider stream idle timeout exceeded", "TimeoutError"),
           );
         }, STREAM_IDLE_CEILING_MS);
       };
@@ -537,37 +539,36 @@ export class VercelUnifiedProvider implements LLMProvider {
           Record<string, unknown> & { type: string }
         >;
       } catch (syncErr) {
-        const mapped = mapAiSdkErrorToLvis(syncErr);
-        yield {
-          type: "error",
-          error: mapped.userMessage,
-          classification: mapped.classification,
-          providerError: mapped.providerError,
-        };
+        if (params.abortSignal?.aborted) return;
+        yield createProviderErrorEvent(syncErr);
         return;
       }
 
-      const streamEvents = fullStreamToStreamEvent(fullStream, slot);
+      const activeStream = (async function* () {
+        for await (const part of fullStream) {
+          resetIdleTimer();
+          yield part;
+        }
+      })();
+      const streamEvents = fullStreamToStreamEvent(activeStream, slot);
       const restoredEvents = useOpenAIResponsesAliases
         ? restoreStreamEventsFromOpenAIResponses(streamEvents)
         : streamEvents;
       resetIdleTimer();
       try {
         for await (const event of restoredEvents) {
-          resetIdleTimer();
+          if (params.abortSignal?.aborted) return;
+          idleController.signal.throwIfAborted();
           yield event;
         }
+        if (params.abortSignal?.aborted) return;
+        idleController.signal.throwIfAborted();
       } finally {
         if (idleTimer) clearTimeout(idleTimer);
       }
     } catch (err) {
-      const mapped = mapAiSdkErrorToLvis(err);
-      yield {
-        type: "error",
-        error: mapped.userMessage,
-        classification: mapped.classification,
-        providerError: mapped.providerError,
-      };
+      if (params.abortSignal?.aborted) return;
+      yield createProviderErrorEvent(err);
     }
   }
 
@@ -895,24 +896,16 @@ export function genericToModelMessages(
       // [HIGH PRIVACY] thinkingBlocks are Claude-specific signed thoughts.
       // They MUST NOT be forwarded to non-Claude vendors (Gemini/OpenAI do not
       // understand them and the signed content must not leave the Claude path).
-      if (vendor === "claude" && msg.thinkingBlocks) {
-        for (const tb of msg.thinkingBlocks) {
-          if (typeof tb.signature !== "string" || tb.signature.length === 0) {
-            // Defense-in-depth: thinkingBlocks may be deserialized from persisted
-            // history where signatures were trimmed. Guard here ensures we never
-            // echo a signature-less block to Anthropic (400).
-            // eslint-disable-next-line no-console
-            messageMapperLog.warn(
-              "thinkingBlock missing signature — skipping",
-            );
-            continue;
-          }
-          parts.push({
-            type: "reasoning",
-            text: tb.thinking,
-            providerOptions: { anthropic: { signature: tb.signature } },
-          });
-        }
+      const replayableThinking = selectAssistantWireThinkingBlocks(msg.thinkingBlocks, vendor);
+      if (vendor === "claude" && replayableThinking.length !== (msg.thinkingBlocks?.length ?? 0)) {
+        messageMapperLog.warn("thinkingBlock missing signature — skipping");
+      }
+      for (const tb of replayableThinking) {
+        parts.push({
+          type: "reasoning",
+          text: tb.thinking,
+          providerOptions: { anthropic: { signature: tb.signature } },
+        });
       }
 
       if (msg.content) {
@@ -1050,8 +1043,6 @@ export async function* fullStreamToStreamEvent(
   stream: AsyncIterable<AnyStreamPart>,
   vendor: VercelVendor,
 ): AsyncIterable<StreamEvent> {
-  let hasToolCalls = false;
-
   // Per-reasoning-block accumulator. Key = block id. Value = accumulated text.
   const reasoningBuffers = new Map<string, string>();
   // Completed thinking blocks (signature verified) across the whole turn.
@@ -1059,12 +1050,6 @@ export async function* fullStreamToStreamEvent(
 
   for await (const part of stream) {
     switch (part.type) {
-      case "start": {
-        // Generator is single-use per turn; reset sticky state defensively in
-        // case an SDK wrapper restarts the stream within the same instance.
-        hasToolCalls = false;
-        break;
-      }
       case "text-delta": {
         const text = (part as { text?: string }).text ?? "";
         if (text) yield { type: "text_delta", text };
@@ -1123,7 +1108,6 @@ export async function* fullStreamToStreamEvent(
           toolName: string;
           input: unknown;
         };
-        hasToolCalls = true;
         const normalized = normalizeToolCallInput(p.input);
         if (normalized.invalidInput) {
           streamMapperLog.warn(
@@ -1151,22 +1135,24 @@ export async function* fullStreamToStreamEvent(
             };
           };
         };
-        // Honor finishReason explicitly when present; fallback to sticky
-        // hasToolCalls only when finishReason is missing.
         let stopReason: "tool_use" | "end_turn" | "max_tokens";
         if (p.finishReason === "tool-calls") {
           stopReason = "tool_use";
         } else if (p.finishReason === "length") {
-          // AI SDK emits finishReason "length" when the model hit its
-          // output-token cap mid-generation. Surface it as a DISTINCT
-          // truncation signal. This branch MUST precede the generic
-          // `else if (p.finishReason)` below — otherwise "length" is collapsed
-          // into a clean "end_turn" and the truncation is hidden from the loop.
+          // Preserve the output ceiling as a truncation signal for the loop.
           stopReason = "max_tokens";
-        } else if (p.finishReason) {
+        } else if (
+          p.finishReason === "stop" ||
+          p.finishReason === "content-filter"
+        ) {
           stopReason = "end_turn";
         } else {
-          stopReason = hasToolCalls ? "tool_use" : "end_turn";
+          // A finish event can be synthesized at EOF with an unclassified
+          // reason. Its presence alone does not prove provider completion.
+          yield createProviderErrorEvent(new Error(
+            `Provider stream ended with an unsuccessful finish reason: ${p.finishReason ?? "missing"}`,
+          ));
+          return;
         }
         // v5 exposes totalUsage; v4 exposed usage. Accept either and tolerate
         // both inputTokens/outputTokens (v5) and promptTokens/completionTokens (v4).
@@ -1204,7 +1190,13 @@ export async function* fullStreamToStreamEvent(
           error: providerErrorMessage(err),
           providerError,
         };
-        break;
+        return;
+      }
+      case "abort": {
+        yield createProviderErrorEvent(new Error("Provider stream aborted", {
+          cause: part.reason,
+        }));
+        return;
       }
       default:
         // Ignore non-essential parts (start, start-step, finish-step,
@@ -1262,6 +1254,16 @@ export function mapAiSdkErrorToLvis(err: unknown): MappedError {
     userMessage: classified.userMessage,
     rawError: raw,
     providerError: withProviderErrorClassification(diagnostics, classified.category),
+  };
+}
+
+function createProviderErrorEvent(err: unknown): Extract<StreamEvent, { type: "error" }> {
+  const mapped = mapAiSdkErrorToLvis(err);
+  return {
+    type: "error",
+    error: mapped.userMessage,
+    classification: mapped.classification,
+    providerError: mapped.providerError,
   };
 }
 

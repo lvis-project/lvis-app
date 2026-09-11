@@ -14,7 +14,11 @@
  * command port, which publishes turn events into the real timeline the same
  * way handleChatSend does.
  */
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createTmpDirTracker } from "../../__tests__/support/tmp-dir-teardown.js";
 import { MemorySecretStore } from "../../audit/hmac-chain.js";
 import { createConversationSurfaceRuntime } from "../../engine/conversation-surface-runtime.js";
 import { createPlatformConversationEventSink } from "../../engine/conversation-platform-protocol.js";
@@ -36,11 +40,22 @@ import {
 import { forbidAmbientFetch } from "../../__tests__/support/network-fetch-stubs.js";
 
 const ASSISTANT_TEXT = "응답 텍스트입니다.";
+const temporaryDirectories = createTmpDirTracker();
+
+beforeEach(() => {
+  const root = temporaryDirectories.track(mkdtempSync(join(tmpdir(), "telegram-egress-home-")));
+  vi.stubEnv("LVIS_HOME", root);
+});
 
 afterEach(async () => {
-  await stopTelegramBridgeServer();
-  resetTelegramBridgeServerForTests();
-  vi.unstubAllGlobals();
+  try {
+    await stopTelegramBridgeServer();
+  } finally {
+    resetTelegramBridgeServerForTests();
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+    await temporaryDirectories.cleanup();
+  }
 });
 
 describe("telegram egress integration (real projection, real delivery)", () => {

@@ -1,5 +1,6 @@
 import type { GenericMessage } from "../llm/types.js";
-import { estimateMessageTokensForWire } from "../auto-compact.js";
+import { serializeMessageForEstimation } from "../llm/types.js";
+import { estimateTokens } from "../../shared/token-estimate.js";
 import {
   normalizeSubscriptionUsageTelemetry,
   type SubscriptionChatRuntimeSelection,
@@ -40,7 +41,9 @@ function estimateLocalSubscriptionUsage(params: {
   const inputTokens = Number.isSafeInteger(params.inputTokens) && params.inputTokens >= 0
     ? params.inputTokens
     : 0;
-  const outputTokens = estimateMessageTokensForWire(params.assistant);
+  // Generated reasoning contributes to output even when the next request does
+  // not replay it. Input projection would silently omit that generated work.
+  const outputTokens = estimateTokens(serializeMessageForEstimation(params.assistant));
   return normalizeSubscriptionUsageTelemetry({
     provider: params.provider,
     model: params.model,
@@ -52,7 +55,7 @@ function estimateLocalSubscriptionUsage(params: {
   });
 }
 
-/** Collects exact provider reports or the shared wire-shape fallback per round. */
+/** Collects provider reports or a local estimate of generated output per round. */
 export function createSubscriptionUsageCollector(): SubscriptionUsageCollector {
   const segments: SubscriptionUsageTelemetry[] = [];
   return {

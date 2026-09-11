@@ -42,8 +42,12 @@ describe("find expression operand roles", () => {
     expect(check(command)).toBeNull();
   });
 
-  it("retains the recursive traversal restriction for input redirection", () => {
-    expect(check("find . -printf <&- '%p\\n'")?.kind).toBe("recursive-traversal");
+  it.each([
+    "find . -printf <&- '%p\\n'",
+    "find . -printf 0<&- '%p\\n'",
+    "find . -printf 3</dev/null <&3 '%p\\n'",
+  ])("keeps descriptor redirection separate from read-only traversal: %s", (command) => {
+    expect(check(command)).toBeNull();
   });
 
   it.each([
@@ -51,6 +55,7 @@ describe("find expression operand roles", () => {
     "find . -printf >&-/../../../../etc/shadow '%p\\n'",
     "find . -printf > /etc/shadow '%p\\n'",
     "find . -printf < /etc/shadow '%p\\n'",
+    "find . -printf 3</etc/shadow <&3 '%p\\n'",
     "find . -newer > ./report /etc/shadow -printf '%p\\n'",
     "find . -newer 2>&1 /etc/shadow -printf '%p\\n'",
     "find . -printf > '/etc/shadow' '%p\\n'",

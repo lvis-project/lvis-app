@@ -816,11 +816,11 @@ class ToolLoopProvider implements LLMProvider {
  */
 class NudgeAndCompactProvider implements LLMProvider {
   readonly vendor = "openai" as const;
-  readonly messages: GenericMessage[][] = [];
+  readonly requests: StreamTurnParams[] = [];
   private round = 0;
 
   async *streamTurn(input: StreamTurnParams): AsyncIterable<StreamEvent> {
-    this.messages.push(input.messages);
+    this.requests.push(input);
     const round = this.round++;
     if (round < 2) {
       yield { type: "tool_call", id: `tu-${round}`, name: "probe", input: { n: round } };
@@ -927,20 +927,21 @@ describe("round-loop token preflight — a turn that grows its own context", () 
     // itself would spend the cap on the assembly that was only measured and
     // send the round that reaches the model without any instruction at all.
     const sessionId = "7c9d2b41-3e18-4c05-8b6a-9d4f1e0a2c73";
-    // Measured on this shape: 1,169 projected tokens at the reasoning-only
-    // round, 1,745 at the round after it, where the replayed reasoning and the
-    // instruction join the history. A threshold between the two puts the
-    // crossing exactly on the round that carries the re-prompt.
+    // Stored history remains below the threshold. Only the pending request's
+    // bounded reasoning replay and instruction cross it, so both preflight
+    // checks must measure that assembled request rather than raw history.
     process.env.LVIS_DEV_PREFLIGHT_OVERRIDE = "1400";
     const provider = new NudgeAndCompactProvider();
-    const loop = new ConversationLoop(
-      makeDeps({
-        settingsService: makeSettings(true, "gpt-4o", "openai"),
-        memoryManager: makeMemoryManager([], sessionId),
-        memoryReviewer: makeMemoryReviewer(),
-        toolRegistry: makeProbeRegistry(2_000) as unknown as ReturnType<typeof makeDeps>["toolRegistry"],
-      }),
-    );
+    const deps = makeDeps({
+      settingsService: makeSettings(true, "gpt-4o", "openai"),
+      memoryManager: makeMemoryManager([], sessionId),
+      memoryReviewer: makeMemoryReviewer(),
+      toolRegistry: makeProbeRegistry(2_000) as unknown as ReturnType<typeof makeDeps>["toolRegistry"],
+    });
+    let summaryPreamble: string | null = null;
+    deps.systemPromptBuilder.build = () => ["system", summaryPreamble].filter(Boolean).join("\n");
+    deps.systemPromptBuilder.setSummaryPreamble = (preamble) => { summaryPreamble = preamble; };
+    const loop = new ConversationLoop(deps);
     loop.resetAndResume(sessionId);
     (loop as unknown as { provider: LLMProvider }).provider = provider;
     const decisions: TurnDecisionEvent[] = [];
@@ -956,10 +957,28 @@ describe("round-loop token preflight — a turn that grows its own context", () 
       expect.objectContaining({ kind: "compact.auto", branch: "fired" }),
     );
     const instruction = t("be_conversationLoop.reasoningOnlyContinuePrompt");
-    const rePromptRound = provider.messages[3] ?? [];
+    const rePromptRequest = provider.requests[3]!;
+    const rePromptRound = rePromptRequest.messages;
+    expect(rePromptRequest.systemPrompt).toContain("## Compact preamble");
     // The round went out on the compacted history, not the one the gate
     // measured — and it still carries the instruction, exactly once.
     expect(rePromptRound[0]?.meta?.compactBoundary).toBe(true);
+    expect(compactWithBoundary).toHaveBeenCalledTimes(1);
+    const compactInput = vi.mocked(compactWithBoundary).mock.calls[0]![0];
+    const projectionInput = {
+      ...rePromptRequest,
+      toolSchemas: rePromptRequest.tools ?? [],
+    };
+    const rawHistoryProjection = estimateRequestInputProjection({
+      ...projectionInput,
+      messages: compactInput.messages,
+    }, provider);
+    expect(rawHistoryProjection.totalTokens).toBeLessThan(getModelPreflightThreshold("openai", "gpt-4o"));
+    // The compact boundary stores the re-evaluation against rewritten history.
+    // Its pressure must include the same pending instruction and reasoning
+    // replay that the provider actually receives after compaction.
+    const sentProjection = estimateRequestInputProjection(projectionInput, provider);
+    expect(rePromptRound[0]?.meta?.checkpointMeta?.contextTokensAfter).toBe(sentProjection.totalTokens);
     expect(
       rePromptRound.filter(
         (message) =>

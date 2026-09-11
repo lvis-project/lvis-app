@@ -108,6 +108,149 @@ export interface TokenizeResult {
   parseError: boolean;
 }
 
+interface ShellSource {
+  text: string;
+  original: string;
+  offsets?: number[];
+}
+
+/**
+ * Remove escaped newlines before recognizing words or operators. The source
+ * map keeps a leaf's raw text tied to the input the caller will execute.
+ * Quoted heredoc bodies, single quotes and comments retain their bytes.
+ */
+function shellContinuationSource(command: string): ShellSource | null {
+  if (!command.includes("\\\n")) return { text: command, original: command };
+  const offsets: number[] = [];
+  let text = "";
+  const append = (start: number, end: number): void => {
+    text += command.slice(start, end);
+    for (let index = start; index < end; index += 1) offsets.push(index);
+  };
+  const nextLogicalIndex = (index: number): number => {
+    while (command[index] === "\\" && command[index + 1] === "\n") index += 2;
+    return index;
+  };
+  type Context = { quote: "'" | '"' | null; close?: ")" | "`"; depth: number; heredocs: number[]; wordActive: boolean };
+  const contexts: Context[] = [{ quote: null, depth: 0, heredocs: [], wordActive: false }];
+  let i = 0;
+  while (i < command.length) {
+    const context = contexts.at(-1)!;
+    const ch = command[i]!;
+    if (context.quote === "'") {
+      append(i, i + 1);
+      if (ch === "'") context.quote = null;
+      i += 1;
+      continue;
+    }
+    if (ch === "\\") {
+      if (command[i + 1] === "\n") i += 2;
+      else {
+        append(i, Math.min(i + 2, command.length));
+        context.wordActive = true;
+        i += 2;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      context.quote = context.quote === '"' ? null : '"';
+      context.wordActive = true;
+      append(i, i + 1);
+      i += 1;
+      continue;
+    }
+    if (ch === "'" && context.quote === null) {
+      context.quote = "'";
+      context.wordActive = true;
+      append(i, i + 1);
+      i += 1;
+      continue;
+    }
+    const next = nextLogicalIndex(i + 1);
+    if ((ch === "$" || (context.quote === null && (ch === "<" || ch === ">")))
+      && command[next] === "(") {
+      append(i, i + 1);
+      append(next, next + 1);
+      context.wordActive = true;
+      contexts.push({ quote: null, close: ")", depth: 1, heredocs: [], wordActive: false });
+      i = next + 1;
+      continue;
+    }
+    if (ch === "`") {
+      if (context.close === "`" && context.quote === null) contexts.pop();
+      else {
+        context.wordActive = true;
+        contexts.push({ quote: null, close: "`", depth: 0, heredocs: [], wordActive: false });
+      }
+      append(i, i + 1);
+      i += 1;
+      continue;
+    }
+    if (context.quote === null) {
+      if (ch === "#" && !context.wordActive && startsShellComment(text + "#", text.length)) {
+        const newline = command.indexOf("\n", i);
+        const end = newline === -1 ? command.length : newline;
+        append(i, end);
+        i = end;
+        continue;
+      }
+      if (context.close === ")") {
+        if (ch === "(") context.depth += 1;
+        if (ch === ")" && --context.depth === 0) contexts.pop();
+      }
+      if (ch === "<" && command[next] === "<" && text.at(-1) !== "<") {
+        const after = nextLogicalIndex(next + 1);
+        if (command[after] !== "<") context.heredocs.push(text.length);
+      }
+      if (ch === "\n" && context.heredocs.length > 0) {
+        context.wordActive = false;
+        append(i, i + 1);
+        i += 1;
+        for (const start of context.heredocs) {
+          const opened = readHeredocDelimiter(text, start);
+          const end = opened ? findHeredocTerminator(command, i, opened) : null;
+          // An unknown body boundary cannot leave a partly normalized command:
+          // later continued words could then hide their actual file operands.
+          if (end === null) return null;
+          // Expandable bodies join physical lines before looking for the
+          // terminator. Quotes and comment markers in the body are data and
+          // must not change that rule, even inside a substitution's text.
+          if (opened!.quoted) append(i, end);
+          else {
+            let chunkStart = i;
+            while (i < end) {
+              if (command[i] === "\\") {
+                if (command[i + 1] === "\n") {
+                  append(chunkStart, i);
+                  chunkStart = i + 2;
+                }
+                i += 2;
+              } else i += 1;
+            }
+            append(chunkStart, end);
+          }
+          i = end;
+        }
+        context.heredocs.length = 0;
+        continue;
+      }
+      context.wordActive = !/[ \t\r\n;&|<>()]/.test(ch);
+    }
+    append(i, i + 1);
+    i += 1;
+  }
+  offsets.push(command.length);
+  return { text, original: command, offsets };
+}
+
+/**
+ * Shared logical-line view for policy scanners; execution keeps the original.
+ * Null means a heredoc boundary prevents complete continuation analysis.
+ */
+export function normalizeShellLineContinuations(command: string): string | null {
+  return shellContinuationSource(command)?.text ?? null;
+}
+
 interface RawWord {
   /** The word's textual value with quotes removed but content preserved. */
   value: string;
@@ -150,18 +293,32 @@ interface RawLeaf {
  * `heredocBodies: "preserve"` retains stdin text for structural guards.
  * `literalDataProof` additionally rejects unresolved heredocs, here-strings,
  * unquoted escapes, and unbalanced ordinary grouping before relaxing a deny.
+ * `simpleCommandList` implies literal proof and accepts only complete direct
+ * commands connected by `;`, newline, `&&` or `||`. Pipes, background execution
+ * and unquoted groups need a consumer relationship this proof does not model.
  */
 export function tokenizeShell(
   command: string,
-  options: { heredocBodies?: "redact" | "preserve"; literalDataProof?: boolean } = {},
+  options: { heredocBodies?: "redact" | "preserve"; literalDataProof?: boolean; simpleCommandList?: boolean } = {},
 ): TokenizeResult {
   // Structural guards can retain stdin text conservatively: a shell consumer
   // may execute it. Default risk/path callers continue to omit those bodies.
-  const redacted = redactHeredocBodies(command, options.literalDataProof ?? false);
+  const logical = shellContinuationSource(command);
+  if (logical === null) return { leaves: [], parseError: true };
+  const literalDataProof = options.literalDataProof || options.simpleCommandList;
+  const removed: Array<{ start: number; end: number }> = [];
+  const redacted = redactHeredocCommand(logical.text, literalDataProof ?? false, (start, end) => {
+    removed.push({ start, end });
+  });
   if (redacted === null) return { leaves: [], parseError: true };
+  const scanSource = options.heredocBodies === "preserve" || redacted === logical.text
+    ? logical
+    : redactShellSource(logical, redacted, removed);
   const scan = scanLeaves(
-    options.heredocBodies === "preserve" ? command : redacted,
-    options.literalDataProof,
+    options.heredocBodies === "preserve" ? logical.text : redacted,
+    literalDataProof,
+    scanSource,
+    options.simpleCommandList,
   );
   if (scan.parseError) {
     return { leaves: [], parseError: true };
@@ -178,6 +335,26 @@ export function tokenizeShell(
     leaves.push(buildLeaf(rawLeaf));
   }
   return { leaves, parseError: false };
+}
+
+function redactShellSource(
+  source: ShellSource,
+  text: string,
+  removed: readonly { start: number; end: number }[],
+): ShellSource {
+  const offsets: number[] = [];
+  let rangeIndex = 0;
+  for (let index = 0; index < source.text.length; index += 1) {
+    const range = removed[rangeIndex];
+    if (range && index === range.start) {
+      index = range.end - 1;
+      rangeIndex += 1;
+      continue;
+    }
+    offsets.push(source.offsets?.[index] ?? index);
+  }
+  offsets.push(source.original.length);
+  return { text, original: source.original, offsets };
 }
 
 /**
@@ -208,10 +385,7 @@ export function tokenizeShell(
  * read confidently keeps the behaviour it had before. The opt-in
  * `literalDataProof` mode returns null instead and rejects unsupported forms.
  *
- * A terminator is recognised by comparing the TRIMMED line to the delimiter,
- * which is laxer than plain `<<` (where the terminator must start at column 0).
- * Lax in this direction ends the body early and hands the remaining lines back
- * to the command scanner, which is the fail-closed side of the mistake.
+ * Terminators must match the whole line; only `<<-` strips leading tabs.
  *
  * NOT a relaxation of the read/write classifier: `<<` is an input redirect, and
  * {@link ShellLeaf.hasInputRedirect} on the consuming leaf already makes the
@@ -238,10 +412,19 @@ export function tokenizeShell(
 export function redactHeredocBodies(command: string): string;
 export function redactHeredocBodies(command: string, literalDataProof: boolean): string | null;
 export function redactHeredocBodies(command: string, literalDataProof = false): string | null {
+  return redactHeredocCommand(command, literalDataProof);
+}
+
+function redactHeredocCommand(
+  command: string,
+  literalDataProof: boolean,
+  onRemoved?: (start: number, end: number) => void,
+  dataInspection?: { omitExpandableBody: (body: string) => boolean; onUnresolved: () => void },
+): string | null {
   if (!command.includes("<<")) return command;
   const n = command.length;
   // Delimiters opened on the current line, in the order their bodies follow it.
-  const pending: string[] = [];
+  const pending: HeredocDelimiter[] = [];
   let out = "";
   let i = 0;
   while (i < n) {
@@ -284,18 +467,26 @@ export function redactHeredocBodies(command: string, literalDataProof = false): 
       i = end;
       continue;
     }
-    if (literalDataProof && ch === "<" && command.slice(i, i + 3) === "<<<") return null;
+    if (ch === "<" && command.slice(i, i + 3) === "<<<") {
+      if (literalDataProof) return null;
+      // The last two characters must not become a new heredoc opener on the
+      // next iteration: a here-string has no following body to remove.
+      out += "<<<";
+      i += 3;
+      continue;
+    }
     // `<<` heredoc, but NOT `<<<` (a here-STRING, whose operand is one word on
     // the same line and therefore has no body to remove).
     if (ch === "<" && command[i + 1] === "<" && command[i + 2] !== "<") {
       const opened = readHeredocDelimiter(command, i);
-      if (opened) {
-        pending.push(opened.delimiter);
+      if (opened && (!literalDataProof || opened.quoted)) {
+        pending.push(opened);
         out += command.slice(i, opened.next);
         i = opened.next;
         continue;
       }
       if (literalDataProof) return null;
+      dataInspection?.onUnresolved();
       out += "<<";
       i += 2;
       continue;
@@ -305,7 +496,14 @@ export function redactHeredocBodies(command: string, literalDataProof = false): 
       i += 1;
       for (const delimiter of pending) {
         const bodyEnd = findHeredocTerminator(command, i, delimiter);
-        if (bodyEnd === null) return literalDataProof ? null : command;
+        if (bodyEnd === null) {
+          // EOF still supplies an unquoted heredoc's body to the shell, which
+          // performs its expansions despite warning about the missing marker.
+          if (!delimiter.quoted) dataInspection?.omitExpandableBody(command.slice(i));
+          return literalDataProof ? null : command;
+        }
+        if (delimiter.quoted || dataInspection?.omitExpandableBody(command.slice(i, bodyEnd))) onRemoved?.(i, bodyEnd);
+        else out += command.slice(i, bodyEnd);
         i = bodyEnd;
       }
       pending.length = 0;
@@ -316,6 +514,82 @@ export function redactHeredocBodies(command: string, literalDataProof = false): 
   }
   if (literalDataProof && pending.length > 0) return null;
   return out;
+}
+
+/**
+ * Path analysis may omit an unquoted body only after proving that no expansion
+ * occurs and the whole command proves an independent data consumer. Bodies with
+ * expansions remain in the conservative scan, and their
+ * executable substitutions are also returned independently: quotes and `#`
+ * inside heredoc data cannot conceal those commands as shell text operands.
+ */
+export function inspectShellHeredocData(
+  command: string,
+): { command: string; expansionCommands: string[] } | null {
+  const expansionCommands: string[] = [];
+  let unresolvedExpansion = false;
+  let omittedExpandableData = false;
+  const inspectExpandableBody = (body: string): boolean => {
+    let literal = true;
+    for (let i = 0; i < body.length; i += 1) {
+      const ch = body[i]!;
+      const next = body[i + 1];
+      // Unlike command text, quotes and comment markers have no syntax here.
+      if (ch === "\\" && next !== undefined && "\\$`".includes(next)) { i += 1; continue; }
+      if (ch === "`") {
+        literal = false;
+        const close = body.indexOf("`", i + 1);
+        // Escaped legacy substitution syntax needs another decoding pass.
+        // Refuse it rather than inspect a different command than the shell.
+        if (close === -1 || body.slice(i + 1, close).includes("\\")) {
+          unresolvedExpansion = true;
+          return false;
+        }
+        expansionCommands.push(body.slice(i + 1, close));
+        i = close;
+      } else if (ch === "$" && next !== undefined && /[A-Za-z0-9_({\[?#!*@\-$]/.test(next)) {
+        literal = false;
+        // Arithmetic and parameter operators can perform further expansions.
+        // Keep their boundary closed until that grammar can be inspected.
+        if (next === "{" || next === "[" || (next === "(" && body[i + 2] === "(")) {
+          unresolvedExpansion = true;
+          return false;
+        }
+        if (next === "(") {
+          const close = findShellSubstitutionEnd(body, i + 1, { strict: true });
+          if (close === -1) {
+            unresolvedExpansion = true;
+            return false;
+          }
+          expansionCommands.push(body.slice(i + 2, close));
+          i = close;
+        }
+      }
+    }
+    omittedExpandableData ||= literal;
+    return literal;
+  };
+  const projected = redactHeredocCommand(command, false, undefined, {
+    onUnresolved: () => { unresolvedExpansion = true; },
+    omitExpandableBody: inspectExpandableBody,
+  });
+  if (unresolvedExpansion) return null;
+  if (omittedExpandableData) {
+    // A local cat header can sit inside a group whose output is piped to a
+    // shell. Prove the WHOLE projected command is one independent consumer;
+    // complete raw coverage also excludes dangling control operators.
+    const parsed = tokenizeShell(projected!);
+    const leaf = parsed.leaves[0];
+    const independentDataConsumer = !parsed.parseError && parsed.leaves.length === 1 && leaf !== undefined
+      && leaf.raw === projected!.trim()
+      && stripCommandPath(leaf.argv[0] ?? "") === "cat"
+      && leaf.assignments.length === 0
+      && leaf.strippedWrappers.every((wrapper) => wrapper === "command")
+      && !leaf.hasCommandSubstitution && !leaf.hasProcessSubstitution
+      && !leaf.argvHasExpandableDollar.some(Boolean);
+    if (!independentDataConsumer) return { command: redactHeredocBodies(command), expansionCommands };
+  }
+  return { command: projected!, expansionCommands };
 }
 
 /**
@@ -338,42 +612,67 @@ export function startsShellComment(command: string, index: number): boolean {
 }
 
 /**
- * At `start` (the first `<` of a `<<`), read a QUOTED heredoc delimiter.
- * Returns the delimiter text and the index just past its closing quote, or null
- * when the delimiter is unquoted, empty, or never closes — all of which mean
- * "leave this heredoc alone".
+ * At `start` (the first `<` of a `<<`), read a simple bare or quoted delimiter.
+ * Quote-removal and tab-stripping metadata keep boundary detection separate
+ * from deciding whether a caller may omit that body's contents.
  */
+interface HeredocDelimiter {
+  delimiter: string;
+  next: number;
+  quoted: boolean;
+  stripTabs: boolean;
+}
+
 function readHeredocDelimiter(
   command: string,
   start: number,
-): { delimiter: string; next: number } | null {
+): HeredocDelimiter | null {
   let i = start + 2;
-  if (command[i] === "-") i += 1;
+  const stripTabs = command[i] === "-";
+  if (stripTabs) i += 1;
   while (command[i] === " " || command[i] === "\t") i += 1;
   const quote = command[i];
-  if (quote !== "'" && quote !== '"') return null;
-  const close = command.indexOf(quote, i + 1);
-  if (close === -1) return null;
-  const delimiter = command.slice(i + 1, close);
-  if (delimiter.length === 0) return null;
-  return { delimiter, next: close + 1 };
+  const quoted = quote === "'" || quote === '"';
+  const startWord = quoted ? i + 1 : i;
+  if (quoted) {
+    i = command.indexOf(quote, startWord);
+    if (i === -1) return null;
+  } else {
+    while (i < command.length && !/[ \t\n;&|<>()'"\\`]/.test(command[i]!)) {
+      if (command[i] === "$" && command[i + 1] === "(") return null;
+      i += 1;
+    }
+  }
+  const delimiter = command.slice(startWord, i);
+  const next = quoted ? i + 1 : i;
+  // Concatenated quotes, escapes and expansion-shaped delimiter words need
+  // more quote-removal grammar. Do not guess a boundary from a word prefix.
+  if (delimiter.length === 0 || /[\\\n]/.test(delimiter)
+    || (next < command.length && !/[ \t\n;&|<>()]/.test(command[next]!))) return null;
+  return { delimiter, next, quoted, stripTabs };
 }
 
 /**
  * Index just past the heredoc terminator line that closes a body starting at
  * `from`, or null when the terminator never arrives.
  */
-function findHeredocTerminator(command: string, from: number, delimiter: string): number | null {
+function findHeredocTerminator(command: string, from: number, opened: HeredocDelimiter): number | null {
   let lineStart = from;
   const n = command.length;
   while (lineStart <= n) {
-    const newline = command.indexOf("\n", lineStart);
-    const lineEnd = newline === -1 ? n : newline;
-    if (command.slice(lineStart, lineEnd).trim() === delimiter) {
-      return newline === -1 ? n : newline + 1;
+    let i = lineStart;
+    let line = "";
+    while (i < n && command[i] !== "\n") {
+      if (!opened.quoted && command[i] === "\\") {
+        if (command[i + 1] !== "\n") line += command.slice(i, i + 2);
+        i += 2;
+      } else line += command[i++]!;
     }
-    if (newline === -1) return null;
-    lineStart = newline + 1;
+    if ((opened.stripTabs ? line.replace(/^\t+/, "") : line) === opened.delimiter) {
+      return Math.min(i + 1, n);
+    }
+    if (i >= n) return null;
+    lineStart = i + 1;
   }
   return null;
 }
@@ -388,12 +687,15 @@ function isCompleteDescriptorRedirect(operator: string): boolean {
  * tracking quote and substitution nesting. Returns `parseError` when a quote or
  * paren never closes.
  */
-function scanLeaves(command: string, literalDataProof = false): { leaves: RawLeaf[]; parseError: boolean } {
+function scanLeaves(command: string, literalDataProof = false, source?: ShellSource, simpleCommandList = false): { leaves: RawLeaf[]; parseError: boolean } {
   let parentheses = 0;
   let braces = 0;
   const leaves: RawLeaf[] = [];
   let words: RawWord[] = [];
   let leafStart = 0;
+  // A conditional connector still needs its right-hand command after any
+  // number of blank/comment lines. Sequence terminators need no such operand.
+  let pendingListOperand = false;
 
   let current = "";
   let currentHasCmdSubst = false;
@@ -436,7 +738,11 @@ function scanLeaves(command: string, literalDataProof = false): { leaves: RawLea
 
   const endLeaf = (endIndex: number, nextStart: number): void => {
     pushWord();
-    leaves.push({ words, raw: command.slice(leafStart, endIndex).trim() });
+    if (words.length > 0) pendingListOperand = false;
+    const raw = source
+      ? source.original.slice(source.offsets?.[leafStart] ?? leafStart, source.offsets?.[endIndex] ?? endIndex).trim()
+      : command.slice(leafStart, endIndex).trim();
+    leaves.push({ words, raw });
     words = [];
     leafStart = nextStart;
   };
@@ -572,7 +878,13 @@ function scanLeaves(command: string, literalDataProof = false): { leaves: RawLea
 
     // Compound separators.
     if (ch === "&") {
-      if (command[i + 1] === "&") { endLeaf(i, i + 2); i += 2; continue; }
+      if (command[i + 1] === "&") {
+        if (simpleCommandList && !wordActive && words.length === 0) return { leaves: [], parseError: true };
+        endLeaf(i, i + 2);
+        pendingListOperand = true;
+        i += 2;
+        continue;
+      }
       // `&>` / `&>>` redirect (bash: redirect both stdout+stderr).
       if (command[i + 1] === ">") {
         const opLen = command[i + 2] === ">" ? 3 : 2;
@@ -581,18 +893,27 @@ function scanLeaves(command: string, literalDataProof = false): { leaves: RawLea
         continue;
       }
       // Bare `&` background operator — leaf boundary.
+      if (simpleCommandList) return { leaves: [], parseError: true };
       endLeaf(i, i + 1);
       i += 1;
       continue;
     }
     if (ch === "|") {
-      if (command[i + 1] === "|") { endLeaf(i, i + 2); i += 2; continue; }
+      if (command[i + 1] === "|") {
+        if (simpleCommandList && !wordActive && words.length === 0) return { leaves: [], parseError: true };
+        endLeaf(i, i + 2);
+        pendingListOperand = true;
+        i += 2;
+        continue;
+      }
       // `>|` is handled in the `>` branch; a bare `|` is a pipe boundary.
+      if (simpleCommandList) return { leaves: [], parseError: true };
       endLeaf(i, i + 1);
       i += 1;
       continue;
     }
     if (ch === ";") {
+      if (simpleCommandList && !wordActive && words.length === 0) return { leaves: [], parseError: true };
       endLeaf(i, i + 1);
       i += 1;
       continue;
@@ -634,6 +955,7 @@ function scanLeaves(command: string, literalDataProof = false): { leaves: RawLea
     // they change a comment/word boundary. Balance ordinary grouping too.
     if (literalDataProof) {
       if (ch === "\\") return { leaves: [], parseError: true };
+      if (simpleCommandList && "(){}".includes(ch)) return { leaves: [], parseError: true };
       if (ch === "(") parentheses += 1;
       if (ch === ")" && --parentheses < 0) return { leaves: [], parseError: true };
       if (ch === "{") braces += 1;
@@ -648,6 +970,7 @@ function scanLeaves(command: string, literalDataProof = false): { leaves: RawLea
   }
 
   if (literalDataProof && (parentheses !== 0 || braces !== 0)) return { leaves: [], parseError: true };
+  if (simpleCommandList && pendingListOperand && !wordActive && words.length === 0) return { leaves: [], parseError: true };
   endLeaf(command.length, command.length);
   // Drop leaves that are entirely empty (e.g. trailing separators).
   const nonEmpty = leaves.filter((l) => l.words.length > 0 || l.raw.length > 0);
@@ -662,6 +985,7 @@ function scanLeaves(command: string, literalDataProof = false): { leaves: RawLea
 function consumeDoubleQuote(
   command: string,
   open: number,
+  strictBoundary = false,
 ): { text: string; next: number; hasCommandSubstitution: boolean } | null {
   let text = "";
   let hasCommandSubstitution = false;
@@ -686,6 +1010,7 @@ function consumeDoubleQuote(
       return { text, next: i + 1, hasCommandSubstitution };
     }
     if (ch === "`") {
+      if (strictBoundary) return null;
       const close = command.indexOf("`", i + 1);
       if (close === -1) return null;
       text += command.slice(i, close + 1);
@@ -694,13 +1019,14 @@ function consumeDoubleQuote(
       continue;
     }
     if (ch === "$" && command[i + 1] === "(") {
-      const close = matchParen(command, i + 1);
+      const close = matchParen(command, i + 1, strictBoundary);
       if (close === -1) return null;
       text += command.slice(i, close + 1);
       hasCommandSubstitution = true;
       i = close + 1;
       continue;
     }
+    if (strictBoundary && ch === "$" && (command[i + 1] === "{" || command[i + 1] === "[")) return null;
     text += ch;
     i += 1;
   }
@@ -711,34 +1037,70 @@ function consumeDoubleQuote(
  * Given the index of an opening `(`, return the index of its matching `)`,
  * honouring nested parens and quoted regions. Returns -1 when unbalanced.
  */
-function matchParen(command: string, openParen: number): number {
+function matchParen(command: string, openParen: number, strictBoundary = false): number {
   let depth = 0;
   let i = openParen;
+  let wordActive = false;
   const n = command.length;
   while (i < n) {
     const ch = command[i]!;
+    if (ch === "\\") { wordActive = true; i += 2; continue; }
+    if (ch === "#" && !wordActive && startsShellComment(command, i)) {
+      const newline = command.indexOf("\n", i);
+      if (newline === -1) return -1;
+      i = newline;
+      continue;
+    }
+    // Case patterns use ')' without opening a parenthesized group. Strict
+    // expansion inspection must refuse that unsupported grammar, including
+    // nested legacy substitutions, instead of ending the body prematurely.
+    if (strictBoundary && (ch === "`" || (!wordActive && command.slice(i, i + 4) === "case"
+      && /[ \t\r\n;&|<>()]/.test(command[i + 4] ?? "")))) return -1;
+    if (strictBoundary && ((ch === "$" && "{['\"".includes(command[i + 1] ?? " "))
+      || (ch === "(" && command[i + 1] === "(")
+      || ((ch === "<" || ch === ">") && command[i + 1] === "("))) return -1;
+    // Nested heredoc bodies have their own data grammar: a literal ')' in a
+    // body must not end this substitution before later executable commands.
+    // Here-strings also need an operand proof outside this bounded scanner.
+    if (strictBoundary && ch === "<" && command[i + 1] === "<") return -1;
     if (ch === "'") {
       const close = command.indexOf("'", i + 1);
       if (close === -1) return -1;
+      wordActive = true;
       i = close + 1;
       continue;
     }
     if (ch === '"') {
-      const res = consumeDoubleQuote(command, i);
+      const res = consumeDoubleQuote(command, i, strictBoundary);
       if (res === null) return -1;
+      wordActive = true;
       i = res.next;
       continue;
     }
-    if (ch === "(") { depth += 1; i += 1; continue; }
+    if (ch === "(") { wordActive = false; depth += 1; i += 1; continue; }
     if (ch === ")") {
       depth -= 1;
       if (depth === 0) return i;
+      wordActive = false;
       i += 1;
       continue;
     }
+    wordActive = !/[ \t\r\n;&|<>]/.test(ch);
     i += 1;
   }
   return -1;
+}
+
+/**
+ * Shared quote/comment-aware substitution boundary. Strict inspection refuses
+ * unsupported nested syntax before granting a new executable-data exemption.
+ */
+export function findShellSubstitutionEnd(
+  command: string,
+  openParen: number,
+  options: { strict?: boolean } = {},
+): number {
+  return command[openParen] === "(" ? matchParen(command, openParen, options.strict ?? false) : -1;
 }
 
 /** Reduce `/usr/bin/ls` → `ls`; leave bare verbs unchanged. */

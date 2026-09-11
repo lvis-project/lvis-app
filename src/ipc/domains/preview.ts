@@ -124,7 +124,7 @@ export function registerPreviewHandlers(deps: IpcDeps): void {
         });
         return {
           ok: true,
-          content: window.lines.join("\n"),
+          content: window.content,
           path: resolved,
           bytes: stat.size,
           truncated: window.truncated,

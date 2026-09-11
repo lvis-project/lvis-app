@@ -58,8 +58,11 @@ Foreground shell execution shares the output collector, timeout input schema,
 and deadline/cancellation owner in `src/tools/shell-tools.ts`. Timer conversion
 is owned by `resolveShellTimeoutMs` in `src/shared/tool-timeout-policy.ts`, which
 the executor ceiling also references. Cancellation terminates the managed child
-tree; output capture keeps a bounded prefix while draining both pipes. Child
-environment filtering stays in `src/tools/safe-env.ts`. Background incremental
+tree. An interrupted foreground call settles after requesting that termination
+and releasing its output pipe ends, even if a descendant keeps an inherited
+pipe open. Ordinary completion still drains stdout and stderr through closure;
+sandbox cleanup waits for confirmed root termination. Output capture keeps a
+bounded prefix. Child environment filtering stays in `src/tools/safe-env.ts`. Background incremental
 output and structured parser output have separate contracts.
 
 The Bash tool resolves the same Bash dialect for foreground, background, and
@@ -71,6 +74,31 @@ commands own process groups; Windows background commands use the native job
 launcher described in `native/windows-job/README.md`. Session disposal and root
 exit release those owned descendants. The native job is a lifecycle mechanism,
 not a security sandbox.
+
+Shell classification and path checks share logical-line handling in
+`src/shared/shell-tokenizer.ts`; execution retains the original command and leaf
+source spans. Operand roles distinguish patterns and process identifiers from
+file paths. Executed substitutions use the shared quote-aware boundary and
+remain subject to path checks. Process-data exemptions require complete
+inspection and refuse unsupported executable expansion syntax. Unquoted
+heredoc data exemptions require a literal body and one isolated data consumer
+across the whole command; structural checks preserve executable input.
+Continuation analysis refuses a command when its heredoc boundary cannot be
+resolved; here-strings never consume later lines as a heredoc body.
+Denial guidance distinguishes available operations from missing capabilities.
+The structural eval check can recognize a literal non-shell program argument
+inside a complete simple command list. This opt-in tokenizer proof checks every
+consumer and connector, preserving shell expansion, wrapper and file-access
+checks; it does not validate the other language's program behavior.
+
+Text file reads and previews share `readTextFileWindow` in
+`src/tools/file-read-core.ts`. Its `content` preserves the source separators
+between selected lines and omits the final selected line's separator, so a
+returned fragment can be used by the exact edit and patch tools. Both consumers
+use that content directly. Logical line offsets, limits, counts and truncation
+remain independent of line-ending style; reads stream the file and release the
+stream when the requested window is complete. Edits preserve exact matching and
+use replacement text as supplied without implicit newline conversion.
 
 External controllers can explicitly retain a headless session after its turn
 for later use of its background services. The caller owns eventual release;
@@ -172,6 +200,20 @@ Important rules:
   session is persisted; a general conversation remains unscoped.
 - Tool calls must not execute until the permission manager has resolved the
   decision path.
+- A provider round succeeds only after an explicit completion event. EOF after
+  text, reasoning, or tool calls remains a stream error. Internal stream deadlines
+  and unsolicited provider aborts are errors; caller cancellation remains an
+  interruption. An explicitly completed empty response retains its stop reason.
+- Stream activity is observed before event mapping, so incremental tool input
+  resets the same idle deadline as text or reasoning deltas.
+- Input estimates count the fields a route replays. Display-only assistant
+  thought is excluded; signed reasoning selection is shared by the estimator
+  and wire mapper. Before a fallback route is selected, preflight reserves the
+  largest complete request projection among configured routes. Local output
+  estimates still count generated thought.
+- Compaction measures the assembled pending request, including pending
+  instructions and the current summary prompt, before and after rewriting
+  history. Measurement does not consume an instruction's execution allowance.
 - Long histories are compacted through the structured compact path rather than
   silent truncation.
 - A round that stops at `end_turn` with reasoning but no visible text and no

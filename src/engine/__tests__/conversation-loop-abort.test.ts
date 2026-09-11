@@ -57,14 +57,17 @@ describe("ConversationLoop currentAbortController lifecycle", () => {
     expect(loop.currentAbortController).toBeNull();
   });
 
-  it("surfaces a stream error when a tool call arrives without message_complete", async () => {
+  it.each<{ label: string; events: StreamEvent[] }>([
+    { label: "empty response", events: [] },
+    { label: "partial text", events: [{ type: "text_delta", text: "I will update the files." }] },
+    { label: "partial reasoning", events: [{ type: "reasoning_delta", text: "I need to run a command." }] },
+    { label: "pending tool", events: [{ type: "tool_call", id: "t1", name: "noop_tool", input: {} }] },
+  ])("surfaces a stream error for $label without message_complete", async ({ events }) => {
     const loop = makeLoop();
     (loop as { provider: LLMProvider }).provider = {
       vendor: "openai" as const,
       async *streamTurn(): AsyncIterable<StreamEvent> {
-        yield { type: "text_delta", text: "도구를 확인합니다." } as StreamEvent;
-        yield { type: "tool_call", id: "t1", name: "noop_tool", input: {},
-        } as StreamEvent;
+        yield* events;
       },
     };
 
@@ -72,9 +75,9 @@ describe("ConversationLoop currentAbortController lifecycle", () => {
     const result = await loop.runTurn("ask", { onError: (message) => errors.push(message) }, undefined, { inputOrigin: "user-keyboard" },
     );
 
-    expect(result.stopReason).not.toBe("tool_use");
-    expect(result.text).toContain("도구 호출 완료 신호 없이 종료");
-    expect(errors[0]).toContain("도구 호출 완료 신호 없이 종료");
+    expect(result.stopReason).toBe("stream-error");
+    expect(result.text).toContain("모델 응답이 완료 신호 없이 종료");
+    expect(errors[0]).toContain("모델 응답이 완료 신호 없이 종료");
     expect(loop.getHistory().getMessages().some((message) => message.role === "tool"),
     ).toBe(false);
   });
@@ -225,7 +228,7 @@ describe("ConversationLoop abort (B4)", () => {
     expect(result.stopReason).not.toBe("interrupted");
   });
 
-  it("Issue 3: error with err.name=AbortError is treated as interrupt (name check)", async () => {
+  it("reports a provider AbortError when the caller has not cancelled", async () => {
     const loop = makeLoop();
 
     (loop as { provider: LLMProvider }).provider = {
@@ -238,11 +241,12 @@ describe("ConversationLoop abort (B4)", () => {
       },
     };
 
-    const result = await loop.runTurn("hi", undefined, undefined, { inputOrigin: "user-keyboard",
+    const errors: string[] = [];
+    const result = await loop.runTurn("hi", { onError: (message) => errors.push(message) }, undefined, { inputOrigin: "user-keyboard",
     });
-    // Should be treated as interrupt, not a hard error
-    expect(result.stopReason).toBe("interrupted");
-    expect(result.text).not.toContain("[중단됨]");
+    expect(result.stopReason).toBe("stream-error");
+    expect(errors).toHaveLength(1);
+    expect(loop.currentAbortController).toBeNull();
   });
 
   it("Issue 3: error with 'abort' substring but wrong name is NOT treated as abort", async () => {

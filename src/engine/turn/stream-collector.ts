@@ -243,7 +243,7 @@ export async function collectRoundStream(
       }
     }
   } catch (err) {
-    if (abortSignal?.aborted || (err instanceof Error && err.name === "AbortError")) {
+    if (abortSignal?.aborted) {
       return { kind: "interrupted", text };
     }
     if (isContextLengthError(err)) {
@@ -263,7 +263,7 @@ export async function collectRoundStream(
   }
 
   if (abortSignal?.aborted) return { kind: "interrupted", text };
-  if (!sawMessageComplete && toolCalls.length > 0) {
+  if (!sawMessageComplete) {
     return {
       kind: "stream_error",
       userMessage: t("be_streamCollector.streamEndedWithoutCompletion"),
@@ -271,7 +271,7 @@ export async function collectRoundStream(
       providerError: {
         origin: "unknown",
         classification: "unknown",
-        messagePreview: "model stream ended without message_complete after tool_call",
+        messagePreview: "model stream ended without message_complete",
       },
     };
   }

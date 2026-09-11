@@ -27,6 +27,7 @@ import { createProvider as defaultCreateProvider } from "../provider-factory.js"
 import { createLogger } from "../../../lib/logger.js";
 import { sleep } from "../../../shared/abortable-deadline.js";
 import { errorMessage } from "../../../shared/error-message.js";
+import { estimateRequestInputProjection } from "../../request-input-projection.js";
 
 const log = createLogger("fallback-chain");
 
@@ -243,7 +244,19 @@ export class FallbackProvider implements LLMProvider {
   projectRequestInput(
     input: ProviderRequestInputProjectionParams,
   ): ProviderRequestInputProjection | undefined {
-    return this.primary.projectRequestInput?.(input);
+    if (this.chain.length === 0) return this.primary.projectRequestInput?.(input);
+
+    // Preflight runs before an attempt can select a fallback. Reserve the
+    // largest complete projection among configured routes; summing routes
+    // would charge context for requests that are never sent together.
+    let projection = estimateRequestInputProjection(input, this.primary);
+    for (const entry of this.chain) {
+      // Fallback entries use the generic API-key transport. Projection must
+      // not construct providers or read credentials before they are needed.
+      const candidate = estimateRequestInputProjection(input, { vendor: entry.provider });
+      if (candidate.totalTokens > projection.totalTokens) projection = candidate;
+    }
+    return projection;
   }
 
   streamTurnWithCallbacks(

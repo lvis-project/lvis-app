@@ -108,9 +108,16 @@ function watchShellLifetime(
 ) {
   let timedOut = false;
   let aborted = false;
+  let notifyStopped: () => void;
+  const stopped = new Promise<void>((resolve) => { notifyStopped = resolve; });
   const stop = (): void => {
     abortSandbox?.();
     forceKillManagedChildProcess(child, timedOut ? "shell-timeout" : "shell-cancelled");
+    // An exited root can leave inherited pipes open in a detached descendant.
+    // Interruption releases our pipe ends and settles without waiting for close.
+    child.stdout?.destroy();
+    child.stderr?.destroy();
+    notifyStopped();
   };
   const cancel = (): void => {
     if (timedOut || aborted) return;
@@ -125,6 +132,7 @@ function watchShellLifetime(
   signal?.addEventListener("abort", cancel, { once: true });
   if (signal?.aborted) cancel();
   return {
+    stopped,
     get timedOut() { return timedOut; },
     get aborted() { return aborted; },
     dispose(): void {
@@ -476,7 +484,7 @@ export class BashTool extends ZodTool<typeof BashToolInputSchema> {
   }
 
   readonly name = "bash";
-  readonly description = "Run a shell command in the local repository.";
+  readonly description = "Run a shell command in the local repository under permission and path checks. Recursive copying and archive creation/extraction are blocked, with no built-in equivalent. Single-file copying and archive listing are distinct operations subject to the same checks.";
   readonly inputSchema = BashToolInputSchema;
   override readonly category: ToolCategory = "shell";
 
@@ -861,6 +869,7 @@ export async function spawnWithSandbox(
     let lifecycleCleaned = false;
     const cleanupAfterTermination = (): void => {
       if (lifecycleCleaned) return;
+      if (child.pid !== undefined && child.exitCode === null && child.signalCode === null) return;
       lifecycleCleaned = true;
       void cleanupAsrtSandboxAfterCommand();
       sandboxHome.cleanup();
@@ -889,7 +898,8 @@ export async function spawnWithSandbox(
       }
     };
 
-    child.on("close", (code) => finish(code));
+    void lifetime.stopped.then(() => finish(child.exitCode));
+    child.once("close", (code) => finish(code));
     child.on("error", (err) => {
       if (settled) return;
       settled = true;
@@ -953,7 +963,8 @@ async function spawnWithTimeout(
       }
     };
 
-    child.on("close", (code) => finish(code));
+    void lifetime.stopped.then(() => finish(child.exitCode));
+    child.once("close", (code) => finish(code));
     child.on("error", (err) => {
       if (settled) return;
       settled = true;
@@ -1748,6 +1759,7 @@ async function spawnPowerShellWithSandbox(
     let lifecycleCleaned = false;
     const cleanupAfterTermination = (): void => {
       if (lifecycleCleaned) return;
+      if (child.pid !== undefined && child.exitCode === null && child.signalCode === null) return;
       lifecycleCleaned = true;
       void cleanupAsrtSandboxAfterCommand();
       sandboxHome.cleanup();
@@ -1769,7 +1781,8 @@ async function spawnPowerShellWithSandbox(
       });
     };
 
-    child.on("close", (code) => finish(code));
+    void lifetime.stopped.then(() => finish(child.exitCode));
+    child.once("close", (code) => finish(code));
     child.on("error", (err) => {
       if (settled) return;
       settled = true;
@@ -1831,7 +1844,8 @@ async function spawnPowerShell(
       });
     };
 
-    child.on("close", (code) => finish(code));
+    void lifetime.stopped.then(() => finish(child.exitCode));
+    child.once("close", (code) => finish(code));
     child.on("error", (err) => {
       if (settled) return;
       settled = true;

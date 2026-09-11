@@ -110,6 +110,47 @@ describe("readTextFileWindow / isBinaryFile", () => {
     expect(rest.truncated).toBe(false);
   });
 
+  it.each([
+    ["empty", "", [], ""],
+    ["unterminated", "alpha", ["alpha"], "alpha"],
+    ["lf", "alpha\nbeta\n", ["alpha", "beta"], "alpha\nbeta"],
+    ["crlf", "alpha\r\nbeta\r\n", ["alpha", "beta"], "alpha\r\nbeta"],
+    ["cr", "alpha\rbeta\r", ["alpha", "beta"], "alpha\rbeta"],
+    ["blank lf lines", "\n\n", ["", ""], "\n"],
+    ["blank crlf lines", "\r\n\r\n", ["", ""], "\r\n"],
+    ["mixed", "alpha\r\nbeta\ngamma\rdelta", ["alpha", "beta", "gamma", "delta"], "alpha\r\nbeta\ngamma\rdelta"],
+  ] as const)("preserves exact text for %s lines", async (label, source, lines, content) => {
+    const path = join(root, `${label}.txt`);
+    writeFileSync(path, source);
+    expect(await readTextFileWindow(path, 0, 20)).toEqual({ lines, content, truncated: false });
+  });
+
+  it("preserves exact text within an offset and limit", async () => {
+    const path = join(root, "window.txt");
+    writeFileSync(path, "before\r\none\rtwo\nthree\r\nlast");
+    expect(await readTextFileWindow(path, 1, 3)).toEqual({
+      lines: ["one", "two", "three"],
+      content: "one\rtwo\nthree",
+      truncated: true,
+    });
+    expect(await readTextFileWindow(path, 4, 1)).toEqual({
+      lines: ["last"], content: "last", truncated: false,
+    });
+    expect(await readTextFileWindow(path, 5, 1)).toEqual({
+      lines: [], content: "", truncated: false,
+    });
+  });
+
+  it("preserves exact text across a file stream byte boundary", async () => {
+    const path = join(root, "boundary.txt");
+    const first = "x".repeat(65_535);
+    writeFileSync(path, `${first}\r\nbeta\r\n`);
+    const result = await readTextFileWindow(path, 0, 2);
+    expect(result.lines).toEqual([first, "beta"]);
+    expect(result.content).toBe(`${first}\r\nbeta`);
+    expect(result.truncated).toBe(false);
+  });
+
   it("detects a NUL byte as binary", async () => {
     expect(await isBinaryFile(join(root, "bin.dat"))).toBe(true);
     expect(await isBinaryFile(join(root, "text.txt"))).toBe(false);

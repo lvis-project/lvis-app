@@ -14,6 +14,10 @@ function errorText(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
+export function electronNodeNormalizerArgument(normalizerPath = DEFAULT_NORMALIZER_PATH) {
+  return `--import=${pathToFileURL(normalizerPath).href}`;
+}
+
 export function resolveElectronVitestRuntime({
   loadElectron = () => require("electron"),
   resolveVitest = () => join(dirname(require.resolve("vitest/package.json")), "vitest.mjs"),
@@ -62,18 +66,18 @@ export function createElectronVitestInvocation(
   ) {
     throw new Error("[electron-vitest-runtime-invalid] Electron and Vitest paths are required");
   }
-  const normalizerOption = `--import=${pathToFileURL(normalizerPath).href}`;
-  const nodeOptions = [env.NODE_OPTIONS, normalizerOption].filter(Boolean).join(" ");
+  const normalizerOption = electronNodeNormalizerArgument(normalizerPath);
   return {
     command: electronPath,
-    args: [vitestPath, ...args],
+    // Startup environment options can be disabled by the parent application.
+    // The required initializer must also reach fresh test worker processes.
+    args: [normalizerOption, vitestPath, ...args],
     options: {
       cwd,
       env: {
         ...env,
         ELECTRON_RUN_AS_NODE: "1",
         LVIS_TEST_NODE_EXEC_PATH: nodeExecPath,
-        NODE_OPTIONS: nodeOptions,
       },
       shell: false,
       stdio: "inherit",
