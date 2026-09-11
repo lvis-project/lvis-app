@@ -110,6 +110,60 @@ describe("file native tools", () => {
   describe.each([
     ["edit_file", EditFileTool],
     ["apply_patch", ApplyPatchTool],
+  ] as const)("%s literal replacement content", (name, ToolClass) => {
+    describe.each([false, true])("replaceAll=%s", (replaceAll) => {
+      it.each([
+        ["matched text token", "$&"],
+        ["dollar token", "$$"],
+        ["prefix token", "$`"],
+        ["suffix token", "$'"],
+        ["ordinary text", "updated text"],
+      ])("stores the %s as supplied", async (_label, newText) => {
+        const path = join(workDir, "literal-replacement.txt");
+        writeFileSync(path, "before alpha after\n");
+        const replacement = { oldText: "alpha", newText, replaceAll };
+        const result = await new ToolClass().execute(
+          name === "edit_file" ? { path, ...replacement } : { path, replacements: [replacement] },
+          ctx(),
+        );
+        expect(result.isError).toBe(false);
+        expect(parse(result.output).replacements).toBe(1);
+        expect(readFileSync(path, "utf8")).toBe(`before ${newText} after\n`);
+      });
+    });
+
+    it("stores literal replacement tokens at every match", async () => {
+      const path = join(workDir, "literal-global.txt");
+      writeFileSync(path, "before alpha middle alpha after\n");
+      const newText = "$& $$ $` $'";
+      const replacement = { oldText: "alpha", newText, replaceAll: true };
+      const result = await new ToolClass().execute(
+        name === "edit_file" ? { path, ...replacement } : { path, replacements: [replacement] },
+        ctx(),
+      );
+      expect(result.isError).toBe(false);
+      expect(parse(result.output).replacements).toBe(2);
+      expect(readFileSync(path, "utf8")).toBe(`before ${newText} middle ${newText} after\n`);
+    });
+
+    it.each(["missing", "ambiguous"] as const)("does not write when the match is %s", async (kind) => {
+      const path = join(workDir, "literal-rejected.txt");
+      const source = "before alpha middle alpha after\n";
+      writeFileSync(path, source);
+      const replacement = { oldText: kind === "missing" ? "absent" : "alpha", newText: "$&" };
+      const result = await new ToolClass().execute(
+        name === "edit_file" ? { path, ...replacement } : { path, replacements: [replacement] },
+        ctx(),
+      );
+      expect(result.isError).toBe(true);
+      expect(result.output).toContain(kind === "missing" ? "oldText not found" : "matched 2 times");
+      expect(readFileSync(path, "utf8")).toBe(source);
+    });
+  });
+
+  describe.each([
+    ["edit_file", EditFileTool],
+    ["apply_patch", ApplyPatchTool],
   ] as const)("%s exact text round trip", (name, ToolClass) => {
     it.each([
       ["lf", "\n"],

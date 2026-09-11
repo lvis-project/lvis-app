@@ -571,7 +571,7 @@ export class EditFileTool extends FileTool<typeof EditFileInputSchema> {
 
     const next = input.replaceAll
       ? current.split(input.oldText).join(input.newText)
-      : current.replace(input.oldText, input.newText);
+      : current.replace(input.oldText, () => input.newText);
     await atomicTextWrite(target, next);
     return {
       output: JSON.stringify({ path: target, replacements: input.replaceAll ? occurrences : 1 }),
@@ -627,7 +627,7 @@ export class ApplyPatchTool extends FileTool<typeof ApplyPatchInputSchema> {
       totalReplacements += replacement.replaceAll ? occurrences : 1;
       next = replacement.replaceAll
         ? next.split(replacement.oldText).join(replacement.newText)
-        : next.replace(replacement.oldText, replacement.newText);
+        : next.replace(replacement.oldText, () => replacement.newText);
     }
 
     await atomicTextWrite(target, next);
