@@ -208,11 +208,27 @@ function shellContinuationSource(command: string): ShellSource | null {
         i += 1;
         for (const start of context.heredocs) {
           const opened = readHeredocDelimiter(text, start);
-          const end = opened ? findHeredocTerminator(command, i, opened.delimiter) : null;
+          const end = opened ? findHeredocTerminator(command, i, opened) : null;
           // An unknown body boundary cannot leave a partly normalized command:
           // later continued words could then hide their actual file operands.
           if (end === null) return null;
-          append(i, end);
+          // Expandable bodies join physical lines before looking for the
+          // terminator. Quotes and comment markers in the body are data and
+          // must not change that rule, even inside a substitution's text.
+          if (opened!.quoted) append(i, end);
+          else {
+            let chunkStart = i;
+            while (i < end) {
+              if (command[i] === "\\") {
+                if (command[i + 1] === "\n") {
+                  append(chunkStart, i);
+                  chunkStart = i + 2;
+                }
+                i += 2;
+              } else i += 1;
+            }
+            append(chunkStart, end);
+          }
           i = end;
         }
         context.heredocs.length = 0;
@@ -364,10 +380,7 @@ function redactShellSource(
  * read confidently keeps the behaviour it had before. The opt-in
  * `literalDataProof` mode returns null instead and rejects unsupported forms.
  *
- * A terminator is recognised by comparing the TRIMMED line to the delimiter,
- * which is laxer than plain `<<` (where the terminator must start at column 0).
- * Lax in this direction ends the body early and hands the remaining lines back
- * to the command scanner, which is the fail-closed side of the mistake.
+ * Terminators must match the whole line; only `<<-` strips leading tabs.
  *
  * NOT a relaxation of the read/write classifier: `<<` is an input redirect, and
  * {@link ShellLeaf.hasInputRedirect} on the consuming leaf already makes the
@@ -405,7 +418,7 @@ function redactHeredocCommand(
   if (!command.includes("<<")) return command;
   const n = command.length;
   // Delimiters opened on the current line, in the order their bodies follow it.
-  const pending: string[] = [];
+  const pending: HeredocDelimiter[] = [];
   let out = "";
   let i = 0;
   while (i < n) {
@@ -453,8 +466,8 @@ function redactHeredocCommand(
     // the same line and therefore has no body to remove).
     if (ch === "<" && command[i + 1] === "<" && command[i + 2] !== "<") {
       const opened = readHeredocDelimiter(command, i);
-      if (opened) {
-        pending.push(opened.delimiter);
+      if (opened?.quoted) {
+        pending.push(opened);
         out += command.slice(i, opened.next);
         i = opened.next;
         continue;
@@ -504,42 +517,64 @@ export function startsShellComment(command: string, index: number): boolean {
 }
 
 /**
- * At `start` (the first `<` of a `<<`), read a QUOTED heredoc delimiter.
- * Returns the delimiter text and the index just past its closing quote, or null
- * when the delimiter is unquoted, empty, or never closes — all of which mean
- * "leave this heredoc alone".
+ * At `start` (the first `<` of a `<<`), read a simple bare or quoted delimiter.
+ * Quote-removal and tab-stripping metadata keep boundary detection separate
+ * from deciding whether a caller may omit that body's contents.
  */
+interface HeredocDelimiter {
+  delimiter: string;
+  next: number;
+  quoted: boolean;
+  stripTabs: boolean;
+}
+
 function readHeredocDelimiter(
   command: string,
   start: number,
-): { delimiter: string; next: number } | null {
+): HeredocDelimiter | null {
   let i = start + 2;
-  if (command[i] === "-") i += 1;
+  const stripTabs = command[i] === "-";
+  if (stripTabs) i += 1;
   while (command[i] === " " || command[i] === "\t") i += 1;
   const quote = command[i];
-  if (quote !== "'" && quote !== '"') return null;
-  const close = command.indexOf(quote, i + 1);
-  if (close === -1) return null;
-  const delimiter = command.slice(i + 1, close);
-  if (delimiter.length === 0) return null;
-  return { delimiter, next: close + 1 };
+  const quoted = quote === "'" || quote === '"';
+  const startWord = quoted ? i + 1 : i;
+  if (quoted) {
+    i = command.indexOf(quote, startWord);
+    if (i === -1) return null;
+  } else {
+    while (i < command.length && !/[ \t\r\n;&|<>()'"\\`$]/.test(command[i]!)) i += 1;
+  }
+  const delimiter = command.slice(startWord, i);
+  const next = quoted ? i + 1 : i;
+  // Concatenated quotes, escapes and expansion-shaped delimiter words need
+  // more quote-removal grammar. Do not guess a boundary from a word prefix.
+  if (delimiter.length === 0 || /[\\\n]/.test(delimiter)
+    || (next < command.length && !/[ \t\r\n;&|<>()]/.test(command[next]!))) return null;
+  return { delimiter, next, quoted, stripTabs };
 }
 
 /**
  * Index just past the heredoc terminator line that closes a body starting at
  * `from`, or null when the terminator never arrives.
  */
-function findHeredocTerminator(command: string, from: number, delimiter: string): number | null {
+function findHeredocTerminator(command: string, from: number, opened: HeredocDelimiter): number | null {
   let lineStart = from;
   const n = command.length;
   while (lineStart <= n) {
-    const newline = command.indexOf("\n", lineStart);
-    const lineEnd = newline === -1 ? n : newline;
-    if (command.slice(lineStart, lineEnd).trim() === delimiter) {
-      return newline === -1 ? n : newline + 1;
+    let i = lineStart;
+    let line = "";
+    while (i < n && command[i] !== "\n") {
+      if (!opened.quoted && command[i] === "\\") {
+        if (command[i + 1] !== "\n") line += command.slice(i, i + 2);
+        i += 2;
+      } else line += command[i++]!;
     }
-    if (newline === -1) return null;
-    lineStart = newline + 1;
+    if ((opened.stripTabs ? line.replace(/^\t+/, "") : line) === opened.delimiter) {
+      return Math.min(i + 1, n);
+    }
+    if (i >= n) return null;
+    lineStart = i + 1;
   }
   return null;
 }

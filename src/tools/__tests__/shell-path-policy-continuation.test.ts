@@ -20,6 +20,8 @@ describe("shell path policy across logical lines", () => {
     'openssl req -x509 -newkey rsa:2048 \\\n -keyout ./server.key \\\n -out ./server.crt \\\n -subj "/CN=example.test" 2>&1',
     'sed \\\n -n "/^first/,/^last/p" ./input.txt',
     'printf \\\n "%s\\n" ./input.txt',
+    'cat <<END\nfirst\\\nsecond\nEND\nprintf \\\n done',
+    'cat <<END\nEN\\\nD\nprintf \\\n done',
   ])("preserves text operand roles: %s", (command) => {
     expect(check(command)).toBeNull();
   });
@@ -30,6 +32,9 @@ describe("shell path policy across logical lines", () => {
     "cat < /et\\\nc/shadow",
     'openssl req -subj "$\\\n(cat /etc/shadow)" -out ./cert.pem',
     'openssl req -subj "/CN=example.test" \\\n -out /etc/shadow',
+    "cat <<END\nEND\ncat /et\\\nc/shadow",
+    "cat <<END\nEN\\\nD\ncat /et\\\nc/shadow",
+    "cat <<END\n$(cat /et\\\nc/shadow)\nEND",
   ])("retains sensitive-path checks: %s", (command) => {
     expect(check(command)?.kind).toBe("sensitive-path");
   });
@@ -39,9 +44,9 @@ describe("shell path policy across logical lines", () => {
   });
 
   it.each([
-    "cat <<END\nEND\ncat /et\\\nc/shadow",
-    "cat <<END\nEN\\\nD\ncat /et\\\nc/shadow",
-    "cat <<END\n$(cat /et\\\nc/shadow)\nEND",
+    'cat <<E"ND"\nEND\ncat /et\\\nc/shadow',
+    "cat <<\\END\nEND\ncat /et\\\nc/shadow",
+    "(( 1 << 2 ))\ncat /et\\\nc/shadow",
   ])("refuses an unresolved heredoc boundary before granting path exemptions: %s", (command) => {
     expect(check(command)?.kind).toBe("invalid-path");
   });
