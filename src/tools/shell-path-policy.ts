@@ -1351,19 +1351,31 @@ function extractCommandSubstitutionBodies(command: string, strict = false): stri
   const n = command.length;
   let i = 0;
   let inDoubleQuote = false;
+  let wordActive = false;
   while (i < n) {
     const ch = command[i]!;
     if (ch === "\\") {
+      wordActive = true;
       i += 2;
+      continue;
+    }
+    // Like the canonical tokenizer, require a word boundary as well as an
+    // unquoted '#': an escaped space can be part of the preceding word.
+    if (ch === "#" && !inDoubleQuote && !wordActive && startsShellComment(command, i)) {
+      const newline = command.indexOf("\n", i);
+      if (newline === -1) return bodies;
+      i = newline + 1;
       continue;
     }
     if (ch === "'" && !inDoubleQuote) {
       const close = command.indexOf("'", i + 1);
       if (close === -1) return bodies;
+      wordActive = true;
       i = close + 1;
       continue;
     }
     if (ch === '"') {
+      wordActive = true;
       inDoubleQuote = !inDoubleQuote;
       i += 1;
       continue;
@@ -1372,6 +1384,7 @@ function extractCommandSubstitutionBodies(command: string, strict = false): stri
       const close = command.indexOf("`", i + 1);
       if (close === -1 || (strict && command.slice(i + 1, close).includes("\\"))) return null;
       bodies.push(command.slice(i + 1, close));
+      wordActive = true;
       i = close + 1;
       continue;
     }
@@ -1385,9 +1398,11 @@ function extractCommandSubstitutionBodies(command: string, strict = false): stri
       // inspection, which refuses arithmetic whose execution cannot be proven.
       const arithmetic = command[i + 2] === "(" && command[close - 1] === ")";
       if (!arithmetic) bodies.push(command.slice(i + 2, close));
+      wordActive = true;
       i = close + 1;
       continue;
     }
+    if (!inDoubleQuote) wordActive = !/[ \t\r\n;&|<>()]/.test(ch);
     i += 1;
   }
   return bodies;

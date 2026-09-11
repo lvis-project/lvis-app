@@ -35,6 +35,10 @@ describe("process-selection pattern operands", () => {
     'pgrep -f "<(literal pattern)"',
     'kill ">(literal process name)"',
     'pgrep -f "$(printf \')\')"',
+    'pgrep -f "$(printf \'<<INNER )\')"',
+    'pgrep -f "$(printf \'<<<\')"',
+    'pgrep -f "$(printf "<<INNER )")"',
+    'pgrep -f "$(printf \\<\\<INNER)"',
     "pgrep -f '$(literal pattern)'",
   ])("does not treat the regex as a filesystem operand: %s", (command) => {
     expect(check(command)).toBeNull();
@@ -76,6 +80,14 @@ describe("process-selection pattern operands", () => {
     'n=3; echo "sum=$((n + 2))"',
     'echo "${VALUE:-fallback}"',
   ])("keeps existing arithmetic and variable expansion outside new process-data exemptions: %s", (command) => {
+    expect(check(command)).toBeNull();
+  });
+
+  it.each([
+    "printf okay # example $(unfinished",
+    "printf okay # example `unfinished",
+    "printf okay # example $(unfinished\nprintf later",
+  ])("ignores substitution markers in actual shell comments: %s", (command) => {
     expect(check(command)).toBeNull();
   });
 
@@ -130,6 +142,23 @@ describe("process-selection pattern operands", () => {
       `printf $'value'; cat '${source}'`,
     ]) {
       expect(findShellPathPolicyViolation(`${head} "$(${body})"`, allowed, allowed, [], true)).not.toBeNull();
+    }
+    for (const body of [
+      `cat <<'INNER'\n)\nINNER\ncat '${source}'`,
+      `cat <<INNER\n)\nINNER\ncat '${source}'`,
+      `cat <<-INNER\n\t)\n\tINNER\ncat '${source}'`,
+      `cat <<< ')'; cat '${source}'`,
+    ]) {
+      expect(findShellPathPolicyViolation(`${head} "$(${body})"`, allowed, allowed, [], true)?.kind)
+        .toBe("dynamic-path");
+    }
+    for (const command of [
+      `printf okay # example $(unfinished\nprintf "$(cat '${source}')"`,
+      `printf '%s' word\\ #$(cat '${source}')`,
+      `printf "#$(cat '${source}')"`,
+      `printf ''#$(cat '${source}')`,
+    ]) {
+      expect(findShellPathPolicyViolation(command, allowed, allowed, [], true)?.kind).toBe("sandbox-boundary");
     }
     expect(findShellPathPolicyViolation(`${head} "$(printf missing`, allowed, allowed, [], true)).not.toBeNull();
   });

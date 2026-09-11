@@ -1033,6 +1033,10 @@ function matchParen(command: string, openParen: number, strictBoundary = false):
     if (strictBoundary && ((ch === "$" && "{['\"".includes(command[i + 1] ?? " "))
       || (ch === "(" && command[i + 1] === "(")
       || ((ch === "<" || ch === ">") && command[i + 1] === "("))) return -1;
+    // Nested heredoc bodies have their own data grammar: a literal ')' in a
+    // body must not end this substitution before later executable commands.
+    // Here-strings also need an operand proof outside this bounded scanner.
+    if (strictBoundary && ch === "<" && command[i + 1] === "<") return -1;
     if (ch === "'") {
       const close = command.indexOf("'", i + 1);
       if (close === -1) return -1;
