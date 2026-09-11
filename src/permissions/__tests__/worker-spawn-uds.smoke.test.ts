@@ -17,7 +17,7 @@
  *
  * Skipped off darwin or when ASRT can't initialize (deps missing / offline).
  */
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { request as httpRequest } from "node:http";
 import { writeFileSync, mkdtempSync, statSync, existsSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -119,12 +119,16 @@ let tmpRoot: string | undefined;
 let worker: SpawnedWorker | undefined;
 
 afterEach(async () => {
-  worker?.stop();
-  worker = undefined;
-  if (isAsrtSandboxActive()) await resetAsrtSandbox();
-  __resetWrappedPluginWorkersForTest();
-  if (tmpRoot) await cleanupTmpDir(tmpRoot);
-  tmpRoot = undefined;
+  try {
+    worker?.stop();
+    worker = undefined;
+    if (isAsrtSandboxActive()) await resetAsrtSandbox();
+    __resetWrappedPluginWorkersForTest();
+  } finally {
+    vi.unstubAllEnvs();
+    if (tmpRoot) await cleanupTmpDir(tmpRoot);
+    tmpRoot = undefined;
+  }
 });
 
 describe("worker-spawn UDS smoke (macOS, real ASRT)", () => {
@@ -138,7 +142,10 @@ describe("worker-spawn UDS smoke (macOS, real ASRT)", () => {
       return;
     }
 
-    tmpRoot = mkdtempSync(join(tmpdir(), "uds-smoke-"));
+    // Keep the complete plugin socket path within macOS's Unix socket limit.
+    const temporaryBase = process.platform === "darwin" ? "/private/tmp" : tmpdir();
+    tmpRoot = mkdtempSync(join(temporaryBase, "lvis-uds-"));
+    vi.stubEnv("LVIS_HOME", tmpRoot);
     const workerFile = join(tmpRoot, "worker.cjs");
     writeFileSync(workerFile, WORKER_SOURCE, "utf8");
     // GENUINELY outside the write-jail (jail = [socketDir, tmpRoot]). A path in

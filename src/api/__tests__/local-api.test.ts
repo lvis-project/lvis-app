@@ -10,7 +10,11 @@
  * These are the security proof that mutating gesture-gated channels are
  * un-invokable by api/cli in this commit.
  */
-import { describe, it, expect, vi } from "vitest";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
+import { createTmpDirTracker } from "../../__tests__/support/tmp-dir-teardown.js";
 import {
   createLocalApi,
   LOCAL_API_GESTURE_REQUIRED,
@@ -26,6 +30,18 @@ import {
   PERMISSIONS,
   EXTERNAL_MUTATION_DENIED,
 } from "../../contract/app-contract.js";
+
+const temporaryDirectories = createTmpDirTracker();
+
+beforeEach(() => {
+  const root = temporaryDirectories.track(mkdtempSync(join(tmpdir(), "local-api-home-")));
+  vi.stubEnv("LVIS_HOME", root);
+});
+
+afterEach(async () => {
+  vi.unstubAllEnvs();
+  await temporaryDirectories.cleanup();
+});
 
 // Stub command entrypoint — chat send is exercised in its own port tests.
 const conversationCommandPort: ConversationCommandPort = {
