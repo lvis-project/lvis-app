@@ -25,6 +25,7 @@ import {
   type RationaleOnlyRoundBatchResult,
   type RationaleOnlyRoundResult,
 } from "../rationale-round.js";
+import * as streamCollector from "../stream-collector.js";
 
 const NOW = Date.now();
 const LLM_SETTINGS = {
@@ -151,6 +152,27 @@ class HangingProvider implements LLMProvider {
   async *streamTurn(params: StreamTurnParams): AsyncIterable<StreamEvent> {
     this.requests.push(params);
     await new Promise<never>(() => {});
+  }
+}
+
+class AbortAwareProvider implements LLMProvider {
+  readonly vendor = "openai" as const;
+  readonly requests: StreamTurnParams[] = [];
+
+  // eslint-disable-next-line require-yield
+  async *streamTurn(params: StreamTurnParams): AsyncIterable<StreamEvent> {
+    this.requests.push(params);
+    const signal = params.abortSignal;
+    if (!signal) throw new Error("expected a linked abort signal");
+    await new Promise<never>((_resolve, reject) => {
+      const onAbort = () => {
+        const error = new Error("operation was aborted");
+        error.name = "AbortError";
+        reject(error);
+      };
+      if (signal.aborted) onAbort();
+      else signal.addEventListener("abort", onAbort, { once: true });
+    });
   }
 }
 
@@ -366,32 +388,77 @@ describe("runRationaleOnlyRound", () => {
     expect(provider.requests).toHaveLength(0);
   });
 
-  it("maps a provider AbortError without caller abort to generation-timeout", async () => {
-    const control = fixture();
-    const error = new Error("provider deadline");
-    error.name = "AbortError";
+  it.each(["operation was aborted", "provider deadline"])(
+    "does not infer a timeout from an unsolicited provider AbortError: %s",
+    async (message) => {
+      const control = fixture();
+      const error = new Error(message);
+      error.name = "AbortError";
+      const provider = new ThrowingProvider(error);
 
-    await expect(run(new ThrowingProvider(error), control)).resolves.toEqual({
+      await expect(run(provider, control)).resolves.toEqual({
+        kind: "generation-failure",
+        generationOutcome: "generation-error",
+        streamKind: "stream_error",
+        classification: "unknown",
+        usage: null,
+      });
+      expect(provider.requests[0]!.abortSignal?.aborted).toBe(false);
+    },
+  );
+
+  it.each([
+    ["provider request timed out", "unknown"],
+    ["provider deadline exceeded", "unknown"],
+    ["provider stream idle timeout", "network"],
+  ] as const)("preserves explicit provider timeout evidence: %s", async (message, classification) => {
+    const control = fixture();
+    const error = new Error(message);
+    error.name = "AbortError";
+    const provider = new ThrowingProvider(error);
+
+    await expect(run(provider, control)).resolves.toEqual({
       kind: "generation-failure",
       generationOutcome: "generation-timeout",
-      streamKind: "interrupted",
-      classification: "timeout",
+      streamKind: "stream_error",
+      classification,
       usage: null,
     });
+    expect(provider.requests[0]!.abortSignal?.aborted).toBe(false);
   });
 
-  it("enforces the host generation deadline even when the provider ignores abort", async () => {
+  it("rejects a collector interruption without a host boundary owner", async () => {
+    const collect = vi.spyOn(streamCollector, "collectRoundStream").mockResolvedValueOnce({
+      kind: "interrupted",
+      text: "",
+    });
+    try {
+      await expect(run(new RecordingProvider([]), fixture())).rejects.toThrow(
+        "Rationale stream interrupted without a deadline or caller abort",
+      );
+      expect(collect.mock.calls[0]![0].abortSignal?.aborted).toBe(false);
+    } finally {
+      collect.mockRestore();
+    }
+  });
+
+  it.each([
+    ["ignores abort", () => new HangingProvider()],
+    ["throws AbortError on abort", () => new AbortAwareProvider()],
+  ] as const)("enforces the host generation deadline when the provider %s", async (_label, createProvider) => {
     vi.useFakeTimers();
     try {
       const control = fixture();
-      const provider = new HangingProvider();
+      const provider = createProvider();
       const pending = run(provider, control);
       await vi.advanceTimersByTimeAsync(0);
       expect(provider.requests).toHaveLength(1);
 
       await vi.advanceTimersByTimeAsync(
-        TOOL_TIMEOUT_POLICY.rationaleGenerationMs + 1,
+        TOOL_TIMEOUT_POLICY.rationaleGenerationMs - 1,
       );
+      expect(provider.requests[0]!.abortSignal?.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
       await expect(pending).resolves.toEqual({
         kind: "generation-failure",
         generationOutcome: "generation-timeout",
@@ -400,27 +467,35 @@ describe("runRationaleOnlyRound", () => {
         usage: null,
       });
       expect(provider.requests[0]!.abortSignal?.aborted).toBe(true);
+      expect(provider.requests[0]!.abortSignal?.reason.message).toBe(
+        `deadline exceeded after ${TOOL_TIMEOUT_POLICY.rationaleGenerationMs}ms`,
+      );
       expect(vi.getTimerCount()).toBe(0);
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it("keeps an in-flight caller abort distinct and clears the generation timer", async () => {
+  it.each([
+    ["ignores abort", () => new HangingProvider()],
+    ["throws AbortError on abort", () => new AbortAwareProvider()],
+  ] as const)("keeps caller cancellation distinct when the provider %s", async (_label, createProvider) => {
     vi.useFakeTimers();
     try {
       const control = fixture();
-      const provider = new HangingProvider();
+      const provider = createProvider();
       const caller = new AbortController();
       const pending = run(provider, control, caller.signal);
       await vi.advanceTimersByTimeAsync(0);
-      caller.abort(new Error("caller cancelled"));
+      const reason = new Error("caller cancelled");
+      caller.abort(reason);
 
       await expect(pending).resolves.toEqual({
         kind: "interrupted",
         usage: null,
       });
       expect(provider.requests[0]!.abortSignal?.aborted).toBe(true);
+      expect(provider.requests[0]!.abortSignal?.reason).toBe(reason);
       expect(vi.getTimerCount()).toBe(0);
     } finally {
       vi.useRealTimers();

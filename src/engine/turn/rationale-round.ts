@@ -166,15 +166,9 @@ export async function runRationaleOnlyRound(
   const stream = streamOutcome.value;
 
   if (stream.kind === "interrupted") {
-    // A provider-originated AbortError without either host boundary is
-    // conservatively treated as the provider's own deadline failure.
-    return {
-      kind: "generation-failure",
-      generationOutcome: "generation-timeout",
-      streamKind: "interrupted",
-      classification: "timeout",
-      usage: null,
-    };
+    // The deadline boundary settles before aborting the collector's signal.
+    // An owned interruption cannot arrive as a successful boundary result.
+    throw new Error("Rationale stream interrupted without a deadline or caller abort");
   }
 
   if (stream.kind === "context_error" || stream.kind === "stream_error") {
