@@ -176,6 +176,11 @@ Important rules:
   text, reasoning, or tool calls remains a stream error. Internal stream deadlines
   and unsolicited provider aborts are errors; caller cancellation remains an
   interruption. An explicitly completed empty response retains its stop reason.
+- Stream activity is observed before event mapping, so incremental tool input
+  resets the same idle deadline as text or reasoning deltas.
+- Input estimates count only fields replayed on the active route. Display-only
+  assistant thought is excluded; signed reasoning selection is shared by the
+  estimator and wire mapper. Local output estimates still count generated thought.
 - Long histories are compacted through the structured compact path rather than
   silent truncation.
 - A round that stops at `end_turn` with reasoning but no visible text and no

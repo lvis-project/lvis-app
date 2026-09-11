@@ -63,6 +63,7 @@ import type { MarketplaceInstalledProviderPreset } from "../../../shared/marketp
 import { isGuardedInsecureCredentialedModelProviderFetch } from "../marketplace-provider-fetch.js";
 import { normalizeOutputTokenLimit } from "../output-token-limit.js";
 import { toGrammarSafeToolSchemas } from "../grammar-safe-tool-schema.js";
+import { selectAssistantWireThinkingBlocks } from "../assistant-wire-content.js";
 
 /** Vendor slot recognised by VercelUnifiedProvider. */
 export type VercelVendor = LLMVendor;
@@ -895,24 +896,16 @@ export function genericToModelMessages(
       // [HIGH PRIVACY] thinkingBlocks are Claude-specific signed thoughts.
       // They MUST NOT be forwarded to non-Claude vendors (Gemini/OpenAI do not
       // understand them and the signed content must not leave the Claude path).
-      if (vendor === "claude" && msg.thinkingBlocks) {
-        for (const tb of msg.thinkingBlocks) {
-          if (typeof tb.signature !== "string" || tb.signature.length === 0) {
-            // Defense-in-depth: thinkingBlocks may be deserialized from persisted
-            // history where signatures were trimmed. Guard here ensures we never
-            // echo a signature-less block to Anthropic (400).
-            // eslint-disable-next-line no-console
-            messageMapperLog.warn(
-              "thinkingBlock missing signature — skipping",
-            );
-            continue;
-          }
-          parts.push({
-            type: "reasoning",
-            text: tb.thinking,
-            providerOptions: { anthropic: { signature: tb.signature } },
-          });
-        }
+      const replayableThinking = selectAssistantWireThinkingBlocks(msg.thinkingBlocks, vendor);
+      if (vendor === "claude" && replayableThinking.length !== (msg.thinkingBlocks?.length ?? 0)) {
+        messageMapperLog.warn("thinkingBlock missing signature — skipping");
+      }
+      for (const tb of replayableThinking) {
+        parts.push({
+          type: "reasoning",
+          text: tb.thinking,
+          providerOptions: { anthropic: { signature: tb.signature } },
+        });
       }
 
       if (msg.content) {

@@ -243,9 +243,8 @@ export function userContentText(
 }
 
 /**
- * Serialized form of a message's TEXTUAL prompt-bearing fields, notably
- * assistant thinkingBlocks, so callers do not undercount context usage when
- * extended thinking is enabled.
+ * Serialized form of a message's raw textual fields, including generated
+ * reasoning retained for local output estimates and history inspection.
  *
  * NOT a token estimator on its own, and not the answer to "what does this
  * message cost on the wire":
@@ -254,9 +253,9 @@ export function userContentText(
  *     (double-counting it here would inflate every caller);
  *   - a marked/stubbed `tool_result` keeps its content verbatim in memory, so
  *     this reads the RAW length while the wire carries only a short stub.
- * Both compensations live in `estimateMessageTokensForWire` (auto-compact.ts),
- * which is the single authority for per-message wire cost. This function is
- * its serialization helper — call the authority, not this.
+ * `estimateMessageTokensForWire` (auto-compact.ts) also projects assistant
+ * reasoning onto the active route's replayable fields. Use that authority for
+ * input cost; raw generated output can include reasoning absent from requests.
  */
 export function serializeMessageForEstimation(message: GenericMessage): string {
   switch (message.role) {
