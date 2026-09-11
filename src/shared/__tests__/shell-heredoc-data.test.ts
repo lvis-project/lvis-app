@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
+import { resolveShell } from "../../lib/shell-resolver.js";
 import { inspectShellHeredocData, redactHeredocBodies, tokenizeShell } from "../shell-tokenizer.js";
 
 describe("heredoc data inspection", () => {
@@ -47,7 +48,8 @@ describe("heredoc data inspection", () => {
 
   it.skipIf(process.platform === "win32")("inspects expansions when EOF supplies a body without its terminator", () => {
     const command = "cat <<END\nprintf '$(printf witnessed)'";
-    expect(execFileSync("/bin/sh", ["-c", command], { encoding: "utf8", stdio: ["pipe", "pipe", "ignore"] }))
+    const shell = resolveShell("bash");
+    expect(execFileSync(shell.cmd, shell.shellArgs(command), { encoding: "utf8", stdio: ["pipe", "pipe", "ignore"] }))
       .toBe("printf 'witnessed'\n");
     expect(inspectShellHeredocData(command)).toEqual({ command, expansionCommands: ["printf witnessed"] });
   });

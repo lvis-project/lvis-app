@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
+import { resolveShell } from "../../lib/shell-resolver.js";
 import { normalizeShellLineContinuations, tokenizeShell } from "../shell-tokenizer.js";
 
 describe("shell logical lines", () => {
@@ -87,7 +88,8 @@ describe("shell logical lines", () => {
 
   it.skipIf(process.platform === "win32")("resumes after a continued unquoted heredoc terminator", () => {
     const command = "cat >/dev/null << END\nEN\\\nD\nprintf witnessed";
-    expect(execFileSync("/bin/sh", ["-c", command], { encoding: "utf8" })).toBe("witnessed");
+    const shell = resolveShell("bash");
+    expect(execFileSync(shell.cmd, shell.shellArgs(command), { encoding: "utf8" })).toBe("witnessed");
     expect(normalizeShellLineContinuations(command)).toBe("cat >/dev/null << END\nEND\nprintf witnessed");
     expect(tokenizeShell(command).parseError).toBe(false);
   });
