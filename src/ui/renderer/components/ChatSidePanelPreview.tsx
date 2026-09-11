@@ -30,6 +30,7 @@ import type { ChatPreviewTarget, WorkspaceFileItem } from "../preview/preview-ta
 import { resolveIpcErrorKey } from "../format-ipc-error.js";
 import { normalizeBrowserNavigationUrl } from "../preview/url-safety.js";
 import { useCopyFlash } from "../hooks/use-copy-flash.js";
+import { incompleteToolStatusLabelKey } from "../utils/tool-status-label.js";
 import { errorMessage } from "../../../shared/error-message.js";
 import { PreviewContent } from "../preview/preview-renderers.js";
 import { FileEditDiff } from "./FileEditDiff.js";
@@ -570,6 +571,7 @@ export function FileTreeRows({
     <>
       {nodes.map((node) => {
         const file = node.file;
+        const incompleteStatusKey = incompleteToolStatusLabelKey(file?.status);
         const isFile = Boolean(file);
         const active = isFile && file?.id === selectedFileId;
         return (
@@ -598,9 +600,9 @@ export function FileTreeRows({
               {file ? (
                 <span
                   data-testid="chat-side-panel-file-tree-operation"
-                  className="shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground"
+                  className={`shrink-0 text-[10px] uppercase tracking-wide ${statusTone(file.status)}`}
                 >
-                  {t(`chatPreviewRail.fileOperation.${file.operation}`)}
+                  {t(incompleteStatusKey ?? `chatPreviewRail.fileOperation.${file.operation}`)}
                 </span>
               ) : null}
             </button>
