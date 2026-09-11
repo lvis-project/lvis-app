@@ -143,7 +143,8 @@ export class BashAstValidator {
 
   /** Relax a raw eval hit only within the shared lexical model.
    * Keep quoted stdin bodies visible and scan them conservatively as shell
-   * text; this does not model another consumer's programming language.
+   * text. A documented literal program argument has a separate language
+   * boundary; this rule does not validate that language's code or behavior.
    * Unresolved syntax, substitutions and shell consumers retain the raw deny.
    */
   private _evalIsOnlyLiteralData(command: string): boolean {
@@ -167,6 +168,20 @@ export class BashAstValidator {
     ].some(mentionsEval));
     // No argument, assignment, or file target carries the raw match.
     if (carryingEval.length === 0) return true;
+    // A single literal -c program is interpreted by its documented language,
+    // not reparsed as shell text. Prove the complete standalone operand shape
+    // before ignoring an eval spelling inside it; opaque wrappers, additional
+    // operands, redirected input/output and compound consumers stay strict.
+    if (leaves.length === 1) {
+      const leaf = leaves[0]!;
+      const verb = this._basename(leaf.argv[0] ?? "");
+      if (/^python[23]?$/.test(verb)
+        && leaf.raw === command.trim()
+        && leaf.argv.length === 3 && leaf.argv[1] === "-c"
+        && leaf.assignments.length === 0 && leaf.strippedWrappers.length === 0
+        && !leaf.hasInputRedirect && !leaf.hasOutputRedirect
+        && mentionsEval(leaf.argv[2]!)) return true;
+    }
     // These shell builtins do not execute ordinary output operands. Unknown
     // consumers may execute an argument or formatted output; retain their deny.
     for (const leaf of leaves) {
