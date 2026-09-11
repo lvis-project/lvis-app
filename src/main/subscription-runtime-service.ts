@@ -45,7 +45,6 @@ import {
   CodexAppServerError,
 } from "./codex-app-server-client.js";
 import {
-  CLAUDE_CODE_SUBSCRIPTION_PROVIDER_ID,
   isClaudeCodeSubscriptionProviderId,
   type ClaudeCodeSubscriptionStatus,
 } from "../shared/claude-code-subscription.js";

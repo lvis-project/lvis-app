@@ -427,7 +427,7 @@ export class ClaudeCodeSubscriptionClient {
     this.pendingLogin = null;
     clearTimeout(pending.timer);
     try {
-      forceKillManagedChildProcess(pending.child);
+      forceKillManagedChildProcess(pending.child, "claude-code-login-cancel");
     } catch {
       // Best-effort cancellation only.
     }
@@ -528,7 +528,7 @@ export class ClaudeCodeSubscriptionClient {
       const timer = setTimeout(() => {
         finish(() => rejectPromise(new ClaudeCodeSubscriptionError("claude-code-operation-failed")));
         try {
-          forceKillManagedChildProcess(child);
+          forceKillManagedChildProcess(child, "claude-code-command-timeout");
         } catch {
           // Ignore kill races.
         }
@@ -547,7 +547,7 @@ export class ClaudeCodeSubscriptionClient {
         if (outputBytes > MAX_OUTPUT_BYTES) {
           finish(() => rejectPromise(new ClaudeCodeSubscriptionError("claude-code-operation-failed")));
           try {
-            forceKillManagedChildProcess(child);
+            forceKillManagedChildProcess(child, "claude-code-command-output-cap");
           } catch {
             // Ignore kill races.
           }

@@ -276,7 +276,7 @@ export class ClaudeCodeConversationRuntime {
     if (!child) return;
     this.activeChild = null;
     try {
-      forceKillManagedChildProcess(child);
+      forceKillManagedChildProcess(child, "claude-code-turn-cancel");
     } catch {
       // Best-effort interrupt.
     }
