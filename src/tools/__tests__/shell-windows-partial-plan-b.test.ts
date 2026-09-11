@@ -69,11 +69,11 @@ function fakeChild(parser: boolean): FakeChild {
   queueMicrotask(() => {
     const output = parser
       ? JSON.stringify({
-          errors: [],
+          errors: [], redirections: [], unsupported: [],
           commands: [
             {
               name: "Write-Output",
-              elements: ["Write-Output", "native-plan-b"],
+              arguments: [{ kind: "literal", text: "Write-Output", value: "Write-Output" }, { kind: "literal", text: "native-plan-b", value: "native-plan-b" }],
               text: "Write-Output native-plan-b",
             },
           ],
@@ -178,11 +178,8 @@ const SHELLS = [
     toolName: "powershell" as const,
     create: () => new PowerShellTool(),
     input: { command: "Write-Output native-plan-b", timeoutSeconds: 7 },
-    // Only the approved plain child. The AST parser child used to spawn here
-    // too, because the structural deny ran inside the tool; it now runs at the
-    // runner's Step 2.5 alongside bash's, so a direct `execute()` spawns
-    // exactly one child for both dialects.
-    expectedSpawnCount: 1,
+    // A direct native AST parse precedes the one approved plain child.
+    expectedSpawnCount: 2,
   },
 ] as const;
 
@@ -193,7 +190,7 @@ describe("builtin shell - Windows partial Plan-B native execution", () => {
     childProcessMock.execFileSync.mockReset();
     // Bash resolves a POSIX shell by probing it synchronously on Windows.
     // Keep that probe fully mocked too: no real host child is started.
-    childProcessMock.execFileSync.mockReturnValue("__lvis_shell_ok__");
+    childProcessMock.execFileSync.mockImplementation((_file, args) => args.join(" ").includes("LVIS_PROBE_RHS") ? "parent\0AB가😀\0" : "__lvis_shell_ok__");
     childProcessMock.spawn.mockImplementation(
       (
         _command: string,
@@ -283,7 +280,7 @@ describe("builtin shell - Windows partial Plan-B native execution", () => {
         metadata: { sandboxed: false, isolation: "none" },
       });
       expect(replay.output).toContain("one-shot host approval permit");
-      expect(childProcessMock.spawn).toHaveBeenCalledTimes(spawnCountAfterFirst);
+      expect(childProcessMock.spawn).toHaveBeenCalledTimes(spawnCountAfterFirst + (toolName === "powershell" ? 1 : 0));
     },
   );
 });
@@ -296,7 +293,7 @@ describe.each(["darwin", "linux", "win32"] as const)(
       __resetShellResolverCache();
       childProcessMock.spawn.mockReset();
       childProcessMock.execFileSync.mockReset();
-      childProcessMock.execFileSync.mockReturnValue("__lvis_shell_ok__");
+      childProcessMock.execFileSync.mockImplementation((_file, args) => args.join(" ").includes("LVIS_PROBE_RHS") ? "parent\0AB가😀\0" : "__lvis_shell_ok__");
       childProcessMock.spawn.mockImplementation(
         (
           _command: string,
@@ -363,7 +360,7 @@ describe.each(["darwin", "linux", "win32"] as const)(
           metadata: { sandboxed: false, isolation: "none" },
         });
         expect(replay.output).toContain("one-shot host approval permit");
-        expect(childProcessMock.spawn).toHaveBeenCalledTimes(spawnCountAfterFirst);
+        expect(childProcessMock.spawn).toHaveBeenCalledTimes(spawnCountAfterFirst + (toolName === "powershell" ? 1 : 0));
       },
     );
   },

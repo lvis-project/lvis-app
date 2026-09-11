@@ -1,25 +1,27 @@
 /** File operands of a literal archive listing with no external-command options. */
 export interface TarListing {
   archivePaths: string[];
+  archiveArgIndices: number[];
 }
 
 const LISTING_SWITCHES = new Set(["--verbose", "--gzip", "--bzip2", "--xz", "--numeric-owner"]);
 
 /**
  * Recognize only explicit-file listing forms. Unknown options, file-supplied
- * options, remote archives and expansion-generated flags remain unresolved.
- * Callers must also check shell substitutions and expandable dollar words.
+ * options and remote archives remain unresolved. Callers supply the canonical
+ * argument projection and separately check unresolved expansion provenance.
  */
 export function parseTarListing(argv: readonly string[]): TarListing | null {
-  if (argv.some((word) => /[*?\[\]{}]/.test(word))) return null;
   const archivePaths: string[] = [];
+  const archiveArgIndices: number[] = [];
   let lists = false;
   let optionsEnded = false;
-  const takeArchive = (value: string | undefined): boolean => {
+  const takeArchive = (value: string | undefined, index: number): boolean => {
     // A colon can select a remote transport. An omitted file can select a tape
     // device or an environment-provided archive, so neither is a literal read.
     if (!value || value.includes(":")) return false;
     archivePaths.push(value);
+    archiveArgIndices.push(index);
     return true;
   };
 
@@ -30,7 +32,7 @@ export function parseTarListing(argv: readonly string[]): TarListing | null {
     if (token === "--list") { lists = true; continue; }
     if (LISTING_SWITCHES.has(token)) continue;
     if (token === "--file" || token.startsWith("--file=")) {
-      if (!takeArchive(token === "--file" ? argv[++i] : token.slice(7))) return null;
+      if (!takeArchive(token === "--file" ? argv[++i] : token.slice(7), i)) return null;
       continue;
     }
     if (token.startsWith("--")) return null;
@@ -46,10 +48,10 @@ export function parseTarListing(argv: readonly string[]): TarListing | null {
         // In a dashed cluster the remainder is the file value. Traditional
         // clusters always take file values from subsequent arguments.
         const glued = traditional ? "" : flags.slice(j + 1);
-        if (!takeArchive(glued || argv[++i])) return null;
+        if (!takeArchive(glued || argv[++i], i)) return null;
         if (!traditional) break;
       } else if (!"vzjJ".includes(flag)) return null;
     }
   }
-  return lists && archivePaths.length > 0 ? { archivePaths } : null;
+  return lists && archivePaths.length > 0 ? { archivePaths, archiveArgIndices } : null;
 }

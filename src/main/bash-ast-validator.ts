@@ -1,279 +1,104 @@
+import { resolve as resolvePath } from "node:path";
 import { t } from "../i18n/index.js";
-import { tokenizeShell } from "../shared/shell-tokenizer.js";
-
-
-
-
+import { staticShellWord, type ShellWord } from "../shared/shell-analysis.js";
+import { extractShellCommands } from "../shared/shell-command-fields.js";
+import { effectiveShellCommand, stripCommandPath } from "../shared/shell-effective-command.js";
+import { inspectShellExecution, ShellExecutionError, type ShellExecutionFacts } from "../shared/shell-execution.js";
+import { buildSafeChildEnv } from "../tools/safe-env.js";
+import { inspectEmbeddedShellPrograms } from "../tools/shell-path-policy.js";
 
 export type ValidationDecision = "allow" | "warn" | "deny";
-
 export interface BashAstValidationResult {
   decision: ValidationDecision;
   reason?: string;
   patternId?: string;
+  operand?: string;
+}
+export interface BashAstValidatorOptions { mode?: "warn" | "deny" }
+class StructuralShellError extends Error {
+  constructor(readonly patternId: string, message: string, readonly operand?: string) { super(message); }
 }
 
-export interface BashAstValidatorOptions {
-
-  mode?: "warn" | "deny";
-}
-
+/** Structural rules consume the same executed-command and word facts as paths. */
 export class BashAstValidator {
   constructor(private readonly opts: BashAstValidatorOptions = {}) {}
 
-
-
-
-  validate(toolName: string, input: Record<string, unknown>): BashAstValidationResult {
-    if (!this._isBashTool(toolName)) return { decision: "allow" };
-
-    const command = this._extractCommand(input);
-    if (!command) return { decision: "allow" };
-
-    // Pattern ordering matters — first match wins. The bypass patterns
-    // (variable-expansion, ifs-injection, brace-expansion, subshell-exec,
-    // rm-rf-compound, backtick-substitution) are intentionally evaluated
-    // BEFORE the simpler rm-rf-root pattern so that commands hidden inside
-    // compound/backtick/expansion shells are attributed to the correct
-    // bypass id rather than rm-rf-root.
-    const dangerousRmTarget = String.raw`(?:(?:['"]?/{1,}['"]?)|(?:['"]?~/?['"]?)|(?:['"]?\$HOME/?['"]?)|(?:['"]?\*['"]?))`;
-    const commandBoundary = String.raw`(?=$|[\s;&|])`;
-    const patterns: Array<{ id: string; regex: RegExp; reason: string }> = [
-      {
-        id: "ifs-command-injection",
-
-        regex: /\$\{?IFS\}?/i,
-        reason: t("be_bashAstValidator.ifsInjection"),
-      },
-      {
-        id: "brace-expansion-exec",
-
-        regex: /\b\w\{[^}]*\}\s+-[rfRF]/,
-        reason: t("be_bashAstValidator.braceExpansion"),
-      },
-      {
-        id: "subshell-command-exec",
-
-        regex: new RegExp(String.raw`\$\([^)]+\)\s+-[rfRF]+\s+${dangerousRmTarget}${commandBoundary}`, "i"),
-        reason: t("be_bashAstValidator.subshellExec"),
-      },
-      {
-        id: "variable-expansion-exec",
-        // e.g. `X=rm; $X -rf /`, `${CMD} -rf ~`, `$FOO -Rf $HOME`
-        // 중괄호 형태 `${VAR}`와 단순 `$VAR` 모두 캡처
-        regex: new RegExp(String.raw`\$\{?\w+\}?\s+-[rfRF]+\s+${dangerousRmTarget}${commandBoundary}`, "i"),
-        reason: t("be_bashAstValidator.variableExpansion"),
-      },
-      {
-        id: "backtick-command-substitution",
-        // `...` command substitution that contains a dangerous inner command
-        regex: /`[^`]*\b(rm\s+-[rfRF]|curl[^`]*\|\s*sh|sudo|eval)/i,
-        reason: t("be_bashAstValidator.backtickSubstitution"),
-      },
-      {
-        id: "rm-rf-compound",
-
-        // Does NOT use ^ so that a bare "rm -rf /" falls through to rm-rf-root.
-        regex: new RegExp(String.raw`[;&|\n]\s*rm\s+(?:-[rfRF]+\s+)+${dangerousRmTarget}${commandBoundary}`, "i"),
-        reason: t("be_bashAstValidator.rmRfCompound"),
-      },
-      {
-        id: "rm-rf-root",
-        regex: new RegExp(String.raw`\brm\s+(?:-[rfRF]+\s+)+${dangerousRmTarget}${commandBoundary}`, "i"),
-        reason: t("be_bashAstValidator.rmRfRoot"),
-      },
-      {
-        id: "curl-pipe-sh",
-        regex: /\b(curl|wget|fetch)\b[^|]*\|\s*(sh|bash|zsh|fish)/i,
-        reason: t("be_bashAstValidator.curlPipeSh"),
-      },
-      {
-        id: "sudo-escalation",
-        regex: /\b(sudo|su|doas)\b/i,
-        reason: t("be_bashAstValidator.sudoEscalation"),
-      },
-      {
-        id: "fork-bomb",
-        regex: /:\(\)\s*\{\s*:\|:\s*&\s*\}\s*;\s*:/i,
-        reason: "fork bomb",
-      },
-      {
-        id: "eval-untrusted",
-        regex: /\beval\s+\$?\{?[^}]*\}?/i,
-        reason: t("be_bashAstValidator.evalUntrusted"),
-      },
-      {
-        id: "tty-injection",
-        regex: /echo\s+-[ne]+\s+["'].*\\033/i,
-        reason: "TTY escape injection",
-      },
-      {
-        id: "subst-pipe-shell",
-        regex: /\$\([^)]+\)\s*\|\s*(sh|bash)/i,
-        reason: "command substitution → shell pipe",
-      },
-    ];
-
-    for (const p of patterns) {
-      if (p.regex.test(command)) {
-        if (p.id === "eval-untrusted" && this._evalIsOnlyLiteralData(command)) continue;
-        return {
-          decision: this.opts.mode === "warn" ? "warn" : "deny",
-          reason: p.reason,
-          patternId: p.id,
-        };
+  validate(toolName: string, input: Record<string, unknown>, context?: { cwd: string; facts: ShellExecutionFacts }): BashAstValidationResult {
+    // Broad name coverage remains distinct from canonical builtin identity.
+    if (!/^(bash|shell|exec|run_command|terminal)/i.test(toolName)) return { decision: "allow" };
+    const cwd = resolvePath(context?.cwd ?? process.cwd(), typeof input.cwd === "string" ? input.cwd : ".");
+    const facts = context?.facts ?? { dialect: "bash", environment: buildSafeChildEnv() };
+    const refuse = (patternId: string, message: string, word?: ShellWord): never => {
+      throw new StructuralShellError(patternId, message, word?.source.raw);
+    };
+    try {
+      for (const command of extractShellCommands(input)) {
+        inspectShellExecution(command, cwd, facts, {
+          path() {}, // This stage owns structure; the independent path gate owns authority.
+          word(word) {
+            if (word.parts.some((part) => part.kind === "parameter" && part.name === "IFS")) {
+              refuse("ifs-command-injection", t("be_bashAstValidator.ifsInjection"), word);
+            }
+            if (word.parts.some((part) => part.kind === "unknown" && part.reason === "Unsupported brace expansion")) {
+              refuse("brace-expansion-exec", t("be_bashAstValidator.braceExpansion"), word);
+            }
+          },
+          command(event) {
+            const { argv, effective } = event;
+            const verb = stripCommandPath(argv[0]!);
+            const first = effective.words[0];
+            if (event.recursiveFunction) refuse("fork-bomb", "Recursive shell function execution is unsupported", first);
+            if (event.functionCall) return;
+            if (["sudo", "su", "doas"].includes(verb)) refuse("sudo-escalation", t("be_bashAstValidator.sudoEscalation"), first);
+            if (verb === "eval") refuse("eval-untrusted", t("be_bashAstValidator.evalUntrusted"), first);
+            if (verb === "rm") {
+              const flags: string[] = [];
+              const targets: number[] = [];
+              let ended = false;
+              argv.slice(1).forEach((argument, index) => {
+                if (!ended && argument === "--") { ended = true; return; }
+                if (!ended && argument?.startsWith("-")) flags.push(argument);
+                else targets.push(index + 1);
+              });
+              const recursive = flags.some((flag) => flag === "--recursive" || /^-[A-Za-z]*[rR]/.test(flag));
+              const force = flags.some((flag) => flag === "--force" || /^-[A-Za-z]*f/.test(flag));
+              const dangerous = targets.find((index) => {
+                const target = argv[index];
+                const word = effective.words[index]!;
+                return target !== undefined && /^\/+$/u.test(target)
+                  || target !== undefined && event.environment.HOME !== undefined && resolvePath(event.cwd ?? cwd, target) === resolvePath(event.environment.HOME)
+                  || word.parts.some((part) => part.kind === "pattern" && part.value === "*");
+              });
+              if (recursive && force && (dangerous !== undefined || event.backquote)) {
+                const origin = event.original.words.find((word) => word.source.start === first?.source.start);
+                const indirect = origin?.parts.some((part) => part.kind === "parameter");
+                const id = event.backquote ? "backtick-command-substitution" : indirect ? "variable-expansion-exec"
+                  : event.original.source.start === 0 ? "rm-rf-root" : "rm-rf-compound";
+                refuse(id, t("be_bashAstValidator.rmRfRoot"), dangerous === undefined ? first : effective.words[dangerous]);
+              }
+            }
+            if (verb === "echo" && argv.slice(1).some((argument) => argument !== undefined && /^-[ne]+$/.test(argument))
+              && argv.slice(1).some((argument) => argument?.includes("\\033") || argument?.includes("\u001b"))) {
+              refuse("tty-injection", "TTY escape injection", first);
+            }
+            if (event.fromPipe && ["sh", "bash", "dash", "zsh", "ksh", "fish"].includes(verb)
+              && !argv.some((argument) => argument === "-c" || /^-[A-Za-z]*c/.test(argument ?? ""))) {
+              const download = event.pipeline?.some((statement) => {
+                if (statement.kind !== "command") return false;
+                const firstWord = effectiveShellCommand(statement).words[0];
+                return firstWord !== undefined && ["curl", "wget", "fetch"].includes(stripCommandPath(staticShellWord(firstWord) ?? ""));
+              });
+              refuse(download ? "curl-pipe-sh" : "subst-pipe-shell", t("be_bashAstValidator.curlPipeSh"), first);
+            }
+            inspectEmbeddedShellPrograms(event);
+          },
+        });
       }
+      return { decision: "allow" };
+    } catch (error) {
+      if (!(error instanceof StructuralShellError) && !(error instanceof ShellExecutionError)) throw error;
+      return { decision: this.opts.mode === "warn" ? "warn" : "deny", reason: error.message,
+        patternId: error instanceof StructuralShellError ? error.patternId : "shell-analysis", ...(error.operand ? { operand: error.operand } : {}) };
     }
-
-    // Additional leaf-aware guard using the shared tokenizer. Runs AFTER the
-    // regex patterns so their patternId attribution is unchanged; it only adds
-    // denies the raw-regex boundary could miss (e.g. a quoted separator hiding
-    // an `rm -rf /` leaf). Never relaxes an existing deny.
-    const leafGuard = this._detectDangerousRmLeaf(command);
-    if (leafGuard) {
-      return {
-        decision: this.opts.mode === "warn" ? "warn" : "deny",
-        reason: leafGuard.reason,
-        patternId: leafGuard.patternId,
-      };
-    }
-
-    return { decision: "allow" };
-  }
-
-  /** Relax a raw eval hit only within the shared lexical model.
-   * Keep quoted stdin bodies visible and scan them conservatively as shell
-   * text. A documented literal program argument has a separate language
-   * boundary; this rule does not validate that language's code or behavior.
-   * Unresolved syntax, substitutions and shell consumers retain the raw deny.
-   */
-  private _evalIsOnlyLiteralData(command: string): boolean {
-    const { leaves, parseError } = tokenizeShell(command, { heredocBodies: "preserve", literalDataProof: true });
-    if (parseError) return false;
-    // A raw hit in a comment does not establish that opaque shell-code
-    // operands or substitutions elsewhere are safe to execute.
-    for (const leaf of leaves) {
-      if (leaf.hasCommandSubstitution || leaf.hasProcessSubstitution
-        || leaf.argvHasExpandableDollar.some(Boolean)
-        || leaf.assignments.some((assignment) => /[$`]/.test(assignment))) return false;
-      const verb = this._basename(leaf.argv[0] ?? "");
-      if (/^(?:eval|sh|bash|dash|ash|zsh|ksh|fish|csh|tcsh|source|\.|exec|builtin)$/.test(verb)) return false;
-      // printf -v interprets an array subscript in its variable-name operand;
-      // even a single-quoted subscript can execute command substitution there.
-      if (leaf.argv[0] === "printf" && leaf.argv[1]?.startsWith("-") && leaf.argv[1] !== "--") return false;
-    }
-    const mentionsEval = (word: string): boolean => /\beval(?:\s|$)/i.test(word);
-    const carryingEval = leaves.filter((leaf) => [
-      ...leaf.argv, ...leaf.assignments, ...leaf.redirectTargets, ...leaf.inputRedirectTargets,
-    ].some(mentionsEval));
-    // No argument, assignment, or file target carries the raw match.
-    if (carryingEval.length === 0) return true;
-    // Prove the whole direct command list before attributing an eval spelling
-    // to a literal foreign-language program operand. The shared scanner owns
-    // separator completeness; a flat leaf list alone loses pipes/dangling &&.
-    const simpleList = tokenizeShell(command, { heredocBodies: "preserve", simpleCommandList: true });
-    if (!simpleList.parseError && simpleList.leaves.length > 0 && simpleList.leaves.every((leaf) => {
-      // Complete static output descriptor operators have no file target.
-      // Files and stdin consumers stay outside this proof; other permission
-      // layers still inspect the original command under their own contracts.
-      if (leaf.assignments.length > 0 || leaf.strippedWrappers.length > 0
-        || leaf.hasInputRedirect || leaf.redirectTargets.length > 0) return false;
-      const verb = this._basename(leaf.argv[0] ?? "");
-      if (/^python[23]?$/.test(verb)) {
-        return leaf.argv.length === 3 && leaf.argv[1] === "-c"
-          && !leaf.argv.slice(0, 2).some(mentionsEval);
-      }
-      if (leaf.argv[0] === "cd") {
-        return !leaf.argv.some(mentionsEval) && (leaf.argv.length <= 2
-          || (leaf.argv.length === 3 && leaf.argv[1] === "--"));
-      }
-      return leaf.argv[0] === "printf" || leaf.argv[0] === "echo";
-    })) return true;
-    // These shell builtins do not execute ordinary output operands. Unknown
-    // consumers may execute an argument or formatted output; retain their deny.
-    for (const leaf of leaves) {
-      if (leaf.assignments.some(mentionsEval)
-        || leaf.redirectTargets.some(mentionsEval)
-        || leaf.inputRedirectTargets.some(mentionsEval)) return false;
-      if (leaf.argv.length === 0) continue;
-      if (leaf.argv[0] !== "printf" && leaf.argv[0] !== "echo") return false;
-      if (leaf.strippedWrappers.some((wrapper) => wrapper !== "command")) return false;
-    }
-    return true;
-  }
-
-  /**
-   * Tokenizer-based detection of an `rm -rf <dangerous-path>` leaf anywhere in a
-   * compound command. Uses the shared {@link tokenizeShell} leaf definition so a
-   * quote-aware split identifies the leaf the raw regex might miss. Returns null
-   * when no such leaf is found (or on a parse error — the regex patterns and the
-   * host risk inspector already fail closed on unparseable input, so this
-   * additive layer stays silent rather than double-attributing).
-   */
-  private _detectDangerousRmLeaf(
-    command: string,
-  ): { reason: string; patternId: string } | null {
-    const { leaves, parseError } = tokenizeShell(command);
-    if (parseError) return null;
-    for (const leaf of leaves) {
-      const argv = leaf.argv;
-      if (argv.length === 0) continue;
-      const verb = this._basename(argv[0]!);
-      if (verb !== "rm") continue;
-      const flags = argv.slice(1);
-      const recursiveForce = flags.some((f) => /^-[a-zA-Z]*r[a-zA-Z]*$/i.test(f))
-        && flags.some((f) => /^-[a-zA-Z]*f[a-zA-Z]*$/i.test(f));
-      if (!recursiveForce) continue;
-      const target = flags.find((f) => !f.startsWith("-"));
-      if (target !== undefined && this._isDangerousRmTarget(target)) {
-        return { reason: t("be_bashAstValidator.rmRfCompound"), patternId: "rm-rf-compound" };
-      }
-    }
-    return null;
-  }
-
-  /** Reduce `/bin/rm` → `rm`; leave bare verbs unchanged. */
-  private _basename(token: string): string {
-    const slash = token.lastIndexOf("/");
-    return slash >= 0 ? token.slice(slash + 1) : token;
-  }
-
-  /** True for the dangerous `rm` targets the regex patterns also treat as
-   * catastrophic: `/`, `~`/`~/`, `$HOME`, `*`. */
-  private _isDangerousRmTarget(target: string): boolean {
-    return /^\/+$/.test(target)
-      || /^~\/?$/.test(target)
-      || /^\$HOME\/?$/.test(target)
-      || target === "*";
-  }
-
-  /**
-   * Does this tool present itself as a shell? Deliberately a NAME test, and
-   * deliberately the WIDEST of the host's three shell-tool derivations.
-   *
-   * A plugin or MCP tool registers under its own unprefixed name
-   * (`mcpToolToPluginTool` passes `tool.name` through verbatim), so a plugin
-   * tool called `shell-runner` reaches this validator and gets the POSIX
-   * structural rules applied to its command string. That coverage is the point:
-   * narrowing this to the canonical-instance discriminator the runner computes
-   * (`isCanonicalBashTool` / `isCanonicalPowerShellTool` in
-   * `src/tools/invocation-runner.ts`) would drop every non-builtin shell tool
-   * out of structural analysis. The third derivation,
-   * `ASRT_WRAPPED_SHELL_TOOLS` in `src/permissions/sandbox-capability.ts`,
-   * answers a different question (which tools run on the ASRT-wrapped host
-   * shell) and is intentionally the narrowest, builtin-only set.
-   *
-   * The three are NOT merged, and the asymmetry is pinned by
-   * `src/tools/__tests__/executor-shell-tool-identity.test.ts`.
-   */
-  private _isBashTool(toolName: string): boolean {
-    return /^(bash|shell|exec|run_command|terminal)/i.test(toolName);
-  }
-
-  private _extractCommand(input: Record<string, unknown>): string | null {
-    if (typeof input.command === "string") return input.command;
-    if (typeof input.script === "string") return input.script;
-    if (typeof input.cmd === "string") return input.cmd;
-    return null;
   }
 }

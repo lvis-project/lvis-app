@@ -129,6 +129,7 @@ export interface ToolExecutionContext {
    * Tool code must use this plan rather than recomputing a late fallback.
    */
   hostShellExecutionPlan?: HostShellExecutionPlan;
+  preparedShellInvocation?: import("./prepared-shell-invocation.js").PreparedShellInvocation;
   /**
    * Opaque one-shot approval proof for a requested-sandbox plain-shell fallback.
    * It is minted only after allow-once and is consumed by bash/PowerShell.

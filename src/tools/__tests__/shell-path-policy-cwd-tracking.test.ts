@@ -9,10 +9,10 @@
  * needed a directory that was ALLOWED but shallower than the session cwd; from
  * there `..` reaches places the static resolution never looks at.
  *
- * The fix walks leaves in order using the shared tokenizer SOT — the same
- * splitting the risk classifier uses — and resolves each leaf's operands
- * against the directory in effect for that leaf.
+ * The shared execution inspector follows typed statement scopes and resolves
+ * each operand against the possible directories at that point of execution.
  */
+import { homedir } from "node:os";
 import { describe, expect, it } from "vitest";
 
 import { findShellPathPolicyViolation } from "../shell-path-policy.js";
@@ -109,7 +109,7 @@ describe("shell path policy — working directory tracking", () => {
 
     it("says what to do instead", () => {
       // The message is shown to the user, so it has to name a way forward.
-      expect(check("cd $DIR && cat foo")!.reason).toMatch(/absolute path|working directory/i);
+      expect(check("cd $DIR && cat foo")!.reason).toMatch(/unresolved working-directory destination/i);
     });
 
     it("treats a bare cd as decidable — it goes home, which is then checked", () => {
@@ -117,10 +117,9 @@ describe("shell path policy — working directory tracking", () => {
       // rather than an indeterminate one. Distinguishing them matters: only the
       // indeterminate case is unanalysable.
       //
-      // This one needs the RESOLVED destination to be checked: a bare `cd` has
-      // no operand to check, and `foo` is not a path candidate, so an
-      // operand-only walk let the whole thing through.
-      const violation = check("cd && cat foo");
+      // A bare cd supplies no path word: its destination comes from the
+      // prepared HOME fact and receives the same boundary check.
+      const violation = findShellPathPolicyViolation("cd && cat foo", CWD, ROOT, EXTRAS, true, { dialect: "bash", environment: { HOME: homedir() } });
       expect(violation).not.toBeNull();
       expect(violation!.kind).toBe("sandbox-boundary");
     });

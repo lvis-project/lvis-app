@@ -24,6 +24,41 @@ type ShellDialect = "posix" | "bash";
 const cachedShells = new Map<ShellDialect, ResolvedShellCommand>();
 const cachedErrors = new Map<ShellDialect, ShellMismatchError>();
 const SHELL_PROBE_TIMEOUT_MS = 20_000;
+export interface BashCapabilities {
+  readonly unicodeEscapes: boolean;
+  readonly prefixAssignmentRhs: "incoming" | "sequential";
+}
+const bashCapabilities = new WeakMap<ResolvedShellCommand, Map<string, Readonly<BashCapabilities>>>();
+
+/** Fixed native controls only; caller command text is never executed by a probe. */
+export function getBashCapabilities(
+  shell: ResolvedShellCommand,
+  environment: Readonly<Record<string, string>>,
+  cwd: string,
+): Readonly<BashCapabilities> {
+  const locale = JSON.stringify([environment.LC_ALL, environment.LC_CTYPE, environment.LANG]);
+  let entries = bashCapabilities.get(shell);
+  const cached = entries?.get(locale);
+  if (cached) return cached;
+  const child = `${shellQuote(shellPathForHostPath(shell, shell.cmd))} -c ${shellQuote('printf "%s\\0" "$LVIS_PROBE_RHS"')}`;
+  const source = `LVIS_PROBE_VALUE=parent; LVIS_PROBE_VALUE=child LVIS_PROBE_RHS=$LVIS_PROBE_VALUE ${child}; printf '%s\\0' $'\\u0041\\U00000042\\uac00\\U0001f600'`;
+  const output = execFileSync(shell.cmd, shell.shellArgs(source), {
+    cwd, env: { ...environment }, stdio: "pipe", timeout: SHELL_PROBE_TIMEOUT_MS, maxBuffer: 4096,
+  }).toString("utf8").split("\0");
+  if (output.length !== 3 || output[2] !== "" || !["parent", "child"].includes(output[0]!)) {
+    throw new ShellMismatchError("The selected Bash did not satisfy the execution-state probe contract.");
+  }
+  const capabilities = Object.freeze({
+    unicodeEscapes: output[1] === "AB가😀",
+    prefixAssignmentRhs: output[0] === "child" ? "sequential" as const : "incoming" as const,
+  });
+  if (!entries) { entries = new Map(); bashCapabilities.set(shell, entries); }
+  // Interpreter identity is owned by resolveShell; only locale affects these
+  // fixed controls. Keep at most eight locale observations for that identity.
+  if (entries.size >= 8) entries.delete(entries.keys().next().value!);
+  entries.set(locale, capabilities);
+  return capabilities;
+}
 
 export function resolveShell(dialect: ShellDialect = "posix"): ResolvedShellCommand {
   if (process.platform !== "win32" && dialect === "posix") {
@@ -58,8 +93,9 @@ export function resolveShell(dialect: ShellDialect = "posix"): ResolvedShellComm
         throw new Error(`unexpected shell probe output: ${JSON.stringify(probe)}`);
       }
       if (process.platform === "win32") candidate.windowsFlavor = detectWindowsShellFlavor(candidate);
-      cachedShells.set(dialect, candidate);
-      return candidate;
+      const selected = Object.freeze({ ...candidate });
+      cachedShells.set(dialect, selected);
+      return selected;
     } catch (err) {
       lastError = err;
     }

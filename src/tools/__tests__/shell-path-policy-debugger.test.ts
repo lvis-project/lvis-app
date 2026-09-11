@@ -12,6 +12,7 @@ describe("debugger command operand roles", () => {
   afterEach(async () => { await cleanupTmpDir(root); });
 
   it.each([
+    "gdb -ex /etc/shadow ./program",
     "gdb -q -batch -ex 'x/4xw $sp' ./program",
     "gdb -ex 'x/-3uh 0x54320' ./program",
     "gdb -ex 'print/x $pc' ./program",
@@ -28,7 +29,6 @@ describe("debugger command operand roles", () => {
   });
 
   it.each([
-    "gdb -ex /etc/shadow ./program",
     "gdb -x /etc/shadow ./program",
     "gdb --command=/etc/shadow ./program",
     "gdb -ix /etc/shadow ./program",
@@ -46,13 +46,13 @@ describe("debugger command operand roles", () => {
 
   it.each(["--args", "-args", "--arg", "--no-escape-args", "-no-escape-args", "--no-escape-a", "--"])(
     "does not apply debugger option roles to forwarded arguments after %s", (separator) => {
-      expect(findShellPathPolicyViolation(`gdb ${separator} ./program -ex '$UNRESOLVED_INPUT/file'`, root, root, [], false)).not.toBeNull();
+      expect(findShellPathPolicyViolation(`gdb ${separator} ./program -ex "$UNRESOLVED_INPUT/file"`, root, root, [], false)).not.toBeNull();
     },
   );
 
-  it.each(["-x", "--command", "--comm", "-ix", "--init-command", "-eix", "--early-init-command", "--eval", "--init-eval-comm", "--ty"])(
+  it.each(["-x", "--command", "--comm", "-ix", "--init-command", "-eix", "--early-init-command", "--eval", "--init-eval-comm", "--tt"])(
     "consumes the file operand before reading later options: %s", (option) => {
-      expect(findShellPathPolicyViolation(`gdb ${option} -ex '$UNRESOLVED_INPUT/file'`, root, root, [], false)).not.toBeNull();
+      expect(findShellPathPolicyViolation(`gdb ${option} -ex "$UNRESOLVED_INPUT/file"`, root, root, [], false)).not.toBeNull();
     },
   );
 });

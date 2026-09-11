@@ -75,21 +75,58 @@ launcher described in `native/windows-job/README.md`. Session disposal and root
 exit release those owned descendants. The native job is a lifecycle mechanism,
 not a security sandbox.
 
-Shell classification and path checks share logical-line handling in
-`src/shared/shell-tokenizer.ts`; execution retains the original command and leaf
-source spans. Operand roles distinguish patterns and process identifiers from
-file paths. Executed substitutions use the shared quote-aware boundary and
-remain subject to path checks. Process-data exemptions require complete
-inspection and refuse unsupported executable expansion syntax. Unquoted
-heredoc data exemptions require a literal body and one isolated data consumer
-across the whole command; structural checks preserve executable input.
-Continuation analysis refuses a command when its heredoc boundary cannot be
-resolved; here-strings never consume later lines as a heredoc body.
-Denial guidance distinguishes available operations from missing capabilities.
-The structural eval check can recognize a literal non-shell program argument
-inside a complete simple command list. This opt-in tokenizer proof checks every
-consumer and connector, preserving shell expansion, wrapper and file-access
-checks; it does not validate the other language's program behavior.
+Shell interpretation starts in [shell-parser.ts](../../src/shared/shell-parser.ts),
+which initializes the packaged grammar before synchronous policy consumers are
+available. [shell-analysis.ts](../../src/shared/shell-analysis.ts) lowers its
+typed syntax into statements, word parts, redirect ownership and original byte
+spans. Active continuations and quoted data are distinguished by the grammar's
+lexical reader; the executed command bytes are never normalized. The tokenizer
+is a conservative risk projection of this same analysis, not another parser or
+a source of path authority. Parse, runtime and unsupported-syntax failures do
+not return partial permission evidence. The [grammar build contract](../../tools/shell-parser/README.md)
+owns pinned inputs, patch removal conditions, resource bounds and retained
+runtime memory. There is no command or analysis-result cache.
+
+[shell-execution.ts](../../src/shared/shell-execution.ts) propagates cwd,
+bindings and exit-status possibilities through actual statement scopes. Loop
+conditions contribute their final state; unknown outcomes retain every possible
+branch. Subshells isolate bindings and cwd, while potential filesystem changes
+remain shared. Path operands are resolved at their point of use, preserving
+literal dollars, percent signs and symlink traversal before parent components.
+Patterns, program text and output data have explicit argument roles; unknown
+values cannot authorize paths. Pure data arithmetic and default/alternate
+parameter values retain their separate value and effect contracts. Heredoc
+substitutions are inspected where expansion occurs, and input remains attached
+to its actual consumer. A pipe consumed as shell code is explicitly unresolved.
+These rules do not validate the internal behavior of another programming
+language or relax traversal, sensitive-path, approval or sandbox gates.
+
+[prepared-shell-invocation.ts](../../src/tools/prepared-shell-invocation.ts)
+issues a private host handle after the final command and execution plan are
+known. It captures the interpreter, immutable argv, cwd, filtered environment
+and observed interpreter capabilities once. Policy and native execution use
+those same facts, including every public command-bearing input field. For
+sandbox execution an inner launcher passes the original command as one `-c`
+argument and fixes the prepared environment after wrapper setup. Its HOME and
+temporary directory belong to that invocation; this replaces the shared
+temporary directory for the inner command without enlarging allowed roots.
+Final grants materialize the wrapper without recapturing environment facts.
+One synchronous claim precedes wrapper or spawn effects. A denied preparation
+is released, pending wrapper work retains ownership until settlement, and a
+spawned child's resources remain until confirmed termination even if the tool
+result settles earlier. Background execution retains its existing plan limits
+and session cleanup owner.
+
+PowerShell uses [native AST facts](../../src/tools/powershell-ast.ts), not Bash
+interpretation. Its literal arguments, parameters and redirects remain distinct.
+Function definitions and .NET method invocation are explicitly unsupported:
+the previous command-only summary omitted their execution effects. This is a
+public compatibility restriction, not a claim that the native shell rejects
+them. Supported cmdlet output, exit, timeout and cleanup remain covered through
+the public tool in [shell-tools.test.ts](../../src/tools/__tests__/shell-tools.test.ts);
+native process stress has a separate lifecycle test boundary. The
+[permission contract](permission-policy-design.md) records other explicit
+analysis limits and their regression owners.
 
 Text file reads and previews share `readTextFileWindow` in
 `src/tools/file-read-core.ts`. Its `content` preserves the source separators

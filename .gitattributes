@@ -67,3 +67,8 @@ resources/AGENTS.md* text eol=lf
 scripts/hooks/pre-commit text eol=lf
 scripts/hooks/pre-push text eol=lf
 scripts/hooks/*.mjs text eol=lf
+
+# Unified patches contain required space-prefixed context, including empty lines
+# and Go tab indentation. Keep their LF text/diffs and check other whitespace.
+# The parser build checks application to the pinned source and asset identity.
+tools/shell-parser/*.patch whitespace=-blank-at-eol,-space-before-tab

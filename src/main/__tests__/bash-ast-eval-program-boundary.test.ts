@@ -28,7 +28,9 @@ it("keeps the original command subject to independent directory and file contain
     expect(validator.validate("bash", { command: outside }).decision).toBe("allow");
     expect(pathViolation(outside)).not.toBeNull();
     for (const command of [`${program} < '${input}'`, `${program} > '${output}'`]) {
-      expect(validator.validate("bash", { command }).patternId).toBe("eval-untrusted");
+      // Redirects remain file operations; their presence does not execute the
+      // word eval inside another language's literal program argument.
+      expect(validator.validate("bash", { command }).decision).toBe("allow");
       expect(pathViolation(command)).not.toBeNull();
     }
   } finally {

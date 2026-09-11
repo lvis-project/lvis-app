@@ -9,7 +9,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { execFileSync } from "node:child_process";
-import { redactHeredocBodies, tokenizeShell } from "../shell-tokenizer.js";
+import { tokenizeShell } from "../shell-tokenizer.js";
 
 describe("tokenizeShell — quoting", () => {
   it("keeps whitespace inside single quotes as one argv token", () => {
@@ -84,7 +84,7 @@ describe("tokenizeShell — substitution flags", () => {
   it("does NOT flag bare parameter expansion as command substitution", () => {
     const { leaves } = tokenizeShell("ls ${HOME}");
     expect(leaves[0]!.hasCommandSubstitution).toBe(false);
-    expect(leaves[0]!.argv).toEqual(["ls", "${HOME}"]);
+    expect(leaves[0]!.argv).toEqual(["ls", "$HOME"]);
   });
 });
 
@@ -167,10 +167,8 @@ describe("tokenizeShell — wrapper & assignment stripping", () => {
     expect(tokenizeShell("nohup ls -la").leaves[0]!.argv).toEqual(["ls", "-la"]);
   });
 
-  it("a bare wrapper leaves an empty argv but records the wrapper verb", () => {
-    const leaf = tokenizeShell("timeout").leaves[0]!;
-    expect(leaf.argv).toEqual([]);
-    expect(leaf.strippedWrappers).toEqual(["timeout"]);
+  it("an incomplete wrapper does not produce a partial executable leaf", () => {
+    expect(tokenizeShell("timeout")).toEqual({ leaves: [], parseError: true });
   });
 
   it("records a stripped wrapper basename even when argv is present", () => {
@@ -205,42 +203,7 @@ describe("tokenizeShell — fail closed", () => {
   });
 });
 
-describe("redactHeredocBodies", () => {
-  it("removes a quoted-delimiter body and its terminator line", () => {
-    const command = "python3 - <<'EOF'\nnstep = int(2.0 / 0.002)\nEOF\necho done";
-    expect(redactHeredocBodies(command)).toBe("python3 - <<'EOF'\necho done");
-  });
 
-  it("handles the tab-stripping `<<-` form and a double-quoted delimiter", () => {
-    expect(redactHeredocBodies('cat <<-"END"\nbody / line\n\tEND\nls').trim())
-      .toBe('cat <<-"END"\nls');
-  });
-
-  it("leaves an UNQUOTED delimiter alone, because the shell still expands the body", () => {
-    const command = "cat <<EOF\n$(id)\nEOF";
-    expect(redactHeredocBodies(command)).toBe(command);
-  });
-
-  it("leaves an unterminated heredoc alone", () => {
-    const command = "cat <<'EOF'\nstill going";
-    expect(redactHeredocBodies(command)).toBe(command);
-  });
-
-  it("does not treat a here-string `<<<` as a heredoc", () => {
-    const command = "grep x <<< 'a b'";
-    expect(redactHeredocBodies(command)).toBe(command);
-  });
-
-  it("does not treat `<<` inside quotes as a heredoc operator", () => {
-    const command = "echo \"a << 'EOF' b\"\nsecond";
-    expect(redactHeredocBodies(command)).toBe(command);
-  });
-
-  it("consumes two heredocs opened on one line in order", () => {
-    const command = "diff <<'A' <<'B'\nfirst\nA\nsecond\nB\nls";
-    expect(redactHeredocBodies(command)).toBe("diff <<'A' <<'B'\nls");
-  });
-});
 
 describe("tokenizeShell — heredoc bodies are not commands", () => {
   it("does not turn body lines into leaves", () => {
@@ -258,33 +221,7 @@ describe("tokenizeShell — heredoc bodies are not commands", () => {
   });
 });
 
-describe("redactHeredocBodies — comments", () => {
-  it("does not open a heredoc from a `<<` inside a comment", () => {
-    // bash runs line 2 here; treating the comment's `<<'X'` as a real opener
-    // deleted line 2 from every caller's view of the command.
-    const command = "echo hi # <<'X'\ncat /etc/shadow\nX";
-    expect(redactHeredocBodies(command)).toBe(command);
-  });
 
-  it("ignores a `<<` in a whole-line comment and in a `<<-` comment", () => {
-    const whole = "# <<'X'\ncat /etc/shadow\nX";
-    expect(redactHeredocBodies(whole)).toBe(whole);
-    const dash = "echo hi # <<-'X'\ncat /etc/shadow\nX";
-    expect(redactHeredocBodies(dash)).toBe(dash);
-  });
-
-  it("treats a mid-token `#` as text, not as a comment", () => {
-    // A URL fragment is part of the argument. If this started a comment, the
-    // heredoc that follows would stop being redacted.
-    const command = "curl http://example.test/x#frag <<'A'\nbody\nA\nls";
-    expect(redactHeredocBodies(command)).toBe("curl http://example.test/x#frag <<'A'\nls");
-  });
-
-  it("still consumes a body for a heredoc opened before a trailing comment", () => {
-    const command = "cat <<'A' # note\nbody\nA\nls";
-    expect(redactHeredocBodies(command)).toBe("cat <<'A' # note\nls");
-  });
-});
 
 describe("tokenizeShell — input redirect sources", () => {
   it("reports the source of a `<` redirect", () => {
@@ -380,8 +317,8 @@ describe("tokenizeShell — redirect operand completeness", () => {
     { command: "cmd > 'report file'", target: "report file" },
     { command: "cmd > report\\ file", target: "report file" },
     { command: "cmd > \\>", target: ">" },
-    { command: String.raw`cmd > C:\workspace\report.txt`, target: String.raw`C:\workspace\report.txt` },
-    { command: String.raw`cmd > \\server\share\report.txt`, target: String.raw`\\server\share\report.txt` },
+    { command: String.raw`cmd > C:\workspace\report.txt`, target: "C:workspacereport.txt" },
+    { command: String.raw`cmd > \\server\share\report.txt`, target: String.raw`\serversharereport.txt` },
   ])("distinguishes an explicit target from an absent word: $command", ({ command, target }) => {
     const parsed = tokenizeShell(command);
     expect(parsed.parseError).toBe(false);

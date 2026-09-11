@@ -148,6 +148,7 @@ export interface ExecutionStageContext {
   hostShellExecutionPermitBinding: HostShellExecutionPermitBinding | undefined;
   hostShellApprovalDecision: ApprovalDecision | undefined;
   hostShellExecutionPlan: HostShellExecutionPlan | undefined;
+  preparedShellInvocation?: import("./prepared-shell-invocation.js").PreparedShellInvocation;
   hostShellRequiresExplicitApproval: boolean;
   invocationRuntimeAllowedDirectories: string[];
   supportsA2AParentDelivery: boolean | undefined;
@@ -192,6 +193,7 @@ export async function executeAuthorizedToolInvocation(
     hostShellExecutionPermitBinding,
     hostShellApprovalDecision,
     hostShellExecutionPlan,
+    preparedShellInvocation,
     hostShellRequiresExplicitApproval,
     invocationRuntimeAllowedDirectories,
     supportsA2AParentDelivery,
@@ -653,6 +655,7 @@ export async function executeAuthorizedToolInvocation(
       ? { ownerPluginSandboxRoot: resolvePluginWritableRoot(tool.pluginId) }
       : {}),
     ...(hostShellExecutionPlan ? { hostShellExecutionPlan } : {}),
+    ...(preparedShellInvocation ? { preparedShellInvocation } : {}),
     ...(hostShellExecutionPermit ? { hostShellExecutionPermit } : {}),
     metadata: {
       // Absent when the invocation has no conversation behind it. Tools that

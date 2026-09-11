@@ -9,6 +9,7 @@
  * file-wide, which must not leak onto the unmocked suites here.
  */
 
+import type { PowerShellArgument, PowerShellValueArgument } from "../powershell-ast.js";
 import { EventEmitter } from "node:events";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -36,6 +37,8 @@ import {
   validatePowerShellAst,
   validatePowerShellCommand,
   type PowerShellAstSummary,
+  findPowerShellAstPathViolation,
+  _spawnPowerShellForTest,
 } from "../shell-tools.js";
 
 /**
@@ -350,7 +353,7 @@ describe("bash tool", () => {
         ctx(),
       );
       expect(result.isError).toBe(true);
-      expect(result.output).toContain("unsupported user-home expansion");
+      expect(result.output).toContain("Unsupported named-home expansion");
     });
 
     it("rejects bare ~user operands before shell expansion", async () => {
@@ -359,7 +362,7 @@ describe("bash tool", () => {
         ctx(),
       );
       expect(result.isError).toBe(true);
-      expect(result.output).toContain("unsupported user-home expansion");
+      expect(result.output).toContain("Unsupported named-home expansion");
     });
 
     it("rejects redirection targets outside the sandbox before spawning the shell", async () => {
@@ -508,11 +511,39 @@ describe("powershell tool", () => {
   });
 
   describe.skipIf(process.platform !== "win32")("native process resource handling", () => {
-    it("drains both large output streams and preserves the exit status", async () => {
+    it("preserves public cmdlet output and a nonzero exit", async () => {
       const result = await new PowerShellTool().execute({
-        command: "[Console]::Out.Write('x' * 1048576); [Console]::Error.Write('y' * 1048576); exit 7",
-        timeoutSeconds: 30,
+        command: "Write-Output first; Write-Error second -ErrorAction Continue; exit 7", timeoutSeconds: 30,
       }, ctx());
+      expect(result.metadata?.returncode).toBe(7);
+      expect(result.isError).toBe(true);
+      expect(result.output).toContain("first");
+      expect(result.output).toContain("second");
+    }, 40_000);
+
+    it("cancels the public cmdlet invocation and closes its native shell", async () => {
+      const dir = mkdtempSync(join(tmpdir(), "lvis-public-ps-cancel-"));
+      const controller = new AbortController();
+      const pending = new PowerShellTool().execute({
+        command: "Write-Output $PID | Set-Content shell.pid; Start-Sleep -Seconds 30", timeoutSeconds: 60,
+      }, { ...ctx(dir), abortSignal: controller.signal });
+      try {
+        const pidFile = join(dir, "shell.pid");
+        await vi.waitFor(() => expect(existsSync(pidFile)).toBe(true), { timeout: 10_000 });
+        const pid = Number(readFileSync(pidFile, "utf8").replace(/^\uFEFF/, "").trim());
+        expect(Number.isInteger(pid) && pid > 0).toBe(true);
+        controller.abort();
+        const result = await pending;
+        expect(result.metadata?.aborted).toBe(true);
+        expect(result.isError).toBe(true);
+        await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow());
+      } finally { controller.abort(); await pending; await cleanupTmpDir(dir); }
+    }, 20_000);
+
+    it("drains both large output streams and preserves the exit status", async () => {
+      const result = await _spawnPowerShellForTest(
+        "[Console]::Out.Write('x' * 1048576); [Console]::Error.Write('y' * 1048576); exit 7", process.cwd(), 30,
+      );
       expect(result.metadata?.returncode).toBe(7);
       expect(result.output.length).toBeLessThan(12_100);
       expect(result.output.endsWith("...[truncated]...")).toBe(true);
@@ -531,10 +562,10 @@ describe("powershell tool", () => {
       const dir = mkdtempSync(join(tmpdir(), "lvis-native-cancel-"));
       const controller = new AbortController();
       const pidFile = join(dir, "child.pid");
-      const pending = new PowerShellTool().execute({
-        command: "$child = Start-Process powershell.exe -ArgumentList '-NoProfile','-Command','Start-Sleep 30' -PassThru; $child.Id | Set-Content child.pid; $child.WaitForExit()",
-        timeoutSeconds: 60,
-      }, { ...ctx(dir), abortSignal: controller.signal });
+      const pending = _spawnPowerShellForTest(
+        "$child = Start-Process powershell.exe -ArgumentList '-NoProfile','-Command','Start-Sleep 30' -PassThru; $child.Id | Set-Content child.pid; $child.WaitForExit()",
+        dir, 60, controller.signal,
+      );
       try {
         await vi.waitFor(() => expect(existsSync(pidFile)).toBe(true), { timeout: 10_000 });
         const pid = Number(readFileSync(pidFile, "utf8").replace(/^\uFEFF/, "").trim());
@@ -551,13 +582,19 @@ describe("powershell tool", () => {
     }, 20_000);
   });
 
+  const psLiteral = (value: string, text = value): PowerShellValueArgument => ({ kind: "literal", value, text });
+  const psDynamic = (text: string): PowerShellValueArgument => ({ kind: "dynamic", text });
+  const psParameter = (name: string, argument?: PowerShellValueArgument): PowerShellArgument => ({
+    kind: "parameter", name, text: "-" + name, ...(argument ? { argument } : {}),
+  });
+
   function ast(commands: Array<Partial<PowerShellAstSummary["commands"][number]>>, errors: string[] = []): PowerShellAstSummary {
     return {
-      errors,
+      errors, redirections: [], unsupported: [],
       commands: commands.map((command) => ({
         name: command.name ?? null,
         text: command.text ?? command.name ?? "",
-        elements: command.elements ?? (command.name ? [command.name] : []),
+        arguments: command.arguments ?? (command.name ? [psLiteral(command.name)] : []),
       })),
     };
   }
@@ -602,7 +639,7 @@ describe("powershell tool", () => {
     it("blocks expression execution and encoded command forms from the AST summary", () => {
       expect(validatePowerShellAst(ast([{ name: "Invoke-Expression" }]))).toContain("Invoke-Expression");
       expect(validatePowerShellAst(ast([{ name: "iex" }]))).toContain("Invoke-Expression");
-      expect(validatePowerShellAst(ast([{ name: "Get-Content", elements: ["Get-Content", "-EncodedCommand", "AAAA"] }]))).toContain("encoded commands");
+      expect(validatePowerShellAst(ast([{ name: "Get-Content", arguments: [psLiteral("Get-Content"), psParameter("EncodedCommand"), psLiteral("AAAA")] }]))).toContain("encoded commands");
     });
 
     it("blocks interactive prompts from the AST summary", () => {
@@ -612,49 +649,49 @@ describe("powershell tool", () => {
 
     it("blocks dynamic path composition from the AST summary", () => {
       expect(
-        validatePowerShellAst(ast([{ name: "Join-Path", elements: ["Join-Path", "$HOME", "\"Desktop/out.txt\""] }])),
+        validatePowerShellAst(ast([{ name: "Join-Path", arguments: [psLiteral("Join-Path"), psDynamic("$HOME"), psLiteral("Desktop/out.txt", '"Desktop/out.txt"')] }])),
       ).toContain("dynamic path composition");
       expect(
-        validatePowerShellAst(ast([{ name: "Set-Content", elements: ["Set-Content", "([IO.Path]::Combine($HOME,'.ssh','id_rsa'))", "x"] }])),
+        validatePowerShellAst(ast([{ name: "Set-Content", arguments: [psLiteral("Set-Content"), psDynamic("([IO.Path]::Combine($HOME,'.ssh','id_rsa'))"), psLiteral("x")] }])),
       ).toContain("dynamic path argument");
       expect(
-        validatePowerShellAst(ast([{ name: "Set-Content", elements: ["Set-Content", "($HOME + '/.ssh/id_rsa')", "x"] }])),
+        validatePowerShellAst(ast([{ name: "Set-Content", arguments: [psLiteral("Set-Content"), psDynamic("($HOME + '/.ssh/id_rsa')"), psLiteral("x")] }])),
       ).toContain("dynamic path argument");
       expect(validatePowerShellAst(ast([{ name: "Resolve-Path" }]))).toContain("dynamic path resolution");
       expect(
-        validatePowerShellAst(ast([{ name: "sc", elements: ["sc", "($HOME + '/.ssh/id_rsa')", "x"] }])),
+        validatePowerShellAst(ast([{ name: "sc", arguments: [psLiteral("sc"), psDynamic("($HOME + '/.ssh/id_rsa')"), psLiteral("x")] }])),
       ).toContain("dynamic path argument");
       expect(
-        validatePowerShellAst(ast([{ name: "ac", elements: ["ac", "('.e' + 'nv')", "x"] }])),
+        validatePowerShellAst(ast([{ name: "ac", arguments: [psLiteral("ac"), psDynamic("('.e' + 'nv')"), psLiteral("x")] }])),
       ).toContain("dynamic path argument");
       expect(
-        validatePowerShellAst(ast([{ name: "dir", elements: ["dir", "('.s' + 'sh')"] }])),
+        validatePowerShellAst(ast([{ name: "dir", arguments: [psLiteral("dir"), psDynamic("('.s' + 'sh')")] }])),
       ).toContain("dynamic path argument");
       expect(
-        validatePowerShellAst(ast([{ name: "ri", elements: ["ri", "('.e' + 'nv')"] }])),
+        validatePowerShellAst(ast([{ name: "ri", arguments: [psLiteral("ri"), psDynamic("('.e' + 'nv')")] }])),
       ).toContain("dynamic path argument");
     });
 
     it("blocks recursive forced deletion regardless of flag order", () => {
-      expect(validatePowerShellAst(ast([{ name: "Remove-Item", elements: ["Remove-Item", "./x", "-Recurse", "-Force"] }]))).toContain(
+      expect(validatePowerShellAst(ast([{ name: "Remove-Item", arguments: [psLiteral("Remove-Item"), psLiteral("./x"), psParameter("Recurse"), psParameter("Force")] }]))).toContain(
         "recursive forced deletion",
       );
-      expect(validatePowerShellAst(ast([{ name: "Remove-Item", elements: ["Remove-Item", "./x", "-Force", "-Recurse"] }]))).toContain(
+      expect(validatePowerShellAst(ast([{ name: "Remove-Item", arguments: [psLiteral("Remove-Item"), psLiteral("./x"), psParameter("Force"), psParameter("Recurse")] }]))).toContain(
         "recursive forced deletion",
       );
-      expect(validatePowerShellAst(ast([{ name: "rm", elements: ["rm", "./x", "-r", "-fo"] }]))).toContain(
+      expect(validatePowerShellAst(ast([{ name: "rm", arguments: [psLiteral("rm"), psLiteral("./x"), psParameter("r"), psParameter("fo")] }]))).toContain(
         "recursive forced deletion",
       );
-      expect(validatePowerShellAst(ast([{ name: "Remove-Item", elements: ["Remove-Item", "./x", "-Recurse:$true", "-Force:$true"] }]))).toContain(
+      expect(validatePowerShellAst(ast([{ name: "Remove-Item", arguments: [psLiteral("Remove-Item"), psLiteral("./x"), psParameter("Recurse", psLiteral("true", "$true")), psParameter("Force", psLiteral("true", "$true"))] }]))).toContain(
         "recursive forced deletion",
       );
     });
 
     it("blocks recursive filesystem traversal before shell execution", () => {
-      expect(validatePowerShellAst(ast([{ name: "Get-ChildItem", elements: ["Get-ChildItem", "-Recurse", "."] }]))).toContain(
+      expect(validatePowerShellAst(ast([{ name: "Get-ChildItem", arguments: [psLiteral("Get-ChildItem"), psParameter("Recurse"), psLiteral(".")] }]))).toContain(
         "recursive shell filesystem traversal",
       );
-      expect(validatePowerShellAst(ast([{ name: "dir", elements: ["dir", "-r", "."] }]))).toContain(
+      expect(validatePowerShellAst(ast([{ name: "dir", arguments: [psLiteral("dir"), psParameter("r"), psLiteral(".")] }]))).toContain(
         "recursive shell filesystem traversal",
       );
     });
@@ -703,68 +740,26 @@ describe("powershell tool", () => {
       }
     });
 
-    it("rejects sensitive path operands before PowerShell AST parsing", async () => {
-      const root = mkdtempSync(join(tmpdir(), "lvis-pwsh-sensitive-operand-"));
-      const target = join(root, ".ssh", "id_rsa");
-      mkdirSync(join(root, ".ssh"), { recursive: true });
-      writeFileSync(target, "secret", "utf8");
+    it.each([".ssh/id_rsa", ".env"])("rejects native literal sensitive operand %s", async (operand) => {
+      const root = mkdtempSync(join(tmpdir(), "lvis-pwsh-sensitive-"));
       try {
-        const result = await new PowerShellTool().execute(
-          { command: `Get-Content ${target}`, timeoutSeconds: 5 },
-          ctx(root),
-        );
-
-        expect(result.isError).toBe(true);
-        expect(result.output).toContain("Sensitive path:");
-      } finally {
-        await cleanupTmpDir(root);
-      }
+        const summary = ast([{ name: "Get-Content", arguments: [psLiteral("Get-Content"), psLiteral(operand)] }]);
+        expect(findPowerShellAstPathViolation(summary, root, root, [], false)?.kind).toBe("sensitive-path");
+      } finally { await cleanupTmpDir(root); }
     });
 
-    it("rejects bare sensitive filename operands before PowerShell AST parsing", async () => {
-      const root = mkdtempSync(join(tmpdir(), "lvis-pwsh-bare-sensitive-"));
-      writeFileSync(join(root, ".env"), "SECRET=1\n", "utf8");
-      try {
-        const result = await new PowerShellTool().execute(
-          { command: "Get-Content .env", timeoutSeconds: 5 },
-          ctx(root),
-        );
-
-        expect(result.isError).toBe(true);
-        expect(result.output).toContain("Sensitive path:");
-      } finally {
-        await cleanupTmpDir(root);
-      }
+    it("does not invent a path for native dynamic HOME operands", () => {
+      const summary = ast([{ name: "Get-Content", arguments: [psLiteral("Get-Content"), psDynamic("$HOME/.ssh/id_rsa")] }]);
+      expect(findPowerShellAstPathViolation(summary, process.cwd(), process.cwd(), [], false)?.reason).toContain("dynamic path argument");
     });
 
-    it("rejects variable-expanded sensitive operands before PowerShell AST parsing", async () => {
-      const result = await new PowerShellTool().execute(
-        { command: "Get-Content $HOME/.ssh/id_rsa", timeoutSeconds: 5 },
-        ctx(),
-      );
-
-      expect(result.isError).toBe(true);
-      expect(result.output).toContain("Sensitive path:");
+    it.each(["~example/Documents/file.txt", "~example"])("declines native unresolved home operand %s", (operand) => {
+      const summary = ast([{ name: "Get-Content", arguments: [psLiteral("Get-Content"), psLiteral(operand)] }]);
+      expect(findPowerShellAstPathViolation(summary, process.cwd(), process.cwd(), [], false)?.reason).toContain("home or wildcard path");
     });
 
-    it("rejects unsupported ~user operands before PowerShell AST parsing", async () => {
-      const result = await new PowerShellTool().execute(
-        { command: "Get-Content ~example/Documents/not-in-sandbox.txt", timeoutSeconds: 5 },
-        ctx(),
-      );
-
-      expect(result.isError).toBe(true);
-      expect(result.output).toContain("unsupported user-home expansion");
-    });
-
-    it("rejects bare ~user operands before PowerShell AST parsing", async () => {
-      const result = await new PowerShellTool().execute(
-        { command: "Get-ChildItem ~example", timeoutSeconds: 5 },
-        ctx(),
-      );
-
-      expect(result.isError).toBe(true);
-      expect(result.output).toContain("unsupported user-home expansion");
+    it("keeps method execution unsupported while native process tests exercise lifetime separately", () => {
+      expect(validatePowerShellAst({ ...ast([]), unsupported: ["InvokeMemberExpressionAst"] })).toContain("unsupported PowerShell execution state");
     });
   });
 });

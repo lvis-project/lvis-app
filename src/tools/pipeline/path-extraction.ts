@@ -1,3 +1,4 @@
+import type { ShellExecutionFacts } from "../../shared/shell-execution.js";
 /**
  * Tool pipeline — filesystem target-path extraction + shell path policy.
  *
@@ -60,6 +61,7 @@ export function shellPathPolicyViolation(
   sandboxRoot: string,
   allowedDirectories: readonly string[],
   blockReadsOutsideWorkingDirectories: boolean,
+  facts?: ShellExecutionFacts,
 ): ShellPathPolicyViolation | null {
   const commands = extractShellCommands(finalInput);
   if (commands.length === 0) {
@@ -79,6 +81,7 @@ export function shellPathPolicyViolation(
       sandboxRoot,
       allowedDirectories,
       blockReadsOutsideWorkingDirectories,
+      facts,
     );
     if (violation) return violation;
   }

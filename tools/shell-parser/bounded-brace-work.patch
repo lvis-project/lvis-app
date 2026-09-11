@@ -1,0 +1,298 @@
+diff --git a/syntax/braces.go b/syntax/braces.go
+index 1d2243b..b390825 100644
+--- a/syntax/braces.go
++++ b/syntax/braces.go
+@@ -4,6 +4,7 @@
+ package syntax
+ 
+ import (
++	"errors"
+ 	"slices"
+ 	"strconv"
+ 	"strings"
+@@ -27,12 +28,58 @@ var (
+ // It does not return an error; malformed brace expansions are simply skipped.
+ // For example, the literal word "a{b" is left unchanged.
+ func SplitBraces(word *Word) bool {
++	split, _ := SplitBracesBounded(word, nil)
++	return split
++}
++
++var errBraceWork = errors.New("Shell brace analysis work limit exceeded")
++
++// BraceBudget counts part construction/copy work and literal bytes joined by
++// sequence validation. A caller may share it across an entire syntax tree.
++type BraceBudget struct{ PartWork, LiteralBytes int }
++
++// SplitBracesBounded applies SplitBraces with a shared part-work budget.
++// Each constructed or copied part/element is charged before allocation.
++// A nil budget preserves the original unbounded API. On exhaustion, the
++// original word remains untouched and an error is returned, never false success.
++func SplitBracesBounded(word *Word, remaining *BraceBudget) (bool, error) {
++	charge := func(n int) bool {
++		if remaining == nil {
++			return true
++		}
++		if n > remaining.PartWork {
++			return false
++		}
++		remaining.PartWork -= n
++		return true
++	}
++	chargeLiteral := func(word *Word) bool {
++		for _, part := range word.Parts {
++			if !charge(1) {
++				return false
++			}
++			lit, ok := part.(*Lit)
++			if !ok {
++				return true
++			} // Word.Lit returns immediately without joining.
++			if remaining != nil {
++				if len(lit.Value) > remaining.LiteralBytes {
++					return false
++				}
++				remaining.LiteralBytes -= len(lit.Value)
++			}
++		}
++		return true
++	}
+ 	if !slices.ContainsFunc(word.Parts, func(part WordPart) bool {
+ 		lit, ok := part.(*Lit)
+ 		return ok && strings.Contains(lit.Value, "{")
+ 	}) {
+ 		// In the common case where a word has no braces, skip any allocs.
+-		return false
++		return false, nil
++	}
++	if !charge(1) {
++		return false, errBraceWork
+ 	}
+ 	top := &Word{}
+ 	acc := top
+@@ -51,32 +98,44 @@ func SplitBraces(word *Word) bool {
+ 		}
+ 		return old
+ 	}
+-	addLit := func(lit *Lit) {
++	addLit := func(lit *Lit) bool {
++		if !charge(1) {
++			return false
++		}
+ 		acc.Parts = append(acc.Parts, lit)
++		return true
+ 	}
+ 
+ 	for _, wp := range word.Parts {
+ 		lit, ok := wp.(*Lit)
+ 		if !ok {
++			if !charge(1) {
++				return false, errBraceWork
++			}
+ 			acc.Parts = append(acc.Parts, wp)
+ 			continue
+ 		}
+ 		last := 0
+ 		for j := 0; j < len(lit.Value); j++ {
+-			addlitidx := func() {
++			addlitidx := func() bool {
+ 				if last == j {
+-					return // empty lit
++					return true // empty lit
+ 				}
+ 				l2 := *lit
+ 				l2.Value = l2.Value[last:j]
+-				addLit(&l2)
++				return addLit(&l2)
+ 			}
+ 			switch lit.Value[j] {
+ 			case '\\':
+ 				j++
+ 				continue
+ 			case '{':
+-				addlitidx()
++				if !addlitidx() {
++					return false, errBraceWork
++				}
++				if !charge(3) {
++					return false, errBraceWork
++				}
+ 				acc = &Word{}
+ 				cur = &BraceExp{Elems: []*Word{acc}}
+ 				open = append(open, cur)
+@@ -84,12 +143,17 @@ func SplitBraces(word *Word) bool {
+ 				if cur == nil {
+ 					continue
+ 				}
+-				addlitidx()
++				if !addlitidx() {
++					return false, errBraceWork
++				}
+ 				if cur.Sequence {
+ 					// A comma inside a sequence like {1..2,3} makes it
+ 					// a list expansion where the ".." are literal.
+ 					merged := cur.Elems[0]
+ 					for _, elem := range cur.Elems[1:] {
++						if !charge(1 + len(elem.Parts)) {
++							return false, errBraceWork
++						}
+ 						merged.Parts = append(merged.Parts, litDots)
+ 						merged.Parts = append(merged.Parts, elem.Parts...)
+ 					}
+@@ -97,6 +161,9 @@ func SplitBraces(word *Word) bool {
+ 					cur.Elems = cur.Elems[:1]
+ 					cur.Elems[0] = merged
+ 				}
++				if !charge(3) {
++					return false, errBraceWork
++				}
+ 				acc = &Word{}
+ 				cur.Elems = append(cur.Elems, acc)
+ 			case '.':
+@@ -110,8 +177,13 @@ func SplitBraces(word *Word) bool {
+ 					// ".." inside a list expansion like {1,2..3} is literal.
+ 					continue
+ 				}
+-				addlitidx()
++				if !addlitidx() {
++					return false, errBraceWork
++				}
+ 				cur.Sequence = true
++				if !charge(3) {
++					return false, errBraceWork
++				}
+ 				acc = &Word{}
+ 				cur.Elems = append(cur.Elems, acc)
+ 				j++
+@@ -119,22 +191,37 @@ func SplitBraces(word *Word) bool {
+ 				if cur == nil {
+ 					continue
+ 				}
+-				addlitidx()
++				if !addlitidx() {
++					return false, errBraceWork
++				}
+ 				br := pop()
+ 				if len(br.Elems) == 1 {
+ 					// return {x} to a non-brace
+-					addLit(litLeftBrace)
++					if !addLit(litLeftBrace) {
++						return false, errBraceWork
++					}
++					if !charge(len(br.Elems[0].Parts)) {
++						return false, errBraceWork
++					}
+ 					acc.Parts = append(acc.Parts, br.Elems[0].Parts...)
+-					addLit(litRightBrace)
++					if !addLit(litRightBrace) {
++						return false, errBraceWork
++					}
+ 					break
+ 				}
+ 				if !br.Sequence {
++					if !charge(1) {
++						return false, errBraceWork
++					}
+ 					acc.Parts = append(acc.Parts, br)
+ 					break
+ 				}
+ 				var chars [2]bool
+ 				broken := false
+ 				for i, elem := range br.Elems[:2] {
++					if !chargeLiteral(elem) {
++						return false, errBraceWork
++					}
+ 					val := elem.Lit()
+ 					// ParseInt with bit size 64 to ensure consistent behavior on 32-bit platforms.
+ 					if _, err := strconv.ParseInt(val, 10, 64); err == nil {
+@@ -146,6 +233,9 @@ func SplitBraces(word *Word) bool {
+ 				}
+ 				if len(br.Elems) == 3 {
+ 					// increment must be a number
++					if !chargeLiteral(br.Elems[2]) {
++						return false, errBraceWork
++					}
+ 					val := br.Elems[2].Lit()
+ 					// ParseInt with bit size 64 to ensure consistent behavior on 32-bit platforms.
+ 					if _, err := strconv.ParseInt(val, 10, 64); err != nil {
+@@ -161,46 +251,71 @@ func SplitBraces(word *Word) bool {
+ 					broken = true
+ 				}
+ 				if !broken {
++					if !charge(1) {
++						return false, errBraceWork
++					}
+ 					acc.Parts = append(acc.Parts, br)
+ 					break
+ 				}
+ 				// return broken {x..y[..incr]} to a non-brace
+-				addLit(litLeftBrace)
++				if !addLit(litLeftBrace) {
++					return false, errBraceWork
++				}
+ 				for i, elem := range br.Elems {
+ 					if i > 0 {
+-						addLit(litDots)
++						if !addLit(litDots) {
++							return false, errBraceWork
++						}
++					}
++					if !charge(len(elem.Parts)) {
++						return false, errBraceWork
+ 					}
+ 					acc.Parts = append(acc.Parts, elem.Parts...)
+ 				}
+-				addLit(litRightBrace)
++				if !addLit(litRightBrace) {
++					return false, errBraceWork
++				}
+ 			default:
+ 				continue
+ 			}
+ 			last = j + 1
+ 		}
+ 		if last == 0 {
+-			addLit(lit)
++			if !addLit(lit) {
++				return false, errBraceWork
++			}
+ 		} else {
+ 			left := *lit
+ 			left.Value = left.Value[last:]
+-			addLit(&left)
++			if !addLit(&left) {
++				return false, errBraceWork
++			}
+ 		}
+ 	}
+ 	// open braces that were never closed fall back to non-braces
+ 	for acc != top {
+ 		br := pop()
+-		addLit(litLeftBrace)
++		if !addLit(litLeftBrace) {
++			return false, errBraceWork
++		}
+ 		for i, elem := range br.Elems {
+ 			if i > 0 {
+ 				if br.Sequence {
+-					addLit(litDots)
++					if !addLit(litDots) {
++						return false, errBraceWork
++					}
+ 				} else {
+-					addLit(litComma)
++					if !addLit(litComma) {
++						return false, errBraceWork
++					}
+ 				}
+ 			}
++			if !charge(len(elem.Parts)) {
++				return false, errBraceWork
++			}
+ 			acc.Parts = append(acc.Parts, elem.Parts...)
+ 		}
+ 	}
+ 	*word = *top
+-	return true
++	return true, nil
+ }

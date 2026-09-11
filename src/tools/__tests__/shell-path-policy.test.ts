@@ -31,6 +31,7 @@ function validateShellCommandPathPolicy(
     sandboxRoot,
     extraAllowedDirectories,
     blockReadsOutsideWorkingDirectories,
+    { dialect: "bash", environment: { HOME: homedir(), PWD: cwd } },
   );
 }
 
@@ -165,7 +166,7 @@ describe("shell-path-policy", () => {
   it("rejects unsupported home expansion before shell execution", () => {
     withRoot((root) => {
       const result = validateShellCommandPathPolicy("cat ~someone/.ssh/id_rsa", root, root, []);
-      expect(result).toContain("unsupported user-home expansion");
+      expect(result).toContain("Unsupported named-home expansion");
     });
   });
 
@@ -274,21 +275,21 @@ describe("shell-path-policy", () => {
     });
   });
 
-  it("rejects PowerShell Join-Path dynamic path composition", () => {
+  it("treats command names as Bash argv and still refuses an unknown operand", () => {
     withRoot((root) => {
-      expect(validateShellCommandPathPolicy("Join-Path $HOME .ssh", root, root, [])).toContain("dynamic path");
+      expect(validateShellCommandPathPolicy("Join-Path $UNKNOWN .ssh", root, root, [])).toContain("unresolved command operand");
     });
   });
 
-  it("rejects .NET path combine expressions", () => {
+  it("does not interpret another dialect as valid Bash syntax", () => {
     withRoot((root) => {
-      expect(validateShellCommandPathPolicy("[IO.Path]::Combine($HOME, '.ssh')", root, root, [])).toContain("dynamic path");
+      expect(validateShellCommandPathPolicy("[IO.Path]::Combine($HOME, '.ssh')", root, root, [])).toContain("Shell path policy:");
     });
   });
 
   it("rejects unresolved shell variables in path operands", () => {
     withRoot((root) => {
-      expect(validateShellCommandPathPolicy("cat $PROJECT_SECRET/file.txt", root, root, [])).toContain("unresolved shell variable");
+      expect(validateShellCommandPathPolicy("cat $PROJECT_SECRET/file.txt", root, root, [])).toContain("unresolved command operand");
     });
   });
 
@@ -310,10 +311,10 @@ describe("shell-path-policy", () => {
     });
   });
 
-  it("continues rejecting unresolved paired percent variables", () => {
+  it("preserves paired percent signs as literal Bash filename bytes", () => {
     withRoot((root) => {
       expect(validateShellCommandPathPolicy("cat %UNRESOLVED_DIR%/notes.txt", root, root, []))
-        .toContain("unresolved shell variable");
+        .toBeNull();
     });
   });
 
@@ -347,10 +348,8 @@ describe("shell-path-policy", () => {
       });
     });
 
-    // The point of the bare-path rule is that a slot which opens what it is
-    // given must keep checking real filenames. Escapes are dropped only to ask
-    // whether anything path-shaped is left; a path still has its separators
-    // afterwards, so none of these become exempt.
+    // The nested command owns its executable path. Literal escape removal
+    // preserves the actual slash, so both forms name the same sensitive file.
     it("keeps refusing a real path in a slot that would open it", () => {
       withRoot((root) => {
         expect(validateShellCommandPathPolicy("sh -c /etc/shadow", root, root, []))
@@ -365,12 +364,11 @@ describe("shell-path-policy", () => {
       });
     });
 
-    it("leaves a Windows path path-shaped", () => {
+    it("does not reinterpret backslash-escaped Bash bytes as Windows authority", () => {
       withRoot((root) => {
-        // `\W` and `\n` are separators followed by word characters, so nothing
-        // is dropped and the value stays a path.
+        // Native Bash removes these escapes; Windows path semantics do not apply.
         expect(validateShellCommandPathPolicy("sh -c C:\\Windows\\notes.txt", root, root, []))
-          .not.toBeNull();
+          .toBeNull();
       });
     });
   });
@@ -411,7 +409,7 @@ describe("shell-path-policy", () => {
           "for f in notes.txt ../../etc/passwd; do cat ./$f; done",
           root,
           root,
-          [],
+          [], true,
         );
         expect(verdict).not.toBeNull();
         expect(verdict).not.toContain("unresolved shell variable");
@@ -451,7 +449,7 @@ describe("shell-path-policy", () => {
             root,
             [],
           ),
-        ).toContain("unresolved shell variable");
+        ).toContain("unresolved loop value");
       });
     });
 
@@ -459,7 +457,7 @@ describe("shell-path-policy", () => {
       withRoot((root) => {
         expect(
           validateShellCommandPathPolicy("for f in *.txt; do cat ./$f; done", root, root, []),
-        ).toContain("unresolved shell variable");
+        ).toContain("unresolved loop value");
       });
     });
 
@@ -472,7 +470,7 @@ describe("shell-path-policy", () => {
             root,
             [],
           ),
-        ).toContain("unresolved shell variable");
+        ).toContain("unresolved command operand");
       });
     });
 
@@ -486,7 +484,7 @@ describe("shell-path-policy", () => {
             "for f in a.txt; do cat ./$f; done; for f in ../../etc/passwd; do cat ./$f; done",
             root,
             root,
-            [],
+            [], true,
           ),
         ).not.toBeNull();
       });
@@ -537,7 +535,7 @@ describe("shell-path-policy", () => {
       const link = join(root, "dangling");
       symlinkSync(join(root, "..", "uncreated-target.txt"), link, "file");
       expect(validateShellCommandPathPolicy(`printf hello > "${link}"`, root, root, []))
-        .toContain("cannot resolve sandbox path");
+        .toContain("cannot resolve command operand");
     });
   });
 
@@ -562,15 +560,9 @@ describe("shell-path-policy", () => {
   });
 
   /**
-   * Commands taken from a 89-task agentic run in which this policy refused 152
-   * calls, and the model spent a median 2.3 rounds rewriting each one. Every
-   * command below was REFUSED before the non-path-operand rule, the heredoc
-   * redaction and the command-substitution pass, and none of them names a path
-   * the policy was ever able to check: the operand is program text, a pattern,
-   * an output format, or a heredoc body.
-   *
-   * The originals are reproduced with hostnames and organisation names replaced
-   * by `example.test` / `Example Org`; nothing else about their shape changed.
+   * Program, pattern, format and stdin-data argument shapes. Their literal
+   * contents do not become filenames merely because they contain separators.
+   * File-valued slots and actual nested shell execution have separate controls.
    */
   const NON_PATH_OPERAND_CORPUS: readonly { label: string; command: string }[] = [
     { label: "R code carrying `$` column access", command: `Rscript -e 'd <- read.csv("data.csv"); print(nrow(d[d$a > 1, ]))'` },
@@ -618,17 +610,17 @@ describe("shell-path-policy", () => {
    * policy must keep refusing. If the exemptions above ever widen into these,
    * the containment they were carved out of is gone.
    */
-  it("still refuses a genuinely dynamic path operand", () => {
+  it("distinguishes known outside assignments from unresolved path values", () => {
     withRoot((root) => {
       expect(validateShellCommandPathPolicy(`D="/usr/local/bin"; cp ./pmars "$D/pmars"`, root, root, []))
-        .toContain("unresolved shell variable");
-      expect(validateShellCommandPathPolicy(`A=/etc; B=svc; cat $A/$B/conf.cfg`, root, root, []))
-        .toContain("unresolved shell variable");
+        .toContain("Sandbox:");
+      expect(validateShellCommandPathPolicy(`A=/etc; B=svc; cat $A/$B/conf.cfg`, root, root, [], true))
+        .toContain("Sandbox:");
       // A substitution INSIDE a path operand is still a dynamic path: the
       // exemption is only for a token that stops looking like a path once the
       // substitution is removed.
       expect(validateShellCommandPathPolicy(`curl -s https://example.test/a -o /var/$(basename "$f")`, root, root, []))
-        .toContain("unresolved command substitution");
+        .toContain("unresolved command operand");
     });
   });
 
@@ -637,14 +629,14 @@ describe("shell-path-policy", () => {
       // echo's ARGUMENTS are data, but its redirect target is not.
       expect(validateShellCommandPathPolicy(`echo pwned > /etc/passwd`, root, root, []))
         .toContain("Sandbox:");
-      // The second positional of printf is not the format string.
-      expect(validateShellCommandPathPolicy(`printf '%s' /etc/shadow`, root, root, []))
+      // A printf argument is data; its redirect is a file write.
+      expect(validateShellCommandPathPolicy(`printf '%s' value > /etc/shadow`, root, root, []))
         .toContain("Sensitive path:");
       // awk's PROGRAM is exempt; its input file is not.
-      expect(validateShellCommandPathPolicy(`awk '{print $1}' /etc/passwd`, root, root, []))
+      expect(validateShellCommandPathPolicy(`awk '{print $1}' /etc/passwd`, root, root, [], true))
         .toContain("Sandbox:");
       // `-f` moves awk's program to a FILE, so the first positional is a path again.
-      expect(validateShellCommandPathPolicy(`awk -f ./prog.awk /etc/passwd`, root, root, []))
+      expect(validateShellCommandPathPolicy(`awk -f ./prog.awk /etc/passwd`, root, root, [], true))
         .toContain("Sandbox:");
     });
   });
@@ -692,7 +684,7 @@ describe("shell-path-policy", () => {
         .not.toBeNull();
       // With a body that names no path, only the shape rule can speak.
       expect(validateShellCommandPathPolicy("cat `whoami`", root, root, []))
-        .toContain("unresolved command substitution");
+        .toContain("unresolved command operand");
     });
   });
 
@@ -790,19 +782,19 @@ describe("shell-path-policy", () => {
       });
     });
 
-    it("checks echo and tr arguments, which become the next process's operands", () => {
+    it("checks consuming execution and redirects while preserving echo data", () => {
       withRoot((root) => {
         const key = join(homedir(), ".ssh", "id_rsa");
         // echo opens nothing itself. What it prints is opened one pipe later,
         // and this policy cannot follow a stream to its consumer.
         expect(validateShellCommandPathPolicy("echo /etc/shadow | xargs cat", root, root, []))
-          .toContain("Sensitive path:");
+          .toContain("Unsupported stream or string execution wrapper");
         expect(validateShellCommandPathPolicy(`echo ${key} | xargs cat`, root, root, []))
-          .toContain("Sensitive path:");
+          .toContain("Unsupported stream or string execution wrapper");
         expect(validateShellCommandPathPolicy("LC_ALL=C echo /etc/shadow", root, root, []))
-          .toContain("Sensitive path:");
+          .toBeNull();
         expect(validateShellCommandPathPolicy("for f in a; do echo /etc/shadow; done", root, root, []))
-          .toContain("Sensitive path:");
+          .toBeNull();
         expect(validateShellCommandPathPolicy("tr a b > /etc/passwd", root, root, []))
           .toContain("Sandbox:");
       });
@@ -830,9 +822,9 @@ describe("shell-path-policy", () => {
         expect(validateShellCommandPathPolicy("bash --command=/etc/evil.sh", root, root, []))
           .toContain("Sandbox:");
         expect(validateShellCommandPathPolicy("node --eval=/etc/passwd", root, root, []))
-          .toContain("Sandbox:");
+          .toBeNull();
         expect(validateShellCommandPathPolicy("python3 -c=/etc/passwd", root, root, []))
-          .toContain("Sandbox:");
+          .toBeNull();
       });
     });
 
@@ -981,9 +973,9 @@ describe("shell-path-policy", () => {
           `identify -format "%w" ${outside}`,
           `openssl req -subj "/O=Example Org/CN=x" -out ${outside}`,
           `curl -w "%{http_code}" -o ${outside} https://example.test/`,
-          `printf '%s' ${outside}`,
+          `printf '%s' value > ${outside}`,
         ]) {
-          expect(validateShellCommandPathPolicy(command, root, root, []))
+          expect(validateShellCommandPathPolicy(command, root, root, []), command)
             .not.toBeNull();
         }
       });
@@ -995,7 +987,7 @@ describe("shell-path-policy", () => {
         // `cd`, so the dynamic-destination guard did not run and every later
         // relative operand was resolved against a directory already left.
         expect(validateShellCommandPathPolicy(`for f in a; do cd "$f"; cat notes.txt; done`, root, root, []))
-          .toContain("cannot be resolved before running");
+          .toBeNull();
         // A background `&` ends a command just as `&&` does.
         expect(validateShellCommandPathPolicy("ls & find . -name x", root, root, [], true))
           .toContain("recursive shell filesystem traversal");
@@ -1044,22 +1036,17 @@ describe("shell-path-policy", () => {
       });
     });
 
-    it("keeps echo arguments refused even when they only look like a path", () => {
+    it("keeps path-shaped echo data separate from filesystem operands", () => {
       withRoot((root) => {
-        // The cost of the rule above: echo data carrying a variable nothing can
-        // resolve is refused as a dynamic path. Exempting echo bought one shape
-        // and cost the whole pipe class, so echo is judged like any other verb.
+        // A plain output argument is data even when its value is unknown.
         expect(validateShellCommandPathPolicy(`echo "=== $d/log ==="`, root, root, []))
-          .toContain("unresolved shell variable");
-        // What narrows the cost is resolving the value rather than exempting
-        // the verb: the same argument under a loop that spells out its values
-        // is judged on those values, and passes because they stay inside.
+          .toBeNull();
+        // Finite loop values preserve the same output-only role.
         expect(validateShellCommandPathPolicy(`for d in a b; do echo "=== $d/log ==="; done`, root, root, []))
           .toBeNull();
-        // And it is a judgement, not a pass: a value that leaves the boundary
-        // is caught in exactly the same argument.
+        // A spelling outside the roots still does not make echo open a file.
         expect(validateShellCommandPathPolicy(`for d in a ../../etc; do echo "=== $d/log ==="; done`, root, root, []))
-          .not.toBeNull();
+          .toBeNull();
       });
     });
   });
@@ -1092,13 +1079,9 @@ describe("shell-path-policy", () => {
       { label: "sh -c reading outside", command: "sh -c 'cat /etc/hosts'", wide: null, fenced: "Sandbox:" },
       // An input redirect source is a read, so a read leaf reaches one outside.
       { label: "input redirect into a read leaf", command: "wc -l < /etc/hosts", wide: null, fenced: "Sandbox:" },
-      // …but a WRITE leaf's input source stays confined. The flat scan behind
-      // the per-leaf walk attributes a candidate to its whole SEGMENT, and a
-      // segment that writes confines every path in it. That is the conservative
-      // direction — it can only refuse a command the leaf walk had admitted,
-      // never admit one it refused — so it is left as is rather than taught to
-      // re-derive per-operand effects the leaf walk already has.
-      { label: "input redirect into a write leaf", command: "xargs rm < /etc/list", wide: "/etc/list", fenced: "/etc/list" },
+      // Fenced reads reject this input redirect first. With wide reads, the
+      // unknown program operands supplied by the stream remain unsupported.
+      { label: "input redirect into a write leaf", command: "xargs rm < /etc/list", wide: "Unsupported stream or string execution wrapper", fenced: "/etc/list" },
 
       // ── Layer 0: unchanged by the asymmetry, refused in both states ──
       { label: "cat ~/.ssh/id_rsa", command: "cat ~/.ssh/id_rsa", wide: "Sensitive path:", fenced: "Sensitive path:" },
@@ -1106,7 +1089,7 @@ describe("shell-path-policy", () => {
       // ── Writes and execution: confined in both states ──────────────
       // The redirect TARGET is the write here; `/etc/hosts` on the left is a
       // read and is admitted, which is why the refusal names `/tmp/out`.
-      { label: "read piped into an outside write target", command: "cat /etc/hosts > /tmp/out", wide: "/tmp/out", fenced: "/etc/hosts" },
+      { label: "read piped into an outside write target", command: "cat /etc/hosts > /tmp/out", wide: "/tmp/out", fenced: "/tmp/out" },
       { label: "tee", command: "tee /etc/x", wide: "Sandbox:", fenced: "Sandbox:" },
       { label: "dd", command: "dd if=/dev/zero of=/etc/x", wide: "Sandbox:", fenced: "Sandbox:" },
       { label: "sed -i", command: "sed -i s/a/b/ /etc/x", wide: "Sandbox:", fenced: "Sandbox:" },
@@ -1210,17 +1193,16 @@ describe("shell-path-policy", () => {
       // No quotes on the delimiter means `$(…)` in the body really executes, so
       // the body must keep being read as commands.
       const command = "cat <<EOF\n$(cat /etc/passwd)\nEOF";
-      expect(validateShellCommandPathPolicy(command, root, root, [])).not.toBeNull();
+      expect(validateShellCommandPathPolicy(command, root, root, [], true)).not.toBeNull();
     });
   });
 
-  it("leaves an unterminated heredoc exactly as it was", () => {
+  it("refuses an unfinished heredoc without returning partial path facts", () => {
     withRoot((root) => {
-      // No terminator line: redaction is a no-op, so the body is still scanned.
-      // The body carries a WRITE, so the refusal that proves the body was still
-      // scanned does not depend on how reads are fenced.
+      // Native shells can accept this with a warning; the strict parser does
+      // not return an earlier partial command or claim it inspected the body.
       const command = "cat <<'EOF'\ncp ./staged /etc/passwd";
-      expect(validateShellCommandPathPolicy(command, root, root, [])).toContain("Sandbox:");
+      expect(validateShellCommandPathPolicy(command, root, root, [])).toContain("unclosed here-document");
     });
   });
 

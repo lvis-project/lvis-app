@@ -1,0 +1,842 @@
+--- a/syntax/lexer.go
++++ b/syntax/lexer.go
+@@ -92,7 +92,15 @@
+ 			if p.r == '\\' {
+ 			} else if p.peek() == '\n' {
+ 				p.bsp++
++				if !p.literalContinuations || p.openBquotes > 0 {
++					p.continuations.gaps = append(p.continuations.gaps, continuationGap{start: NewPos(uint(p.offs)+p.bsp-2, uint(p.line), uint(p.col)), end: NewPos(uint(p.offs)+p.bsp, uint(p.line+1), 1)})
++				}
+ 				p.w, p.r = 1, escNewl
++				if p.openBquotes > 0 {
++					p.line++
++					p.col = 1
++					goto retry
++				}
+ 				return escNewl
+ 			}
+ 			// TODO: why is this necessary to ensure correct position info?
+@@ -304,6 +312,7 @@
+ 				p.advanceLitNone(r)
+ 				return
+ 			}
++			p.literalContinuations = true
+ 			r = p.rune()
+ 			p.newLit(r)
+ 		runeLoop:
+@@ -330,6 +339,7 @@
+ 			} else {
+ 				p.litBs = nil
+ 			}
++			p.literalContinuations = false
+ 			p.next()
+ 		case '[':
+ 			// `[` only starts an `[idx]=val` element when it begins a new word;
+@@ -341,8 +351,8 @@
+ 				p.advanceLitNone(r)
+ 			}
+ 		case '=':
+-			if p.peek() == '(' {
+-				p.rune()
++			if p.logicalPeek() == '(' {
++				p.logicalRune()
+ 				p.rune()
+ 				p.tok = assgnParen
+ 			} else if p.quote == arrayElems {
+@@ -365,8 +375,8 @@
+ 				case '!':
+ 					p.tok = globExcl
+ 				}
++				p.logicalRune()
+ 				p.rune()
+-				p.rune()
+ 			} else {
+ 				p.advanceLitNone(r)
+ 			}
+@@ -427,14 +437,14 @@
+ 		// We don't support e.g. `function @() { ... }` at the moment, but we could.
+ 		return false
+ 	}
+-	if p.peek() == '(' {
++	if p.logicalPeek() == '(' {
+ 		// NOTE: empty pattern list is a valid globbing syntax like `@()`,
+ 		// but we'll operate on the "likelihood" that it is a function;
+ 		// only tokenize if its a non-empty pattern list.
+ 		// We do this after peeking for just one byte, so that the input `echo *`
+ 		// followed by a newline does not hang an interactive shell parser until
+ 		// another byte is input.
+-		_, p2 := p.peekTwo()
++		_, p2 := p.logicalPeekTwo()
+ 		return p2 != ')'
+ 	}
+ 	return false
+@@ -465,9 +475,60 @@
+ 	return p.bs[p.bsp], p.bs[p.bsp+1]
+ }
+ 
++// logicalRune and logicalPeek own escaped-newline removal before active
++// token classification. Quoted data and comment readers keep physical rune().
++func (p *Parser) logicalRune() rune {
++	p.rune()
++	return p.logicalCurrent()
++}
++
++func (p *Parser) logicalCurrent() rune {
++	r := p.r
++	for r == escNewl {
++		r = p.rune()
++	}
++	return r
++}
++
++// physicalAhead preserves current rune/position while filling a lookahead
++// window. The host admits the entire source before parsing; growth is bounded
++// by those source bytes and is not an independent command cache.
++func (p *Parser) physicalAhead(offset int) byte {
++	for int(p.bsp)+offset >= len(p.bs) {
++		if p.readEOF {
++			return utf8.RuneSelf
++		}
++		if len(p.bs)-int(p.bsp) == len(p.readBuf) {
++			grown := make([]byte, len(p.readBuf)*2)
++			copy(grown, p.readBuf)
++			p.readBuf, p.bs = grown, grown[:len(p.bs)]
++		}
++		if p.fill() == 0 {
++			return utf8.RuneSelf
++		}
++	}
++	return p.bs[int(p.bsp)+offset]
++}
++func (p *Parser) logicalAhead(count int) byte {
++	for offset := 0; ; offset++ {
++		b := p.physicalAhead(offset)
++		if b == '\\' && p.physicalAhead(offset+1) == '\n' {
++			offset++
++			continue
++		}
++		if count == 0 || b == utf8.RuneSelf {
++			return b
++		}
++		count--
++	}
++}
++func (p *Parser) logicalPeek() byte            { return p.logicalAhead(0) }
++func (p *Parser) logicalPeekTwo() (byte, byte) { return p.logicalAhead(0), p.logicalAhead(1) }
++
+ func (p *Parser) regToken(r rune) token {
+ 	switch r {
+ 	case '\'':
++		p.literalContinuations = true
+ 		p.rune()
+ 		return sglQuote
+ 	case '"':
+@@ -478,12 +539,12 @@
+ 		// properly handle backslashes in the lexer.
+ 		return bckQuote
+ 	case '&':
+-		switch p.rune() {
++		switch p.logicalRune() {
+ 		case '&':
+ 			p.rune()
+ 			return andAnd
+ 		case '>':
+-			switch p.rune() {
++			switch p.logicalRune() {
+ 			case '|':
+ 				p.rune()
+ 				return rdrAllClob
+@@ -493,7 +554,7 @@
+ 					return rdrAllClob
+ 				}
+ 			case '>':
+-				switch p.rune() {
++				switch p.logicalRune() {
+ 				case '|':
+ 					p.rune()
+ 					return appAllClob
+@@ -519,7 +580,7 @@
+ 		}
+ 		return and
+ 	case '|':
+-		switch p.rune() {
++		switch p.logicalRune() {
+ 		case '|':
+ 			p.rune()
+ 			return orOr
+@@ -532,11 +593,12 @@
+ 		}
+ 		return or
+ 	case '$':
+-		switch p.rune() {
++		switch p.logicalRune() {
+ 		case '\'':
+ 			if !p.lang.in(langBashLike | LangMirBSDKorn | LangZsh) {
+ 				break
+ 			}
++			p.literalContinuations = true
+ 			p.rune()
+ 			return dollSglQuote
+ 		case '"':
+@@ -556,7 +618,7 @@
+ 			p.rune()
+ 			return dollBrack
+ 		case '(':
+-			if p.rune() == '(' {
++			if p.logicalRune() == '(' {
+ 				p.rune()
+ 				return dollDblParen
+ 			}
+@@ -564,7 +626,7 @@
+ 		}
+ 		return dollar
+ 	case '(':
+-		if p.rune() == '(' && p.lang.in(langBashLike|LangMirBSDKorn|LangZsh) && p.quote != testExpr {
++		if p.logicalRune() == '(' && p.lang.in(langBashLike|LangMirBSDKorn|LangZsh) && p.quote != testExpr {
+ 			p.rune()
+ 			return dblLeftParen
+ 		}
+@@ -573,9 +635,9 @@
+ 		p.rune()
+ 		return rightParen
+ 	case ';':
+-		switch p.rune() {
++		switch p.logicalRune() {
+ 		case ';':
+-			if p.rune() == '&' && p.lang.in(langBashLike) {
++			if p.logicalRune() == '&' && p.lang.in(langBashLike) {
+ 				p.rune()
+ 				return dblSemiAnd
+ 			}
+@@ -595,9 +657,9 @@
+ 		}
+ 		return semicolon
+ 	case '<':
+-		switch p.rune() {
++		switch p.logicalRune() {
+ 		case '<':
+-			switch p.rune() {
++			switch p.logicalRune() {
+ 			case '-':
+ 				p.rune()
+ 				return dashHdoc
+@@ -621,9 +683,9 @@
+ 		}
+ 		return rdrIn
+ 	case '>':
+-		switch p.rune() {
++		switch p.logicalRune() {
+ 		case '>':
+-			switch p.rune() {
++			switch p.logicalRune() {
+ 			case '|':
+ 				p.rune()
+ 				return appClob
+@@ -636,7 +698,7 @@
+ 				if !p.lang.in(LangZsh) {
+ 					break
+ 				}
+-				switch p.rune() {
++				switch p.logicalRune() {
+ 				case '|':
+ 					p.rune()
+ 					return appAllClob // >>&| is an alias for &>>|
+@@ -648,7 +710,7 @@
+ 			}
+ 			return appOut
+ 		case '&':
+-			r = p.rune()
++			r = p.logicalRune()
+ 			if p.lang.in(LangZsh) {
+ 				switch r {
+ 				case '|':
+@@ -690,7 +752,7 @@
+ 		// properly handle backslashes in the lexer.
+ 		return bckQuote
+ 	case '$':
+-		switch p.rune() {
++		switch p.logicalRune() {
+ 		case '{':
+ 			p.rune()
+ 			return dollBrace
+@@ -701,7 +763,7 @@
+ 			p.rune()
+ 			return dollBrack
+ 		case '(':
+-			if p.rune() == '(' {
++			if p.logicalRune() == '(' {
+ 				p.rune()
+ 				return dollDblParen
+ 			}
+@@ -718,7 +780,7 @@
+ 		p.rune()
+ 		return rightBrace
+ 	case ':':
+-		switch p.rune() {
++		switch p.logicalRune() {
+ 		case '+':
+ 			p.rune()
+ 			return colPlus
+@@ -755,13 +817,13 @@
+ 		p.rune()
+ 		return assgn
+ 	case '%':
+-		if p.rune() == '%' {
++		if p.logicalRune() == '%' {
+ 			p.rune()
+ 			return dblPerc
+ 		}
+ 		return perc
+ 	case '#':
+-		if p.rune() == '#' {
++		if p.logicalRune() == '#' {
+ 			p.rune()
+ 			return dblHash
+ 		}
+@@ -773,19 +835,19 @@
+ 		p.rune()
+ 		return rightBrack
+ 	case '/':
+-		if p.rune() == '/' {
++		if p.logicalRune() == '/' {
+ 			p.rune()
+ 			return dblSlash
+ 		}
+ 		return slash
+ 	case '^':
+-		if p.rune() == '^' {
++		if p.logicalRune() == '^' {
+ 			p.rune()
+ 			return dblCaret
+ 		}
+ 		return caret
+ 	case ',':
+-		if p.rune() == ',' {
++		if p.logicalRune() == ',' {
+ 			p.rune()
+ 			return dblComma
+ 		}
+@@ -809,13 +871,13 @@
+ func (p *Parser) arithmToken(r rune) token {
+ 	switch r {
+ 	case '!':
+-		if p.rune() == '=' {
++		if p.logicalRune() == '=' {
+ 			p.rune()
+ 			return nequal
+ 		}
+ 		return exclMark
+ 	case '=':
+-		if p.rune() == '=' {
++		if p.logicalRune() == '=' {
+ 			p.rune()
+ 			return equal
+ 		}
+@@ -830,9 +892,9 @@
+ 		p.rune()
+ 		return rightParen
+ 	case '&':
+-		switch p.rune() {
++		switch p.logicalRune() {
+ 		case '&':
+-			if p.rune() == '=' && p.lang.in(LangZsh) {
++			if p.logicalRune() == '=' && p.lang.in(LangZsh) {
+ 				p.rune()
+ 				return andBoolAssgn
+ 			}
+@@ -843,9 +905,9 @@
+ 		}
+ 		return and
+ 	case '|':
+-		switch p.rune() {
++		switch p.logicalRune() {
+ 		case '|':
+-			if p.rune() == '=' && p.lang.in(LangZsh) {
++			if p.logicalRune() == '=' && p.lang.in(LangZsh) {
+ 				p.rune()
+ 				return orBoolAssgn
+ 			}
+@@ -856,9 +918,9 @@
+ 		}
+ 		return or
+ 	case '<':
+-		switch p.rune() {
++		switch p.logicalRune() {
+ 		case '<':
+-			if p.rune() == '=' {
++			if p.logicalRune() == '=' {
+ 				p.rune()
+ 				return shlAssgn
+ 			}
+@@ -869,9 +931,9 @@
+ 		}
+ 		return rdrIn
+ 	case '>':
+-		switch p.rune() {
++		switch p.logicalRune() {
+ 		case '>':
+-			if p.rune() == '=' {
++			if p.logicalRune() == '=' {
+ 				p.rune()
+ 				return shrAssgn
+ 			}
+@@ -882,7 +944,7 @@
+ 		}
+ 		return rdrOut
+ 	case '+':
+-		switch p.rune() {
++		switch p.logicalRune() {
+ 		case '+':
+ 			p.rune()
+ 			return addAdd
+@@ -892,7 +954,7 @@
+ 		}
+ 		return plus
+ 	case '-':
+-		switch p.rune() {
++		switch p.logicalRune() {
+ 		case '-':
+ 			p.rune()
+ 			return subSub
+@@ -902,15 +964,15 @@
+ 		}
+ 		return minus
+ 	case '%':
+-		if p.rune() == '=' {
++		if p.logicalRune() == '=' {
+ 			p.rune()
+ 			return remAssgn
+ 		}
+ 		return perc
+ 	case '*':
+-		switch p.rune() {
++		switch p.logicalRune() {
+ 		case '*':
+-			if p.rune() == '=' && p.lang.in(LangZsh) {
++			if p.logicalRune() == '=' && p.lang.in(LangZsh) {
+ 				p.rune()
+ 				return powAssgn
+ 			}
+@@ -921,15 +983,15 @@
+ 		}
+ 		return star
+ 	case '/':
+-		if p.rune() == '=' {
++		if p.logicalRune() == '=' {
+ 			p.rune()
+ 			return quoAssgn
+ 		}
+ 		return slash
+ 	case '^':
+-		switch p.rune() {
++		switch p.logicalRune() {
+ 		case '^':
+-			if p.rune() == '=' && p.lang.in(LangZsh) {
++			if p.logicalRune() == '=' && p.lang.in(LangZsh) {
+ 				p.rune()
+ 				return xorBoolAssgn
+ 			}
+@@ -1114,7 +1176,7 @@
+ 				}
+ 				continue
+ 			}
+-			if p.peek() == '(' {
++			if p.logicalPeek() == '(' {
+ 				tok = _Lit
+ 			} else if p.isLitRedir() {
+ 				tok = _LitRedir
+@@ -1178,13 +1240,9 @@
+ }
+ 
+ func (p *Parser) advanceLitHdoc(r rune) {
+-	// Unlike the rest of nextKeepSpaces quote states, we handle escaped
+-	// newlines here. If lastTok==_Lit, then we know we're following an
+-	// escaped newline, so the first line can't end the heredoc.
+-	lastTok := p.tok
++	// An unquoted body compares its delimiter after logical continuations.
+ 	for r == escNewl {
+ 		r = p.rune()
+-		lastTok = _Lit
+ 	}
+ 	p.pos = p.nextPos()
+ 
+@@ -1197,7 +1255,9 @@
+ 	stop := p.hdocStops[len(p.hdocStops)-1]
+ 	for ; ; r = p.rune() {
+ 		switch r {
+-		case escNewl, '$':
++		case escNewl:
++			continue
++		case '$':
+ 			p.val = p.endLit()
+ 			return
+ 		case '\\': // escaped byte follows
+@@ -1215,9 +1275,6 @@
+ 					p.val = p.endLit()
+ 					return
+ 				}
+-			} else if lStart == 0 && lastTok == _Lit {
+-				// This line starts right after an escaped
+-				// newline, so it should never end the heredoc.
+ 			} else if lStart >= 0 {
+ 				// Compare the current line with the stop word.
+ 				line := p.litBs[lStart:]
+@@ -1246,6 +1303,9 @@
+ }
+ 
+ func (p *Parser) quotedHdocWord() *Word {
++	oldLiteral := p.literalContinuations
++	p.literalContinuations = true
++	defer func() { p.literalContinuations = oldLiteral }()
+ 	r := p.r
+ 	p.newLit(r)
+ 	pos := p.nextPos()
+--- a/syntax/parser.go
++++ b/syntax/parser.go
+@@ -544,9 +544,11 @@
+ 	litBatch  []Lit
+ 	wordBatch []wordAlloc
+ 
+-	readBuf [bufSize]byte
+-	litBuf  [bufSize]byte
+-	litBs   []byte
++	continuations        *continuationMap
++	literalContinuations bool
++	readBuf              []byte
++	litBuf               [bufSize]byte
++	litBs                []byte
+ }
+ 
+ // Incomplete reports whether the parser needs more input bytes
+@@ -563,6 +565,11 @@
+ const bufSize = 1 << 10
+ 
+ func (p *Parser) reset() {
++	p.continuations = &continuationMap{}
++	p.literalContinuations = false
++	if p.readBuf == nil {
++		p.readBuf = make([]byte, bufSize)
++	}
+ 	p.callDepth = 0
+ 	p.tok, p.val = illegalTok, ""
+ 	p.eqlOffs = 0
+@@ -589,7 +596,11 @@
+ func (p *Parser) nextPos() Pos {
+ 	// Basic protection against offset overflow;
+ 	// note that an offset of 0 is valid, so we leave the maximum.
+-	offset := min(p.offs+int64(p.bsp)-int64(p.w), offsetMax)
++	width := int64(p.w)
++	if p.r == escNewl {
++		width = 2
++	}
++	offset := min(p.offs+int64(p.bsp)-width, offsetMax)
+ 	var line, col uint
+ 	if p.line <= lineMax {
+ 		line = uint(p.line)
+@@ -597,7 +608,9 @@
+ 	if p.col <= colMax {
+ 		col = uint(p.col)
+ 	}
+-	return NewPos(uint(offset), line, col)
++	pos := NewPos(uint(offset), line, col)
++	pos.continuations = p.continuations
++	return pos
+ }
+ 
+ func (p *Parser) lit(pos Pos, val string) *Lit {
+@@ -717,7 +730,9 @@
+ 	buf := make([]byte, 0, 4)
+ 	didUnquote := false
+ 	for _, wp := range w.Parts {
+-		buf, didUnquote = p.unquotedWordPart(buf, wp, false)
++		var partQuoted bool
++		buf, partQuoted = p.unquotedWordPart(buf, wp, false)
++		didUnquote = didUnquote || partQuoted
+ 	}
+ 	return buf, didUnquote
+ }
+@@ -758,8 +773,8 @@
+ 		// Nothing do do; don't even issue a read.
+ 		return
+ 	}
+-	p.rune() // consume '\n', since we know p.tok == _Newl
+ 	old := p.quote
++	oldLiteral := p.literalContinuations
+ 	p.heredocs = p.heredocs[:p.buriedHdocs]
+ 	for i, r := range hdocs {
+ 		if p.err != nil {
+@@ -771,7 +786,8 @@
+ 		}
+ 		stop, quoted := p.unquotedWordBytes(r.Word)
+ 		p.hdocStops = append(p.hdocStops, stop)
+-		if i > 0 && p.r == '\n' {
++		p.literalContinuations = quoted
++		if i == 0 || p.r == '\n' {
+ 			p.rune()
+ 		}
+ 		if quoted {
+@@ -786,6 +802,7 @@
+ 		p.hdocStops = p.hdocStops[:len(p.hdocStops)-1]
+ 	}
+ 	p.quote = old
++	p.literalContinuations = oldLiteral
+ }
+ 
+ func (p *Parser) got(tok token) bool {
+@@ -1313,6 +1330,7 @@
+ 				sq.Right = p.nextPos()
+ 				sq.Value = p.endLit()
+ 
++				p.literalContinuations = false
+ 				p.rune()
+ 				p.next()
+ 				return sq
+@@ -1476,9 +1494,9 @@
+ 		// In the future, parsing as a word is better for cases like
+ 		// `${(ps.$sep.)val}`.
+ 		lparen := p.nextPos()
+-		p.rune()
++		p.logicalRune()
+ 		p.pos = p.nextPos()
+-		for p.newLit(p.r); p.r != runeEOF && p.r != ')'; p.rune() {
++		for p.newLit(p.r); p.r != runeEOF && p.r != ')'; p.logicalRune() {
+ 		}
+ 		p.val = p.endLit()
+ 		if p.r != ')' {
+@@ -1486,7 +1504,7 @@
+ 			p.matchingErr(lparen, leftParen, rightParen)
+ 		}
+ 		pe.Flags = p.lit(p.pos, p.val)
+-		p.rune()
++		p.logicalRune()
+ 	}
+ 	// Zsh-only prefixes that change how the parameter is expanded.
+ 	// They may appear in any combination, like ${=^name}.
+@@ -1504,7 +1522,7 @@
+ 		default:
+ 			break zshPrefixLoop
+ 		}
+-		next, after := p.peekTwo()
++		next, after := p.logicalPeekTwo()
+ 		state := OptOn
+ 		check := next
+ 		if rune(next) == p.r {
+@@ -1521,9 +1539,9 @@
+ 			break zshPrefixLoop
+ 		}
+ 		if state == OptOff {
+-			p.rune() // consume the first of the doubled pair
++			p.logicalRune() // consume the first of the doubled pair
+ 		}
+-		p.rune()
++		p.logicalRune()
+ 		*field = state
+ 	}
+ 	if !pe.Short || p.lang.in(LangZsh) {
+@@ -1561,7 +1579,7 @@
+ 	if pe.Short {
+ 		if p.lang.in(LangZsh) && p.r == '[' && (len(p.val) != 1 || !positionalRuneParam(p.val[0])) {
+ 			p.pos = p.nextPos()
+-			p.rune()
++			p.logicalRune()
+ 			pe.Index = p.eitherIndex()
+ 		}
+ 		p.quote = old
+@@ -1578,7 +1596,7 @@
+ 			p.posErr(p.nextPos(), "cannot index a special parameter name")
+ 		}
+ 		p.pos = p.nextPos()
+-		p.rune()
++		p.logicalRune()
+ 		pe.Index = p.eitherIndex()
+ 	}
+ 	tokRune := p.r
+@@ -1608,7 +1626,7 @@
+ 		if p.lang.in(LangZsh) && (p.r == '&' || asciiLetter(p.r)) {
+ 			pos := p.pos
+ 		loop:
+-			for p.newLit(p.r); ; p.rune() {
++			for p.newLit(p.r); ; p.logicalRune() {
+ 				switch p.r {
+ 				case runeEOF:
+ 					p.tok = _EOF
+@@ -1617,11 +1635,11 @@
+ 				case '}':
+ 					pe.Modifiers = append(pe.Modifiers, p.lit(pos, p.endLit()))
+ 					pe.Rbrace = p.nextPos()
+-					p.rune()
++					p.logicalRune()
+ 					break loop
+ 				case ':':
+ 					pe.Modifiers = append(pe.Modifiers, p.lit(pos, p.endLit()))
+-					p.rune()
++					p.logicalRune()
+ 					pos = p.nextPos()
+ 					p.newLit(p.r)
+ 				}
+@@ -1692,9 +1710,9 @@
+ // Only the long form allows a quoted nested expansion like ${#"$(foo)"} or EOF;
+ // in the short form the prefix rune is the parameter itself, as in "$#" or $#"$foo".
+ func (p *Parser) paramNameStart(pe *ParamExp) bool {
+-	r := p.peek()
++	r := p.logicalPeek()
+ 	if paramNameStartRune(r) || (!pe.Short && (r == '"' || r == utf8.RuneSelf)) {
+-		p.rune()
++		p.logicalRune()
+ 		return true
+ 	}
+ 	return false
+@@ -1706,7 +1724,7 @@
+ 	}
+ 	if p.r == '"' {
+ 		quotePos = p.nextPos()
+-		p.rune()
++		p.logicalRune()
+ 	}
+ 	if p.r != '$' {
+ 		if quotePos.IsValid() {
+@@ -1714,15 +1732,15 @@
+ 		}
+ 		return illegalTok, Pos{}
+ 	}
+-	switch p1 := p.peek(); p1 {
++	switch p1 := p.logicalPeek(); p1 {
+ 	case '{', '(':
+ 		p.pos = p.nextPos()
+ 		p.checkLang(p.pos, LangZsh, "nested parameter expansions")
+ 		if p.err != nil {
+ 			return illegalTok, Pos{} // xxx given that we overwrite p.tok below
+ 		}
+-		p.rune()
+-		p.rune()
++		p.logicalRune()
++		p.logicalRune()
+ 		if p1 == '{' {
+ 			left = dollBrace
+ 		} else { // '('
+@@ -1764,7 +1782,7 @@
+ 				Right: p.nextPos(),
+ 				Parts: []WordPart{wp},
+ 			}
+-			p.rune()
++			p.logicalRune()
+ 		} else {
+ 			pe.NestedParam = wp
+ 		}
+@@ -1773,7 +1791,7 @@
+ 	// The parameter name itself, like $foo or $?.
+ 	switch p.r {
+ 	case '?', '-':
+-		if pe.Length && p.peek() != '}' {
++		if pe.Length && p.logicalPeek() != '}' {
+ 			// actually ${#-default}, not ${#-}; fix the ambiguity
+ 			pe.Length = false
+ 			pos := p.nextPos()
+@@ -1784,7 +1802,7 @@
+ 		fallthrough
+ 	case '@', '*', '#', '!', '$':
+ 		r, pos := p.r, p.nextPos()
+-		p.rune()
++		p.logicalRune()
+ 		pe.Param = p.lit(pos, string(r))
+ 	default:
+ 		// Note that $1a is equivalent to ${1}a, but ${1a} is not.
+@@ -1792,9 +1810,9 @@
+ 		pos := p.nextPos()
+ 		if pe.Short && singleRuneParam(p.r) {
+ 			p.val = string(p.r)
+-			p.rune()
++			p.logicalRune()
+ 		} else {
+-			for p.newLit(p.r); p.r != runeEOF; p.rune() {
++			for p.newLit(p.r); p.r != runeEOF; p.logicalRune() {
+ 				if !paramNameRune(p.r) && p.r != escNewl {
+ 					break
+ 				}
+--- a/syntax/parser_arithm.go
++++ b/syntax/parser_arithm.go
+@@ -346,8 +346,17 @@
+ 	return x
+ }
+ 
+-func (p *Parser) peekArithmEnd() bool {
+-	return p.tok == rightParen && p.r == ')'
++func (p *Parser) peekArithmEnd(open token) bool {
++	if p.tok != rightParen {
++		return false
++	}
++	// Expansion closers undergo logical continuation removal. Arithmetic-command
++	// recognition requires physically adjacent closing parentheses; otherwise
++	// native dialect versions may interpret nested commands instead.
++	if open == dollDblParen {
++		return p.logicalCurrent() == ')'
++	}
++	return p.r == ')'
+ }
+ 
+ func (p *Parser) arithmMatchingErr(pos Pos, left, right token) {
+@@ -377,7 +386,7 @@
+ }
+ 
+ func (p *Parser) arithmEnd(ltok token, lpos Pos, old saveState) Pos {
+-	if !p.peekArithmEnd() {
++	if !p.peekArithmEnd(ltok) {
+ 		if p.recoverError() {
+ 			return recoveredPos
+ 		}
+--- a/syntax/nodes.go
++++ b/syntax/nodes.go
+@@ -69,6 +69,7 @@
+ 
+ // Pos is a position within a shell source file.
+ type Pos struct {
++	continuations *continuationMap
+ 	offs, lineCol uint32
+ }
+ 
+@@ -187,6 +188,9 @@
+ func posAddCol(p Pos, n int) Pos {
+ 	if !p.IsValid() {
+ 		return p
++	}
++	if p.continuations != nil {
++		return p.continuations.add(p, n)
+ 	}
+ 	// Clamp the offset, and drop columns which no longer fit,
+ 	// just like [NewPos] does. Note that a column of zero is already unknown,
+--- /dev/null
++++ b/syntax/continuations.go
+@@ -0,0 +1,33 @@
++package syntax
++
++import "sort"
++
++// continuationMap is lexical provenance, recorded by the existing input reader
++// only for discarded continuations. It is owned by one parse and retained by
++// that tree's positions; no executable bytes are rewritten or rescanned.
++type continuationMap struct{ gaps []continuationGap }
++type continuationGap struct{ start, end Pos }
++
++func (m *continuationMap) add(p Pos, n int) Pos {
++	result := p
++	result.continuations = nil
++	result = posAddCol(result, n)
++	target := int64(result.offs)
++	if n > 0 {
++		first := sort.Search(len(m.gaps), func(i int) bool { return m.gaps[i].start.offs >= p.offs })
++		for i := first; i < len(m.gaps) && int64(m.gaps[i].start.offs) < target; i++ {
++			gap := m.gaps[i]
++			target += int64(gap.end.offs - gap.start.offs)
++			result = posAddCol(gap.end, int(target-int64(gap.end.offs)))
++		}
++	} else if n < 0 {
++		first := sort.Search(len(m.gaps), func(i int) bool { return m.gaps[i].end.offs > p.offs }) - 1
++		for i := first; i >= 0 && int64(m.gaps[i].end.offs) > target; i-- {
++			gap := m.gaps[i]
++			target -= int64(gap.end.offs - gap.start.offs)
++			result = posAddCol(gap.start, int(target-int64(gap.start.offs)))
++		}
++	}
++	result.continuations = m
++	return result
++}
