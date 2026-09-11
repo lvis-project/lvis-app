@@ -843,8 +843,11 @@ export async function queryLoop(
           { role: "user" as const, content: appendedUserText.join("\n\n") },
         ];
       };
-      const projectRound = (messages: GenericMessage[]) => self.projectProviderRequestInput({
-        systemPrompt, messages, toolSchemas,
+      const projectRound = (
+        messages: GenericMessage[],
+        requestSystemPrompt = systemPrompt,
+      ) => self.projectProviderRequestInput({
+        systemPrompt: requestSystemPrompt, messages, toolSchemas,
         continuationPrefill: continuationPrefillText !== undefined,
         enableThinking: roundLlmSettings.enableThinking,
         thinkingBudgetTokens: subscriptionRuntime ? undefined : activeBlock.thinkingBudgetTokens,
@@ -891,7 +894,19 @@ export async function queryLoop(
               {
                 systemPrompt,
                 toolSchemas,
-                estimateCurrent: () => self.estimateCurrentRequestProjection({ systemPrompt, toolSchemas }),
+                // The guard and its post-compact evaluation must include this
+                // round's wire-only instructions and bounded reasoning replay,
+                // plus the summary preamble that compaction may have replaced.
+                estimateCurrent: () => projectRound(
+                  assembleRoundMessages(self.history.getMessages()),
+                  self.buildSystemPromptForScope(
+                    scope,
+                    stagedOrigin,
+                    bounds.rolePrompt,
+                    bounds.sessionIdOverride ?? self.sessionId,
+                    bounds.memoryQuery,
+                  ),
+                ),
               },
               abortSignal,
               callbacks,
