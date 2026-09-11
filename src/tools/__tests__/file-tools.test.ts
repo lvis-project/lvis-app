@@ -107,6 +107,61 @@ describe("view_image tool", () => {
 });
 
 describe("file native tools", () => {
+  describe.each([
+    ["edit_file", EditFileTool],
+    ["apply_patch", ApplyPatchTool],
+  ] as const)("%s exact text round trip", (name, ToolClass) => {
+    it.each([
+      ["lf", "\n"],
+      ["crlf", "\r\n"],
+      ["cr", "\r"],
+    ])("edits the returned %s fragment without changing other bytes", async (_label, separator) => {
+      const path = join(workDir, "round-trip.txt");
+      writeFileSync(path, `before${separator}alpha${separator}beta${separator}after${separator}`);
+      const read = await new ReadFileTool().execute({ path, offset: 1, limit: 2 }, ctx());
+      expect(read.isError).toBe(false);
+      const oldText = parse(read.output).content;
+      const replacement = { oldText, newText: "updated\nentry" };
+      const edit = await new ToolClass().execute(
+        name === "edit_file" ? { path, ...replacement } : { path, replacements: [replacement] },
+        ctx(),
+      );
+      expect(edit.isError).toBe(false);
+      expect(readFileSync(path, "utf8")).toBe(`before${separator}updated\nentry${separator}after${separator}`);
+      expect(oldText).toBe(`alpha${separator}beta`);
+    });
+
+    it("edits the returned mixed-separator fragment with exact matching", async () => {
+      const path = join(workDir, "mixed-round-trip.txt");
+      writeFileSync(path, "before\nalpha\r\nbeta\rgamma\nafter\r\n");
+      const read = await new ReadFileTool().execute({ path, offset: 1, limit: 3 }, ctx());
+      expect(read.isError).toBe(false);
+      const oldText = parse(read.output).content;
+      const replacement = { oldText, newText: "updated" };
+      const edit = await new ToolClass().execute(
+        name === "edit_file" ? { path, ...replacement } : { path, replacements: [replacement] },
+        ctx(),
+      );
+      expect(edit.isError).toBe(false);
+      expect(readFileSync(path, "utf8")).toBe("before\nupdated\nafter\r\n");
+      expect(oldText).toBe("alpha\r\nbeta\rgamma");
+    });
+
+    it("still rejects old text with different separators", async () => {
+      const path = join(workDir, "exact-only.txt");
+      const source = "alpha\r\nbeta\r\n";
+      writeFileSync(path, source);
+      const replacement = { oldText: "alpha\nbeta", newText: "updated" };
+      const edit = await new ToolClass().execute(
+        name === "edit_file" ? { path, ...replacement } : { path, replacements: [replacement] },
+        ctx(),
+      );
+      expect(edit.isError).toBe(true);
+      expect(edit.output).toContain("oldText not found");
+      expect(readFileSync(path, "utf8")).toBe(source);
+    });
+  });
+
   it("read_file reads a bounded line window", async () => {
     const result = await new ReadFileTool().execute(
       { path: "src/a.ts", offset: 1, limit: 1 },

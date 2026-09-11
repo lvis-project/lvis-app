@@ -65,6 +65,7 @@ import { registerWorkspaceHandlers } from "../workspace.js";
 import { CHANNELS } from "../../../contract/app-contract.js";
 import { getWorkspaceRootLifecycle } from "../../../permissions/workspace-root-lifecycle.js";
 import { canonicalizePathForMatch, caseFoldForMatch } from "../../../permissions/sensitive-paths.js";
+import { ReadFileTool } from "../../../tools/file-tools.js";
 
 const deps = {
   auditLogger: { log: vi.fn() },
@@ -158,6 +159,24 @@ beforeEach(() => {
 });
 
 describe("preview:read-file handler", () => {
+  it.each([
+    ["crlf", "alpha\r\nbeta\r\n", "alpha\r\nbeta"],
+    ["mixed", "alpha\rbeta\r\ngamma\n", "alpha\rbeta\r\ngamma"],
+  ])("preserves exact text shared with the %s file reader", async (label, source, content) => {
+    const path = join(root, `${label}.txt`);
+    writeFileSync(path, source);
+    const preview = await invoke(CHANNELS.preview.readFile, OK_FRAME, path) as {
+      ok: boolean;
+      content?: string;
+    };
+    const read = await new ReadFileTool().execute({ path }, {
+      cwd: root, extraAllowedDirectories: [], metadata: {},
+    });
+    expect(read.isError).toBe(false);
+    expect(preview).toMatchObject({ ok: true, content });
+    expect(JSON.parse(read.output).content).toBe(preview.content);
+  });
+
   it("reads a file inside an allowed project root", async () => {
     const res = (await invoke(CHANNELS.preview.readFile, OK_FRAME, join(root, "docs", "architecture.md"))) as {
       ok: boolean;

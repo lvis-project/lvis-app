@@ -84,6 +84,15 @@ Continuation analysis refuses a command when its heredoc boundary cannot be
 resolved; here-strings never consume later lines as a heredoc body.
 Denial guidance distinguishes available operations from missing capabilities.
 
+Text file reads and previews share `readTextFileWindow` in
+`src/tools/file-read-core.ts`. Its `content` preserves the source separators
+between selected lines and omits the final selected line's separator, so a
+returned fragment can be used by the exact edit and patch tools. Both consumers
+use that content directly. Logical line offsets, limits, counts and truncation
+remain independent of line-ending style; reads stream the file and release the
+stream when the requested window is complete. Edits preserve exact matching and
+use replacement text as supplied without implicit newline conversion.
+
 External controllers can explicitly retain a headless session after its turn
 for later use of its background services. The caller owns eventual release;
 normal shutdown still cleans the session and descendants. The

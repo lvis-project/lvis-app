@@ -221,7 +221,7 @@ export class ReadFileTool extends FileTool<typeof ReadFileInputSchema> {
         startLine: input.offset + 1,
         endLine: input.offset + window.lines.length,
         truncated: window.truncated,
-        content: window.lines.join("\n"),
+        content: window.content,
       }),
       isError: false,
       metadata: {

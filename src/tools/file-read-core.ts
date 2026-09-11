@@ -12,7 +12,6 @@
  */
 import { createReadStream, realpathSync } from "node:fs";
 import { isAbsolute, resolve as pathResolve } from "node:path";
-import { createInterface } from "node:readline";
 import { finished } from "node:stream/promises";
 
 import { expandLeadingTilde } from "../shared/home-tilde.js";
@@ -96,34 +95,83 @@ export async function isBinaryFile(path: string): Promise<boolean> {
 }
 
 /**
- * Read a zero-based line window of a UTF-8 text file. Returns the collected
- * lines and whether more lines existed past `limit` (truncated).
+ * Read a zero-based line window of a UTF-8 text file. `content` preserves the
+ * source separators between selected lines, omitting the final line's separator.
+ * `lines` contains the same logical lines without separators, and `truncated`
+ * reports whether more lines existed past `limit`.
  */
 export async function readTextFileWindow(
   path: string,
   offset: number,
   limit: number,
-): Promise<{ lines: string[]; truncated: boolean }> {
+): Promise<{ lines: string[]; content: string; truncated: boolean }> {
   const input = createReadStream(path, { encoding: "utf8" });
-  const rl = createInterface({ input, crlfDelay: Infinity });
   const lines: string[] = [];
+  const contentParts: string[] = [];
+  let lineParts: string[] = [];
   let lineNo = 0;
+  let previousSeparator = "";
+  let pendingCR = false;
+  let lineOpen = false;
   let truncated = false;
 
-  try {
-    for await (const line of rl) {
-      if (lineNo >= offset && lines.length < limit) {
-        lines.push(line);
-      } else if (lineNo >= offset && lines.length >= limit) {
+  const append = (fragment: string): void => {
+    if (fragment.length === 0) return;
+    lineOpen = true;
+    if (lineNo >= offset && lines.length < limit) lineParts.push(fragment);
+  };
+
+  const finishLine = (separator: string): boolean => {
+    if (lineNo >= offset) {
+      if (lines.length >= limit) {
         truncated = true;
-        break;
+        return false;
       }
-      lineNo += 1;
+      const line = lineParts.join("");
+      if (lines.length > 0) contentParts.push(previousSeparator);
+      lines.push(line);
+      contentParts.push(line);
+    }
+    lineParts = [];
+    lineOpen = false;
+    lineNo += 1;
+    previousSeparator = separator;
+    return true;
+  };
+
+  try {
+    read: for await (const chunk of input) {
+      if (chunk.length === 0) continue;
+      let start = 0;
+      // A CR at a chunk boundary may be the first half of a CRLF separator.
+      if (pendingCR) {
+        pendingCR = false;
+        const hasLF = chunk.startsWith("\n");
+        if (!finishLine(hasLF ? "\r\n" : "\r")) break;
+        if (hasLF) start = 1;
+      }
+
+      const separators = /\r\n|\r|\n/g;
+      separators.lastIndex = start;
+      let match: RegExpExecArray | null;
+      while ((match = separators.exec(chunk)) !== null) {
+        append(chunk.slice(start, match.index));
+        start = separators.lastIndex;
+        if (match[0] === "\r" && start === chunk.length) {
+          pendingCR = true;
+          break;
+        }
+        if (!finishLine(match[0])) break read;
+      }
+      append(chunk.slice(start));
+    }
+    if (!truncated) {
+      if (pendingCR) finishLine("\r");
+      else if (lineOpen) finishLine("");
     }
   } finally {
-    rl.close();
     input.destroy();
     await finished(input, { cleanup: true }).catch(() => undefined);
   }
-  return { lines, truncated };
+  return { lines, content: contentParts.join(""), truncated };
 }
