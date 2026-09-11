@@ -77,7 +77,7 @@ const RECURSIVE_TRAVERSAL_COMMANDS = new Set([
 ]);
 
 const RECURSIVE_FLAG_COMMANDS = new Map<string, readonly string[]>([
-  ["cp", ["-r", "-R", "--recursive"]],
+  ["cp", ["-r", "-R", "--recursive", "-a", "--archive"]],
   ["du", ["-a", "--all"]],
   ["egrep", ["-r", "-R", "--recursive", "--dereference-recursive"]],
   ["fgrep", ["-r", "-R", "--recursive", "--dereference-recursive"]],

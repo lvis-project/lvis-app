@@ -72,6 +72,16 @@ launcher described in `native/windows-job/README.md`. Session disposal and root
 exit release those owned descendants. The native job is a lifecycle mechanism,
 not a security sandbox.
 
+Shell classification and path checks share logical-line handling in
+`src/shared/shell-tokenizer.ts`; execution retains the original command and leaf
+source spans. Operand roles distinguish patterns and process identifiers from
+file paths. Executed substitutions remain subject to path checks. Unquoted
+heredoc data exemptions require a literal body and one isolated data consumer
+across the whole command; structural checks preserve executable input.
+Continuation analysis refuses a command when
+its heredoc boundary cannot be resolved.
+Denial guidance distinguishes available operations from missing capabilities.
+
 External controllers can explicitly retain a headless session after its turn
 for later use of its background services. The caller owns eventual release;
 normal shutdown still cleans the session and descendants. The
@@ -178,9 +188,11 @@ Important rules:
   interruption. An explicitly completed empty response retains its stop reason.
 - Stream activity is observed before event mapping, so incremental tool input
   resets the same idle deadline as text or reasoning deltas.
-- Input estimates count only fields replayed on the active route. Display-only
-  assistant thought is excluded; signed reasoning selection is shared by the
-  estimator and wire mapper. Local output estimates still count generated thought.
+- Input estimates count the fields a route replays. Display-only assistant
+  thought is excluded; signed reasoning selection is shared by the estimator
+  and wire mapper. Before a fallback route is selected, preflight reserves the
+  largest complete request projection among configured routes. Local output
+  estimates still count generated thought.
 - Long histories are compacted through the structured compact path rather than
   silent truncation.
 - A round that stops at `end_turn` with reasoning but no visible text and no

@@ -28,8 +28,9 @@ function inspect(command: string, fencedReads = false) {
 describe.each(["en", "ko"] as const)("shell capability guidance in %s", (locale) => {
   beforeEach(() => setLocale(locale));
 
-  it("states that recursive copying is unavailable without promising a text transfer", () => {
-    const denial = inspect("cp -r ./source ./destination");
+  it.each(["-r", "-R", "--recursive", "-a", "--archive", "-av"])(
+    "states the recursive copying limit for %s without promising a text transfer", (flag) => {
+    const denial = inspect(`cp ${flag} ./source ./destination`);
     expect(denial?.kind).toBe("recursive-traversal");
     expect(denial?.reason).toContain(locale === "en"
       ? "Recursive copying is unavailable"
