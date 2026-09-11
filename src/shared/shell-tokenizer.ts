@@ -108,6 +108,135 @@ export interface TokenizeResult {
   parseError: boolean;
 }
 
+interface ShellSource {
+  text: string;
+  original: string;
+  offsets?: number[];
+}
+
+/**
+ * Remove escaped newlines before recognizing words or operators. The source
+ * map keeps a leaf's raw text tied to the input the caller will execute.
+ * Quoted heredoc bodies, single quotes and comments retain their bytes.
+ */
+function shellContinuationSource(command: string): ShellSource {
+  if (!command.includes("\\\n")) return { text: command, original: command };
+  const offsets: number[] = [];
+  let text = "";
+  const append = (start: number, end: number): void => {
+    text += command.slice(start, end);
+    for (let index = start; index < end; index += 1) offsets.push(index);
+  };
+  const nextLogicalIndex = (index: number): number => {
+    while (command[index] === "\\" && command[index + 1] === "\n") index += 2;
+    return index;
+  };
+  type Context = { quote: "'" | '"' | null; close?: ")" | "`"; depth: number; heredocs: number[]; wordActive: boolean };
+  const contexts: Context[] = [{ quote: null, depth: 0, heredocs: [], wordActive: false }];
+  let i = 0;
+  while (i < command.length) {
+    const context = contexts.at(-1)!;
+    const ch = command[i]!;
+    if (context.quote === "'") {
+      append(i, i + 1);
+      if (ch === "'") context.quote = null;
+      i += 1;
+      continue;
+    }
+    if (ch === "\\") {
+      if (command[i + 1] === "\n") i += 2;
+      else {
+        append(i, Math.min(i + 2, command.length));
+        context.wordActive = true;
+        i += 2;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      context.quote = context.quote === '"' ? null : '"';
+      context.wordActive = true;
+      append(i, i + 1);
+      i += 1;
+      continue;
+    }
+    if (ch === "'" && context.quote === null) {
+      context.quote = "'";
+      context.wordActive = true;
+      append(i, i + 1);
+      i += 1;
+      continue;
+    }
+    const next = nextLogicalIndex(i + 1);
+    if ((ch === "$" || (context.quote === null && (ch === "<" || ch === ">")))
+      && command[next] === "(") {
+      append(i, i + 1);
+      append(next, next + 1);
+      context.wordActive = true;
+      contexts.push({ quote: null, close: ")", depth: 1, heredocs: [], wordActive: false });
+      i = next + 1;
+      continue;
+    }
+    if (ch === "`") {
+      if (context.close === "`" && context.quote === null) contexts.pop();
+      else {
+        context.wordActive = true;
+        contexts.push({ quote: null, close: "`", depth: 0, heredocs: [], wordActive: false });
+      }
+      append(i, i + 1);
+      i += 1;
+      continue;
+    }
+    if (context.quote === null) {
+      if (ch === "#" && !context.wordActive && startsShellComment(text + "#", text.length)) {
+        const newline = command.indexOf("\n", i);
+        const end = newline === -1 ? command.length : newline;
+        append(i, end);
+        i = end;
+        continue;
+      }
+      if (context.close === ")") {
+        if (ch === "(") context.depth += 1;
+        if (ch === ")" && --context.depth === 0) contexts.pop();
+      }
+      if (ch === "<" && command[next] === "<" && text.at(-1) !== "<") {
+        const after = nextLogicalIndex(next + 1);
+        if (command[after] !== "<") context.heredocs.push(text.length);
+      }
+      if (ch === "\n" && context.heredocs.length > 0) {
+        context.wordActive = false;
+        append(i, i + 1);
+        i += 1;
+        for (const start of context.heredocs) {
+          const opened = readHeredocDelimiter(text, start);
+          const end = opened ? findHeredocTerminator(command, i, opened.delimiter) : null;
+          // Unsupported heredoc syntax retains the remaining source intact.
+          // Its expansion and path checks must not be weakened by guessing
+          // where stdin data ends and the next shell command begins.
+          if (end === null) {
+            append(i, command.length);
+            i = command.length;
+            break;
+          }
+          append(i, end);
+          i = end;
+        }
+        context.heredocs.length = 0;
+        continue;
+      }
+      context.wordActive = !/[ \t\r\n;&|<>()]/.test(ch);
+    }
+    append(i, i + 1);
+    i += 1;
+  }
+  offsets.push(command.length);
+  return { text, original: command, offsets };
+}
+
+/** Shared logical-line view for shell policy scanners; execution keeps its original command. */
+export function normalizeShellLineContinuations(command: string): string {
+  return shellContinuationSource(command).text;
+}
+
 interface RawWord {
   /** The word's textual value with quotes removed but content preserved. */
   value: string;
@@ -157,11 +286,19 @@ export function tokenizeShell(
 ): TokenizeResult {
   // Structural guards can retain stdin text conservatively: a shell consumer
   // may execute it. Default risk/path callers continue to omit those bodies.
-  const redacted = redactHeredocBodies(command, options.literalDataProof ?? false);
+  const logical = shellContinuationSource(command);
+  const removed: Array<{ start: number; end: number }> = [];
+  const redacted = redactHeredocCommand(logical.text, options.literalDataProof ?? false, (start, end) => {
+    removed.push({ start, end });
+  });
   if (redacted === null) return { leaves: [], parseError: true };
+  const scanSource = options.heredocBodies === "preserve" || redacted === logical.text
+    ? logical
+    : redactShellSource(logical, redacted, removed);
   const scan = scanLeaves(
-    options.heredocBodies === "preserve" ? command : redacted,
+    options.heredocBodies === "preserve" ? logical.text : redacted,
     options.literalDataProof,
+    scanSource,
   );
   if (scan.parseError) {
     return { leaves: [], parseError: true };
@@ -178,6 +315,26 @@ export function tokenizeShell(
     leaves.push(buildLeaf(rawLeaf));
   }
   return { leaves, parseError: false };
+}
+
+function redactShellSource(
+  source: ShellSource,
+  text: string,
+  removed: readonly { start: number; end: number }[],
+): ShellSource {
+  const offsets: number[] = [];
+  let rangeIndex = 0;
+  for (let index = 0; index < source.text.length; index += 1) {
+    const range = removed[rangeIndex];
+    if (range && index === range.start) {
+      index = range.end - 1;
+      rangeIndex += 1;
+      continue;
+    }
+    offsets.push(source.offsets?.[index] ?? index);
+  }
+  offsets.push(source.original.length);
+  return { text, original: source.original, offsets };
 }
 
 /**
@@ -238,6 +395,14 @@ export function tokenizeShell(
 export function redactHeredocBodies(command: string): string;
 export function redactHeredocBodies(command: string, literalDataProof: boolean): string | null;
 export function redactHeredocBodies(command: string, literalDataProof = false): string | null {
+  return redactHeredocCommand(command, literalDataProof);
+}
+
+function redactHeredocCommand(
+  command: string,
+  literalDataProof: boolean,
+  onRemoved?: (start: number, end: number) => void,
+): string | null {
   if (!command.includes("<<")) return command;
   const n = command.length;
   // Delimiters opened on the current line, in the order their bodies follow it.
@@ -303,11 +468,13 @@ export function redactHeredocBodies(command: string, literalDataProof = false): 
     if (ch === "\n" && pending.length > 0) {
       out += "\n";
       i += 1;
+      const bodyStart = i;
       for (const delimiter of pending) {
         const bodyEnd = findHeredocTerminator(command, i, delimiter);
         if (bodyEnd === null) return literalDataProof ? null : command;
         i = bodyEnd;
       }
+      onRemoved?.(bodyStart, i);
       pending.length = 0;
       continue;
     }
@@ -388,7 +555,7 @@ function isCompleteDescriptorRedirect(operator: string): boolean {
  * tracking quote and substitution nesting. Returns `parseError` when a quote or
  * paren never closes.
  */
-function scanLeaves(command: string, literalDataProof = false): { leaves: RawLeaf[]; parseError: boolean } {
+function scanLeaves(command: string, literalDataProof = false, source?: ShellSource): { leaves: RawLeaf[]; parseError: boolean } {
   let parentheses = 0;
   let braces = 0;
   const leaves: RawLeaf[] = [];
@@ -436,7 +603,10 @@ function scanLeaves(command: string, literalDataProof = false): { leaves: RawLea
 
   const endLeaf = (endIndex: number, nextStart: number): void => {
     pushWord();
-    leaves.push({ words, raw: command.slice(leafStart, endIndex).trim() });
+    const raw = source
+      ? source.original.slice(source.offsets?.[leafStart] ?? leafStart, source.offsets?.[endIndex] ?? endIndex).trim()
+      : command.slice(leafStart, endIndex).trim();
+    leaves.push({ words, raw });
     words = [];
     leafStart = nextStart;
   };

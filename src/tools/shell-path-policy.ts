@@ -4,6 +4,7 @@ import { isAbsolute, resolve as pathResolve } from "node:path";
 import { t } from "../i18n/index.js";
 import {
   redactHeredocBodies,
+  normalizeShellLineContinuations,
   startsShellComment,
   stripCommandPath,
   tokenizeShell,
@@ -182,7 +183,7 @@ function findViolationInCommand(
   // A quoted heredoc body is stdin data, not commands — see
   // `redactHeredocBodies`. Removing it here rather than inside each extractor
   // keeps the flat scan and the leaf walk reading the same text.
-  const command = redactHeredocBodies(rawCommand);
+  const command = redactHeredocBodies(normalizeShellLineContinuations(rawCommand));
   // What this text declares, on top of what the text around it declared. A body
   // rebinding a name shadows the outer one, which is what the shell does.
   const loopBindings = mergeLoopBindings(inheritedLoopBindings, collectLiteralLoopBindings(command));
