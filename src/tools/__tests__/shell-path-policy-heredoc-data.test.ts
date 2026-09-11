@@ -19,7 +19,7 @@ describe("heredoc data path policy", () => {
   it.each([
     "cat > ./commands.vim <<END\n:%s/^first$/last/\nwq\nEND",
     "cat > ./text <<END\n'path/to/data' # text\nEND\nprintf done",
-    "cat > ./text <<END\nnot shell syntax: ' and /\nEN\\\nD\nprintf \\\n done",
+    "cat > ./text <<END\nnot shell syntax: ' and /\nEN\\\nD",
     "cat > ./text <<END\n\\$(cat /etc/shadow)\nEND",
   ])("accepts expansion-free stdin data inside the allowed scope: %s", (command) => {
     expect(check(command)).toBeNull();
@@ -52,6 +52,10 @@ describe("heredoc data path policy", () => {
 
   it.each(["|", "||", "&&", ";", "&"])("retains the body when a control operator leaves the header incomplete: %s", (operator) => {
     expect(check(`cat <<END ${operator}\ncat /etc/shadow\nEND\nsh`)).not.toBeNull();
+  });
+
+  it.each([["{", "}"], ["(", ")"]])("retains bodies whose enclosing group can feed an execution consumer: %s", (open, close) => {
+    expect(check(`${open}\ncat <<END\ncat /etc/shadow\nEND\n${close} | sh`)).not.toBeNull();
   });
 
   it.each([

@@ -414,7 +414,7 @@ function redactHeredocCommand(
   command: string,
   literalDataProof: boolean,
   onRemoved?: (start: number, end: number) => void,
-  omitExpandableBody?: (body: string, header: string) => boolean,
+  omitExpandableBody?: (body: string) => boolean,
 ): string | null {
   if (!command.includes("<<")) return command;
   const n = command.length;
@@ -422,7 +422,6 @@ function redactHeredocCommand(
   const pending: HeredocDelimiter[] = [];
   let out = "";
   let i = 0;
-  let headerStart = 0;
   while (i < n) {
     const ch = command[i]!;
     if (ch === "\\" && i + 1 < n) {
@@ -480,23 +479,20 @@ function redactHeredocCommand(
       continue;
     }
     if (ch === "\n" && pending.length > 0) {
-      const header = command.slice(headerStart, i);
       out += "\n";
       i += 1;
       for (const delimiter of pending) {
         const bodyEnd = findHeredocTerminator(command, i, delimiter);
         if (bodyEnd === null) return literalDataProof ? null : command;
-        if (delimiter.quoted || omitExpandableBody?.(command.slice(i, bodyEnd), header)) onRemoved?.(i, bodyEnd);
+        if (delimiter.quoted || omitExpandableBody?.(command.slice(i, bodyEnd))) onRemoved?.(i, bodyEnd);
         else out += command.slice(i, bodyEnd);
         i = bodyEnd;
       }
       pending.length = 0;
-      headerStart = i;
       continue;
     }
     out += ch;
     i += 1;
-    if (ch === "\n") headerStart = i;
   }
   if (literalDataProof && pending.length > 0) return null;
   return out;
@@ -504,7 +500,7 @@ function redactHeredocCommand(
 
 /**
  * Path analysis may omit an unquoted body only after proving that no expansion
- * occurs and the header proves an ordinary data consumer. Bodies with
+ * occurs and the whole command proves an independent data consumer. Bodies with
  * expansions remain in the conservative scan, and their
  * executable substitutions are also returned independently: quotes and `#`
  * inside heredoc data cannot conceal those commands as shell text operands.
@@ -514,7 +510,8 @@ export function inspectShellHeredocData(
 ): { command: string; expansionCommands: string[] } | null {
   const expansionCommands: string[] = [];
   let unresolvedExpansion = false;
-  const projected = redactHeredocCommand(command, false, undefined, (body, header) => {
+  let omittedExpandableData = false;
+  const projected = redactHeredocCommand(command, false, undefined, (body) => {
     let literal = true;
     for (let i = 0; i < body.length; i += 1) {
       const ch = body[i]!;
@@ -551,21 +548,26 @@ export function inspectShellHeredocData(
         }
       }
     }
-    if (!literal) return false;
-    // An execution consumer interprets even expansion-free stdin as a
-    // program. Grant the new data exemption only for an isolated known data
-    // consumer; pipes, wrapper execution and opaque headers remain scanned.
-    const parsed = tokenizeShell(header);
+    omittedExpandableData ||= literal;
+    return literal;
+  });
+  if (unresolvedExpansion) return null;
+  if (omittedExpandableData) {
+    // A local cat header can sit inside a group whose output is piped to a
+    // shell. Prove the WHOLE projected command is one independent consumer;
+    // complete raw coverage also excludes dangling control operators.
+    const parsed = tokenizeShell(projected!);
     const leaf = parsed.leaves[0];
-    return !parsed.parseError && parsed.leaves.length === 1 && leaf !== undefined
-      && leaf.raw === header.trim()
+    const independentDataConsumer = !parsed.parseError && parsed.leaves.length === 1 && leaf !== undefined
+      && leaf.raw === projected!.trim()
       && stripCommandPath(leaf.argv[0] ?? "") === "cat"
       && leaf.assignments.length === 0
       && leaf.strippedWrappers.every((wrapper) => wrapper === "command")
       && !leaf.hasCommandSubstitution && !leaf.hasProcessSubstitution
       && !leaf.argvHasExpandableDollar.some(Boolean);
-  });
-  return unresolvedExpansion ? null : { command: projected!, expansionCommands };
+    if (!independentDataConsumer) return { command: redactHeredocBodies(command), expansionCommands };
+  }
+  return { command: projected!, expansionCommands };
 }
 
 /**

@@ -10,9 +10,9 @@ describe("heredoc data inspection", () => {
     "literal \\$(command) and \\`command\\`",
     "$'literal' and a standalone $",
   ])("omits expansion-free body data for path analysis: %s", (body) => {
-    const command = `cat > ./output <<END\n${body}\nEND\nprintf done`;
+    const command = `cat > ./output <<END\n${body}\nEND`;
     expect(inspectShellHeredocData(command)).toEqual({
-      command: "cat > ./output <<END\nprintf done", expansionCommands: [],
+      command: "cat > ./output <<END\n", expansionCommands: [],
     });
     // Default tokenizer/redactor contract stays quoted-only.
     expect(redactHeredocBodies(command)).toBe(command);
@@ -67,6 +67,14 @@ describe("heredoc data inspection", () => {
     expect(inspectShellHeredocData(command)?.command).toBe("cat '|' <<END\n");
   });
 
+  it.skipIf(process.platform === "win32")("retains bodies whose enclosing group feeds an execution consumer", () => {
+    for (const [open, close] of [["{", "}"], ["(", ")"]]) {
+      const command = `${open}\ncat <<END\nprintf witnessed\nEND\n${close} | sh`;
+      expect(execFileSync("/bin/sh", ["-c", command], { encoding: "utf8" })).toBe("witnessed");
+      expect(inspectShellHeredocData(command)?.command).toBe(command);
+    }
+  });
+
   it.each(["${VALUE:-other}", "$((VALUE + 1))", "$[VALUE]", "$(unclosed", "`unclosed", "`printf \\`nested\\``"])(
     "refuses an unresolved expansion: %s", (body) => {
       expect(inspectShellHeredocData(`cat <<END\n${body}\nEND`)).toBeNull();
@@ -74,9 +82,9 @@ describe("heredoc data inspection", () => {
   );
 
   it("preserves the consuming redirect and does not open a heredoc from body text", () => {
-    const command = "cat <<FIRST <<'SECOND'\n<<'FALSE'\nFIRST\nother\nSECOND\nprintf done";
-    expect(redactHeredocBodies(command)).toBe("cat <<FIRST <<'SECOND'\n<<'FALSE'\nFIRST\nprintf done");
-    expect(inspectShellHeredocData(command)?.command).toBe("cat <<FIRST <<'SECOND'\nprintf done");
+    const command = "cat <<FIRST <<'SECOND'\n<<'FALSE'\nFIRST\nother\nSECOND";
+    expect(redactHeredocBodies(command)).toBe("cat <<FIRST <<'SECOND'\n<<'FALSE'\nFIRST\n");
+    expect(inspectShellHeredocData(command)?.command).toBe("cat <<FIRST <<'SECOND'\n");
     expect(tokenizeShell(inspectShellHeredocData(command)!.command).leaves[0]!.hasInputRedirect).toBe(true);
   });
 });
