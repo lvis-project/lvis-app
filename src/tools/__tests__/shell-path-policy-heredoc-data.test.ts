@@ -50,6 +50,10 @@ describe("heredoc data path policy", () => {
     expect(check(`cat <<END\n'${nested}'\nEND`)?.kind).toBe("dynamic-path");
   });
 
+  it.each(["|", "||", "&&", ";", "&"])("retains the body when a control operator leaves the header incomplete: %s", (operator) => {
+    expect(check(`cat <<END ${operator}\ncat /etc/shadow\nEND\nsh`)).not.toBeNull();
+  });
+
   it.each([
     "cat <<END\nprintf '$(printf x # )\ncat /etc/shadow\n)'\nEND",
     "cat <<END\nprintf '$(case x in x) cat /etc/shadow;; esac)'\nEND",

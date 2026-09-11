@@ -51,6 +51,22 @@ describe("heredoc data inspection", () => {
     expect(tokenizeShell(command, { heredocBodies: "preserve", literalDataProof: true }).parseError).toBe(true);
   });
 
+  it.each(["|", "||", "&&", ";", "&"])("retains bodies when the header ends with a control operator: %s", (operator) => {
+    const command = `cat <<END ${operator}\nprintf witnessed\nEND\nsh`;
+    expect(inspectShellHeredocData(command)?.command).toBe(command);
+  });
+
+  it.skipIf(process.platform === "win32")("keeps the body of a pipeline that resumes after its heredoc", () => {
+    const command = "cat <<END |\nprintf witnessed\nEND\nsh";
+    expect(execFileSync("/bin/sh", ["-c", command], { encoding: "utf8" })).toBe("witnessed");
+    expect(inspectShellHeredocData(command)?.command).toBe(command);
+  });
+
+  it("does not treat a quoted pipe argument as a control operator", () => {
+    const command = "cat '|' <<END\nordinary / data\nEND";
+    expect(inspectShellHeredocData(command)?.command).toBe("cat '|' <<END\n");
+  });
+
   it.each(["${VALUE:-other}", "$((VALUE + 1))", "$[VALUE]", "$(unclosed", "`unclosed", "`printf \\`nested\\``"])(
     "refuses an unresolved expansion: %s", (body) => {
       expect(inspectShellHeredocData(`cat <<END\n${body}\nEND`)).toBeNull();

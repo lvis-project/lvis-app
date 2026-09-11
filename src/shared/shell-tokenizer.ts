@@ -558,6 +558,7 @@ export function inspectShellHeredocData(
     const parsed = tokenizeShell(header);
     const leaf = parsed.leaves[0];
     return !parsed.parseError && parsed.leaves.length === 1 && leaf !== undefined
+      && leaf.raw === header.trim()
       && stripCommandPath(leaf.argv[0] ?? "") === "cat"
       && leaf.assignments.length === 0
       && leaf.strippedWrappers.every((wrapper) => wrapper === "command")
