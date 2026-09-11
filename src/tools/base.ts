@@ -67,6 +67,14 @@ export interface Tool {
    */
   readonly parallelSafe?: boolean;
   /**
+   * Host-only builtin opt-in: wait for interrupted work and its cleanup to
+   * settle before publishing the interruption result. Settlement does not
+   * change the original timeout or cancellation into success.
+   * The builtin must stop new work on abort and settle after cleanup; a stuck
+   * in-process operation can therefore delay the result indefinitely.
+   */
+  readonly awaitCancellationSettlement?: true;
+  /**
    * Declares that this BUILTIN surfaces MCP-server data, so the turn scope's
    * `includeMcp` switch applies to it as it does to `source: "mcp"` tools.
    *
@@ -218,6 +226,7 @@ export abstract class ZodTool<TSchema extends z.ZodTypeAny = z.ZodTypeAny>
   abstract readonly category: ToolCategory;
   readonly decisionOverride?: ToolDecisionOverride;
   readonly parallelSafe?: boolean;
+  readonly awaitCancellationSettlement?: true;
   readonly pluginId?: string;
   readonly workerId?: string;
   readonly mcpServerId?: string;

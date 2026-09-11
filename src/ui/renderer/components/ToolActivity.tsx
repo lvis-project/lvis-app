@@ -12,6 +12,7 @@ import { useTranslation } from "../../../i18n/react.js";
 import { Button } from "../../../components/ui/button.js";
 import { formatDuration } from "../../../lib/turn-summary-format.js";
 import type { FileChangeOperation } from "../utils/tool-input-paths.js";
+import { incompleteToolStatusLabelKey, toolStatusLabelKey } from "../utils/tool-status-label.js";
 import {
   useNativeContextMenu,
   type NativeContextMenuHandlers,
@@ -89,10 +90,8 @@ function statusClass(status: ToolActivityItem["status"]): string {
 }
 
 function statusLabel(status: ToolActivityItem["status"], t: ReturnType<typeof useTranslation>["t"]): string {
-  if (status === "running") return t("toolActivity.status.running");
-  if (status === "error") return t("toolActivity.status.error");
-  if (status === "done") return t("toolActivity.status.done");
-  return "";
+  const key = toolStatusLabelKey(status);
+  return key ? t(key) : "";
 }
 
 /** The badge a file-change row wears: the change, not the tool. */
@@ -161,7 +160,7 @@ function ActivitySection({
                   </span>
                 )}
               </span>
-              {item.operation && (
+              {item.operation && !incompleteToolStatusLabelKey(item.status) && (
                 <span
                   className={`mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-[10px] ${operationClass(item.operation)}`}
                   data-testid="tool-activity-operation"

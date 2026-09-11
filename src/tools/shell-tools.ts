@@ -484,7 +484,7 @@ export class BashTool extends ZodTool<typeof BashToolInputSchema> {
   }
 
   readonly name = "bash";
-  readonly description = "Run a shell command in the local repository under permission and path checks. Recursive copying and archive creation/extraction are blocked, with no built-in equivalent. Single-file copying and archive listing are distinct operations subject to the same checks.";
+  readonly description = "Run a shell command in the local repository under permission and path checks. Recursive copying and archive creation/extraction remain blocked in this shell. Use copy_path for ordinary binary/text files or complete directory trees, and extract_archive for tar or gzip-compressed tar extraction, subject to existing write approvals. Both require an absent exact destination with an existing parent; no overwrite or merge. ZIP extraction and archive creation have no built-in equivalent. Single-file shell copying and archive listing remain subject to the same checks.";
   readonly inputSchema = BashToolInputSchema;
   override readonly category: ToolCategory = "shell";
 

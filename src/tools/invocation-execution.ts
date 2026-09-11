@@ -18,7 +18,10 @@ import {
   isA2AAgentCausalContext,
   type A2AAgentCausalContext,
 } from "../engine/a2a-agent-message-envelope.js";
-import { TOOL_RESULT_CHUNK_READER_METADATA_KEY } from "./tool-result-chunk.js";
+import {
+  TOOL_RESULT_CHUNK_MAX_CHARS,
+  TOOL_RESULT_CHUNK_READER_METADATA_KEY,
+} from "./tool-result-chunk.js";
 import { t } from "../i18n/index.js";
 import { createLogger } from "../lib/logger.js";
 import { resolvePluginWritableRoot } from "../plugins/plugin-storage-layout.js";
@@ -73,6 +76,31 @@ import { errorMessage } from "../shared/error-message.js";
 const log = createLogger("executor");
 
 type AuditToolCall = (...args: Parameters<AuditWriter["auditToolCall"]>) => Promise<void>;
+
+function boundInterruptionDetail(detail: string): string {
+  if (detail.length <= TOOL_RESULT_CHUNK_MAX_CHARS) return detail;
+  const suffix = "\n[Settled detail truncated]";
+  return detail.slice(0, TOOL_RESULT_CHUNK_MAX_CHARS - suffix.length) + suffix;
+}
+
+interface SettledToolDetail {
+  raw: string;
+  start: number;
+  boundedLength: number;
+}
+
+function maskExecutionOutput(content: string, detail: SettledToolDetail | undefined, pii: boolean) {
+  if (!detail) return maskSensitiveData(content, { pii });
+  // Mask the complete diagnostic before truncation can remove a credential's
+  // closing delimiter. The machine channel retains its bounded raw text.
+  const prefix = maskSensitiveData(content.slice(0, detail.start), { pii });
+  const settled = maskSensitiveData(detail.raw, { pii });
+  const suffix = maskSensitiveData(content.slice(detail.start + detail.boundedLength), { pii });
+  return {
+    masked: prefix.masked + boundInterruptionDetail(settled.masked) + suffix.masked,
+    detections: [...new Set([...prefix.detections, ...settled.detections, ...suffix.detections])],
+  };
+}
 
 function satisfiesDeclaredReadResultStatus(
   value: unknown,
@@ -387,6 +415,7 @@ export async function executeAuthorizedToolInvocation(
   let deferredOperationSettlement: Promise<unknown> | undefined;
   let indeterminateAuditPersisted = false;
   let interruptionReason: "ceiling" | "user-abort" | undefined;
+  let settledToolDetail: SettledToolDetail | undefined;
   let holdOperationLeaseForFinalBoundary = false;
   let pluginAuthLifecycleSettled = false;
   const completePluginAuthSuccess = (result: unknown): void => {
@@ -662,6 +691,9 @@ export async function executeAuthorizedToolInvocation(
   // loop; a builtin shell invocation follows its own `timeoutSeconds` so an
   // escalated retry is not cut short by the ceiling.
   const effectiveCeilingMs = resolveEffectiveCeilingMs(tool, finalInput);
+  const awaitCancellationSettlement =
+    source === "builtin" && tool.awaitCancellationSettlement === true;
+  let settledTaskError: string | undefined;
   // A host-derived raise is invisible at the call site — it comes from a
   // setting, not from anything in this invocation's input — so record it.
   // (A shell raise needs no separate entry: the `timeoutSeconds` the model
@@ -697,7 +729,7 @@ export async function executeAuthorizedToolInvocation(
       // When `hostClassifiesRisk` is OFF (disabled/unset; the shipped default
       // is ON, see settings-store.ts) the gate is a pass-through, so binding
       // the context here is inert.
-      return runWithToolExecutionCwd(executionCwd, () =>
+      const execution = runWithToolExecutionCwd(executionCwd, () =>
         runWithEffectLedger(effectLedger, () =>
           runWithEffectGateContext(
             {
@@ -744,11 +776,26 @@ export async function executeAuthorizedToolInvocation(
           ),
         ),
       );
+      if (!awaitCancellationSettlement) return execution;
+      return execution.catch((error: unknown) => {
+        // The ceiling helper preserves interruption classification, which can
+        // replace a late rejection message. Keep the actual error for this
+        // builtin's bounded detail without exposing its stack or metadata.
+        settledTaskError = errorMessage(error);
+        throw error;
+      });
     },
     effectiveCeilingMs,
     abortSignal,
     toolUse.name,
   );
+  const cancellationSettlement =
+    !outcome.ok &&
+    (outcome.reason === "ceiling" || outcome.reason === "user-abort") &&
+    outcome.settlement &&
+    awaitCancellationSettlement
+      ? await outcome.settlement
+      : undefined;
   if (
     resolvedPluginOperation &&
     operationExecutionDomain
@@ -820,7 +867,9 @@ export async function executeAuthorizedToolInvocation(
     ) {
       interruptionReason = outcome.reason;
     }
-    if (!outcome.settlement) terminationReason = outcome.reason;
+    if (!outcome.settlement || cancellationSettlement) {
+      terminationReason = outcome.reason;
+    }
     // Ceiling expiry is a RETRYABLE tool error, never a throw that ends the
     // turn. Shell tools recover by naming a larger `timeoutSeconds`; no other
     // tool — builtin, plugin, or MCP — has such a field (audited: only
@@ -836,6 +885,19 @@ export async function executeAuthorizedToolInvocation(
         : outcome.reason === "user-abort"
           ? t("be_executor.toolExecutionCancelled")
           : outcome.error.message || t("be_executor.toolExecutionUnknownError");
+    if (cancellationSettlement) {
+      // Only the settled output/error is diagnostic text. In particular, a
+      // late success is no proof of rollback, and UI/raw metadata is withheld.
+      content += cancellationSettlement.ok
+        ? "\n\n[Tool result after interruption]\n"
+        : "\n\n[Tool error after interruption]\n";
+      const raw = cancellationSettlement.ok
+        ? cancellationSettlement.value.output
+        : settledTaskError ?? cancellationSettlement.error.message;
+      const bounded = boundInterruptionDetail(raw);
+      settledToolDetail = { raw, start: content.length, boundedLength: bounded.length };
+      content += bounded;
+    }
     isError = true;
   }
 
@@ -995,13 +1057,14 @@ export async function executeAuthorizedToolInvocation(
 
   if (interruptionReason === "user-abort") {
     const durationMs = Date.now() - startTime;
+    const displayContent = maskExecutionOutput(content, settledToolDetail, isPiiRedactionEnabled()).masked;
     // Mark BEFORE any onToolEnd/meta consumer reads it: the same `meta` object
     // reaches the live renderer event and the persisted tool_result meta, so
     // setting it here is what makes both paths agree.
     meta.cancelled = true;
     try {
       if (!rationaleResumeContext?.started) {
-        callbacks?.onToolEnd?.(toolUse.name, content, true, meta, undefined, durationMs);
+        callbacks?.onToolEnd?.(toolUse.name, displayContent, true, meta, undefined, durationMs);
       }
       await auditCurrentToolCall(
         sessionId,
@@ -1009,7 +1072,7 @@ export async function executeAuthorizedToolInvocation(
         source,
         trust,
         finalInput,
-        content,
+        displayContent,
         true,
         startTime,
         permissionResult,
@@ -1034,7 +1097,7 @@ export async function executeAuthorizedToolInvocation(
           );
           return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: RATIONALE_TERMINAL_AUDIT_UNKNOWN_RESULT, is_error: true, durationMs });
         }
-        callbacks?.onToolEnd?.(toolUse.name, content, true, meta, undefined, durationMs);
+        callbacks?.onToolEnd?.(toolUse.name, displayContent, true, meta, undefined, durationMs);
       }
       completePluginAuthFailure(new Error(content));
       return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content, is_error: true, durationMs });
@@ -1108,7 +1171,7 @@ export async function executeAuthorizedToolInvocation(
   // `dlp_masked` audit note.
   let displayContent = content;
   const pii = isPiiRedactionEnabled();
-  const dlpResult = maskSensitiveData(content, { pii });
+  const dlpResult = maskExecutionOutput(content, settledToolDetail, pii);
   if (dlpResult.detections.length > 0) {
     displayContent = dlpResult.masked;
     const audit = currentAuditMetadata(finalInput);

@@ -72,6 +72,43 @@ describe("ToolActivityBody item routing", () => {
 });
 
 describe("ToolActivityWorkspace", () => {
+  it.each([
+    ["running", "실행 중"],
+    ["error", "오류"],
+    ["cancelled", "중단됨"],
+    ["done", "완료"],
+  ] as const)("reports %s without treating an unfinished transfer as created", (status, label) => {
+    const activity = emptyToolActivity();
+    activity.changedFiles = ["copy_path", "extract_archive"].map((name) => ({
+      id: name,
+      label: `${name}-destination`,
+      detail: name,
+      status,
+      operation: "create",
+    }));
+    activity.changedFileCount = activity.changedFiles.length;
+    activity.toolCalls = ["copy_path", "extract_archive"].map((name) => ({
+      id: name,
+      name,
+      status,
+      source: "builtin",
+    }));
+    activity.toolCallCount = activity.toolCalls.length;
+    renderPanel(<>
+      <ToolActivityBody activity={activity} />
+      <ToolActivityWorkspace activity={activity} />
+    </>);
+    for (const name of ["copy_path", "extract_archive"]) {
+      const row = screen.getByTestId(`tool-activity-item-${name}`);
+      expect(row).toHaveTextContent(label);
+      if (status === "done") expect(row).toHaveTextContent("생성");
+      else expect(row).not.toHaveTextContent("생성");
+    }
+    for (const row of screen.getAllByTestId("chat-side-panel-activity-tool-row")) {
+      expect(row).toHaveTextContent(label);
+    }
+  });
+
   it("lists every tool call with its source, clock when live, and duration when finished", () => {
     const activity = emptyToolActivity();
     activity.toolCallCount = 7;

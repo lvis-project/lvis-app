@@ -43,18 +43,23 @@ export type FileChangeOperation = "create" | "modify" | "delete" | "move" | "wri
  * Tool names whose invocation is a file change regardless of declared
  * category, and the change each one is contractually known to make.
  */
-const FILE_CHANGE_TOOL_OPERATIONS: ReadonlyMap<string, FileChangeOperation> = new Map([
+const FILE_CHANGE_TOOL_CONTRACTS: ReadonlyMap<string, {
+  operation: FileChangeOperation;
+  inputPathFields?: readonly string[];
+}> = new Map([
   // Both refuse anything but an existing regular file — an edit is a modify.
-  ["edit_file", "modify"],
-  ["apply_patch", "modify"],
+  ["edit_file", { operation: "modify" }],
+  ["apply_patch", { operation: "modify" }],
   // "Create or overwrite": prior existence is not in the call's output.
-  ["write_file", "write"],
-  ["move_file", "move"],
-  ["delete_file", "delete"],
+  ["write_file", { operation: "write" }],
+  ["move_file", { operation: "move" }],
+  ["delete_file", { operation: "delete" }],
+  ["copy_path", { operation: "create", inputPathFields: ["destinationPath"] }],
+  ["extract_archive", { operation: "create", inputPathFields: ["destinationPath"] }],
 ]);
 
 /** Tool names whose invocation is a file WRITE regardless of declared category. */
-export const FILE_WRITE_TOOL_NAMES: ReadonlySet<string> = new Set(FILE_CHANGE_TOOL_OPERATIONS.keys());
+export const FILE_WRITE_TOOL_NAMES: ReadonlySet<string> = new Set(FILE_CHANGE_TOOL_CONTRACTS.keys());
 
 /**
  * The change a file-changing call made, from its name alone. A tool declared
@@ -63,9 +68,20 @@ export const FILE_WRITE_TOOL_NAMES: ReadonlySet<string> = new Set(FILE_CHANGE_TO
  * call is not a file change at all.
  */
 export function classifyFileChange(tool: { name: string; category?: string }): FileChangeOperation | null {
-  const known = FILE_CHANGE_TOOL_OPERATIONS.get(tool.name);
-  if (known) return known;
+  const known = FILE_CHANGE_TOOL_CONTRACTS.get(tool.name);
+  if (known) return known.operation;
   return tool.category === "write" ? "write" : null;
+}
+
+/** Declared destination roles accept literal names without a path-like heuristic. */
+export function declaredFileChangePaths(name: string, input: unknown): string[] | undefined {
+  const fields = FILE_CHANGE_TOOL_CONTRACTS.get(name)?.inputPathFields;
+  if (!fields) return undefined;
+  if (input === null || typeof input !== "object" || Array.isArray(input)) return [];
+  return fields.flatMap(field => {
+    const value = (input as Record<string, unknown>)[field];
+    return typeof value === "string" && value.length > 0 ? [value] : [];
+  });
 }
 
 /** Tool-name shape that reads/searches files. */

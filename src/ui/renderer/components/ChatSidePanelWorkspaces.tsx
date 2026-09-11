@@ -30,6 +30,7 @@ import {
   type AddProjectFolderOutcome,
 } from "../hooks/use-add-project-folder.js";
 import { useNativeContextMenu } from "../hooks/use-native-context-menu.js";
+import { incompleteToolStatusLabelKey } from "../utils/tool-status-label.js";
 import {
   ListDetailWorkspace,
   SearchInput,
@@ -48,6 +49,7 @@ import {
   filterFileTree,
   isPathWithinRoot,
   matchesQuery,
+  statusTone,
   toRelativePath,
 } from "./ChatSidePanelPreview.js";
 
@@ -834,31 +836,36 @@ function ChangedFileRows({
   if (files.length === 0) return <EmptyState>{t("chatPreviewRail.noFiles")}</EmptyState>;
   return (
     <div className="space-y-1" data-testid="chat-side-panel-file-changes">
-      {files.map((file) => (
-        <button
-          key={file.id}
-          type="button"
-          data-testid="chat-side-panel-file-change-row"
-          title={`${file.detail} · ${file.sourceLabel}`}
-          className={cn(
-            "flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-muted/(--opacity-muted)",
-            file.id === selectedFileId ? "bg-accent text-accent-foreground" : "",
-          )}
-          onClick={() => onSelectFile(file)}
-        >
-          <File className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          <span className="min-w-0 flex-1">
-            <span className="block truncate font-medium">{file.label}</span>
-            <span className="block truncate text-[10.5px] text-muted-foreground">{file.detail}</span>
-          </span>
-          <span
-            data-testid="chat-side-panel-file-change-operation"
-            className={cn("shrink-0 rounded px-1.5 py-0.5 text-[10px]", fileChangeBadgeClass(file.operation))}
+      {files.map((file) => {
+        const incompleteStatusKey = incompleteToolStatusLabelKey(file.status);
+        return (
+          <button
+            key={file.id}
+            type="button"
+            data-testid="chat-side-panel-file-change-row"
+            title={`${file.detail} · ${file.sourceLabel}`}
+            className={cn(
+              "flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-muted/(--opacity-muted)",
+              file.id === selectedFileId ? "bg-accent text-accent-foreground" : "",
+            )}
+            onClick={() => onSelectFile(file)}
           >
-            {t(`chatPreviewRail.fileOperation.${file.operation}`)}
-          </span>
-        </button>
-      ))}
+            <File className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate font-medium">{file.label}</span>
+              <span className="block truncate text-[10.5px] text-muted-foreground">{file.detail}</span>
+            </span>
+            <span
+              data-testid="chat-side-panel-file-change-operation"
+              className={cn("shrink-0 rounded px-1.5 py-0.5 text-[10px]", incompleteStatusKey
+                ? statusTone(file.status)
+                : fileChangeBadgeClass(file.operation))}
+            >
+              {t(incompleteStatusKey ?? `chatPreviewRail.fileOperation.${file.operation}`)}
+            </span>
+          </button>
+        );
+      })}
     </div>
   );
 }

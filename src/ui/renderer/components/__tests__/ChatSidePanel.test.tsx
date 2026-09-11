@@ -1809,4 +1809,30 @@ describe("ChatSidePanel inside a chat group", () => {
       .toEqual(["생성", "이동", "수정", "삭제"]);
     expect(screen.getByTestId("chat-side-panel-file-changes")).not.toHaveTextContent("read.md");
   });
+
+  it.each([
+    ["running", "실행 중"],
+    ["error", "오류"],
+    ["cancelled", "중단됨"],
+    ["done", "생성"],
+  ] as const)("shows transfer state %s in both file lists", (status, label) => {
+    const files: WorkspaceFileItem[] = ["copy_path", "extract_archive"].map((name) => ({
+      id: `tool:/ws/${name}-destination`,
+      path: `/ws/${name}-destination`,
+      label: `${name}-destination`,
+      detail: `/ws/${name}-destination`,
+      sourceLabel: name,
+      operation: "create",
+      status,
+      canOpenExternal: false,
+    }));
+    renderPanel(<HarnessPanel api={api()} sessionId="s" targets={[]} files={files} initialSelectedId={null} />);
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("file-browser")));
+    fireEvent.click(screen.getByTestId("chat-side-panel-file-source-session"));
+    expect(screen.getAllByTestId("chat-side-panel-file-tree-operation").map((badge) => badge.textContent))
+      .toEqual([label, label]);
+    fireEvent.click(screen.getByTestId("chat-side-panel-file-source-changed"));
+    expect(screen.getAllByTestId("chat-side-panel-file-change-operation").map((badge) => badge.textContent))
+      .toEqual([label, label]);
+  });
 });
