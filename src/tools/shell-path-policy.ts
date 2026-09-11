@@ -598,13 +598,13 @@ export function validateShellCommandPathPolicy(
 }
 
 /**
- * A recursive-operation refusal either names an available builtin or states
- * the missing capability. An unrelated supported operation is not an
+ * A recursive-operation refusal names an available builtin, scopes a partial
+ * alternative, or states the missing capability. An unrelated operation is not an
  * equivalent, and no refusal should silently narrow the requested scope.
  * Keys belong to RECURSIVE_TRAVERSAL_COMMANDS or RECURSIVE_FLAG_COMMANDS.
  */
 const SHELL_TRAVERSAL_GUIDANCE: Readonly<Record<string, {
-  kind: "builtin" | "unavailable";
+  kind: "builtin" | "conditional" | "unavailable";
   messageKey: string;
 }>> = {
   find: { kind: "builtin", messageKey: "be_shellPathPolicy.altFind" },
@@ -612,13 +612,13 @@ const SHELL_TRAVERSAL_GUIDANCE: Readonly<Record<string, {
   fdfind: { kind: "builtin", messageKey: "be_shellPathPolicy.altFdfind" },
   rg: { kind: "builtin", messageKey: "be_shellPathPolicy.altRg" },
   tree: { kind: "builtin", messageKey: "be_shellPathPolicy.altTree" },
-  tar: { kind: "unavailable", messageKey: "be_shellPathPolicy.altTar" },
+  tar: { kind: "conditional", messageKey: "be_shellPathPolicy.altTar" },
   unzip: { kind: "unavailable", messageKey: "be_shellPathPolicy.altUnzip" },
   zip: { kind: "unavailable", messageKey: "be_shellPathPolicy.altZip" },
   grep: { kind: "builtin", messageKey: "be_shellPathPolicy.altGrep" },
   egrep: { kind: "builtin", messageKey: "be_shellPathPolicy.altEgrep" },
   fgrep: { kind: "builtin", messageKey: "be_shellPathPolicy.altFgrep" },
-  cp: { kind: "unavailable", messageKey: "be_shellPathPolicy.altCp" },
+  cp: { kind: "builtin", messageKey: "be_shellPathPolicy.altCp" },
   mv: { kind: "unavailable", messageKey: "be_shellPathPolicy.altMv" },
 };
 
@@ -1474,7 +1474,9 @@ function buildRecursiveBlockMessage(
   if (!capability) return `${head} ${t("be_shellPathPolicy.guidanceNoAlt")}`;
   const guidanceKey = capability.kind === "builtin"
     ? "be_shellPathPolicy.guidanceWithAlt"
-    : "be_shellPathPolicy.guidanceUnavailable";
+    : capability.kind === "conditional"
+      ? "be_shellPathPolicy.guidanceConditional"
+      : "be_shellPathPolicy.guidanceUnavailable";
   return `${head} ${t(guidanceKey, { alt: t(capability.messageKey) })}`;
 }
 
