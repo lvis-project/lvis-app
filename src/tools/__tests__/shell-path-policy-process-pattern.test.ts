@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { closeSync, mkdirSync, mkdtempSync, openSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -92,10 +92,20 @@ describe("process-selection pattern operands", () => {
   });
 
   it.skipIf(process.platform === "win32")("matches actual shell argv for input descriptor closing and forwarding", () => {
+    const fixture = mkdtempSync(join(tmpdir(), "input-descriptor-policy-"));
+    roots.push(fixture);
+    const source = join(fixture, "stdin.txt");
+    writeFileSync(source, "available\n");
     for (const [redirect, state] of [["<&-", "closed"], ["3<&0 <&3", "open:available"]]) {
       const command = `capture() { printf '%s\\0' "$@"; if IFS= read -r value 2>/dev/null; then printf 'open:%s\\0' "$value"; else printf 'closed\\0'; fi; }; capture find . -printf ${redirect} '%p\\n'`;
-      const output = execFileSync("/bin/sh", ["-c", command], { input: "available\n", encoding: "utf8" });
-      expect(output.split("\0").slice(0, -1)).toEqual(["find", ".", "-printf", "%p\\n", state]);
+      // A file keeps data available without racing a write to a closed pipe.
+      const input = openSync(source, "r");
+      try {
+        const output = execFileSync("/bin/sh", ["-c", command], { stdio: [input, "pipe", "pipe"], encoding: "utf8" });
+        expect(output.split("\0").slice(0, -1)).toEqual(["find", ".", "-printf", "%p\\n", state]);
+      } finally {
+        closeSync(input);
+      }
     }
   });
 
