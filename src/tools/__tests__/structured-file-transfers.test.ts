@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -36,10 +35,6 @@ afterEach(async () => {
 
 function context(extraAllowedDirectories: string[] = []): ToolExecutionContext {
   return { cwd: workspace, extraAllowedDirectories, metadata: {} };
-}
-
-function hash(bytes: Uint8Array): string {
-  return createHash("sha256").update(bytes).digest("hex");
 }
 
 function executorFor(tool: CopyPathTool | ExtractArchiveTool) {
@@ -109,7 +104,7 @@ describe("structured transfer registration and permission routing", () => {
       ok: true,
       summary: { sourcePath: source, destinationPath: join(workspace, "copy.bin"), files: 1, bytesWritten: PAYLOAD.length },
     });
-    expect(hash(readFileSync(join(workspace, "copy.bin")))).toBe(hash(PAYLOAD));
+    expect(readFileSync(join(workspace, "copy.bin"))).toEqual(PAYLOAD);
     expect(readFileSync(source)).toEqual(PAYLOAD);
     expect(statSync(source).mtimeMs).toBe(before.mtimeMs);
     expect(checkScope.mock.calls.some(([request]) => request.effect === "write"
@@ -174,7 +169,7 @@ describe("structured transfer wrapper completion", () => {
 
   it.each([false, true])("extracts content-detected tar with gzip=%s through the registered executor", async gzip => {
     const archive = await fixtureArchive(gzip);
-    const before = hash(readFileSync(archive));
+    const before = readFileSync(archive);
     const result = await invoke(new ExtractArchiveTool(), { archivePath: archive, destinationPath: "unpacked" });
     expect(result.is_error).toBeUndefined();
     expect(JSON.parse(result.content)).toMatchObject({
@@ -183,18 +178,18 @@ describe("structured transfer wrapper completion", () => {
     });
     expect(readFileSync(join(workspace, "unpacked", "nested", "payload.bin"))).toEqual(PAYLOAD);
     expect(readFileSync(join(workspace, "unpacked", ".ordinary-hidden"), "utf8")).toBe("hidden\r\n");
-    expect(hash(readFileSync(archive))).toBe(before);
+    expect(readFileSync(archive)).toEqual(before);
   });
 
   it("rolls back a valid member when later archive data is invalid", async () => {
     const archive = await fixtureArchive();
     writeFileSync(archive, Buffer.concat([readFileSync(archive), Buffer.alloc(512, 1)]));
-    const before = hash(readFileSync(archive));
+    const before = readFileSync(archive);
     const result = await new ExtractArchiveTool().execute({ archivePath: archive, destinationPath: "unpacked" }, context());
     expect(result.isError).toBe(true);
     expect(JSON.parse(result.output)).toMatchObject({ ok: false, code: "invalid-archive", cleanup: "removed" });
     expect(existsSync(join(workspace, "unpacked"))).toBe(false);
-    expect(hash(readFileSync(archive))).toBe(before);
+    expect(readFileSync(archive)).toEqual(before);
   });
 
   it("preserves a numeric extended filename without losing leading zeros", async () => {
