@@ -293,17 +293,21 @@ interface RawLeaf {
  * `heredocBodies: "preserve"` retains stdin text for structural guards.
  * `literalDataProof` additionally rejects unresolved heredocs, here-strings,
  * unquoted escapes, and unbalanced ordinary grouping before relaxing a deny.
+ * `simpleCommandList` implies literal proof and accepts only complete direct
+ * commands connected by `;`, newline, `&&` or `||`. Pipes, background execution
+ * and unquoted groups need a consumer relationship this proof does not model.
  */
 export function tokenizeShell(
   command: string,
-  options: { heredocBodies?: "redact" | "preserve"; literalDataProof?: boolean } = {},
+  options: { heredocBodies?: "redact" | "preserve"; literalDataProof?: boolean; simpleCommandList?: boolean } = {},
 ): TokenizeResult {
   // Structural guards can retain stdin text conservatively: a shell consumer
   // may execute it. Default risk/path callers continue to omit those bodies.
   const logical = shellContinuationSource(command);
   if (logical === null) return { leaves: [], parseError: true };
+  const literalDataProof = options.literalDataProof || options.simpleCommandList;
   const removed: Array<{ start: number; end: number }> = [];
-  const redacted = redactHeredocCommand(logical.text, options.literalDataProof ?? false, (start, end) => {
+  const redacted = redactHeredocCommand(logical.text, literalDataProof ?? false, (start, end) => {
     removed.push({ start, end });
   });
   if (redacted === null) return { leaves: [], parseError: true };
@@ -312,8 +316,9 @@ export function tokenizeShell(
     : redactShellSource(logical, redacted, removed);
   const scan = scanLeaves(
     options.heredocBodies === "preserve" ? logical.text : redacted,
-    options.literalDataProof,
+    literalDataProof,
     scanSource,
+    options.simpleCommandList,
   );
   if (scan.parseError) {
     return { leaves: [], parseError: true };
@@ -682,12 +687,15 @@ function isCompleteDescriptorRedirect(operator: string): boolean {
  * tracking quote and substitution nesting. Returns `parseError` when a quote or
  * paren never closes.
  */
-function scanLeaves(command: string, literalDataProof = false, source?: ShellSource): { leaves: RawLeaf[]; parseError: boolean } {
+function scanLeaves(command: string, literalDataProof = false, source?: ShellSource, simpleCommandList = false): { leaves: RawLeaf[]; parseError: boolean } {
   let parentheses = 0;
   let braces = 0;
   const leaves: RawLeaf[] = [];
   let words: RawWord[] = [];
   let leafStart = 0;
+  // A conditional connector still needs its right-hand command after any
+  // number of blank/comment lines. Sequence terminators need no such operand.
+  let pendingListOperand = false;
 
   let current = "";
   let currentHasCmdSubst = false;
@@ -730,6 +738,7 @@ function scanLeaves(command: string, literalDataProof = false, source?: ShellSou
 
   const endLeaf = (endIndex: number, nextStart: number): void => {
     pushWord();
+    if (words.length > 0) pendingListOperand = false;
     const raw = source
       ? source.original.slice(source.offsets?.[leafStart] ?? leafStart, source.offsets?.[endIndex] ?? endIndex).trim()
       : command.slice(leafStart, endIndex).trim();
@@ -869,7 +878,13 @@ function scanLeaves(command: string, literalDataProof = false, source?: ShellSou
 
     // Compound separators.
     if (ch === "&") {
-      if (command[i + 1] === "&") { endLeaf(i, i + 2); i += 2; continue; }
+      if (command[i + 1] === "&") {
+        if (simpleCommandList && !wordActive && words.length === 0) return { leaves: [], parseError: true };
+        endLeaf(i, i + 2);
+        pendingListOperand = true;
+        i += 2;
+        continue;
+      }
       // `&>` / `&>>` redirect (bash: redirect both stdout+stderr).
       if (command[i + 1] === ">") {
         const opLen = command[i + 2] === ">" ? 3 : 2;
@@ -878,18 +893,27 @@ function scanLeaves(command: string, literalDataProof = false, source?: ShellSou
         continue;
       }
       // Bare `&` background operator — leaf boundary.
+      if (simpleCommandList) return { leaves: [], parseError: true };
       endLeaf(i, i + 1);
       i += 1;
       continue;
     }
     if (ch === "|") {
-      if (command[i + 1] === "|") { endLeaf(i, i + 2); i += 2; continue; }
+      if (command[i + 1] === "|") {
+        if (simpleCommandList && !wordActive && words.length === 0) return { leaves: [], parseError: true };
+        endLeaf(i, i + 2);
+        pendingListOperand = true;
+        i += 2;
+        continue;
+      }
       // `>|` is handled in the `>` branch; a bare `|` is a pipe boundary.
+      if (simpleCommandList) return { leaves: [], parseError: true };
       endLeaf(i, i + 1);
       i += 1;
       continue;
     }
     if (ch === ";") {
+      if (simpleCommandList && !wordActive && words.length === 0) return { leaves: [], parseError: true };
       endLeaf(i, i + 1);
       i += 1;
       continue;
@@ -931,6 +955,7 @@ function scanLeaves(command: string, literalDataProof = false, source?: ShellSou
     // they change a comment/word boundary. Balance ordinary grouping too.
     if (literalDataProof) {
       if (ch === "\\") return { leaves: [], parseError: true };
+      if (simpleCommandList && "(){}".includes(ch)) return { leaves: [], parseError: true };
       if (ch === "(") parentheses += 1;
       if (ch === ")" && --parentheses < 0) return { leaves: [], parseError: true };
       if (ch === "{") braces += 1;
@@ -945,6 +970,7 @@ function scanLeaves(command: string, literalDataProof = false, source?: ShellSou
   }
 
   if (literalDataProof && (parentheses !== 0 || braces !== 0)) return { leaves: [], parseError: true };
+  if (simpleCommandList && pendingListOperand && !wordActive && words.length === 0) return { leaves: [], parseError: true };
   endLeaf(command.length, command.length);
   // Drop leaves that are entirely empty (e.g. trailing separators).
   const nonEmpty = leaves.filter((l) => l.words.length > 0 || l.raw.length > 0);

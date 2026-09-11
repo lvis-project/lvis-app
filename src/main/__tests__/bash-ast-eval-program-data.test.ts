@@ -13,6 +13,13 @@ describe("eval in a literal program operand", () => {
     "/usr/bin/python3 -c 'message = \"an eval example\"; print(message)'",
     "python3 -c 'print(\"$LITERAL\") # eval example'",
     "python3 -c 'print(eval(\"1\")) # eval is language program text'",
+    "cd work && python -c '# explain eval behavior\nprint(1)' 2>&1",
+    "cd -- 'work directory'; python3 -c 'print(\"eval example\")' 12>&3",
+    "python2 -c '# eval note\nprint(1)' || printf retry",
+    "printf before; python3 -c '# eval note\nprint(1)'; printf after",
+    "cd work &&\n# comment before the program\npython -c '# eval note\nprint(1)' 2>&1\n",
+    "python -c 'print(\"eval ; | & && || ( ) $LITERAL\")' 1>&-",
+    "cd work && py\\\nthon -c '# eval note\nprint(1)' 2>&1",
   ])("keeps another language's literal code out of shell eval detection: %s", (command) => {
     expect(validator.validate("bash", { command }).decision).toBe("allow");
   });
@@ -44,6 +51,26 @@ describe("eval in a literal program operand", () => {
     "{ python -c '# eval marker\nprint(1)'; }",
     "python -c '# eval marker\nprint(1)' > script; sh script",
     "python -c '# eval marker\nprint(1)",
+    "cd work && python -c '# eval note\nprint(1)' 2>&1 &&",
+    "cd work && python -c '# eval note\nprint(1)' 2>&1 ||\n# pending command",
+    "&& python -c '# eval note\nprint(1)'",
+    "cd work; && python -c '# eval note\nprint(1)'",
+    "cd work && python -c '# eval note\nprint(1)' && sh -c 'printf 1'",
+    "cd work && python -c '# eval note\nprint(1)' && e\"\"val 'printf 1'",
+    "cd work && python -c '# eval note\nprint(1)' && unknown_consumer",
+    "unknown_consumer; python -c '# eval note\nprint(1)'",
+    "cd work && python -c '# eval note\nprint(1)' > output.txt",
+    "cd work > output.txt && python -c '# eval note\nprint(1)'",
+    "cd work && python -c '# eval note\nprint(1)' >&1report",
+    "cd work && python -c '# eval note\nprint(1)' 2>&$FD",
+    "cd work && python -c '# eval note\nprint(1)' <&0",
+    "cd work && command python -c '# eval note\nprint(1)' 2>&1",
+    "cd work && python -c '# eval note\nprint(1)' && env NAME=value printf done",
+    "cd work && python -c '# eval note\nprint(1)' && $RUNNER",
+    "cd work && python -c '# eval note\nprint(1)' && printf \"$(printf done)\"",
+    "cd work && python -c '# eval note\nprint(1)' && printf '%s' <(printf done)",
+    "cd work && python -c '# eval note\nprint(1)' && printf -v destination '%s' value",
+    "cd 'eval location' && python -c '# eval note\nprint(1)'",
   ])("retains executable or unresolved shell contexts: %s", (command) => {
     const result = validator.validate("bash", { command });
     expect(result.decision).toBe("deny");
