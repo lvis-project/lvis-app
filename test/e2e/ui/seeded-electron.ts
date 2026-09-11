@@ -210,81 +210,96 @@ export async function launchSeededElectron(opts: {
   );
   const lvisHome = resolve(tempHome, ".lvis");
 
-  writeFileSync(
-    resolve(userDataDir, "lvis-settings.json"),
-    `${JSON.stringify(opts.settings ?? buildLlmSettings(), null, 2)}\n`,
-    "utf-8",
-  );
-
-  const sessionsDir = resolve(lvisHome, "sessions");
-  mkdirSync(sessionsDir, { recursive: true });
-  writeFileSync(
-    resolve(sessionsDir, `${sessionId}.jsonl`),
-    `${opts.historyRows.map((row) => JSON.stringify(toPersistedHistoryRow(row))).join("\n")}\n`,
-    "utf-8",
-  );
-  writeFileSync(
-    resolve(sessionsDir, `${sessionId}.meta.json`),
-    `${JSON.stringify({ title: opts.sessionTitle ?? "Seeded e2e session" }, null, 2)}\n`,
-    "utf-8",
-  );
-  writeFileSync(
-    resolve(sessionsDir, ".active-session.json"),
-    `${JSON.stringify(
-      {
-        mainActiveMode: "resume",
-        mainActiveSessionId: sessionId,
-        updatedAt: new Date().toISOString(),
-      },
-      null,
-      2,
-    )}\n`,
-    "utf-8",
-  );
-
-  const app = await electron.launch({
-    args: [MAIN_ENTRY, `--user-data-dir=${userDataDir}`, "--no-sandbox"],
-    env: buildIsolatedElectronEnv({
-      HOME: tempHome,
-      USERPROFILE: tempHome,
-      LVIS_HOME: lvisHome,
-      LVIS_DEV: "1",
-      LVIS_E2E: "1",
-      LVIS_MAIN_ENTRY: MAIN_ENTRY,
-      NODE_ENV: "test",
-      ELECTRON_DISABLE_SECURITY_WARNINGS: "1",
-      ...(opts.launchEnv ?? {}),
-    }),
-    timeout: 30_000,
-  });
-
-  app
-    .process()
-    .stdout?.on("data", (d: Buffer) =>
-      process.stdout.write(`[electron:stdout] ${d}`),
-    );
-  app
-    .process()
-    .stderr?.on("data", (d: Buffer) =>
-      process.stdout.write(`[electron:stderr] ${d}`),
+  let app: ElectronApplication | undefined;
+  try {
+    writeFileSync(
+      resolve(userDataDir, "lvis-settings.json"),
+      `${JSON.stringify(opts.settings ?? buildLlmSettings(), null, 2)}\n`,
+      "utf-8",
     );
 
-  const page = await app.firstWindow();
-  await page.locator('[data-testid="main-toolbar"]').first().waitFor({
-    state: "visible",
-    timeout: 60_000,
-  });
+    const sessionsDir = resolve(lvisHome, "sessions");
+    mkdirSync(sessionsDir, { recursive: true });
+    writeFileSync(
+      resolve(sessionsDir, `${sessionId}.jsonl`),
+      `${opts.historyRows.map((row) => JSON.stringify(toPersistedHistoryRow(row))).join("\n")}\n`,
+      "utf-8",
+    );
+    writeFileSync(
+      resolve(sessionsDir, `${sessionId}.meta.json`),
+      `${JSON.stringify({ title: opts.sessionTitle ?? "Seeded e2e session" }, null, 2)}\n`,
+      "utf-8",
+    );
+    writeFileSync(
+      resolve(sessionsDir, ".active-session.json"),
+      `${JSON.stringify(
+        {
+          mainActiveMode: "resume",
+          mainActiveSessionId: sessionId,
+          updatedAt: new Date().toISOString(),
+        },
+        null,
+        2,
+      )}\n`,
+      "utf-8",
+    );
 
-  return { app, page, userDataDir, tempHome, lvisHome };
+    app = await electron.launch({
+      args: [MAIN_ENTRY, `--user-data-dir=${userDataDir}`, "--no-sandbox"],
+      env: buildIsolatedElectronEnv({
+        HOME: tempHome,
+        USERPROFILE: tempHome,
+        LVIS_HOME: lvisHome,
+        LVIS_DEV: "1",
+        LVIS_E2E: "1",
+        LVIS_MAIN_ENTRY: MAIN_ENTRY,
+        NODE_ENV: "test",
+        ELECTRON_DISABLE_SECURITY_WARNINGS: "1",
+        ...(opts.launchEnv ?? {}),
+      }),
+      timeout: 30_000,
+    });
+
+    app
+      .process()
+      .stdout?.on("data", (d: Buffer) =>
+        process.stdout.write(`[electron:stdout] ${d}`),
+      );
+    app
+      .process()
+      .stderr?.on("data", (d: Buffer) =>
+        process.stdout.write(`[electron:stderr] ${d}`),
+      );
+
+    const page = await app.firstWindow();
+    await page.locator('[data-testid="main-toolbar"]').first().waitFor({
+      state: "visible",
+      timeout: 60_000,
+    });
+
+    return { app, page, userDataDir, tempHome, lvisHome };
+  } catch (error) {
+    await app?.close().catch(() => {});
+    try {
+      removeSeededElectronDirectories(userDataDir, tempHome);
+    } catch (cleanupError) {
+      throw new AggregateError([error, cleanupError], "Seeded Electron startup and cleanup failed");
+    }
+    throw error;
+  }
 }
 
 export async function teardownSeededElectron(
   ctx: SeededElectronContext,
 ): Promise<void> {
   await ctx.app.close().catch(() => {});
-  rmSync(ctx.userDataDir, { recursive: true, force: true });
-  makeTreeWritableSync(ctx.tempHome);
-  rmSync(ctx.tempHome, { recursive: true, force: true });
+  removeSeededElectronDirectories(ctx.userDataDir, ctx.tempHome);
+}
+
+function removeSeededElectronDirectories(userDataDir: string, tempHome: string): void {
+  rmSync(userDataDir, { recursive: true, force: true });
+  makeTreeWritableSync(tempHome);
+  rmSync(tempHome, { recursive: true, force: true });
 }
 
 function makeTreeWritableSync(root: string): void {

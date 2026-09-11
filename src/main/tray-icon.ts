@@ -1,9 +1,6 @@
 import { existsSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+import { join } from "node:path";
+import { projectRoot } from "./main-paths.js";
 
 type NativeImageModule = typeof import("electron").nativeImage;
 type NativeImage = ReturnType<NativeImageModule["createFromPath"]>;
@@ -12,7 +9,7 @@ interface TrayIconPathOptions {
   platform?: NodeJS.Platform;
   resourcesPath?: string;
   cwd?: string;
-  moduleDir?: string;
+  projectRoot?: string;
   exists?: (path: string) => boolean;
 }
 
@@ -28,15 +25,14 @@ export function resolveTrayIconPath(options: TrayIconPathOptions = {}): string {
   const platform = options.platform ?? process.platform;
   const resourcesPath = options.resourcesPath ?? process.resourcesPath;
   const cwd = options.cwd ?? process.cwd();
-  const moduleDir = options.moduleDir ?? __dirname;
+  const devProjectRoot = options.projectRoot ?? projectRoot;
   const exists = options.exists ?? existsSync;
   const fileName = trayIconFileName(platform);
 
   const candidates = [
     resourcesPath ? join(resourcesPath, fileName) : null,
-    resolve(moduleDir, "..", "..", "build", fileName),
-    resolve(moduleDir, "..", "..", "..", "build", fileName),
-    resolve(cwd, "build", fileName),
+    join(devProjectRoot, "build", fileName),
+    join(cwd, "build", fileName),
   ].filter((candidate): candidate is string => Boolean(candidate));
 
   const iconPath = candidates.find((candidate) => exists(candidate));
