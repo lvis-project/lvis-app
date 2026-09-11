@@ -80,6 +80,21 @@ describe("heredoc data inspection", () => {
     expect(inspectShellHeredocData(command)?.command).toBe("cat '|' <<END\n");
   });
 
+  it.each(["cat <<< END", "cat <<< 'END'", "printf '<<< END'", "printf \\<\\<\\< END"])(
+    "does not erase later commands after here-string text: %s", (header) => {
+      const command = `${header}\nprintf harmless > ./output\nEND`;
+      expect(inspectShellHeredocData(command)?.command).toBe(command);
+      expect(redactHeredocBodies(command)).toBe(command);
+      expect(tokenizeShell(command).leaves.some((leaf) => leaf.redirectTargets.includes("./output"))).toBe(true);
+    },
+  );
+
+  it.skipIf(process.platform === "win32")("keeps carriage returns in bare delimiter words", () => {
+    const command = "cat <<END\r\nEND\nprintf '$(printf witnessed)'\nEND\r";
+    expect(execFileSync("/bin/sh", ["-c", command], { encoding: "utf8" })).toBe("END\nprintf 'witnessed'\n");
+    expect(inspectShellHeredocData(command)).toEqual({ command, expansionCommands: ["printf witnessed"] });
+  });
+
   it.skipIf(process.platform === "win32")("retains bodies whose enclosing group feeds an execution consumer", () => {
     for (const [open, close] of [["{", "}"], ["(", ")"]]) {
       const command = `${open}\ncat <<END\nprintf witnessed\nEND\n${close} | sh`;

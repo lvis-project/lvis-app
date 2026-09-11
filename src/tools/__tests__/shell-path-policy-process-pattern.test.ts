@@ -1,4 +1,5 @@
-import { mkdtempSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -31,6 +32,10 @@ describe("process-selection pattern operands", () => {
     'pgrep -f 0<&3 "^/fixture/worker$"',
     'kill -TERM $(pgrep -f "^/fixture/worker$") > ./output',
     'kill --signal TERM -- $(pgrep --full "^/fixture/worker$")',
+    'pgrep -f "<(literal pattern)"',
+    'kill ">(literal process name)"',
+    'pgrep -f "$(printf \')\')"',
+    "pgrep -f '$(literal pattern)'",
   ])("does not treat the regex as a filesystem operand: %s", (command) => {
     expect(check(command)).toBeNull();
   });
@@ -66,6 +71,14 @@ describe("process-selection pattern operands", () => {
     expect(isReadOnlyCommand('kill $(pgrep -f "worker")')).toBe(false);
   });
 
+  it.each([
+    'echo "sum=$((1+2))"',
+    'n=3; echo "sum=$((n + 2))"',
+    'echo "${VALUE:-fallback}"',
+  ])("keeps existing arithmetic and variable expansion outside new process-data exemptions: %s", (command) => {
+    expect(check(command)).toBeNull();
+  });
+
   it.skipIf(process.platform === "win32")("matches actual shell argv for input descriptor closing and forwarding", () => {
     for (const [redirect, state] of [["<&-", "closed"], ["3<&0 <&3", "open:available"]]) {
       const command = `capture() { printf '%s\\0' "$@"; if IFS= read -r value 2>/dev/null; then printf 'open:%s\\0' "$value"; else printf 'closed\\0'; fi; }; capture find . -printf ${redirect} '%p\\n'`;
@@ -78,10 +91,52 @@ describe("process-selection pattern operands", () => {
     expect(check('cat $(printf ./input)')).not.toBeNull();
   });
 
+  it.each(["pgrep -f", "kill"])("does not exempt executable process substitutions: %s", (head) => {
+    const fixture = mkdtempSync(join(tmpdir(), "process-substitution-policy-"));
+    roots.push(fixture);
+    const allowed = join(fixture, "allowed");
+    const other = join(fixture, "other");
+    mkdirSync(allowed);
+    mkdirSync(other);
+    const source = join(other, "ordinary.txt");
+    writeFileSync(source, "fixture");
+    for (const operator of ["<", ">"]) {
+      const command = `${head} ${operator}(cat '${source}')`;
+      expect(findShellPathPolicyViolation(command, allowed, allowed, [], true)?.kind).toBe("dynamic-path");
+    }
+    expect(findShellPathPolicyViolation(`${head} $(cat '${source}')`, allowed, allowed, [], true)).not.toBeNull();
+  });
+
+  it.each(["pgrep -f", "kill"])("inspects the complete quoted command-substitution body: %s", (head) => {
+    const fixture = mkdtempSync(join(tmpdir(), "substitution-boundary-policy-"));
+    roots.push(fixture);
+    const allowed = join(fixture, "allowed");
+    const other = join(fixture, "other");
+    mkdirSync(allowed);
+    mkdirSync(other);
+    const source = join(other, "ordinary.txt");
+    writeFileSync(source, "fixture");
+    for (const body of [
+      `printf ')'; cat '${source}'`,
+      `printf x # )\ncat '${source}'`,
+    ]) {
+      expect(findShellPathPolicyViolation(`${head} "$(${body})"`, allowed, allowed, [], true)?.kind)
+        .toBe("sandbox-boundary");
+    }
+    for (const body of [
+      `printf $((1 + 1)); cat '${source}'`,
+      `printf "\${VALUE:-')}"; cat '${source}'`,
+      `printf <(cat '${source}')`,
+      `printf $'value'; cat '${source}'`,
+    ]) {
+      expect(findShellPathPolicyViolation(`${head} "$(${body})"`, allowed, allowed, [], true)).not.toBeNull();
+    }
+    expect(findShellPathPolicyViolation(`${head} "$(printf missing`, allowed, allowed, [], true)).not.toBeNull();
+  });
+
   it("refuses nested execution beyond the inspection depth", () => {
     let command = "cat /etc/shadow";
     for (let i = 0; i < 8; i += 1) command = `kill $(${command})`;
     expect(check(command)?.kind).toBe("dynamic-path");
   });
 });
-import { execFileSync } from "node:child_process";

@@ -4,6 +4,7 @@ import { isAbsolute, resolve as pathResolve } from "node:path";
 import { t } from "../i18n/index.js";
 import {
   inspectShellHeredocData,
+  findShellSubstitutionEnd,
   normalizeShellLineContinuations,
   startsShellComment,
   stripCommandPath,
@@ -235,9 +236,13 @@ function findViolationInCommand(
   // Re-entering it is what makes `sh -c 'cat /etc/passwd'` visible: the value
   // is program text, so exempting it as such left the operand inside
   // completely unexamined.
+  const substitutions = extractCommandSubstitutionBodies(command);
+  if (substitutions === null) {
+    return { kind: "dynamic-path", reason: "Shell path policy: cannot resolve a command-substitution boundary" };
+  }
   const nestedCommands = new Set([
     ...heredocs.expansionCommands,
-    ...extractCommandSubstitutionBodies(command),
+    ...substitutions,
     ...extractNestedShellCommands(command),
   ]);
   if (depth >= COMMAND_SUBSTITUTION_SCAN_DEPTH && nestedCommands.size > 0) {
@@ -1278,6 +1283,18 @@ function findDynamicExecutionOperand(command: string): string | null {
   const { leaves, parseError } = tokenizeShell(command);
   if (parseError) return null;
   for (const leaf of leaves) {
+    const verb = stripCommandPath(leaf.argv[leadingKeywordCount(leaf.argv)] ?? "").toLowerCase();
+    // Data roles do not prove process-substitution bodies safe. Until those
+    // executable operands receive complete recursive inspection, retain their
+    // refusal instead of removing them with pattern/PID text exemptions.
+    if (leaf.hasProcessSubstitution && (verb === "pgrep" || verb === "kill")) {
+      return "Sandbox: process substitution cannot be inspected in process data operands";
+    }
+    if ((verb === "pgrep" || verb === "kill")
+      && (leaf.hasCommandSubstitution || leaf.argvHasExpandableDollar.some(Boolean))
+      && extractCommandSubstitutionBodies(leaf.raw, true) === null) {
+      return "Sandbox: command substitution cannot be completely inspected in process data operands";
+    }
     const { dynamicExecution } = classifyOperandSlots(leaf.argv);
     if (dynamicExecution) return dynamicExecution;
   }
@@ -1329,7 +1346,7 @@ function isFileSigilValue(value: string): boolean {
  * level of quoting. Double-quoted regions are descended into because expansion
  * still happens there; single-quoted ones are not, because it does not.
  */
-function extractCommandSubstitutionBodies(command: string): string[] {
+function extractCommandSubstitutionBodies(command: string, strict = false): string[] | null {
   const bodies: string[] = [];
   const n = command.length;
   let i = 0;
@@ -1353,19 +1370,21 @@ function extractCommandSubstitutionBodies(command: string): string[] {
     }
     if (ch === "`") {
       const close = command.indexOf("`", i + 1);
-      if (close === -1) return bodies;
+      if (close === -1 || (strict && command.slice(i + 1, close).includes("\\"))) return null;
       bodies.push(command.slice(i + 1, close));
       i = close + 1;
       continue;
     }
+    if (strict && ch === "$" && ("{[".includes(command[i + 1] ?? " ")
+      || (!inDoubleQuote && "'\"".includes(command[i + 1] ?? " ")))) return null;
     if (ch === "$" && command[i + 1] === "(") {
-      const close = matchClosingParen(command, i + 1);
-      if (close === -1) return bodies;
-      // `$((expr))` is arithmetic, not a command. Its body cannot name a file
-      // the shell opens, and reading it as one produced operands out of C-style
-      // integer division.
-      const body = command.slice(i + 2, close);
-      if (!(command[i + 2] === "(" && command[close - 1] === ")")) bodies.push(body);
+      const close = findShellSubstitutionEnd(command, i + 1, { strict });
+      if (close === -1) return null;
+      // General arithmetic keeps its existing non-command treatment. New
+      // process-data exemptions and heredoc expansion proofs request strict
+      // inspection, which refuses arithmetic whose execution cannot be proven.
+      const arithmetic = command[i + 2] === "(" && command[close - 1] === ")";
+      if (!arithmetic) bodies.push(command.slice(i + 2, close));
       i = close + 1;
       continue;
     }
@@ -1374,7 +1393,7 @@ function extractCommandSubstitutionBodies(command: string): string[] {
   return bodies;
 }
 
-/** Index of the `)` matching the `(` at `openParen`, or -1 when unbalanced. */
+/** Parenthesis heuristic for path-candidate text only, never an execution boundary. */
 function matchClosingParen(command: string, openParen: number): number {
   let depth = 0;
   for (let i = openParen; i < command.length; i += 1) {

@@ -462,7 +462,14 @@ function redactHeredocCommand(
       i = end;
       continue;
     }
-    if (literalDataProof && ch === "<" && command.slice(i, i + 3) === "<<<") return null;
+    if (ch === "<" && command.slice(i, i + 3) === "<<<") {
+      if (literalDataProof) return null;
+      // The last two characters must not become a new heredoc opener on the
+      // next iteration: a here-string has no following body to remove.
+      out += "<<<";
+      i += 3;
+      continue;
+    }
     // `<<` heredoc, but NOT `<<<` (a here-STRING, whose operand is one word on
     // the same line and therefore has no body to remove).
     if (ch === "<" && command[i + 1] === "<" && command[i + 2] !== "<") {
@@ -544,7 +551,7 @@ export function inspectShellHeredocData(
           return false;
         }
         if (next === "(") {
-          const close = matchParen(body, i + 1, true);
+          const close = findShellSubstitutionEnd(body, i + 1, { strict: true });
           if (close === -1) {
             unresolvedExpansion = true;
             return false;
@@ -626,7 +633,7 @@ function readHeredocDelimiter(
     i = command.indexOf(quote, startWord);
     if (i === -1) return null;
   } else {
-    while (i < command.length && !/[ \t\r\n;&|<>()'"\\`]/.test(command[i]!)) {
+    while (i < command.length && !/[ \t\n;&|<>()'"\\`]/.test(command[i]!)) {
       if (command[i] === "$" && command[i + 1] === "(") return null;
       i += 1;
     }
@@ -636,7 +643,7 @@ function readHeredocDelimiter(
   // Concatenated quotes, escapes and expansion-shaped delimiter words need
   // more quote-removal grammar. Do not guess a boundary from a word prefix.
   if (delimiter.length === 0 || /[\\\n]/.test(delimiter)
-    || (next < command.length && !/[ \t\r\n;&|<>()]/.test(command[next]!))) return null;
+    || (next < command.length && !/[ \t\n;&|<>()]/.test(command[next]!))) return null;
   return { delimiter, next, quoted, stripTabs };
 }
 
@@ -993,6 +1000,7 @@ function consumeDoubleQuote(
       i = close + 1;
       continue;
     }
+    if (strictBoundary && ch === "$" && (command[i + 1] === "{" || command[i + 1] === "[")) return null;
     text += ch;
     i += 1;
   }
@@ -1022,6 +1030,9 @@ function matchParen(command: string, openParen: number, strictBoundary = false):
     // nested legacy substitutions, instead of ending the body prematurely.
     if (strictBoundary && (ch === "`" || (!wordActive && command.slice(i, i + 4) === "case"
       && /[ \t\r\n;&|<>()]/.test(command[i + 4] ?? "")))) return -1;
+    if (strictBoundary && ((ch === "$" && "{['\"".includes(command[i + 1] ?? " "))
+      || (ch === "(" && command[i + 1] === "(")
+      || ((ch === "<" || ch === ">") && command[i + 1] === "("))) return -1;
     if (ch === "'") {
       const close = command.indexOf("'", i + 1);
       if (close === -1) return -1;
@@ -1048,6 +1059,18 @@ function matchParen(command: string, openParen: number, strictBoundary = false):
     i += 1;
   }
   return -1;
+}
+
+/**
+ * Shared quote/comment-aware substitution boundary. Strict inspection refuses
+ * unsupported nested syntax before granting a new executable-data exemption.
+ */
+export function findShellSubstitutionEnd(
+  command: string,
+  openParen: number,
+  options: { strict?: boolean } = {},
+): number {
+  return command[openParen] === "(" ? matchParen(command, openParen, options.strict ?? false) : -1;
 }
 
 /** Reduce `/usr/bin/ls` → `ls`; leave bare verbs unchanged. */

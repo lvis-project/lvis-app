@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -29,6 +29,7 @@ describe("heredoc data path policy", () => {
     "cat <<END\nprintf '$(cat /etc/shadow)'\nEND",
     "cat <<END\nprintf '$(cat /etc/shadow)'",
     "cat <<$END\nprintf '$(cat /etc/shadow)'\n$END",
+    "cat <<END\r\nEND\nprintf '$(cat /etc/shadow)'\nEND\r",
     "cat <<END\nprintf '$(cat /et\\\nc/shadow)'\nEND",
     "cat <<END\n# $(cat /etc/shadow)\nEND",
     "cat <<END\n'$(cat /etc/shadow)'\nEND",
@@ -70,5 +71,20 @@ describe("heredoc data path policy", () => {
 
   it("refuses a delimiter word whose syntax cannot be inspected", () => {
     expect(check("cat <<$(printf END)\nprintf '$(cat /etc/shadow)'\n$(printf END)")).not.toBeNull();
+  });
+
+  it("retains outside writes after a here-string or literal delimiter text", () => {
+    const fixture = mkdtempSync(join(tmpdir(), "here-string-policy-"));
+    roots.push(fixture);
+    const allowed = join(fixture, "allowed");
+    const other = join(fixture, "other");
+    mkdirSync(allowed);
+    mkdirSync(other);
+    const output = join(other, "ordinary-output.txt");
+    writeFileSync(output, "fixture");
+    for (const header of ["cat <<< END", "cat <<< 'END'", "printf '<<< END'", "printf \\<\\<\\< END"]) {
+      const command = `${header}\nprintf harmless > '${output}'\nEND`;
+      expect(findShellPathPolicyViolation(command, allowed, allowed, [], false)?.kind).toBe("sandbox-boundary");
+    }
   });
 });
