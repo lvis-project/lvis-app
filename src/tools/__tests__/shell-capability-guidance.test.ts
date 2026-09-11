@@ -29,19 +29,21 @@ describe.each(["en", "ko"] as const)("shell capability guidance in %s", (locale)
   beforeEach(() => setLocale(locale));
 
   it.each(["-r", "-R", "--recursive", "-a", "--archive", "-av", "--suffix -- -a"])(
-    "states the recursive copying limit for %s without promising a text transfer", (flag) => {
-    const denial = inspect(`cp ${flag} ./source ./destination`);
-    expect(denial?.kind).toBe("recursive-traversal");
-    expect(denial?.reason).toContain(locale === "en"
-      ? "Recursive copying is unavailable"
-      : "재귀 복사를 지원하지 않습니다");
-    expect(denial?.reason).toContain("cp");
-    expect(denial?.reason).toContain(locale === "en" ? "single regular file" : "일반 파일 하나");
-    expect(denial?.reason).not.toContain("read_file + write_file");
-    expect(denial?.reason).not.toContain(locale === "en"
-      ? "Recommended LVIS built-in tool"
-      : "LVIS 내장 도구 권장");
-  });
+    "states the recursive copying limit for %s without promising a text transfer",
+    (flag) => {
+      const denial = inspect(`cp ${flag} ./source ./destination`);
+      expect(denial?.kind).toBe("recursive-traversal");
+      expect(denial?.reason).toContain(locale === "en"
+        ? "Recursive copying is unavailable"
+        : "재귀 복사를 지원하지 않습니다");
+      expect(denial?.reason).toContain("cp");
+      expect(denial?.reason).toContain(locale === "en" ? "single regular file" : "일반 파일 하나");
+      expect(denial?.reason).not.toContain("read_file + write_file");
+      expect(denial?.reason).not.toContain(locale === "en"
+        ? "Recommended LVIS built-in tool"
+        : "LVIS 내장 도구 권장");
+    },
+  );
 
   it.each(["tar -xf ./archive.tar", "tar -cf ./archive.tar ./source"])(
     "states the archive capability limit for %s",

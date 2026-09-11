@@ -1,4 +1,4 @@
-// AUTO-GENERATED — i18n migration. Source: src/tools/executor.ts. Do not edit by hand.
+// Tool execution message catalog. Aggregate locale barrels are generated.
 export const en = {
   "be_executor.purposeSentence": "Performing the task '{text}' as requested by the user.",
   "be_executor.permHoldStrictHeadless": "[Permission hold — strict headless] Tool '{toolName}' ({source}) — strict mode does not allow headless auto-review.",
