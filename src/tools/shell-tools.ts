@@ -19,7 +19,6 @@ import type { Readable } from "node:stream";
 import { StringDecoder } from "node:string_decoder";
 import { z } from "zod";
 
-import { resolveShell, shellEnvForChild } from "../lib/shell-resolver.js";
 import { spawnWindowsJobProcess } from "../main/windows-job-launcher.js";
 import {
   createDynamicTool,
@@ -30,6 +29,11 @@ import {
   type ToolExecutionResult,
 } from "./base.js";
 import { buildSafeChildEnv, buildSandboxedChildEnv } from "./safe-env.js";
+import { prepareShellInvocation, matchesPreparedShellInvocation, preparedShellFacts, preparedShellCommand, preparedSandboxBootstrap, preparedSandboxEnvironment, disposePreparedShellInvocation, claimPreparedShellInvocation, transferPreparedShellInvocation, type PreparedShellInvocation } from "./prepared-shell-invocation.js";
+import { POWER_SHELL_AST_PARSER, normalizePowerShellAstSummary, type PowerShellArgument, type PowerShellAstSummary } from "./powershell-ast.js";
+import { resolveShellFilesystemPath } from "../shared/shell-filesystem-path.js";
+import { findResolvedShellPathViolation, type ShellPathPolicyViolation } from "./shell-path-policy.js";
+export type { PowerShellAstSummary } from "./powershell-ast.js";
 import { createSandboxProcessHome } from "../permissions/sandbox-process-home.js";
 import {
   validateShellCommandPathPolicy,
@@ -518,17 +522,6 @@ export class BashTool extends ZodTool<typeof BashToolInputSchema> {
     if (cwdViolation) {
       return { output: cwdViolation, isError: true };
     }
-    const commandPathViolation = validateShellCommandPathPolicy(
-      input.command,
-      resolvedCwd,
-      ctx.cwd,
-      ctx.extraAllowedDirectories,
-      ctx.blockReadsOutsideWorkingDirectories === true,
-    );
-    if (commandPathViolation) {
-      return { output: commandPathViolation, isError: true };
-    }
-
     // §691: the executor seals the host-shell substrate before permission
     // routing. The supplied plan must come from the live host provider; a
     // structural lookalike cannot downgrade an active ASRT route to plain spawn.
@@ -544,6 +537,35 @@ export class BashTool extends ZodTool<typeof BashToolInputSchema> {
       };
     }
     const hostShellPlan = suppliedHostShellPlan ?? getHostShellExecutionPlan();
+    if (requiresExplicitHostShellFallbackApproval(hostShellPlan) && !ctx.hostShellExecutionPermit) {
+      return { output: "spawn failed: requested-sandbox shell execution requires a one-shot host approval permit.", isError: true, metadata: { sandboxed: false, isolation: "none" } };
+    }
+    const identity = { command: input.command, requestedCwd: input.cwd, executionCwd: ctx.cwd, resolvedCwd,
+      toolUseId: typeof ctx.metadata.toolUseId === "string" ? ctx.metadata.toolUseId : undefined, plan: hostShellPlan };
+    let prepared: PreparedShellInvocation;
+    try { prepared = ctx.preparedShellInvocation ?? prepareShellInvocation(identity, ctx.abortSignal); }
+    catch (error) {
+      ctx.abortSignal?.throwIfAborted();
+      return { output: `spawn failed: shell preparation failed: ${(error as Error).message}`, isError: true,
+        metadata: { sandboxed: false, isolation: "unavailable" } };
+    }
+    if (!matchesPreparedShellInvocation(prepared, identity)) {
+      return { output: "spawn failed: shell preparation does not match this invocation.", isError: true };
+    }
+    try {
+    const commandPathViolation = validateShellCommandPathPolicy(
+      input.command,
+      resolvedCwd,
+      ctx.cwd,
+      ctx.extraAllowedDirectories,
+      ctx.blockReadsOutsideWorkingDirectories === true,
+      preparedShellFacts(prepared),
+    );
+    if (commandPathViolation) {
+      return { output: commandPathViolation, isError: true };
+    }
+
+
     // A requested-sandbox fallback is an honest plain host child, never an ASRT child.
     // Its opaque permit exists only after an allow-once approval for this exact
     // command/cwd/tool-use tuple and is consumed before spawn.
@@ -595,7 +617,7 @@ export class BashTool extends ZodTool<typeof BashToolInputSchema> {
         input.command,
         resolvedCwd,
         writePaths,
-        input.timeoutSeconds, ctx.abortSignal,
+        input.timeoutSeconds, prepared, ctx.abortSignal,
       );
       return withBackgroundUnavailable(sandboxResult, input.run_in_background === true);
     }
@@ -608,10 +630,10 @@ export class BashTool extends ZodTool<typeof BashToolInputSchema> {
     // approval-fallback (requiresExplicitUserApproval) is excluded so a
     // one-shot-approved command cannot outlive its approval.
     if (input.run_in_background === true && !hostShellPlan.requiresExplicitUserApproval) {
-      return spawnBackground(input.command, resolvedCwd, sessionIdFromContext(ctx));
+      return spawnBackground(input.command, resolvedCwd, sessionIdFromContext(ctx), prepared);
     }
 
-    const plainResult = await spawnWithTimeout(input.command, resolvedCwd, input.timeoutSeconds, ctx.abortSignal);
+    const plainResult = await spawnWithTimeout(input.command, resolvedCwd, input.timeoutSeconds, prepared, ctx.abortSignal);
     if (!hostShellPlan.requiresExplicitUserApproval) {
       return withBackgroundUnavailable(plainResult, input.run_in_background === true);
     }
@@ -627,6 +649,9 @@ export class BashTool extends ZodTool<typeof BashToolInputSchema> {
       },
       input.run_in_background === true,
     );
+    } finally {
+      disposePreparedShellInvocation(prepared);
+    }
   }
 }
 
@@ -655,8 +680,10 @@ function withBackgroundUnavailable(result: SpawnResult, requested: boolean): Spa
  * environment as {@link spawnWithTimeout}; `timeoutSeconds` does not apply — a
  * background shell runs until it exits, bash_kill, session end, or app quit.
  */
-function spawnBackground(command: string, cwd: string, sessionId: string): SpawnResult {
-  const shell = resolveShell("bash");
+function spawnBackground(command: string, cwd: string, sessionId: string, prepared: PreparedShellInvocation): SpawnResult {
+  const releaseClaim = claimPreparedShellInvocation(prepared);
+  try {
+  const { shell, argv, environment: env } = preparedShellCommand(prepared);
   if (process.platform === "win32" && shell.windowsFlavor !== "msys") {
     return {
       output: "Background Bash requires a confirmed native Windows shell. Process ownership is unavailable for this interpreter; this command was not started.",
@@ -665,16 +692,17 @@ function spawnBackground(command: string, cwd: string, sessionId: string): Spawn
     };
   }
   assertManagedChildProcessAdmissionOpen("tool:bash:background");
-  const env = shellEnvForChild(shell, buildSafeChildEnv());
   const child = process.platform === "win32"
-    ? spawnWindowsJobProcess(shell.cmd, shell.shellArgs(command), { cwd, env })
-    : spawn(shell.cmd, shell.shellArgs(command), {
+    ? spawnWindowsJobProcess(shell.cmd, [...argv], { cwd, env })
+    : spawn(shell.cmd, [...argv], {
       cwd,
       stdio: ["ignore", "pipe", "pipe"],
       env,
       shell: false,
       detached: true,
     });
+  const cleanup = transferPreparedShellInvocation(prepared);
+  child.once("close", cleanup);
   const shellId = backgroundShellManager.register({
     sessionId,
     command,
@@ -701,6 +729,7 @@ function spawnBackground(command: string, cwd: string, sessionId: string): Spawn
     isError: false,
     metadata: { backgrounded: true, shellId },
   };
+  } finally { releaseClaim(); }
 }
 
 function preflightInteractiveCommand(command: string): string | null {
@@ -762,24 +791,18 @@ export async function spawnWithSandbox(
   resolvedCwd: string,
   writePaths: readonly string[],
   timeoutSeconds: number,
+  prepared: PreparedShellInvocation,
   signal?: AbortSignal,
 ): Promise<SpawnResult> {
-  signal?.throwIfAborted();
-  let sandboxHome: ReturnType<typeof createSandboxProcessHome>;
+  const releaseClaim = claimPreparedShellInvocation(prepared);
   try {
-    sandboxHome = createSandboxProcessHome();
-  } catch (err) {
-    return {
-      output: `spawn failed: could not create isolated HOME: ${(err as Error).message}`,
-      isError: true,
-      metadata: { sandboxed: false, sandboxAttempted: true, isolation: "unavailable" },
-    };
-  }
-  const home = process.env["HOME"];
+  signal?.throwIfAborted();
+  const { shell, homePath, hostHome: home } = preparedShellCommand(prepared);
+  if (!homePath) throw new Error("Sandbox shell preparation has no owned HOME");
   // Read-jail HOME-leak fix: deny the whole home dir, then re-allow the working
   // tree (cwd + write paths). Omitting denyRead when HOME is unset avoids
   // denying nothing-meaningful; the write paths are always re-allowed for read.
-  const sandboxWritePaths = [...writePaths, sandboxHome.path];
+  const sandboxWritePaths = [...writePaths, homePath];
   const allowRead = [resolvedCwd, ...sandboxWritePaths];
   const denyRead = [
     ...getDefaultSensitiveReadDenyPaths(),
@@ -795,14 +818,13 @@ export async function spawnWithSandbox(
   const abortController = new AbortController();
   let wrapped: { argv: string[]; env: NodeJS.ProcessEnv };
   try {
-    const binShell = resolveShell("bash").cmd;
-    wrapped = await wrapToolCommand(command, {
+    const binShell = shell.cmd;
+    wrapped = await wrapToolCommand(preparedSandboxBootstrap(prepared), {
       filesystem,
       abortSignal: signal ? AbortSignal.any([signal, abortController.signal]) : abortController.signal,
       binShell,
     });
   } catch (err) {
-    sandboxHome.cleanup();
     return {
       output: `spawn failed: ${(err as Error).message}`,
       isError: true,
@@ -813,12 +835,10 @@ export async function spawnWithSandbox(
   const [cmd, ...args] = wrapped.argv;
   if (signal?.aborted) {
     void cleanupAsrtSandboxAfterCommand();
-    sandboxHome.cleanup();
     return { output: "Shell command cancelled.", isError: true, metadata: { aborted: true, sandboxed: false } };
   }
   if (cmd === undefined) {
     void cleanupAsrtSandboxAfterCommand();
-    sandboxHome.cleanup();
     return {
       output: "spawn failed: ASRT returned an empty argv",
       isError: true,
@@ -833,7 +853,7 @@ export async function spawnWithSandbox(
   // safe whitelist baseline + ONLY the allow-listed proxy/CA/SANDBOX_RUNTIME
   // keys ASRT set/changed. So the Windows proxy set is propagated (the "spread")
   // while mac/linux gains nothing extra, and host secrets stay stripped on both.
-  const childEnv = buildSandboxedChildEnv(wrapped.env, { ...sandboxHome.env });
+  const childEnv = preparedSandboxEnvironment(prepared, wrapped.env);
 
   return await new Promise<SpawnResult>((resolveResult) => {
     // CRITICAL: shell:false — the wrapper argv is the literal program+args; a
@@ -850,7 +870,6 @@ export async function spawnWithSandbox(
       });
     } catch (err) {
       void cleanupAsrtSandboxAfterCommand();
-      sandboxHome.cleanup();
       resolveResult({
         output: `spawn failed: ${(err as Error).message}`,
         isError: true,
@@ -858,6 +877,7 @@ export async function spawnWithSandbox(
       });
       return;
     }
+    const cleanupPreparedAfterTermination = transferPreparedShellInvocation(prepared);
     trackManagedChildProcess(child, { killProcessGroup: process.platform !== "win32", label: "tool:bash:asrt" });
 
     const outputCollector = createOutputCollector();
@@ -872,7 +892,7 @@ export async function spawnWithSandbox(
       if (child.pid !== undefined && child.exitCode === null && child.signalCode === null) return;
       lifecycleCleaned = true;
       void cleanupAsrtSandboxAfterCommand();
-      sandboxHome.cleanup();
+      cleanupPreparedAfterTermination();
     };
     const lifetime = watchShellLifetime(child, timeoutSeconds, signal, () => abortController.abort());
 
@@ -912,27 +932,33 @@ export async function spawnWithSandbox(
       });
     });
   });
+  } finally { releaseClaim(); }
 }
 
 async function spawnWithTimeout(
   command: string,
   cwd: string,
   timeoutSeconds: number,
+  prepared: PreparedShellInvocation,
   signal?: AbortSignal,
 ): Promise<SpawnResult> {
+  const releaseClaim = claimPreparedShellInvocation(prepared);
+  try {
   signal?.throwIfAborted();
-  return new Promise((resolve) => {
-    const shell = resolveShell("bash");
+  return await new Promise((resolve) => {
+    const { shell, argv, environment } = preparedShellCommand(prepared);
     assertManagedChildProcessAdmissionOpen("tool:bash");
-    const child: PipedChild = spawn(shell.cmd, shell.shellArgs(command), {
+    const child: PipedChild = spawn(shell.cmd, [...argv], {
       detached: process.platform !== "win32",
       cwd,
       stdio: ["ignore", "pipe", "pipe"],
       // Strip secrets (LVIS_*, *_API_KEY, GITHUB_TOKEN, AWS_*, etc.) from
       // the child's environment. Only generic shell/locale vars pass through.
-      env: shellEnvForChild(shell, buildSafeChildEnv()),
+      env: { ...environment },
       shell: false,
     });
+    const cleanupPreparedAfterTermination = transferPreparedShellInvocation(prepared);
+    child.once("close", cleanupPreparedAfterTermination);
     trackManagedChildProcess(child, { killProcessGroup: process.platform !== "win32", label: "tool:bash" });
 
     const outputCollector = createOutputCollector();
@@ -975,6 +1001,7 @@ async function spawnWithTimeout(
       });
     });
   });
+  } finally { releaseClaim(); }
 }
 
 function formatTimeoutOutput(
@@ -1236,20 +1263,9 @@ const FILESYSTEM_COMMANDS = new Set([
 const RECURSE_FLAGS = new Set(["-recurse", "-r", "-rec"]);
 const FORCE_FLAGS = new Set(["-force", "-fo"]);
 
-interface PowerShellAstCommand {
-  name: string | null;
-  elements: string[];
-  text: string;
-}
-
-export interface PowerShellAstSummary {
-  errors: string[];
-  commands: PowerShellAstCommand[];
-}
-
 const canonicalPowerShellTools = new WeakSet<object>();
 
-export function isCanonicalPowerShellTool(tool: unknown): tool is PowerShellTool {
+export function isCanonicalPowerShellTool(tool: unknown): tool is Tool & PowerShellTool {
   return typeof tool === "object" && tool !== null && canonicalPowerShellTools.has(tool);
 }
 
@@ -1283,16 +1299,7 @@ export class PowerShellTool extends ZodTool<typeof PowerShellToolInputSchema> {
     if (cwdViolation) {
       return { output: cwdViolation, isError: true };
     }
-    const commandPathViolation = validateShellCommandPathPolicy(
-      input.command,
-      resolvedCwd,
-      ctx.cwd,
-      ctx.extraAllowedDirectories,
-      ctx.blockReadsOutsideWorkingDirectories === true,
-    );
-    if (commandPathViolation) {
-      return { output: commandPathViolation, isError: true };
-    }
+
 
     // §691: the executor seals the host-shell substrate before permission
     // routing. The supplied plan must come from the live host provider; a
@@ -1309,6 +1316,19 @@ export class PowerShellTool extends ZodTool<typeof PowerShellToolInputSchema> {
       };
     }
     const hostShellPlan = suppliedHostShellPlan ?? getHostShellExecutionPlan();
+    if (requiresExplicitHostShellFallbackApproval(hostShellPlan) && !ctx.hostShellExecutionPermit) {
+      return { output: "PowerShell spawn failed: requested-sandbox shell execution requires a one-shot host approval permit.", isError: true, metadata: { sandboxed: false, isolation: "none" } };
+    }
+    const commandPathViolation = await findPowerShellCommandPathViolation(
+      input.command,
+      resolvedCwd,
+      ctx.cwd,
+      ctx.extraAllowedDirectories,
+      ctx.blockReadsOutsideWorkingDirectories === true,
+    );
+    if (commandPathViolation) {
+      return { output: commandPathViolation.reason, isError: true };
+    }
     // A requested-sandbox fallback is an honest plain host child, never an ASRT child.
     // Its opaque permit exists only after an allow-once approval for this exact
     // command/cwd/tool-use tuple and is consumed before spawn.
@@ -1336,10 +1356,8 @@ export class PowerShellTool extends ZodTool<typeof PowerShellToolInputSchema> {
         };
       }
     }
-    // The structural AST deny for this command string is Step 2.5 in the
-    // invocation runner (one stage for both shell dialects), NOT here. Running
-    // it here put it AFTER `consumeHostShellExecutionPermit` had burned the
-    // user's one-shot allow, so a refused command still cost the permit.
+    // Native AST admission above also covers direct callers. It precedes the
+    // one-shot permit consumption, so a refused command never spends approval.
     if (hostShellPlan.mode === "blocked") {
       return {
         output:
@@ -1402,23 +1420,26 @@ export function validatePowerShellAst(ast: PowerShellAstSummary): string | null 
     const blocked = BLOCKED_COMMANDS.get(name);
     if (blocked) return blocked;
 
-    const elements = command.elements.map((element) => element.trim().toLowerCase());
-    if (elements.some((element) => ENCODED_COMMAND_FLAGS.has(element))) {
+    const parameters = command.arguments.filter((argument) => argument.kind === "parameter");
+    if (parameters.some((parameter) => ENCODED_COMMAND_FLAGS.has("-" + parameter.name.toLowerCase()))) {
       return "encoded commands are not allowed";
     }
-    if (REMOVE_ITEM_COMMANDS.has(name) && hasRecursiveForcedDeletion(elements)) {
+    if (REMOVE_ITEM_COMMANDS.has(name) && parameters.some((parameter) => isPowerShellSwitchEnabled(parameter, RECURSE_FLAGS))
+      && parameters.some((parameter) => isPowerShellSwitchEnabled(parameter, FORCE_FLAGS))) {
       return "recursive forced deletion is not allowed";
     }
     if (FILESYSTEM_COMMANDS.has(name)) {
-      if (elements.some((element) => isSwitchEnabled(element, RECURSE_FLAGS))) {
+      if (parameters.some((parameter) => isPowerShellSwitchEnabled(parameter, RECURSE_FLAGS))) {
         return "recursive shell filesystem traversal is not allowed";
       }
-      const dynamic = elements.slice(1).find(isDynamicPowerShellPathArgument);
+      const dynamic = command.arguments.slice(1).find((argument) => argument.kind === "dynamic"
+        || (argument.kind === "parameter" && argument.argument?.kind === "dynamic"));
       if (dynamic) {
-        return `dynamic path argument is not allowed: ${dynamic}`;
+        return `dynamic path argument is not allowed: ${dynamic.text}`;
       }
     }
   }
+  if (ast.unsupported.length) return `unsupported PowerShell execution state: ${ast.unsupported[0]}`;
   return null;
 }
 
@@ -1426,29 +1447,70 @@ function canonicalPowerShellCommandName(name: string): string {
   return POWERSHELL_ALIASES.get(name) ?? name;
 }
 
-function isDynamicPowerShellPathArgument(element: string): boolean {
-  if (element.length === 0 || element.startsWith("-")) return false;
-  return (
-    element.includes("$") ||
-    element.includes("[") ||
-    element.includes("]") ||
-    element.includes("(") ||
-    element.includes(")") ||
-    element.includes("+")
-  );
+function isPowerShellSwitchEnabled(parameter: Extract<PowerShellArgument, { kind: "parameter" }>, switches: ReadonlySet<string>): boolean {
+  if (!switches.has("-" + parameter.name.toLowerCase())) return false;
+  return parameter.argument === undefined || parameter.argument.kind !== "literal" || parameter.argument.value.toLowerCase() !== "false";
 }
 
-function hasRecursiveForcedDeletion(elements: string[]): boolean {
-  return (
-    elements.some((element) => isSwitchEnabled(element, RECURSE_FLAGS)) &&
-    elements.some((element) => isSwitchEnabled(element, FORCE_FLAGS))
-  );
+export function findPowerShellAstPathViolation(
+  ast: PowerShellAstSummary, cwd: string, sandboxRoot: string, extraAllowedDirectories: readonly string[],
+  blockReadsOutsideWorkingDirectories: boolean,
+): ShellPathPolicyViolation | null {
+  const cwdError = validateShellWorkingDirectory(cwd, sandboxRoot, extraAllowedDirectories);
+  if (cwdError) return { kind: cwdError.startsWith("Sensitive") ? "sensitive-path" : "sandbox-boundary", reason: cwdError, path: cwd };
+  const structural = validatePowerShellAst(ast);
+  if (structural) return { kind: "dynamic-path", reason: `PowerShell command blocked: ${structural}` };
+  const inspect = (argument: PowerShellArgument, effect: "read" | "write", literalPath = false): ShellPathPolicyViolation | null => {
+    if (argument.kind === "parameter") return argument.argument ? inspect(argument.argument, effect, literalPath) : null;
+    if (argument.kind !== "literal") return { kind: "dynamic-path", reason: "PowerShell path argument is unresolved", candidate: argument.text };
+    const path = argument.value;
+    if (path.startsWith("~") || (!literalPath && /[*?\[\]]/.test(path)) || /^[a-z][a-z0-9_-]*:(?![\\/])/i.test(path)) {
+      return { kind: "dynamic-path", reason: "PowerShell provider, home or wildcard path requires an explicit ordinary path", candidate: argument.text };
+    }
+    let absolute: string;
+    try { absolute = resolveShellFilesystemPath(path, cwd); }
+    catch (error) {
+      if (!(error instanceof Error) || !("code" in error)) throw error;
+      return { kind: "invalid-path", reason: "PowerShell path cannot be resolved", candidate: argument.text };
+    }
+    return findResolvedShellPathViolation(absolute, argument.text, sandboxRoot, extraAllowedDirectories, effect, blockReadsOutsideWorkingDirectories);
+  };
+  for (const redirect of ast.redirections) { const violation = inspect(redirect, "write"); if (violation) return violation; }
+  for (const command of ast.commands) {
+    const name = canonicalPowerShellCommandName(command.name!.toLowerCase());
+    if (["set-location", "cd", "sl", "push-location", "pushd", "pop-location", "popd", "set-alias", "new-alias", "import-module", "remove-module"].includes(name)) {
+      return { kind: "dynamic-path", reason: "PowerShell location or command-identity changes require a separate invocation", candidate: command.arguments[0]?.text };
+    }
+    if (["write-output", "echo", "write-host", "write-error", "write-warning", "write-verbose", "write-debug", "write-information", "start-sleep", "select-object", "measure-object", "format-list", "format-table", "out-string"].includes(name)) continue;
+    const effect = ["get-content", "get-childitem", "get-item", "get-itemproperty", "test-path"].includes(name) ? "read" : "write";
+    let positional = 0;
+    for (let index = 1; index < command.arguments.length; index += 1) {
+      const argument = command.arguments[index]!;
+      if (argument.kind === "parameter" && argument.name.toLowerCase() === "literalpath" && FILESYSTEM_COMMANDS.has(name)) {
+        const target = argument.argument ?? command.arguments[++index];
+        if (!target || target.kind === "parameter") return { kind: "dynamic-path", reason: "PowerShell literal path argument is missing", candidate: argument.text };
+        const violation = inspect(target, effect, true); if (violation) return violation;
+        continue;
+      }
+      if (argument.kind === "parameter" && ["value", "encoding", "itemtype", "type", "filter", "include", "exclude"].includes(argument.name.toLowerCase()) && FILESYSTEM_COMMANDS.has(name)) {
+        if (!argument.argument) index += 1;
+        continue;
+      }
+      if (argument.kind !== "parameter") {
+        positional += 1;
+        if (["set-content", "add-content", "set-item", "set-itemproperty"].includes(name) && positional > 1) continue;
+      }
+      const violation = inspect(argument, effect); if (violation) return violation;
+    }
+  }
+  return null;
 }
 
-function isSwitchEnabled(element: string, switches: ReadonlySet<string>): boolean {
-  const [name, value] = element.split(":", 2);
-  if (!switches.has(name)) return false;
-  return value === undefined || value === "" || value === "true" || value === "$true";
+export async function findPowerShellCommandPathViolation(
+  command: string, cwd: string, sandboxRoot: string, extraAllowedDirectories: readonly string[],
+  blockReadsOutsideWorkingDirectories: boolean,
+): Promise<ShellPathPolicyViolation | null> {
+  return findPowerShellAstPathViolation(await parsePowerShellAst(command), cwd, sandboxRoot, extraAllowedDirectories, blockReadsOutsideWorkingDirectories);
 }
 
 /**
@@ -1539,51 +1601,9 @@ async function parsePowerShellAst(command: string): Promise<PowerShellAstSummary
     parser.stdin.end(command);
   }).catch((err) => ({
     errors: [(err as Error).message],
-    commands: [],
+    commands: [], redirections: [], unsupported: [],
   }));
 }
-
-function normalizePowerShellAstSummary(raw: unknown): PowerShellAstSummary {
-  const obj = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
-  const errors = Array.isArray(obj.errors)
-    ? obj.errors.filter((item): item is string => typeof item === "string")
-    : [];
-  const commands = Array.isArray(obj.commands)
-    ? obj.commands.map((item) => {
-      const command = item && typeof item === "object" ? item as Record<string, unknown> : {};
-      return {
-        name: typeof command.name === "string" ? command.name : null,
-        text: typeof command.text === "string" ? command.text : "",
-        elements: Array.isArray(command.elements)
-          ? command.elements.filter((element): element is string => typeof element === "string")
-          : [],
-      };
-    })
-    : [];
-  return { errors, commands };
-}
-
-const POWER_SHELL_AST_PARSER = `
-$ErrorActionPreference = 'Stop'
-$cmd = [Console]::In.ReadToEnd()
-$tokens = $null
-$errors = $null
-$ast = [System.Management.Automation.Language.Parser]::ParseInput($cmd, [ref]$tokens, [ref]$errors)
-$commands = @(
-  $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.CommandAst] }, $true) |
-    ForEach-Object {
-      [ordered]@{
-        name = $_.GetCommandName()
-        text = $_.Extent.Text
-        elements = @($_.CommandElements | ForEach-Object { $_.Extent.Text })
-      }
-    }
-)
-[ordered]@{
-  errors = @($errors | ForEach-Object { $_.Message })
-  commands = $commands
-} | ConvertTo-Json -Depth 8 -Compress
-`;
 
 /**
  * POSIX single-quote escape one argument so it survives the `<shell> -c <wrap>`
@@ -1859,3 +1879,6 @@ async function spawnPowerShell(
     });
   });
 }
+
+/** @internal Native process lifetime seam; public calls must pass AST admission. */
+export const _spawnPowerShellForTest = spawnPowerShell;

@@ -1,0 +1,17 @@
+{
+  "name": "@lvis/shell-parser-runtime",
+  "version": "1.0.0",
+  "private": true,
+  "license": "BSD-3-Clause",
+  "files": [
+    "parser.wasm",
+    "wasm_exec.cjs",
+    "manifest.json",
+    "LICENSE*"
+  ],
+  "exports": {
+    "./parser.wasm": "./parser.wasm",
+    "./wasm_exec.cjs": "./wasm_exec.cjs",
+    "./manifest.json": "./manifest.json"
+  }
+}

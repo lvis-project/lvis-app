@@ -1,3 +1,5 @@
+import { prepareShellInvocation, preparedShellFacts, disposePreparedShellInvocation, type PreparedShellInvocation } from "./prepared-shell-invocation.js";
+import { resolveHostShellWorkingDirectory } from "../permissions/host-shell-execution-permit.js";
 import { randomUUID } from "node:crypto";
 import { statSync } from "node:fs";
 import type { Tool } from "./base.js";
@@ -6,8 +8,10 @@ import { isModelExposedTool } from "./base.js";
 import {
   isCanonicalBashTool,
   isCanonicalPowerShellTool,
-  validatePowerShellCommand,
+  findPowerShellCommandPathViolation,
 } from "./shell-tools.js";
+import { extractShellCommands } from "../shared/shell-command-fields.js";
+import type { ShellPathPolicyViolation } from "./shell-path-policy.js";
 // Effective invocation-origin SoT (AsyncLocalStorage). The plugin-surface executor
 // enters a `runWithInvocationOrigin` frame for every card/panel/plugin call, so this
 // is defined ("mcp-app" | "ui" | "plugin") ONLY on that path; the model's main-loop
@@ -303,6 +307,7 @@ export async function runToolInvocation(
     let permissionResult: PermissionCheckResult | undefined;
     let source: ToolSource = "builtin";
     let trust: TrustLevel = "high";
+    let preparedShellInvocation: PreparedShellInvocation | undefined;
     let hostShellExecutionPlanAudit: HostShellExecutionPlanAuditProjection | undefined;
     let governedTool = false;
     const withHostShellExecutionPlan = (result: ToolResult): ToolResult =>
@@ -1420,6 +1425,24 @@ export async function runToolInvocation(
       emitGrantAudit("always");
     };
 
+    if (hostShellToolName === "bash" && hostShellExecutionPlan && typeof finalInput.command === "string") {
+      try {
+        if (finalInput.cwd !== undefined && typeof finalInput.cwd !== "string") throw new Error("Shell cwd must be a string");
+        preparedShellInvocation = prepareShellInvocation({
+          command: finalInput.command, requestedCwd: finalInput.cwd as string | undefined,
+          executionCwd, resolvedCwd: resolveHostShellWorkingDirectory(executionCwd, finalInput.cwd as string | undefined),
+          toolUseId: toolUse.id, plan: hostShellExecutionPlan,
+        }, abortSignal);
+      } catch (error) {
+        const msg = `Shell preparation failed: ${errorMessage(error)}`;
+        const durationMs = Date.now() - startTime;
+        emitToolStart(callbacks, toolUse.name, finalInput, meta);
+        callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+        await auditCurrentToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, permissionResult, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
+        return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs });
+      }
+    }
+
     // Path containment runs on the SHAPE of the call — "this invocation carries
     // a command string" — not on the risk verdict derived from it. Gating on
     // `invocationCategory === "shell"` made the sensitive-path hard block and
@@ -1432,12 +1455,19 @@ export async function runToolInvocation(
     // shell category still requires authorization, but has no paths to parse.
     if (hasShellCommandArgument(finalInput)) {
       while (true) {
-        const shellPathViolation = shellPathPolicyViolation(
-          finalInput,
-          executionCwd,
-          invocationRuntimeAllowedDirectories,
-          blockReadsOutsideWorkingDirectories,
-        );
+        let shellPathViolation: ShellPathPolicyViolation | null = null;
+        if (hostShellToolName === "powershell") {
+          const resolvedCwd = resolveHostShellWorkingDirectory(executionCwd, typeof finalInput.cwd === "string" ? finalInput.cwd : undefined);
+          for (const command of extractShellCommands(finalInput)) {
+            shellPathViolation = await findPowerShellCommandPathViolation(command, resolvedCwd, executionCwd, invocationRuntimeAllowedDirectories, blockReadsOutsideWorkingDirectories);
+            if (shellPathViolation) break;
+          }
+        } else {
+          shellPathViolation = shellPathPolicyViolation(
+            finalInput, executionCwd, invocationRuntimeAllowedDirectories, blockReadsOutsideWorkingDirectories,
+            preparedShellInvocation ? preparedShellFacts(preparedShellInvocation) : undefined,
+          );
+        }
         if (!shellPathViolation) break;
 
         if (shellPathViolation.kind === "sandbox-boundary" && shellPathViolation.path) {
@@ -1503,10 +1533,10 @@ export async function runToolInvocation(
     // ── Step 2.5: structural shell command pre-validator ────────────
     //
     // One ladder position for "this command string is structurally refused",
-    // two dialect analyzers behind it. POSIX regexes are meaningless for
-    // PowerShell and the cmdlet blocklist is meaningless for bash, so the RULE
-    // SETS stay separate — but the STAGE must not, or the two dialects sit on
-    // opposite sides of approval and permit consumption.
+    // Bash's execution view owns this structural stage. PowerShell's native
+    // AST owns both structural and path admission in the preceding stage.
+    // Both complete before approval/permit consumption; no Bash interpretation
+    // is applied to PowerShell source.
     //
     // Hooks are allowed to rewrite tool inputs. Validate the final invocation,
     // not the original provider payload, so a hook cannot approve one command
@@ -1523,24 +1553,13 @@ export async function runToolInvocation(
     };
     // Boolean, not the type guard: narrowing `tool` to `PowerShellTool` here
     // would widen it to a union for the rest of the function.
-    const isPowerShellDialect: boolean = isCanonicalPowerShellTool(tool);
-    if (isPowerShellDialect && typeof finalInput.command === "string") {
-      // The PowerShell dialect analyzer used to run INSIDE the tool, after
-      // `consumeHostShellExecutionPermit` had already burned the user's
-      // one-shot allow — the user was shown a modal for a command the host was
-      // always going to refuse, with no refund path. Bash never had that
-      // ordering; both now deny before any approval or permit minting.
-      const preflightError = await validatePowerShellCommand(finalInput.command);
-      if (preflightError) {
-        return await denyStructuralShellCommand(preflightError, "powershell AST");
-      }
-    }
-    if (services.bashAstValidator) {
-      const bashResult = services.bashAstValidator.validate(toolUse.name, finalInput);
+    if (!isCanonicalPowerShellTool(tool) && services.bashAstValidator) {
+      const bashResult = services.bashAstValidator.validate(toolUse.name, finalInput, preparedShellInvocation ? { cwd: executionCwd, facts: preparedShellFacts(preparedShellInvocation) } : undefined);
       if (bashResult.decision === "deny") {
         const msg = t("be_executor.bashAstBlock", { reason: bashResult.reason ?? "", patternId: bashResult.patternId ?? "" })
           + buildPolicyDenialGuidance({
             rule: `bash-ast/${bashResult.patternId ?? "unnamed"}`,
+            operand: bashResult.operand,
             retry: "never",
             // Structural: the shape was refused, so a different target is the
             // one retry guaranteed to fail again.
@@ -1777,7 +1796,7 @@ export async function runToolInvocation(
     permissionResult = authorization.permissionResult;
     hostShellApprovalDecision = authorization.hostShellApprovalDecision;
 
-    return executeAuthorizedToolInvocation({
+    return await executeAuthorizedToolInvocation({
       services,
       tool,
       toolUse,
@@ -1803,6 +1822,7 @@ export async function runToolInvocation(
       hostShellApprovalDecision,
       hostShellExecutionPlan,
       hostShellRequiresExplicitApproval,
+      preparedShellInvocation,
       invocationRuntimeAllowedDirectories,
       supportsA2AParentDelivery,
       spawnDepth,
@@ -1823,6 +1843,7 @@ export async function runToolInvocation(
         ? await generationAccess.runWithLease(generationLease, executeAdmitted)
         : await executeAdmitted();
     } finally {
+      disposePreparedShellInvocation(preparedShellInvocation);
       generationLease?.release();
     }
   }

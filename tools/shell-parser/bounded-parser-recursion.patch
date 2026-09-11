@@ -1,0 +1,184 @@
+--- a/syntax/parser.go
++++ b/syntax/parser.go
+@@ -477,6 +477,8 @@
+ // Parser holds the internal state of the parsing mechanism of a
+ // program.
+ type Parser struct {
++	callDepth int
++
+ 	src io.Reader
+ 	bs  []byte // current chunk of read bytes
+ 	bsp uint   // offset within [Parser.bs] for the rune after [Parser.r]
+@@ -561,6 +563,7 @@
+ const bufSize = 1 << 10
+ 
+ func (p *Parser) reset() {
++	p.callDepth = 0
+ 	p.tok, p.val = illegalTok, ""
+ 	p.eqlOffs = 0
+ 	p.bs, p.bsp = nil, 0
+@@ -720,6 +723,11 @@
+ }
+ 
+ func (p *Parser) unquotedWordPart(buf []byte, wp WordPart, quotes bool) (_ []byte, quoted bool) {
++	if !p.enterCall() {
++		return buf, false
++	}
++	defer p.leaveCall()
++
+ 	switch wp := wp.(type) {
+ 	case *Lit:
+ 		for i := 0; i < len(wp.Value); i++ {
+@@ -1205,6 +1213,11 @@
+ }
+ 
+ func (p *Parser) wordPart() WordPart {
++	if !p.enterCall() {
++		return nil
++	}
++	defer p.leaveCall()
++
+ 	switch p.tok {
+ 	case _Lit, _LitWord, _LitRedir:
+ 		l := p.lit(p.pos, p.val)
+@@ -1720,6 +1733,11 @@
+ }
+ 
+ func (p *Parser) paramExpParameter(pe *ParamExp) *ParamExp {
++	if !p.enterCall() {
++		return nil
++	}
++	defer p.leaveCall()
++
+ 	// Check for Zsh nested parameter expressions like ${(f)"$(foo)"}.
+ 	if left, quotePos := p.nestedParameterStart(pe); left != illegalTok {
+ 		var wp WordPart
+@@ -2108,6 +2126,11 @@
+ }
+ 
+ func (p *Parser) getStmt(readEnd, binCmd, fnBody bool) *Stmt {
++	if !p.enterCall() {
++		return nil
++	}
++	defer p.leaveCall()
++
+ 	pos, ok := p.gotRsrv("!")
+ 	s := &Stmt{Position: pos}
+ 	if ok {
+@@ -2179,6 +2202,11 @@
+ }
+ 
+ func (p *Parser) gotStmtPipe(s *Stmt, binCmd bool) *Stmt {
++	if !p.enterCall() {
++		return nil
++	}
++	defer p.leaveCall()
++
+ 	s.Comments, p.accComs = p.accComs, nil
+ 	for p.peekRedir() {
+ 		p.doRedirect(s)
+@@ -2638,6 +2666,11 @@
+ }
+ 
+ func (p *Parser) testExprBinary(pastAndOr bool) TestExpr {
++	if !p.enterCall() {
++		return nil
++	}
++	defer p.leaveCall()
++
+ 	p.got(_Newl)
+ 	var left TestExpr
+ 	if pastAndOr {
+@@ -2996,4 +3029,16 @@
+ 		p.followErr(fd.Pos(), "foo()", noQuote("a statement"))
+ 	}
+ 	s.Cmd = fd
++}
++
++// enterCall bounds recursive parser work before an AST exists.
++func (p *Parser) enterCall() bool {
++	if p.callDepth >= 256 {
++		p.posErr(p.pos, "shell parser recursion limit exceeded")
++		return false
++	}
++	p.callDepth++
++	return true
+ }
++
++func (p *Parser) leaveCall() { p.callDepth-- }
+--- a/syntax/parser_arithm.go
++++ b/syntax/parser_arithm.go
+@@ -13,6 +13,11 @@
+ }
+ 
+ func (p *Parser) arithmExprAssign(compact bool) ArithmExpr {
++	if !p.enterCall() {
++		return nil
++	}
++	defer p.leaveCall()
++
+ 	// Assign is different from the other binary operators because it's
+ 	// right-associative and needs to check that it's placed after a name
+ 	value := p.arithmExprTernary(compact)
+@@ -44,6 +49,11 @@
+ }
+ 
+ func (p *Parser) arithmExprTernary(compact bool) ArithmExpr {
++	if !p.enterCall() {
++		return nil
++	}
++	defer p.leaveCall()
++
+ 	value := p.arithmExprLor(compact)
+ 	if BinAritOperator(p.tok) != TernQuest || (compact && p.spaced) {
+ 		return value
+@@ -124,6 +134,11 @@
+ }
+ 
+ func (p *Parser) arithmExprPower(compact bool) ArithmExpr {
++	if !p.enterCall() {
++		return nil
++	}
++	defer p.leaveCall()
++
+ 	// Power is different from the other binary operators because it's right-associative
+ 	value := p.arithmExprUnary(compact)
+ 	if BinAritOperator(p.tok) != Pow || (compact && p.spaced) {
+@@ -150,6 +165,11 @@
+ }
+ 
+ func (p *Parser) arithmExprUnary(compact bool) ArithmExpr {
++	if !p.enterCall() {
++		return nil
++	}
++	defer p.leaveCall()
++
+ 	if !compact {
+ 		p.got(_Newl)
+ 	}
+@@ -167,6 +187,11 @@
+ }
+ 
+ func (p *Parser) arithmExprValue(compact bool) ArithmExpr {
++	if !p.enterCall() {
++		return nil
++	}
++	defer p.leaveCall()
++
+ 	var x ArithmExpr
+ 	switch p.tok {
+ 	case addAdd, subSub:
+--- a/syntax/lexer.go
++++ b/syntax/lexer.go
+@@ -239,6 +239,11 @@
+ }
+ 
+ func (p *Parser) next() {
++	if !p.enterCall() {
++		return
++	}
++	defer p.leaveCall()
++
+ 	if p.r == runeEOF {
+ 		p.tok = _EOF
+ 		return

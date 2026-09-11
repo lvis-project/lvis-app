@@ -37,16 +37,45 @@ rules, asks the user or reviewer where required, and records the result.
 Hard-deny rules always run before reviewer or user approval. A user approval
 does not make an invalid tool definition valid.
 
-Shell path checks follow each argument's role. A `grep` pattern remains text
+Shell policy consumes the canonical [typed analysis and prepared execution
+contract](architecture.md#process-boundaries). The path and
+structural checks inspect every declared command-bearing field using the same
+original command, interpreter facts and statement scopes. They do not infer
+execution from a second scan of dequoted text. A `grep` pattern remains text
 even when it contains path separators, regular-expression escapes, or dollar
 anchors. Input files, pattern files supplied with `-f`/`--file`, exclusion files,
 and redirection targets remain subject to path checks. Shell substitutions are
 checked separately because they execute commands before argument passing.
 
-A percent marker without a paired variable delimiter remains part of a path,
-including file-sequence formats. The resulting path still receives normal
-containment and sensitive-path checks. Supported variables expand before those
-checks; unresolved dollar expressions and paired percent variables remain denied.
+Literal dollars and percent markers remain exact filename bytes in Bash,
+including quoted `$PWD` and `%CD%`. Only typed active expansions use the
+prepared environment and point-of-use bindings. A known expansion is checked
+as its exact result; an unknown path or executable remains unresolved. Path
+resolution follows symlinks before parent components and refuses unresolved
+links. The four exact standard-stream operands `/dev/null`, `/dev/stdin`,
+`/dev/stdout` and `/dev/stderr` are recognized before host descriptor resolution.
+Other descriptor paths receive ordinary checks.
+
+Pure output data does not acquire a path role because it contains a slash or
+dollar. Its executed substitutions and expansion effects are still inspected.
+Supported default/alternate parameter operands preserve conditional evaluation;
+simple arithmetic output is admitted only when its dependency values are known
+numeric data and no mutation or nested execution is present. Its computed value
+is not inferred for path authority. Unknown command outcomes preserve possible
+states through conditions and loops; a pre-execution filesystem observation
+cannot decide a later cwd after a possible shared filesystem mutation.
+
+The structural pass follows command text supplied through a child shell's
+`-c`, heredoc or here-string. It does not read a script file or infer its
+contents from an earlier write. Script-file execution remains subject to
+write-risk classification, path authority, approval and the execution sandbox.
+Opaque loading into the current shell through `source` or `.` is explicitly
+unsupported because it could replace the state used for later path decisions.
+
+Read-only evidence comes from the existing risk contract. Unknown executables
+and mutating commands retain the write boundary, including an absolute command
+path; widening reads never supplies a read-only proof for execution. Redirect
+targets carry their own effect independently of the command's argument roles.
 
 Debugger command options (`-ex`, `-iex`, `-eiex` and their documented long
 forms) carry program text. Executable, symbol, core, directory and command-file
@@ -65,8 +94,8 @@ patterns, regular expressions, timestamps, numeric tests, and output formats
 are expression values. In particular, `-printf` takes one format, while
 `-fprintf` takes an output file followed by a format. Each primary consumes
 its documented operands before the next primary is read. Unsupported or
-incomplete expression syntax keeps conservative path checking. Both path scans
-use the shared tokenizer's argv for find roles, so interleaved redirections do
+incomplete expression syntax keeps conservative path checking. The shared
+operand classifier consumes canonical argv, so interleaved redirections do
 not consume expression operands. File redirect targets remain independently
 checked; descriptor duplication/closing consumes no argv operand. A missing
 redirect target is a parse failure, distinct from an explicitly empty word.
@@ -76,7 +105,7 @@ or shell redirection and substitution checks.
 Compiler path options preserve the complete value: `-Iinclude/sub` names
 `include/sub`, and `-ooutput/tool` names `output/tool`. Known options consume
 one argument; unknown and sysroot-dependent forms retain conservative checking.
-Both path scans use the same argv roles and check redirects separately.
+The same operand classifier checks redirects separately.
 
 HTTP and HTTPS query values remain URL data. An equals sign does not create
 a local path operand. Output options, redirects and shell substitutions keep
@@ -89,6 +118,21 @@ archive contents; archive files retain sensitive-path and optional read-boundary
 checks. Mutation, unknown options, file- or environment-supplied options,
 remote transports and expandable option words remain conservative.
 Redirects and hidden execution still affect risk.
+
+Supported grammar is not the same as supported authority analysis. Arithmetic
+commands, C-style loops, unsupported declaration or shell-state operations,
+dynamic shell programs and unproven expansion effects are explicitly declined.
+The strict grammar also declines an unfinished heredoc and a variable-shaped
+literal delimiter accepted by some native Bash forms; it does not return an
+earlier partial command. Version-dependent arithmetic command endings with a
+continuation between their closing parentheses are also declined rather than
+assigned arithmetic authority. These are documented limits, not native-equivalence
+claims. [shell-policy-unsupported.test.ts](../../src/tools/__tests__/shell-policy-unsupported.test.ts)
+retains these refusal cohorts, while
+[shell-authority-native.test.ts](../../src/tools/__tests__/shell-authority-native.test.ts)
+compares supported argv, state and owned filesystem effects with the actual
+native shell. PowerShell's separate function/method restriction and public
+lifecycle coverage are described in the architecture contract.
 
 ## Structured File Transfers
 

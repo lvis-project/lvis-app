@@ -14,6 +14,8 @@ import * as shellResolver from "../../lib/shell-resolver.js";
 import * as windowsJobLauncher from "../../main/windows-job-launcher.js";
 import { wrapToolCommand } from "../../permissions/asrt-sandbox.js";
 import { BashTool, backgroundShellManager, spawnWithSandbox } from "../shell-tools.js";
+import { prepareSandboxFixture } from "./support/prepared-shell.js";
+import { preparedSandboxBootstrap } from "../prepared-shell-invocation.js";
 
 const COMMAND = 'values=(alpha beta); read -r value <<< "${values[1]}"; printf "%s" "$value"';
 const context = { cwd: process.cwd(), extraAllowedDirectories: [], metadata: { sessionId: "bash-dialect" } };
@@ -49,16 +51,25 @@ describe("Bash dialect across execution paths", () => {
       throw new shellResolver.ShellMismatchError("The bash tool requires Bash.");
     });
     vi.mocked(wrapToolCommand).mockClear();
-    const result = await spawnWithSandbox(COMMAND, context.cwd, [context.cwd], 15);
+    const result = await new BashTool().execute({ command: COMMAND }, context);
     expect(result.isError).toBe(true);
     expect(result.output).toContain("requires Bash");
     expect(wrapToolCommand).not.toHaveBeenCalled();
   });
 
   it.skipIf(process.platform !== "win32").each(["wsl", "unknown"] as const)("rejects %s background execution before creating a handle", async (windowsFlavor) => {
-    const shell = shellResolver.resolveShell("bash");
     const spawn = vi.spyOn(windowsJobLauncher, "spawnWindowsJobProcess");
-    vi.spyOn(shellResolver, "resolveShell").mockReturnValue({ ...shell, windowsFlavor });
+    // This probes eligibility, so supply the entire interpreter service fixture.
+    // Relabeling a real native binary would feed a different path dialect into
+    // its real capability probe before this refusal can be reached.
+    vi.spyOn(shellResolver, "resolveShell").mockReturnValue({
+      cmd: `C:\\synthetic-${windowsFlavor}\\bash.exe`,
+      shellArgs: script => ["-c", script],
+      windowsFlavor,
+    });
+    vi.spyOn(shellResolver, "getBashCapabilities").mockReturnValue({
+      unicodeEscapes: false, prefixAssignmentRhs: "incoming",
+    });
     const result = await new BashTool().execute({ command: "printf unexpected", run_in_background: true }, context);
     expect(result.isError).toBe(true);
     expect(result.metadata?.backgroundUnavailable).toBe(true);
@@ -68,8 +79,10 @@ describe("Bash dialect across execution paths", () => {
   });
 
   it.skipIf(process.platform === "win32")("passes the same Bash interpreter into the sandbox wrapper", async () => {
-    const result = await spawnWithSandbox(COMMAND, context.cwd, [context.cwd], 15);
-    expect(wrapToolCommand).toHaveBeenLastCalledWith(COMMAND,
+    const prepared = prepareSandboxFixture(COMMAND, context.cwd);
+    const bootstrap = preparedSandboxBootstrap(prepared);
+    const result = await spawnWithSandbox(COMMAND, context.cwd, [context.cwd], 15, prepared);
+    expect(wrapToolCommand).toHaveBeenLastCalledWith(bootstrap,
       expect.objectContaining({ binShell: shellResolver.resolveShell("bash").cmd }));
     expect(result.isError).toBe(false);
     expect(result.output).toBe("beta");

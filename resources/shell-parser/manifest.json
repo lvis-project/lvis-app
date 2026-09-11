@@ -1,0 +1,55 @@
+{
+  "compiler": "go1.26.5",
+  "module": "mvdan.cc/sh/v3",
+  "version": "v3.14.1",
+  "moduleSum": "h1:bXkhQWNHCs0KZEChF8hYS6FC+T2N9mUZLbQv9blditI=",
+  "moduleGoModSum": "h1:syYCoFET8w9tvevxiXUtY8/ICrU+l26jHmhJDra3Vwo=",
+  "sourceInputs": {
+    "build.mjs": "11ab586cbe46936e8f0cd608733a3d186b354445e126bb30b36b398015c33e5c",
+    "main.go": "472e4654d55cff268f6278a399ea6a224a18a23860e4392345a5ddb40dfb466a",
+    "go.mod": "993124dcd8eed533e17aa77d5b2b1148f9130e24372ce22384d487ec3ad5a760",
+    "go.sum": "816811ceede3e018d293b5097e3cfea283ce6205309d387c21fce95846e2215b",
+    "exact-bash-lexing.patch": "157dc27d0f47b0ffdaf148edfcb5a1aeafd8a35eaf0b3b46084d77fbe505d1e6",
+    "bounded-parser-recursion.patch": "238adafff0a2fea7c209fc786ac887e083279c6a015fd88f3c9548a6d4387274",
+    "bounded-brace-work.patch": "5122016969fbcce8d61b4c5b15100f5084eed0979e5019535873103655cd986b",
+    "logical-shell-input.patch": "26d1be08ee4b8c3402deb77063770cf12a32a63191584854d2fd28c32e16163e",
+    "LICENSE.runtime": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad",
+    "README.md": "c103fda0241aacbe856efcad76cd792790612b611f721928986b596bee563402"
+  },
+  "upstreamLexerSha256": "f7d3135c68a98870b5958b305ef03d7ca307725dbd261ccbd2eaaba5cb9a4444",
+  "patchedLexerSha256": "71aa414bdcb4e2262854cf147b7c81f70ad5d3334b9ed4dc0542d949f956b363",
+  "buildFlags": [
+    "GOOS=js",
+    "GOARCH=wasm",
+    "-trimpath",
+    "-ldflags=-buildid="
+  ],
+  "grammarFiles": {
+    "syntax/lexer.go": {
+      "original": "f7d3135c68a98870b5958b305ef03d7ca307725dbd261ccbd2eaaba5cb9a4444",
+      "patched": "71aa414bdcb4e2262854cf147b7c81f70ad5d3334b9ed4dc0542d949f956b363"
+    },
+    "syntax/parser.go": {
+      "original": "5578ab42326a993385ff8736d26f80dfbd9c148a7aedfbbdb9abcf9eed3b862b",
+      "patched": "d4cbfc998452a07b9c8b40a2407343aaa4a67e567c689c80e188815b8d9decd8"
+    },
+    "syntax/parser_arithm.go": {
+      "original": "b40f7c22c74dd948a3cd95fd864fdb3847f33dac3aa9444ca1e0d6b0e6a82840",
+      "patched": "d5ab1b779b0ae7adc390c874a773c9ed606779c21941d1340dde342dfc43f350"
+    },
+    "syntax/braces.go": {
+      "original": "da17bfe41bf67a60557d443a78d0e18349a3a4eb714645993676831ebce49569",
+      "patched": "6734f5921f79dd984912b354cf3ff1c69bf50db20246ca9baa825bce11d32e5c"
+    },
+    "syntax/nodes.go": {
+      "original": "5c0ca55a5272b576adbfc58290a8d83c524331a09f65f294799d60aa520ea9c1",
+      "patched": "3034661975d37f7a1aabda95dff637748c23de924c951093e5d0bee8c1401393"
+    },
+    "syntax/continuations.go": {
+      "original": null,
+      "patched": "380b017284a648fb44d4458bc2a02e0b79951713a3712051ec55eefd5f570076"
+    }
+  },
+  "wasmSha256": "7a1688deb7585bee090d97948d960b0a2be0126b130db0593c038e40057e1532",
+  "runtimeSha256": "0c949f4996f9a89698e4b5c586de32249c3b69b7baadb64d220073cc04acba14"
+}

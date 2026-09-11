@@ -5,6 +5,7 @@
  */
 
 import { strict as assert } from "node:assert";
+import { execFileSync } from "node:child_process";
 import { describe, it } from "vitest";
 import { BashAstValidator } from "../bash-ast-validator.js";
 
@@ -120,16 +121,16 @@ describe("BashAstValidator — deny 모드 (기본)", () => {
   });
 
   // Pattern 7: command substitution piped to shell
-  it("$(get-payload) | bash → deny (subst-pipe-shell)", () => {
+  it("$(get-payload) | bash → deny before the unknown command can run", () => {
     const r = validator.validate("bash", makeInput("$(get-payload) | bash"));
     assert.equal(r.decision, "deny");
-    assert.equal(r.patternId, "subst-pipe-shell");
+    assert.equal(r.patternId, "shell-analysis");
   });
 
-  it("$(cat /etc/passwd) | sh → deny (subst-pipe-shell)", () => {
+  it("$(cat /etc/passwd) | sh → deny before the unknown command can run", () => {
     const r = validator.validate("bash", makeInput("$(cat /etc/passwd) | sh"));
     assert.equal(r.decision, "deny");
-    assert.equal(r.patternId, "subst-pipe-shell");
+    assert.equal(r.patternId, "shell-analysis");
   });
 
   // Pattern 8: variable-expansion-exec
@@ -178,18 +179,21 @@ describe("BashAstValidator — deny 모드 (기본)", () => {
     assert.equal(r.patternId, "ifs-command-injection");
   });
 
-  // Pattern 13: brace expansion (cycle 2 bypass)
-  it("r{m} -rf / → deny (brace-expansion-exec)", () => {
+  // A single brace element is literal syntax, not an expansion to rm.
+  it("keeps r{m} distinct from an executed rm command", () => {
     const r = validator.validate("bash", makeInput("r{m} -rf /"));
-    assert.equal(r.decision, "deny");
-    assert.equal(r.patternId, "brace-expansion-exec");
+    assert.equal(r.decision, "allow");
+    assert.equal(validator.validate("bash", makeInput("{rm,printf} -rf /")).patternId, "brace-expansion-exec");
+    if (process.platform !== "win32") {
+      assert.equal(execFileSync("/bin/bash", ["-c", "printf '%s' r{m}"], { encoding: "utf8", timeout: 3000 }), "r{m}");
+    }
   });
 
   // Pattern 14: subshell command exec (cycle 2 bypass)
-  it("$(echo rm) -rf / → deny (subshell-command-exec)", () => {
+  it("$(echo rm) -rf / → deny (unresolved executed command)", () => {
     const r = validator.validate("bash", makeInput("$(echo rm) -rf /"));
     assert.equal(r.decision, "deny");
-    assert.equal(r.patternId, "subshell-command-exec");
+    assert.equal(r.patternId, "shell-analysis");
   });
 });
 

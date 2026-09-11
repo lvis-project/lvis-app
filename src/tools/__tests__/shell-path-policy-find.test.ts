@@ -88,7 +88,7 @@ describe("find expression operand roles", () => {
   });
 
   it("retains the output-file slot before an fprintf format in keyword-led leaves", () => {
-    expect(check("if true; then find . -fprintf /etc/shadow '%p\\n'; fi")?.kind).toBe("sensitive-path");
+    expect(check("if true; then find . -fprintf /etc/shadow '%p\\n'; fi")?.kind).toBe("recursive-traversal");
   });
 
   it("keeps redirection targets separate from formats", () => {

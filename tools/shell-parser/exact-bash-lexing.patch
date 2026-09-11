@@ -1,0 +1,69 @@
+--- a/syntax/lexer.go
++++ b/syntax/lexer.go
+@@ -88,22 +88,12 @@
+ 			// Ignore null bytes while parsing, like bash.
+ 			p.col++
+ 			goto retry
+-		case '\r':
+-			if p.peek() == '\n' { // \r\n turns into \n
+-				p.col++
+-				goto retry
+-			}
+ 		case '\\':
+ 			if p.r == '\\' {
+ 			} else if p.peek() == '\n' {
+ 				p.bsp++
+ 				p.w, p.r = 1, escNewl
+ 				return escNewl
+-			} else if p1, p2 := p.peekTwo(); p1 == '\r' && p2 == '\n' { // \\\r\n turns into \\\n
+-				p.col++
+-				p.bsp += 2
+-				p.w, p.r = 2, escNewl
+-				return escNewl
+ 			}
+ 			// TODO: why is this necessary to ensure correct position info?
+ 			p.readEOF = false
+@@ -260,7 +250,7 @@
+ 			return
+ 		case escNewl:
+ 			r = p.rune()
+-		case ' ', '\t', '\r':
++		case ' ', '\t':
+ 			p.spaced = true
+ 			r = p.rune()
+ 		case '\n':
+@@ -318,6 +308,7 @@
+ 					break runeLoop
+ 				case escNewl:
+ 					p.litBs = append(p.litBs, '\\', '\n')
++					p.r = '\n'
+ 					break runeLoop
+ 				case '`':
+ 					if p.backquoteEnd() {
+@@ -1064,7 +1055,7 @@
+ 				break loop
+ 			}
+ 			fallthrough
+-		case '+', '-', ' ', '\t', ';', '&', '>', '<', '|', '(', ')', '\n', '\r':
++		case '+', '-', ' ', '\t', ';', '&', '>', '<', '|', '(', ')', '\n':
+ 			if p.quote&allKeepSpaces == 0 {
+ 				break loop
+ 			}
+@@ -1102,7 +1093,7 @@
+ loop:
+ 	for p.newLit(r); r != runeEOF; r = p.rune() {
+ 		switch r {
+-		case ' ', '\t', '\n', '\r', '&', '|', ';', ')':
++		case ' ', '\t', '\n', '&', '|', ';', ')':
+ 			break loop
+ 		case '(':
+ 			break loop
+@@ -1309,7 +1300,7 @@
+ 				p.quote = testExpr
+ 				return
+ 			}
+-		case ' ', '\t', '\r', '\n', ';', '&', '>', '<':
++		case ' ', '\t', '\n', ';', '&', '>', '<':
+ 			if p.rxOpenParens <= 0 {
+ 				p.tok, p.val = _LitWord, p.endLit()
+ 				p.quote = testExpr

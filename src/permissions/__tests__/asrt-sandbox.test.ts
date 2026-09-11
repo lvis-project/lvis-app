@@ -64,6 +64,7 @@ import {
 import { asrtCanInitialize } from "./test-helpers.js";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 import { spawnWithSandbox } from "../../tools/shell-tools.js";
+import { prepareSandboxFixture } from "../../tools/__tests__/support/prepared-shell.js";
 // ASRT-contract guards: the real vendored matcher + parent-proxy resolver, so
 // the host-side fixes are proven against ASRT's ACTUAL semantics (not a
 // re-implementation that could drift from the package).
@@ -212,11 +213,13 @@ describe("asrt-sandbox — gate ON wraps a real command under the OS sandbox", (
           "-c", "commit.gpgsign=false", "commit", "--allow-empty", "--quiet", "-m", "fixture",
         ], { cwd, env: gitEnv });
         await initializeAsrtSandbox({ allowedDomains: [], strictAllowlist: true });
+        const command = `printf '%s\\n' "$HOME"; git -C '${cwd.replace(/'/g, `'\\''`)}' log --oneline -n 1`;
         const result = await spawnWithSandbox(
-          `printf '%s\\n' "$HOME"; git -C '${cwd.replace(/'/g, `'\\''`)}' log --oneline -n 1`,
+          command,
           cwd,
           [cwd],
           15,
+          prepareSandboxFixture(command, cwd),
         );
 
         expect(result.isError, result.output).toBe(false);

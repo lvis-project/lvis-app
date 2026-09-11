@@ -8,6 +8,7 @@ function expectPreSpawnFailuresToBeUnavailable(
   sourceText: string,
   functionStart: string,
   functionEnd: string,
+  expectedFailureSurfaces: number,
 ): void {
   const start = sourceText.indexOf(functionStart);
   const end = sourceText.indexOf(functionEnd, start);
@@ -31,9 +32,9 @@ function expectPreSpawnFailuresToBeUnavailable(
   expect(emptyArgvFailure).toContain(unavailableMetadata);
   expect(spawnFailure).toContain(unavailableMetadata);
   const unavailableMetadataOccurrences = implementation.split(unavailableMetadata).length - 1;
-  // Isolated-HOME allocation, ASRT wrap, empty argv, synchronous spawn, and
-  // asynchronous spawn errors all happen before a workload is proven confined.
-  expect(unavailableMetadataOccurrences).toBe(5);
+  // Bash HOME allocation is now earlier host preparation, before ASRT begins.
+  // Wrapper/argv/spawn failures still cannot claim a confined workload.
+  expect(unavailableMetadataOccurrences).toBe(expectedFailureSurfaces);
 }
 
 describe("ASRT unavailable metadata", () => {
@@ -42,11 +43,13 @@ describe("ASRT unavailable metadata", () => {
       readRepoFile("src/tools/shell-tools.ts"),
       "export async function spawnWithSandbox(",
       "async function spawnWithTimeout(",
+      4,
     );
     expectPreSpawnFailuresToBeUnavailable(
       readRepoFile("src/tools/shell-tools.ts"),
       "async function spawnPowerShellWithSandbox(",
       "async function spawnPowerShell(",
+      5,
     );
   });
 });

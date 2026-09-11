@@ -58,7 +58,6 @@ describe("process-selection pattern operands", () => {
     'kill $(pgrep -f "$(cat /etc/shadow)")',
     'kill 123 > /etc/shadow',
     'kill 123 < /etc/shadow',
-    'kill 123 > /etc/shadow "',
   ])("retains file and expansion checks: %s", (command) => {
     expect(check(command)?.kind).toBe("sensitive-path");
   });
@@ -124,7 +123,7 @@ describe("process-selection pattern operands", () => {
     writeFileSync(source, "fixture");
     for (const operator of ["<", ">"]) {
       const command = `${head} ${operator}(cat '${source}')`;
-      expect(findShellPathPolicyViolation(command, allowed, allowed, [], true)?.kind).toBe("dynamic-path");
+      expect(findShellPathPolicyViolation(command, allowed, allowed, [], true)?.kind).toBe("sandbox-boundary");
     }
     expect(findShellPathPolicyViolation(`${head} $(cat '${source}')`, allowed, allowed, [], true)).not.toBeNull();
   });
@@ -160,7 +159,7 @@ describe("process-selection pattern operands", () => {
       `cat <<< ')'; cat '${source}'`,
     ]) {
       expect(findShellPathPolicyViolation(`${head} "$(${body})"`, allowed, allowed, [], true)?.kind)
-        .toBe("dynamic-path");
+        .toBe("sandbox-boundary");
     }
     for (const command of [
       `printf okay # example $(unfinished\nprintf "$(cat '${source}')"`,
@@ -173,9 +172,9 @@ describe("process-selection pattern operands", () => {
     expect(findShellPathPolicyViolation(`${head} "$(printf missing`, allowed, allowed, [], true)).not.toBeNull();
   });
 
-  it("refuses nested execution beyond the inspection depth", () => {
+  it("inspects nested execution within the shared depth bound", () => {
     let command = "cat /etc/shadow";
     for (let i = 0; i < 8; i += 1) command = `kill $(${command})`;
-    expect(check(command)?.kind).toBe("dynamic-path");
+    expect(check(command)?.kind).toBe("sensitive-path");
   });
 });

@@ -19,6 +19,7 @@ vi.mock("../../permissions/asrt-sandbox.js", () => ({
 
 import { BashTool, spawnWithSandbox } from "../shell-tools.js";
 import { cleanupAsrtSandboxAfterCommand } from "../../permissions/asrt-sandbox.js";
+import { prepareSandboxFixture } from "./support/prepared-shell.js";
 
 describe.skipIf(process.platform === "win32")("foreground shell deadline settlement", () => {
   it.each([
@@ -60,7 +61,7 @@ describe.skipIf(process.platform === "win32")("foreground shell deadline settlem
       ? new BashTool().execute({ command: "node child.cjs", timeoutSeconds }, {
         cwd: dir, extraAllowedDirectories: [], metadata: {}, abortSignal: controller.signal,
       })
-      : spawnWithSandbox("node child.cjs", dir, [dir], timeoutSeconds, controller.signal);
+      : spawnWithSandbox("node child.cjs", dir, [dir], timeoutSeconds, prepareSandboxFixture("node child.cjs", dir), controller.signal);
     let result: ToolExecutionResult | undefined;
     void pending.then((value) => { result = value; });
     try {

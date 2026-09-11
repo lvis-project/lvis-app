@@ -17,7 +17,7 @@
  * interpreters need them to find their own runtime state. Provider API keys
  * and LVIS-internal variables are intentionally omitted.
  */
-const FORWARD_ENV_KEYS = [
+export const FORWARD_ENV_KEYS = [
   "PATH",
   "HOME",
   "USER",
@@ -149,12 +149,26 @@ export function buildSandboxedChildEnv(
   wrappedEnv: NodeJS.ProcessEnv,
   extra: Record<string, string> = {},
 ): Record<string, string> {
-  const env = buildSafeChildEnv(extra);
+  return overlaySandboxChildEnv(wrappedEnv, buildSafeChildEnv(extra), process.env);
+}
+
+/** Apply wrapper changes to an already captured safe child environment. */
+export function overlaySandboxChildEnv(
+  wrappedEnv: NodeJS.ProcessEnv,
+  safeBaseline: Readonly<Record<string, string>>,
+  wrapperBaseline: Readonly<NodeJS.ProcessEnv>,
+): Record<string, string> {
+  const env = { ...safeBaseline };
   for (const key of ASRT_SANDBOX_ENV_KEYS) {
     const value = wrappedEnv[key];
     if (value === undefined) continue;
-    if (process.env[key] === value) continue; // ASRT left it untouched
+    if (wrapperBaseline[key] === value) continue; // ASRT left it untouched
     env[key] = value;
   }
   return env;
+}
+
+/** Retain only the wrapper's documented overlay keys, never an ambient secret bag. */
+export function captureSandboxEnvironmentBaseline(): Readonly<NodeJS.ProcessEnv> {
+  return Object.freeze(Object.fromEntries([...ASRT_SANDBOX_ENV_KEYS].map((key) => [key, process.env[key]])));
 }

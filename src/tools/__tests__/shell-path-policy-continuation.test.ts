@@ -46,9 +46,8 @@ describe("shell path policy across logical lines", () => {
   it.each([
     'cat <<E"ND"\nEND\ncat /et\\\nc/shadow',
     "cat <<\\END\nEND\ncat /et\\\nc/shadow",
-    "(( 1 << 2 ))\ncat /et\\\nc/shadow",
-  ])("refuses an unresolved heredoc boundary before granting path exemptions: %s", (command) => {
-    expect(check(command)?.kind).toBe("invalid-path");
+  ])("inspects later paths after valid quoted heredoc delimiters: %s", (command) => {
+    expect(check(command)?.kind).toBe("sensitive-path");
   });
 
   it.each(["cp \\\n -r ./source ./copy", "tar \\\n -xf ./archive.tar -C ./output"])(

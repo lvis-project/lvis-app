@@ -210,10 +210,17 @@ describe("policy denials carry their guidance through to the tool result", () =>
     expect(result.content).toContain("[Shell 경로 정책 차단]");
   });
 
-  it("names the rule and the judged operand on a shell path refusal", async () => {
+  it("names the unresolved active operand under the dynamic-path rule", async () => {
     const result = await runUnattended("cat $PROJECT_SECRET/file.txt");
-    expect(result.content).toContain("shell-path-policy/invalid-path");
-    expect(result.content).toContain("$PROJECT_SECRET/file.txt");
+    expect(result.isError).toBe(true);
+    expect(result.ran).toBe(false);
+    expect(result.content).toContain("operand: $PROJECT_SECRET/file.txt (rule: shell-path-policy/dynamic-path)");
+  });
+
+  it("admits the same bytes as a quoted literal filename", async () => {
+    const result = await runUnattended("cat '$PROJECT_SECRET/file.txt'");
+    expect(result.isError).toBe(false);
+    expect(result.ran).toBe(true);
   });
 
   it("tells the model that the filesystem root can never be authorized", async () => {
