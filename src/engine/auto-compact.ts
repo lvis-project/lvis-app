@@ -4,6 +4,7 @@
 
 import type { GenericMessage, LLMVendor } from "./llm/types.js";
 import { serializeMessageForEstimation } from "./llm/types.js";
+import { selectAssistantWireThinkingBlocks } from "./llm/assistant-wire-content.js";
 import { lookupPricing } from "../shared/pricing-data.js";
 import {
   getUsableContext,
@@ -171,19 +172,19 @@ export function getRuntimePreflightOverride(): number | null {
 /**
  * Estimate one message from the provider-wire shape.
  *
- * `vendor` remains an input for request projection callers. Every API-key route
- * sends a live tool-result image, either natively or as a derived user image,
- * so image accounting no longer varies by serving route.
+ * Signed reasoning counts only on a route that replays it; an unknown route
+ * retains valid signed blocks conservatively. Display-only thought never
+ * counts. Every API-key route sends live tool-result images, either natively
+ * or as derived user images, so image accounting does not vary by route.
  */
 export function estimateMessageTokensForWire(message: GenericMessage, vendor?: LLMVendor): number {
-  void vendor;
   if (message.role === "user") return estimateUserMessageTokens(message.content);
 
   // Marked tool_results keep raw content in memory for UI and checkpoint
   // inspection, but stream-collector stubs them immediately before provider
   // send. Counting the raw content here makes preflight and session-load rings
   // fire far earlier than the actual payload.
-  let total = estimateTokens(serializeMessageForWireEstimate(message));
+  let total = estimateTokens(serializeMessageForWireEstimate(message, vendor));
 
   // A view_image tool_result carries its image on a sibling field, so the
   // wire-estimate string above counts 0 for it. Add the image overhead while
@@ -211,7 +212,14 @@ export function estimateMessagesTokens(messages: GenericMessage[], vendor?: LLMV
   return messages.reduce((total, message) => total + estimateMessageTokensForWire(message, vendor), 0);
 }
 
-function serializeMessageForWireEstimate(message: GenericMessage): string {
+function serializeMessageForWireEstimate(message: GenericMessage, vendor?: LLMVendor): string {
+  if (message.role === "assistant") {
+    return serializeMessageForEstimation({
+      ...message,
+      thought: undefined,
+      thinkingBlocks: selectAssistantWireThinkingBlocks(message.thinkingBlocks, vendor),
+    });
+  }
   if (message.role !== "tool_result") {
     return serializeMessageForEstimation(message);
   }
