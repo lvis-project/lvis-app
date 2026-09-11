@@ -34,9 +34,21 @@ import {
   type SubscriptionUsageTelemetry,
 } from "../shared/subscription-runtime.js";
 import {
+  ClaudeCodeSubscriptionClient,
+  ClaudeCodeSubscriptionConfigStore,
+  ClaudeCodeSubscriptionError,
+  claudeCodeRuntimeDirectoryNames,
+} from "./claude-code-subscription-client.js";
+import { ClaudeCodeConversationRuntime } from "./claude-code-conversation-runtime.js";
+import {
   CodexAppServerClient,
   CodexAppServerError,
 } from "./codex-app-server-client.js";
+import {
+  CLAUDE_CODE_SUBSCRIPTION_PROVIDER_ID,
+  isClaudeCodeSubscriptionProviderId,
+  type ClaudeCodeSubscriptionStatus,
+} from "../shared/claude-code-subscription.js";
 import {
   CodexConversationRuntime,
   CodexConversationRuntimeError,
@@ -400,9 +412,14 @@ export interface SubscriptionRuntimeServiceCreateOptions {
   ) => CodexAppServerClient;
   readonly codexClient?: CodexAppServerClient;
   readonly acpRegistry?: AcpSubscriptionRuntimeRegistry;
+  readonly claudeCodeClient?: ClaudeCodeSubscriptionClient;
   readonly createCodexConversationRuntime?: (
     options: CodexConversationRuntimeOptions,
   ) => CodexConversationRuntime;
+  readonly createClaudeCodeConversationRuntime?: (
+    options: ConstructorParameters<typeof ClaudeCodeConversationRuntime>[0],
+  ) => ClaudeCodeConversationRuntime;
+  readonly openExternal?: SubscriptionOpenExternal;
   readonly audit?: SubscriptionRuntimeAuditSink;
 }
 
@@ -579,6 +596,21 @@ export function subscriptionRuntimeErrorCode(error: unknown): SubscriptionRuntim
     return error.code === "acp-session-authentication-required"
       ? "subscription-chat-unavailable"
       : "subscription-operation-failed";
+  }
+  if (error instanceof ClaudeCodeSubscriptionError) {
+    switch (error.code) {
+      case "claude-code-runtime-not-configured":
+        return "subscription-runtime-not-configured";
+      case "claude-code-runtime-unavailable":
+      case "claude-code-runtime-invalid-executable":
+        return "subscription-runtime-unavailable";
+      case "claude-code-login-in-progress":
+        return "subscription-login-in-progress";
+      case "claude-code-login-failed":
+        return "subscription-login-failed";
+      default:
+        return "subscription-operation-failed";
+    }
   }
   return "subscription-operation-failed";
 }
@@ -1000,10 +1032,14 @@ export class SubscriptionRuntimeService {
   private constructor(
     private readonly codexClient: CodexAppServerClient,
     private readonly acpRegistry: AcpSubscriptionRuntimeRegistry,
+    private readonly claudeCodeClient: ClaudeCodeSubscriptionClient,
     private readonly codexTextRuntimePaths: CodexTextRuntimePaths,
     private readonly createCodexConversationRuntime: (
       options: CodexConversationRuntimeOptions,
     ) => CodexConversationRuntime,
+    private readonly createClaudeCodeConversationRuntime: (
+      options: ConstructorParameters<typeof ClaudeCodeConversationRuntime>[0],
+    ) => ClaudeCodeConversationRuntime,
     private readonly audit?: SubscriptionRuntimeAuditSink,
   ) {}
 
@@ -1012,6 +1048,7 @@ export class SubscriptionRuntimeService {
     options: SubscriptionRuntimeServiceCreateOptions = {},
   ): Promise<SubscriptionRuntimeService> {
     const namespace = options.namespace ?? openFeatureNamespace("subscription-runtimes");
+    const claudeDirs = claudeCodeRuntimeDirectoryNames();
     const [
       codexHome,
       codexSqlite,
@@ -1020,6 +1057,10 @@ export class SubscriptionRuntimeService {
       textWorkspace,
       textTemp,
       registry,
+      claudeHome,
+      claudeWorkspace,
+      claudeTemp,
+      claudeExecutable,
     ] = await Promise.all([
       namespace.childDir("codex-v3-home"),
       namespace.childDir("codex-v3-sqlite"),
@@ -1028,6 +1069,10 @@ export class SubscriptionRuntimeService {
       namespace.childDir("codex-text-v2-workspace"),
       namespace.childDir("codex-text-v2-tmp"),
       options.acpRegistry ? Promise.resolve(options.acpRegistry) : AcpSubscriptionRuntimeRegistry.create({ namespace }),
+      namespace.childDir(claudeDirs.runtimeHome),
+      namespace.childDir(claudeDirs.workspaceDir),
+      namespace.childDir(claudeDirs.runtimeTempDir),
+      ClaudeCodeSubscriptionConfigStore.create(namespace).getExecutable(),
     ]);
     const createCodexAppServerClient = options.createCodexAppServerClient
       ?? ((clientOptions: ConstructorParameters<typeof CodexAppServerClient>[0]) => new CodexAppServerClient(clientOptions));
@@ -1038,9 +1083,18 @@ export class SubscriptionRuntimeService {
       runtimeTempDir: loginTemp,
       openExternal,
     });
+    const claudeCodeClient = options.claudeCodeClient ?? new ClaudeCodeSubscriptionClient({
+      runtimeHome: claudeHome,
+      workspaceDir: claudeWorkspace,
+      runtimeTempDir: claudeTemp,
+      executablePath: claudeExecutable,
+      openExternal,
+      configStore: ClaudeCodeSubscriptionConfigStore.create(namespace),
+    });
     return new SubscriptionRuntimeService(
       codexClient,
       registry,
+      claudeCodeClient,
       Object.freeze({
         runtimeHome: codexHome,
         sqliteHome: codexSqlite,
@@ -1048,6 +1102,8 @@ export class SubscriptionRuntimeService {
         runtimeTempDir: textTemp,
       }),
       options.createCodexConversationRuntime ?? ((runtimeOptions) => new CodexConversationRuntime(runtimeOptions)),
+      options.createClaudeCodeConversationRuntime
+        ?? ((runtimeOptions) => new ClaudeCodeConversationRuntime(runtimeOptions)),
       options.audit,
     );
   }
@@ -1057,6 +1113,9 @@ export class SubscriptionRuntimeService {
     this.assertRunning();
     return this.withStableErrors(async () => {
       if (runtimeId === "codex") return this.projectCodexStatus(await this.codexClient.getStatus());
+      if (isClaudeCodeSubscriptionProviderId(runtimeId)) {
+        return this.projectClaudeCodeStatus(await this.claudeCodeClient.getStatus());
+      }
       return this.projectAcpStatus(await this.acpRegistry.getStatus(runtimeId));
     });
   }
@@ -1073,6 +1132,13 @@ export class SubscriptionRuntimeService {
     pickerPath: string,
   ): Promise<SubscriptionRuntimeStatus> {
     this.assertRunning();
+    if (isClaudeCodeSubscriptionProviderId(runtimeId)) {
+      this.invalidateSafety(runtimeId);
+      await this.stopSessionsFor(runtimeId);
+      return this.withStableErrors(async () => this.projectClaudeCodeStatus(
+        await this.claudeCodeClient.setExecutable(pickerPath),
+      ));
+    }
     if (!isAcpRuntime(runtimeId)) throw new SubscriptionRuntimeServiceError("subscription-provider-not-supported");
     this.invalidateSafety(runtimeId);
     await this.stopSessionsFor(runtimeId);
@@ -1083,6 +1149,13 @@ export class SubscriptionRuntimeService {
 
   async forgetExecutable(runtimeId: SubscriptionRuntimeId): Promise<SubscriptionRuntimeStatus> {
     this.assertRunning();
+    if (isClaudeCodeSubscriptionProviderId(runtimeId)) {
+      this.invalidateSafety(runtimeId);
+      await this.stopSessionsFor(runtimeId);
+      return this.withStableErrors(async () => this.projectClaudeCodeStatus(
+        await this.claudeCodeClient.clearExecutable(),
+      ));
+    }
     if (!isAcpRuntime(runtimeId)) throw new SubscriptionRuntimeServiceError("subscription-provider-not-supported");
     this.invalidateSafety(runtimeId);
     await this.stopSessionsFor(runtimeId);
@@ -1117,6 +1190,17 @@ export class SubscriptionRuntimeService {
         this.safelyVerified.add("codex");
         return this.projectCodexStatus(status);
       }
+      if (isClaudeCodeSubscriptionProviderId(runtimeId)) {
+        const status = await this.claudeCodeClient.verify();
+        this.assertRunning();
+        if (!this.safetyEpochIsCurrent(runtimeId, verificationEpoch)) {
+          return this.getStatus(runtimeId);
+        }
+        if (isConnectedAndReady(status)) {
+          this.safelyVerified.add(runtimeId);
+        }
+        return this.projectClaudeCodeStatus(status);
+      }
       const status = await this.acpRegistry.verify(runtimeId);
       this.assertRunning();
       if (!this.safetyEpochIsCurrent(runtimeId, verificationEpoch)) {
@@ -1141,6 +1225,12 @@ export class SubscriptionRuntimeService {
         if (method === "browser") return this.projectCodexStatus(await this.codexClient.startBrowserLogin());
         const result = await this.codexClient.startDeviceCodeLogin();
         return this.projectCodexStatus(result.status);
+      }
+      if (isClaudeCodeSubscriptionProviderId(runtimeId)) {
+        if (method !== "browser") {
+          throw new SubscriptionRuntimeServiceError("subscription-provider-not-supported");
+        }
+        return this.projectClaudeCodeStatus(await this.claudeCodeClient.startBrowserLogin());
       }
       if (method !== "device-code") {
         throw new SubscriptionRuntimeServiceError("subscription-provider-not-supported");
@@ -1168,9 +1258,13 @@ export class SubscriptionRuntimeService {
     this.assertRunning();
     this.invalidateSafety(runtimeId);
     await this.stopSessionsFor(runtimeId);
-    return this.withStableErrors(async () => runtimeId === "codex"
-      ? this.projectCodexStatus(await this.codexClient.cancelLogin())
-      : this.projectAcpStatus(await this.acpRegistry.cancelLogin(runtimeId)));
+    return this.withStableErrors(async () => {
+      if (runtimeId === "codex") return this.projectCodexStatus(await this.codexClient.cancelLogin());
+      if (isClaudeCodeSubscriptionProviderId(runtimeId)) {
+        return this.projectClaudeCodeStatus(await this.claudeCodeClient.cancelLogin());
+      }
+      return this.projectAcpStatus(await this.acpRegistry.cancelLogin(runtimeId));
+    });
   }
 
   async logout(runtimeId: SubscriptionRuntimeId): Promise<SubscriptionRuntimeStatus> {
@@ -1179,6 +1273,9 @@ export class SubscriptionRuntimeService {
     await this.stopSessionsFor(runtimeId);
     return this.withStableErrors(async () => {
       if (runtimeId === "codex") return this.projectCodexStatus(await this.codexClient.logout());
+      if (isClaudeCodeSubscriptionProviderId(runtimeId)) {
+        return this.projectClaudeCodeStatus(await this.claudeCodeClient.logout());
+      }
       if (runtimeId !== "grok-build") {
         throw new SubscriptionRuntimeServiceError("subscription-logout-not-supported");
       }
@@ -1276,6 +1373,21 @@ export class SubscriptionRuntimeService {
             bridge,
           ), safetyEpoch);
         }
+        if (isClaudeCodeSubscriptionProviderId(effectiveSelection.provider)) {
+          const executablePath = this.claudeCodeClient.getConfiguredExecutable();
+          if (!executablePath) {
+            throw new SubscriptionRuntimeServiceError("subscription-runtime-not-configured");
+          }
+          const paths = this.claudeCodeClient.getRuntimePaths();
+          const runtime = this.createClaudeCodeConversationRuntime({
+            executablePath,
+            runtimeHome: paths.runtimeHome,
+            workspaceDir: paths.workspaceDir,
+            runtimeTempDir: paths.runtimeTempDir,
+            bridge,
+          });
+          return await this.trackVerifiedSession(runtime, safetyEpoch);
+        }
         const mcpServers = bridge.tools.length === 0
           ? []
           : [await bridge.startMcpServer()];
@@ -1316,7 +1428,10 @@ export class SubscriptionRuntimeService {
       await Promise.allSettled(sessions.map((session) => session.stop()));
       this.safelyVerified.clear();
       this.codexClient.stop();
-      await this.acpRegistry.stopAll();
+      await Promise.all([
+        this.acpRegistry.stopAll(),
+        this.claudeCodeClient.stop(),
+      ]);
     })();
     return this.stopPromise;
   }
@@ -1335,6 +1450,24 @@ export class SubscriptionRuntimeService {
   private projectAcpStatus(status: AcpSubscriptionStatus): SubscriptionRuntimeStatus {
     this.reconcileSafety(status.provider, status);
     return acpStatus(status, this.safelyVerified.has(status.provider));
+  }
+
+  private projectClaudeCodeStatus(status: ClaudeCodeSubscriptionStatus): SubscriptionRuntimeStatus {
+    this.reconcileSafety(status.provider, status);
+    return {
+      provider: status.provider,
+      runtime: status.runtime,
+      connection: status.connection,
+      planType: null,
+      pendingLogin: status.pendingLogin,
+      pendingDeviceCode: null,
+      canOpenVerificationUrl: false,
+      version: status.version,
+      capabilities: verifiedRuntimeCapabilities(
+        status.provider,
+        this.safelyVerified.has(status.provider) && isConnectedAndReady(status),
+      ),
+    };
   }
 
   private reconcileSafety(
