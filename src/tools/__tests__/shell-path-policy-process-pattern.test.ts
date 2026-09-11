@@ -66,6 +66,14 @@ describe("process-selection pattern operands", () => {
     expect(isReadOnlyCommand('kill $(pgrep -f "worker")')).toBe(false);
   });
 
+  it.skipIf(process.platform === "win32")("matches actual shell argv for input descriptor closing and forwarding", () => {
+    for (const [redirect, state] of [["<&-", "closed"], ["3<&0 <&3", "open:available"]]) {
+      const command = `capture() { printf '%s\\0' "$@"; if IFS= read -r value 2>/dev/null; then printf 'open:%s\\0' "$value"; else printf 'closed\\0'; fi; }; capture find . -printf ${redirect} '%p\\n'`;
+      const output = execFileSync("/bin/sh", ["-c", command], { input: "available\n", encoding: "utf8" });
+      expect(output.split("\0").slice(0, -1)).toEqual(["find", ".", "-printf", "%p\\n", state]);
+    }
+  });
+
   it("retains dynamic file operands for commands that open them", () => {
     expect(check('cat $(printf ./input)')).not.toBeNull();
   });
@@ -76,3 +84,4 @@ describe("process-selection pattern operands", () => {
     expect(check(command)?.kind).toBe("dynamic-path");
   });
 });
+import { execFileSync } from "node:child_process";
