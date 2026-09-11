@@ -1,5 +1,7 @@
 import { EventEmitter } from "node:events";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 
@@ -107,15 +109,17 @@ describe("Electron Node-mode Vitest runner", () => {
 
     expect(invocation).toEqual({
       command: "C:/runtime/electron.exe",
-      args: ["C:/runtime/vitest.mjs", "run", "./src/example.test.ts"],
+      args: [
+        `--import=${pathToFileURL("C:/runtime/normalize.mjs").href}`,
+        "C:/runtime/vitest.mjs", "run", "./src/example.test.ts",
+      ],
       options: {
         cwd: "C:/repo",
         env: {
           ELECTRON_RUN_AS_NODE: "1",
           KEEP: "yes",
           LVIS_TEST_NODE_EXEC_PATH: "C:/runtime/node.exe",
-          NODE_OPTIONS:
-            `--trace-warnings --import=${pathToFileURL("C:/runtime/normalize.mjs").href}`,
+          NODE_OPTIONS: "--trace-warnings",
         },
         shell: false,
         stdio: "inherit",
@@ -161,14 +165,16 @@ describe("Electron Node-mode Vitest runner", () => {
 
     expect(spawnProcess).toHaveBeenCalledWith(
       "C:/runtime/electron.exe",
-      ["C:/runtime/vitest.mjs", "run", "./test.ts"],
+      [
+        `--import=${pathToFileURL("C:/runtime/normalize.mjs").href}`,
+        "C:/runtime/vitest.mjs", "run", "./test.ts",
+      ],
       expect.objectContaining({
         cwd: "C:/repo",
         env: {
           ELECTRON_RUN_AS_NODE: "1",
           KEEP: "yes",
           LVIS_TEST_NODE_EXEC_PATH: "C:/runtime/node.exe",
-          NODE_OPTIONS: `--import=${pathToFileURL("C:/runtime/normalize.mjs").href}`,
         },
         shell: false,
       }),
@@ -219,17 +225,26 @@ describe("Electron Node-mode Vitest runner", () => {
     ).toThrow("[electron-vitest-runtime-unavailable] missing electron");
   });
 
-  it("keeps Electron's ABI while exposing plain-Node runtime markers", () => {
-    expect(process.env.ELECTRON_RUN_AS_NODE).toBe("1");
-    expect(process.versions.modules).toMatch(/^\d+$/);
-    expect(process.versions.electron).toBeUndefined();
-    expect(process.versions.chrome).toBeUndefined();
-    const runtime = process as NodeJS.Process & {
-      helperExecPath?: string;
-      resourcesPath?: string;
-    };
-    expect(runtime.resourcesPath).toBeUndefined();
-    expect(runtime.helperExecPath).toBeUndefined();
+  it("normalizes a fresh test process before its entrypoint loads", async () => {
+    const fixtureRoot = mkdtempSync(join(tmpdir(), "lvis-test-runtime-"));
+    const entrypoint = join(fixtureRoot, "probe.mjs");
+    writeFileSync(entrypoint, [
+      'import assert from "node:assert/strict";',
+      'assert.match(process.versions.modules, /^\\d+$/);',
+      'assert.equal(process.versions.electron, undefined);',
+      'assert.equal(process.versions.chrome, undefined);',
+      'assert.equal(process.resourcesPath, undefined);',
+      'assert.equal(process.helperExecPath, undefined);',
+    ].join("\n"));
+    try {
+      const runtime = resolveElectronVitestRuntime();
+      await expect(runVitestUnderElectron([], {
+        ...runtime,
+        vitestPath: entrypoint,
+      })).resolves.toEqual({ code: 0, signal: null });
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
   });
 
   it("fails closed when a future Electron marker cannot be normalized", () => {

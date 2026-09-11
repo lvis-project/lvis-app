@@ -1,6 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
+import { electronNodeNormalizerArgument } from "./scripts/run-vitest-under-electron.mjs";
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const rootPath = (p: string) => path.resolve(ROOT, p);
@@ -66,7 +67,10 @@ export default defineConfig({
     // before Vitest can collect a test file. Gate on the active test runtime.
     execArgv: (() => {
       const major = parseInt(process.versions.node.split(".")[0], 10);
-      return major >= 25 ? ["--no-experimental-webstorage"] : [];
+      return [
+        electronNodeNormalizerArgument(),
+        ...(major >= 25 ? ["--no-experimental-webstorage"] : []),
+      ];
     })(),
     coverage: {
       provider: "v8",

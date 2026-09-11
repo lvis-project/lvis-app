@@ -195,6 +195,9 @@ Important rules:
   and wire mapper. Before a fallback route is selected, preflight reserves the
   largest complete request projection among configured routes. Local output
   estimates still count generated thought.
+- Compaction measures the assembled pending request, including pending
+  instructions and the current summary prompt, before and after rewriting
+  history. Measurement does not consume an instruction's execution allowance.
 - Long histories are compacted through the structured compact path rather than
   silent truncation.
 - A round that stops at `end_turn` with reasoning but no visible text and no
