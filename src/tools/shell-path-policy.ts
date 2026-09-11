@@ -895,6 +895,66 @@ const GREP_SWITCHES = new Set([
   "--unix-byte-offsets", "--null-data", "--no-group-separator", "--help", "--version",
 ]);
 
+const PROCESS_PATTERN_FILE_OPTIONS = new Set(["-F", "--pidfile"]);
+const PROCESS_PATTERN_LITERAL_OPTIONS = new Set([
+  "-d", "--delimiter", "-g", "--pgroup", "-G", "--group", "-O", "--older",
+  "-p", "--pid", "-P", "--parent", "-s", "--session", "--signal", "-t", "--terminal",
+  "-u", "--euid", "-U", "--uid", "-r", "--runstates", "--cgroup", "--ns", "--nslist", "--env",
+]);
+const PROCESS_PATTERN_SWITCHES = new Set([
+  "-a", "--list-full", "-l", "--list-name", "--quiet", "-v", "--inverse",
+  "-w", "--lightweight", "-c", "--count", "-f", "--full", "-i", "--ignore-case",
+  "-n", "--newest", "-o", "--oldest", "-x", "--exact", "-L", "--logpidfile",
+  "-A", "--ignore-ancestors", "-Q", "--shell-quote", "-h", "--help", "-V", "--version",
+]);
+
+/** Process selection patterns are text; pidfile options still open files. */
+function classifyProcessPatternOperandSlots(argv: readonly string[], verbIndex: number): OperandSlotClassification {
+  const nonPathIndices = new Set<number>();
+  const extraCandidates: string[] = [];
+  const positionals: number[] = [];
+  const unclassified: OperandSlotClassification = {
+    nonPathIndices: new Set(), extraCandidates: [], nestedCommands: [], dynamicExecution: null,
+  };
+  let optionsEnded = false;
+  for (let i = verbIndex + 1; i < argv.length; i += 1) {
+    const token = argv[i]!;
+    if (!optionsEnded && token === "--") {
+      optionsEnded = true;
+      continue;
+    }
+    if (optionsEnded || !token.startsWith("-") || token === "-") {
+      positionals.push(i);
+      continue;
+    }
+    const long = token.startsWith("--");
+    const equals = token.indexOf("=");
+    const options = long
+      ? [equals < 0 ? token : token.slice(0, equals)]
+      : token.slice(1).split("").map((flag) => `-${flag}`);
+    for (let j = 0; j < options.length; j += 1) {
+      const option = options[j]!;
+      const fileValue = PROCESS_PATTERN_FILE_OPTIONS.has(option);
+      if (!fileValue && !PROCESS_PATTERN_LITERAL_OPTIONS.has(option)) {
+        if (!PROCESS_PATTERN_SWITCHES.has(option) || (long && equals >= 0)) return unclassified;
+        continue;
+      }
+      const attached = long ? equals >= 0 : j + 2 < token.length;
+      const value = attached ? token.slice(long ? equals + 1 : j + 2) : argv[i + 1];
+      if (value === undefined) return unclassified;
+      nonPathIndices.add(i);
+      if (!attached) nonPathIndices.add(++i);
+      if (fileValue) extraCandidates.push(value);
+      break;
+    }
+  }
+  // An unknown option or extra positional can change which word is the
+  // pattern. Grant no text exemption unless the complete argv is understood.
+  if (positionals.length > 1) return unclassified;
+  if (positionals[0] !== undefined) nonPathIndices.add(positionals[0]);
+  return { nonPathIndices, extraCandidates, nestedCommands: [], dynamicExecution: null };
+}
+
 /** Pattern text never opens a file; -f and later positionals do. */
 function classifyGrepOperandSlots(argv: readonly string[], verbIndex: number): OperandSlotClassification {
   const nonPathIndices = new Set<number>();
@@ -1040,6 +1100,13 @@ function classifyOperandSlots(argv: readonly string[]): OperandSlotClassificatio
   const verb = stripCommandPath(head).toLowerCase();
   if (verb === "find") return classifyFindOperandSlots(argv, verbIndex);
   if (["grep", "egrep", "fgrep"].includes(verb)) return classifyGrepOperandSlots(argv, verbIndex);
+  if (verb === "pgrep") return classifyProcessPatternOperandSlots(argv, verbIndex);
+  if (verb === "kill") {
+    // These are signals and process identifiers, never file operands. Shell
+    // substitutions are inspected recursively, and redirects remain separate.
+    for (let i = verbIndex + 1; i < argv.length; i += 1) skip.add(i);
+    return empty;
+  }
   if (COMPILER_COMMANDS.has(verb)) return classifyCompilerOperandSlots(argv, verbIndex);
   if (verb === "tar") {
     const listing = parseTarListing(argv.slice(verbIndex));
@@ -1473,10 +1540,10 @@ function splitCommandSegments(command: string): string[] {
     // the segment's head is `cd` and every rule keyed on the verb reads the
     // wrong command, and `ls & find . -name x` hid `find` the same way.
     //
-    // The exclusions are the fd-redirect forms: `2>&1` and `ls &> log` both
+    // The exclusions are fd redirects: `2>&1`, `<&-` and `ls &> log` all
     // spell `&` without ending a command, and splitting them tears an operator
     // in half.
-    if (ch === "&" && command[i + 1] !== ">" && command[i - 1] !== ">") {
+    if (ch === "&" && command[i + 1] !== ">" && command[i - 1] !== ">" && command[i - 1] !== "<") {
       if (segment.trim()) segments.push(segment);
       segment = "";
       if (command[i + 1] === "&") i += 1;
@@ -1575,7 +1642,8 @@ function extractPathCandidates(
     // Keep wrapper operands on the conservative flat path, where none are lost.
     const verb = leaf && stripCommandPath(leaf.argv[leadingKeywordCount(leaf.argv)] ?? "").toLowerCase();
     if (!parsed.parseError && leaf && leaf.strippedWrappers.length === 0
-      && (verb === "find" || verb === "tar" || (verb !== undefined && COMPILER_COMMANDS.has(verb)))) {
+      && (verb === "find" || verb === "tar" || verb === "pgrep" || verb === "kill"
+        || (verb !== undefined && COMPILER_COMMANDS.has(verb)))) {
       const slots = classifyOperandSlots(leaf.argv);
       for (let i = 0; i < leaf.argv.length; i += 1) {
         if (!slots.nonPathIndices.has(i)) {
@@ -1592,9 +1660,9 @@ function extractPathCandidates(
     }
     const tokens = tokenizeCommand(segment);
     const headIndex = tokens.findIndex((token) => !isAssignmentToken(token));
-    const isFind = headIndex >= 0
-      && stripCommandPath(tokens[headIndex] ?? "").toLowerCase() === "find";
-    const slots = headIndex < 0 || isFind ? undefined : classifyOperandSlots(tokens.slice(headIndex));
+    const needsStructuredArgv = headIndex >= 0
+      && ["find", "kill"].includes(stripCommandPath(tokens[headIndex] ?? "").toLowerCase());
+    const slots = headIndex < 0 || needsStructuredArgv ? undefined : classifyOperandSlots(tokens.slice(headIndex));
     const nonPath = slots === undefined
       ? new Set<number>()
       : new Set([...slots.nonPathIndices].map((index) => index + headIndex));
