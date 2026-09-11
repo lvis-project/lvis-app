@@ -75,11 +75,13 @@ not a security sandbox.
 Shell classification and path checks share logical-line handling in
 `src/shared/shell-tokenizer.ts`; execution retains the original command and leaf
 source spans. Operand roles distinguish patterns and process identifiers from
-file paths. Executed substitutions remain subject to path checks. Unquoted
+file paths. Executed substitutions use the shared quote-aware boundary and
+remain subject to path checks. Process-data exemptions require complete
+inspection and refuse unsupported executable expansion syntax. Unquoted
 heredoc data exemptions require a literal body and one isolated data consumer
 across the whole command; structural checks preserve executable input.
-Continuation analysis refuses a command when
-its heredoc boundary cannot be resolved.
+Continuation analysis refuses a command when its heredoc boundary cannot be
+resolved; here-strings never consume later lines as a heredoc body.
 Denial guidance distinguishes available operations from missing capabilities.
 
 External controllers can explicitly retain a headless session after its turn
