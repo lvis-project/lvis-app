@@ -23,11 +23,7 @@ import { createInterface } from "node:readline";
 import { finished } from "node:stream/promises";
 import { z } from "zod";
 
-import { validateSandboxPath } from "../sandbox/path-validator.js";
-import {
-  pathEffectIsConfined,
-  type PathEffect,
-} from "../permissions/allowed-directories.js";
+import type { PathEffect } from "../permissions/allowed-directories.js";
 import {
   MAX_TEXT_FILE_BYTES,
   isBinaryFile,
@@ -36,11 +32,10 @@ import {
 import { expandLeadingTilde } from "../shared/home-tilde.js";
 import { globToRegExp } from "../lib/glob-matcher.js";
 import { writeDiffSidecar, WRITE_DIFF_PREVIEW_LIMIT } from "./write-diff-cache.js";
-import {
-  canonicalizePathForMatch,
-  caseFoldForMatch,
-  isSensitivePath,
-} from "../permissions/sensitive-paths.js";
+import { ensureFileAccess, sensitiveFilePattern } from "./file-access-policy.js";
+import { copyPath, runOwnedTransfer } from "./guarded-file-transfer.js";
+import { consumeTarArchive } from "./archive-entry-reader.js";
+import type { ArchiveFormat, TransferResult } from "./file-transfer-types.js";
 import {
   ZodTool,
   type Tool,
@@ -125,6 +120,20 @@ export const MoveFileInputSchema = z.object({
   overwrite: z.boolean().default(false),
 });
 
+const TransferDestinationSchema = z.string().min(1).describe(
+  "Exact new destination path, absolute or relative to session cwd. Its parent must already exist; existing destinations are rejected.",
+);
+
+export const CopyPathInputSchema = z.object({
+  sourcePath: z.string().min(1).describe("Regular file or directory tree to copy, absolute or relative to session cwd."),
+  destinationPath: TransferDestinationSchema,
+}).strict();
+
+export const ExtractArchiveInputSchema = z.object({
+  archivePath: z.string().min(1).describe("Tar or gzip-compressed tar file, detected by content. Absolute or relative to session cwd."),
+  destinationPath: TransferDestinationSchema,
+}).strict();
+
 export const DeleteFileInputSchema = FilePathSchema.extend({});
 
 abstract class FileTool<TSchema extends z.ZodTypeAny> extends ZodTool<TSchema> {
@@ -152,18 +161,7 @@ abstract class FileTool<TSchema extends z.ZodTypeAny> extends ZodTool<TSchema> {
     ctx: ToolExecutionContext,
     effect: PathEffect,
   ): ToolExecutionResult | null {
-    const sensitive = sensitivePatternForPath(path);
-    if (sensitive) {
-      return toolError(`Sensitive path: ${path} matches ${sensitive}`);
-    }
-    if (!pathEffectIsConfined(effect, ctx.blockReadsOutsideWorkingDirectories === true)) {
-      return null;
-    }
-    const check = validateSandboxPath(path, ctx.cwd, [...ctx.extraAllowedDirectories]);
-    if (!check.allowed) {
-      return toolError(`Sandbox: ${check.reason}`);
-    }
-    return null;
+    return ensureFileAccess(path, ctx, effect);
   }
 
   protected resolveApprovalPath(inputPath: string, ctx: Pick<ToolExecutionContext, "cwd"> | undefined): string {
@@ -689,6 +687,90 @@ export class MoveFileTool extends FileTool<typeof MoveFileInputSchema> {
   }
 }
 
+export class CopyPathTool extends FileTool<typeof CopyPathInputSchema> {
+  readonly name = "copy_path";
+  readonly description =
+    "Copy a regular binary/text file or a complete directory tree to a new destination within admitted workspace roots. The destination parent must exist; existing destinations, links and special entries are rejected. Uses owner-only POSIX mode bits where supported and preserves the source owner's executable bit; does not copy ACLs. The destination may be visible during work; success means the complete copy finished.";
+  readonly inputSchema = CopyPathInputSchema;
+  override readonly category: ToolCategory = "write";
+  override readonly pathFields = ["sourcePath", "destinationPath"] as const;
+  override readonly awaitCancellationSettlement = true as const;
+
+  approvalCacheKey(input: unknown, ctx?: Pick<ToolExecutionContext, "cwd">): string {
+    return JSON.stringify({
+      operation: this.name,
+      sourcePath: this.resolveApprovalPath(this.requireStringField(input, "sourcePath"), ctx),
+      destinationPath: this.resolveApprovalPath(this.requireStringField(input, "destinationPath"), ctx),
+    });
+  }
+
+  protected async executeTyped(
+    input: z.infer<typeof CopyPathInputSchema>,
+    ctx: ToolExecutionContext,
+  ): Promise<ToolExecutionResult> {
+    return fileTransferExecutionResult(await copyPath({
+      sourcePath: this.resolvePath(input.sourcePath, ctx),
+      destinationPath: this.resolvePath(input.destinationPath, ctx),
+    }, ctx));
+  }
+}
+
+export class ExtractArchiveTool extends FileTool<typeof ExtractArchiveInputSchema> {
+  readonly name = "extract_archive";
+  readonly description =
+    "Extract a tar or gzip-compressed tar archive to a new directory within admitted workspace roots. The destination parent must exist. Rejects existing destinations, unsafe paths, links, unsupported entries and malformed archives. ZIP and archive creation are unsupported. Uses owner-only POSIX mode bits where supported and preserves only each file member's owner executable bit; does not copy ACLs. Success means the complete archive was processed without skipped members.";
+  readonly inputSchema = ExtractArchiveInputSchema;
+  override readonly category: ToolCategory = "write";
+  override readonly pathFields = ["archivePath", "destinationPath"] as const;
+  override readonly awaitCancellationSettlement = true as const;
+
+  approvalCacheKey(input: unknown, ctx?: Pick<ToolExecutionContext, "cwd">): string {
+    return JSON.stringify({
+      operation: this.name,
+      archivePath: this.resolveApprovalPath(this.requireStringField(input, "archivePath"), ctx),
+      destinationPath: this.resolveApprovalPath(this.requireStringField(input, "destinationPath"), ctx),
+      formats: ["tar", "tar.gz"],
+    });
+  }
+
+  protected async executeTyped(
+    input: z.infer<typeof ExtractArchiveInputSchema>,
+    ctx: ToolExecutionContext,
+  ): Promise<ToolExecutionResult> {
+    let archiveFormat: ArchiveFormat | undefined;
+    const result = await runOwnedTransfer({
+      sourcePath: this.resolvePath(input.archivePath, ctx),
+      destinationPath: this.resolvePath(input.destinationPath, ctx),
+      destinationKind: "directory",
+    }, ctx, async (session) => {
+      const source = await session.openSourceFile(session.sourcePath);
+      archiveFormat = (await consumeTarArchive(source, session.sink, {
+        signal: session.signal,
+        limits: session.limits,
+      })).format;
+    });
+    if (result.ok) {
+      if (archiveFormat === undefined) {
+        throw new Error("extract_archive completed without a recognized archive format");
+      }
+      result.summary.archiveFormat = archiveFormat;
+    }
+    return fileTransferExecutionResult(result);
+  }
+}
+
+function fileTransferExecutionResult(result: TransferResult): ToolExecutionResult {
+  const output = result.ok ? result : {
+    ok: false,
+    cleanup: result.cleanup,
+    code: result.code,
+    ...(result.residualPaths ? { residualPaths: result.residualPaths } : {}),
+    message: result.message,
+    ...(result.cleanupErrors ? { cleanupErrors: result.cleanupErrors } : {}),
+  };
+  return { output: JSON.stringify(output), isError: !result.ok };
+}
+
 export class DeleteFileTool extends FileTool<typeof DeleteFileInputSchema> {
   readonly name = "delete_file";
   readonly description = "Delete a regular file from the workspace.";
@@ -731,13 +813,11 @@ export function createFileTools(): Tool[] {
     new WriteFileTool(),
     new EditFileTool(),
     new ApplyPatchTool(),
+    new CopyPathTool(),
+    new ExtractArchiveTool(),
     new MoveFileTool(),
     new DeleteFileTool(),
   ];
-}
-
-function sensitivePatternForPath(path: string): string | null {
-  return isSensitivePath(caseFoldForMatch(canonicalizePathForMatch(path)));
 }
 
 async function statFile(path: string): Promise<Result<Stats>> {
@@ -795,7 +875,7 @@ async function collectFiles(
     const rootStat = await stat(root);
     const files: ListedEntry[] = [];
     const state = { visited: 0, truncated: false };
-    if (sensitivePatternForPath(root)) {
+    if (sensitiveFilePattern(root)) {
       return { ok: true, value: { files, truncated: false } };
     }
     if (rootStat.isFile()) {
@@ -837,7 +917,7 @@ async function walk(
       return;
     }
     const full = join(current, dirent.name);
-    if (sensitivePatternForPath(full)) {
+    if (sensitiveFilePattern(full)) {
       continue;
     }
     const rel = normalizeRelativePath(relative(root, full));

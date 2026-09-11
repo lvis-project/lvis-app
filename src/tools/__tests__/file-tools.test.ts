@@ -634,6 +634,8 @@ describe("file native tools", () => {
       ["write_file", ["path"]],
       ["edit_file", ["path"]],
       ["apply_patch", ["path"]],
+      ["copy_path", ["sourcePath", "destinationPath"]],
+      ["extract_archive", ["archivePath", "destinationPath"]],
       ["move_file", ["sourcePath", "destinationPath"]],
       ["delete_file", ["path"]],
     ]);
@@ -646,6 +648,8 @@ describe("file native tools", () => {
     expect(registry.findByName("read_file")?.category).toBe("read");
     expect(registry.findByName("write_file")?.category).toBe("write");
     expect(registry.findByName("apply_patch")?.category).toBe("write");
+    expect(registry.findByName("copy_path")?.category).toBe("write");
+    expect(registry.findByName("extract_archive")?.category).toBe("write");
   });
 });
 

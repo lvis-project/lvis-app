@@ -10,6 +10,7 @@ import {
   TOOL_PATH_KEYS,
   TOOL_URL_PATTERN,
   classifyFileChange,
+  declaredFileChangePaths,
   extractPatchFileChanges,
   isGlobPattern,
   type FileChangeOperation,
@@ -139,6 +140,10 @@ export interface FileChange {
 export function collectFileChanges(tool: Pick<ToolEntryItem, "name" | "category" | "input">): FileChange[] {
   const operation = classifyFileChange(tool);
   if (!operation) return [];
+  const declaredPaths = declaredFileChangePaths(tool.name, tool.input);
+  if (declaredPaths !== undefined) {
+    return [...new Set(declaredPaths)].map(path => ({ path, operation }));
+  }
   if (operation === "move" && isRecord(tool.input)) {
     const [source] = collectPathStrings(tool.input.sourcePath);
     const [destination] = collectPathStrings(tool.input.destinationPath);
