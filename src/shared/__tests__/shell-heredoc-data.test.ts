@@ -45,6 +45,19 @@ describe("heredoc data inspection", () => {
     expect(inspectShellHeredocData(command)).toEqual({ command, expansionCommands: [] });
   });
 
+  it.skipIf(process.platform === "win32")("inspects expansions when EOF supplies a body without its terminator", () => {
+    const command = "cat <<END\nprintf '$(printf witnessed)'";
+    expect(execFileSync("/bin/sh", ["-c", command], { encoding: "utf8", stdio: ["pipe", "pipe", "ignore"] }))
+      .toBe("printf 'witnessed'\n");
+    expect(inspectShellHeredocData(command)).toEqual({ command, expansionCommands: ["printf witnessed"] });
+  });
+
+  it.skipIf(process.platform === "win32")("treats dollar signs in a bare delimiter as literal word bytes", () => {
+    const command = "cat <<$END\nprintf '$(printf witnessed)'\n$END";
+    expect(execFileSync("/bin/sh", ["-c", command], { encoding: "utf8" })).toBe("printf 'witnessed'\n");
+    expect(inspectShellHeredocData(command)).toEqual({ command, expansionCommands: ["printf witnessed"] });
+  });
+
   it.each(["sh", "python3 -", "cat | sh", "env cat"])("retains bodies for execution or opaque consumers: %s", (header) => {
     const command = `${header} <<END\ncat /etc/shadow\nEND`;
     expect(inspectShellHeredocData(command)?.command).toBe(command);

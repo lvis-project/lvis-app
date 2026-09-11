@@ -27,6 +27,8 @@ describe("heredoc data path policy", () => {
 
   it.each([
     "cat <<END\nprintf '$(cat /etc/shadow)'\nEND",
+    "cat <<END\nprintf '$(cat /etc/shadow)'",
+    "cat <<$END\nprintf '$(cat /etc/shadow)'\n$END",
     "cat <<END\nprintf '$(cat /et\\\nc/shadow)'\nEND",
     "cat <<END\n# $(cat /etc/shadow)\nEND",
     "cat <<END\n'$(cat /etc/shadow)'\nEND",
@@ -64,5 +66,9 @@ describe("heredoc data path policy", () => {
     "cat <<END\nprintf '$(printf `printf ')'`; cat /etc/shadow)'\nEND",
   ])("does not grant a path exemption to unresolved nested syntax: %s", (command) => {
     expect(check(command)).not.toBeNull();
+  });
+
+  it("refuses a delimiter word whose syntax cannot be inspected", () => {
+    expect(check("cat <<$(printf END)\nprintf '$(cat /etc/shadow)'\n$(printf END)")).not.toBeNull();
   });
 });

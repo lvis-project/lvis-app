@@ -414,7 +414,7 @@ function redactHeredocCommand(
   command: string,
   literalDataProof: boolean,
   onRemoved?: (start: number, end: number) => void,
-  omitExpandableBody?: (body: string) => boolean,
+  dataInspection?: { omitExpandableBody: (body: string) => boolean; onUnresolved: () => void },
 ): string | null {
   if (!command.includes("<<")) return command;
   const n = command.length;
@@ -474,6 +474,7 @@ function redactHeredocCommand(
         continue;
       }
       if (literalDataProof) return null;
+      dataInspection?.onUnresolved();
       out += "<<";
       i += 2;
       continue;
@@ -483,8 +484,13 @@ function redactHeredocCommand(
       i += 1;
       for (const delimiter of pending) {
         const bodyEnd = findHeredocTerminator(command, i, delimiter);
-        if (bodyEnd === null) return literalDataProof ? null : command;
-        if (delimiter.quoted || omitExpandableBody?.(command.slice(i, bodyEnd))) onRemoved?.(i, bodyEnd);
+        if (bodyEnd === null) {
+          // EOF still supplies an unquoted heredoc's body to the shell, which
+          // performs its expansions despite warning about the missing marker.
+          if (!delimiter.quoted) dataInspection?.omitExpandableBody(command.slice(i));
+          return literalDataProof ? null : command;
+        }
+        if (delimiter.quoted || dataInspection?.omitExpandableBody(command.slice(i, bodyEnd))) onRemoved?.(i, bodyEnd);
         else out += command.slice(i, bodyEnd);
         i = bodyEnd;
       }
@@ -511,7 +517,7 @@ export function inspectShellHeredocData(
   const expansionCommands: string[] = [];
   let unresolvedExpansion = false;
   let omittedExpandableData = false;
-  const projected = redactHeredocCommand(command, false, undefined, (body) => {
+  const inspectExpandableBody = (body: string): boolean => {
     let literal = true;
     for (let i = 0; i < body.length; i += 1) {
       const ch = body[i]!;
@@ -550,6 +556,10 @@ export function inspectShellHeredocData(
     }
     omittedExpandableData ||= literal;
     return literal;
+  };
+  const projected = redactHeredocCommand(command, false, undefined, {
+    onUnresolved: () => { unresolvedExpansion = true; },
+    omitExpandableBody: inspectExpandableBody,
   });
   if (unresolvedExpansion) return null;
   if (omittedExpandableData) {
@@ -616,7 +626,10 @@ function readHeredocDelimiter(
     i = command.indexOf(quote, startWord);
     if (i === -1) return null;
   } else {
-    while (i < command.length && !/[ \t\r\n;&|<>()'"\\`$]/.test(command[i]!)) i += 1;
+    while (i < command.length && !/[ \t\r\n;&|<>()'"\\`]/.test(command[i]!)) {
+      if (command[i] === "$" && command[i + 1] === "(") return null;
+      i += 1;
+    }
   }
   const delimiter = command.slice(startWord, i);
   const next = quoted ? i + 1 : i;
