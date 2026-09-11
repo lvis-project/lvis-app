@@ -46,6 +46,64 @@ async function collect(events: readonly StreamEvent[]) {
   });
 }
 
+describe("provider completion boundary", () => {
+  it.each<{ label: string; events: StreamEvent[] }>([
+    { label: "empty stream", events: [] },
+    { label: "partial text", events: [{ type: "text_delta", text: "partial-response" }] },
+    { label: "reasoning only", events: [{ type: "reasoning_delta", text: "private-thought" }] },
+    {
+      label: "tool call",
+      events: [{ type: "tool_call", id: "pending-call", name: "bash", input: { command: "pwd" } }],
+    },
+  ])("rejects EOF after $label without committing a successful round", async ({ events }) => {
+    const result = await collect(events);
+
+    expect(result).toMatchObject({
+      kind: "stream_error",
+      classification: "unknown",
+      providerError: { messagePreview: "model stream ended without message_complete" },
+    });
+    expect(result).not.toHaveProperty("toolCalls");
+    expect(result).not.toHaveProperty("stopReason");
+    expect(JSON.stringify(result)).not.toMatch(/partial-response|private-thought/);
+  });
+
+  it("accepts an explicitly completed empty response", async () => {
+    expect(await collect([{ type: "message_complete", stopReason: "end_turn" }])).toMatchObject({
+      kind: "ok", text: "", thought: "", toolCalls: [], stopReason: "end_turn",
+    });
+  });
+
+  it("keeps caller cancellation distinct from unexpected provider termination", async () => {
+    const controller = new AbortController();
+    const provider: LLMProvider = {
+      vendor: "openai",
+      async *streamTurn() {
+        yield { type: "text_delta", text: "visible-prefix" };
+        controller.abort();
+      },
+    };
+    expect(await collectRoundStream({
+      provider, model: "test-model", systemPrompt: "system", messages: [], toolSchemas: [],
+      llmSettings: LLM_SETTINGS, abortSignal: controller.signal,
+    })).toEqual({ kind: "interrupted", text: "visible-prefix" });
+  });
+
+  it("reports an unsolicited provider abort as a stream error", async () => {
+    const provider: LLMProvider = {
+      vendor: "openai",
+      async *streamTurn() {
+        yield { type: "text_delta", text: "visible-prefix" };
+        throw new DOMException("Provider request aborted unexpectedly", "AbortError");
+      },
+    };
+    expect(await collectRoundStream({
+      provider, model: "test-model", systemPrompt: "system", messages: [], toolSchemas: [],
+      llmSettings: LLM_SETTINGS,
+    })).toMatchObject({ kind: "stream_error" });
+  });
+});
+
 describe("collectRoundStream tool call IDs", () => {
   it("forwards thinking controls to a marked subscription runtime", async () => {
     const provider = new SubscriptionCapturingProvider([

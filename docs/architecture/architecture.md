@@ -172,6 +172,10 @@ Important rules:
   session is persisted; a general conversation remains unscoped.
 - Tool calls must not execute until the permission manager has resolved the
   decision path.
+- A provider round succeeds only after an explicit completion event. EOF after
+  text, reasoning, or tool calls remains a stream error. Internal stream deadlines
+  and unsolicited provider aborts are errors; caller cancellation remains an
+  interruption. An explicitly completed empty response retains its stop reason.
 - Long histories are compacted through the structured compact path rather than
   silent truncation.
 - A round that stops at `end_turn` with reasoning but no visible text and no
