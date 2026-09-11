@@ -414,6 +414,7 @@ function redactHeredocCommand(
   command: string,
   literalDataProof: boolean,
   onRemoved?: (start: number, end: number) => void,
+  omitExpandableBody?: (body: string, header: string) => boolean,
 ): string | null {
   if (!command.includes("<<")) return command;
   const n = command.length;
@@ -421,6 +422,7 @@ function redactHeredocCommand(
   const pending: HeredocDelimiter[] = [];
   let out = "";
   let i = 0;
+  let headerStart = 0;
   while (i < n) {
     const ch = command[i]!;
     if (ch === "\\" && i + 1 < n) {
@@ -466,7 +468,7 @@ function redactHeredocCommand(
     // the same line and therefore has no body to remove).
     if (ch === "<" && command[i + 1] === "<" && command[i + 2] !== "<") {
       const opened = readHeredocDelimiter(command, i);
-      if (opened?.quoted) {
+      if (opened && (!literalDataProof || opened.quoted)) {
         pending.push(opened);
         out += command.slice(i, opened.next);
         i = opened.next;
@@ -478,23 +480,91 @@ function redactHeredocCommand(
       continue;
     }
     if (ch === "\n" && pending.length > 0) {
+      const header = command.slice(headerStart, i);
       out += "\n";
       i += 1;
-      const bodyStart = i;
       for (const delimiter of pending) {
         const bodyEnd = findHeredocTerminator(command, i, delimiter);
         if (bodyEnd === null) return literalDataProof ? null : command;
+        if (delimiter.quoted || omitExpandableBody?.(command.slice(i, bodyEnd), header)) onRemoved?.(i, bodyEnd);
+        else out += command.slice(i, bodyEnd);
         i = bodyEnd;
       }
-      onRemoved?.(bodyStart, i);
       pending.length = 0;
+      headerStart = i;
       continue;
     }
     out += ch;
     i += 1;
+    if (ch === "\n") headerStart = i;
   }
   if (literalDataProof && pending.length > 0) return null;
   return out;
+}
+
+/**
+ * Path analysis may omit an unquoted body only after proving that no expansion
+ * occurs and the header proves an ordinary data consumer. Bodies with
+ * expansions remain in the conservative scan, and their
+ * executable substitutions are also returned independently: quotes and `#`
+ * inside heredoc data cannot conceal those commands as shell text operands.
+ */
+export function inspectShellHeredocData(
+  command: string,
+): { command: string; expansionCommands: string[] } | null {
+  const expansionCommands: string[] = [];
+  let unresolvedExpansion = false;
+  const projected = redactHeredocCommand(command, false, undefined, (body, header) => {
+    let literal = true;
+    for (let i = 0; i < body.length; i += 1) {
+      const ch = body[i]!;
+      const next = body[i + 1];
+      // Unlike command text, quotes and comment markers have no syntax here.
+      if (ch === "\\" && next !== undefined && "\\$`".includes(next)) { i += 1; continue; }
+      if (ch === "`") {
+        literal = false;
+        const close = body.indexOf("`", i + 1);
+        // Escaped legacy substitution syntax needs another decoding pass.
+        // Refuse it rather than inspect a different command than the shell.
+        if (close === -1 || body.slice(i + 1, close).includes("\\")) {
+          unresolvedExpansion = true;
+          return false;
+        }
+        expansionCommands.push(body.slice(i + 1, close));
+        i = close;
+      } else if (ch === "$" && next !== undefined && /[A-Za-z0-9_({\[?#!*@\-$]/.test(next)) {
+        literal = false;
+        // Arithmetic and parameter operators can perform further expansions.
+        // Keep their boundary closed until that grammar can be inspected.
+        if (next === "{" || next === "[" || (next === "(" && body[i + 2] === "(")) {
+          unresolvedExpansion = true;
+          return false;
+        }
+        if (next === "(") {
+          const close = matchParen(body, i + 1, true);
+          if (close === -1) {
+            unresolvedExpansion = true;
+            return false;
+          }
+          expansionCommands.push(body.slice(i + 2, close));
+          i = close;
+        }
+      }
+    }
+    if (!literal) return false;
+    // An execution consumer interprets even expansion-free stdin as a
+    // program. Grant the new data exemption only for an isolated known data
+    // consumer; pipes, wrapper execution and opaque headers remain scanned.
+    const parsed = tokenizeShell(header);
+    const leaf = parsed.leaves[0];
+    return !parsed.parseError && parsed.leaves.length === 1 && leaf !== undefined
+      && stripCommandPath(leaf.argv[0] ?? "") === "cat"
+      && leaf.assignments.length === 0
+      && leaf.strippedWrappers.every((wrapper) => wrapper === "command")
+      && !leaf.hasCommandSubstitution && !leaf.hasProcessSubstitution
+      && !leaf.argvHasExpandableDollar.some(Boolean);
+  });
+  return unresolvedExpansion ? null : { command: projected!, expansionCommands };
 }
 
 /**
@@ -866,6 +936,7 @@ function scanLeaves(command: string, literalDataProof = false, source?: ShellSou
 function consumeDoubleQuote(
   command: string,
   open: number,
+  strictBoundary = false,
 ): { text: string; next: number; hasCommandSubstitution: boolean } | null {
   let text = "";
   let hasCommandSubstitution = false;
@@ -890,6 +961,7 @@ function consumeDoubleQuote(
       return { text, next: i + 1, hasCommandSubstitution };
     }
     if (ch === "`") {
+      if (strictBoundary) return null;
       const close = command.indexOf("`", i + 1);
       if (close === -1) return null;
       text += command.slice(i, close + 1);
@@ -898,7 +970,7 @@ function consumeDoubleQuote(
       continue;
     }
     if (ch === "$" && command[i + 1] === "(") {
-      const close = matchParen(command, i + 1);
+      const close = matchParen(command, i + 1, strictBoundary);
       if (close === -1) return null;
       text += command.slice(i, close + 1);
       hasCommandSubstitution = true;
@@ -915,31 +987,48 @@ function consumeDoubleQuote(
  * Given the index of an opening `(`, return the index of its matching `)`,
  * honouring nested parens and quoted regions. Returns -1 when unbalanced.
  */
-function matchParen(command: string, openParen: number): number {
+function matchParen(command: string, openParen: number, strictBoundary = false): number {
   let depth = 0;
   let i = openParen;
+  let wordActive = false;
   const n = command.length;
   while (i < n) {
     const ch = command[i]!;
+    if (ch === "\\") { wordActive = true; i += 2; continue; }
+    if (ch === "#" && !wordActive && startsShellComment(command, i)) {
+      const newline = command.indexOf("\n", i);
+      if (newline === -1) return -1;
+      i = newline;
+      continue;
+    }
+    // Case patterns use ')' without opening a parenthesized group. Strict
+    // expansion inspection must refuse that unsupported grammar, including
+    // nested legacy substitutions, instead of ending the body prematurely.
+    if (strictBoundary && (ch === "`" || (!wordActive && command.slice(i, i + 4) === "case"
+      && /[ \t\r\n;&|<>()]/.test(command[i + 4] ?? "")))) return -1;
     if (ch === "'") {
       const close = command.indexOf("'", i + 1);
       if (close === -1) return -1;
+      wordActive = true;
       i = close + 1;
       continue;
     }
     if (ch === '"') {
-      const res = consumeDoubleQuote(command, i);
+      const res = consumeDoubleQuote(command, i, strictBoundary);
       if (res === null) return -1;
+      wordActive = true;
       i = res.next;
       continue;
     }
-    if (ch === "(") { depth += 1; i += 1; continue; }
+    if (ch === "(") { wordActive = false; depth += 1; i += 1; continue; }
     if (ch === ")") {
       depth -= 1;
       if (depth === 0) return i;
+      wordActive = false;
       i += 1;
       continue;
     }
+    wordActive = !/[ \t\r\n;&|<>]/.test(ch);
     i += 1;
   }
   return -1;

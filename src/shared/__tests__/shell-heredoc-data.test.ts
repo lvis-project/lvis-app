@@ -1,0 +1,66 @@
+import { execFileSync } from "node:child_process";
+import { describe, expect, it } from "vitest";
+import { inspectShellHeredocData, redactHeredocBodies, tokenizeShell } from "../shell-tokenizer.js";
+
+describe("heredoc data inspection", () => {
+  it.each([
+    ":%s/^first$/last/\nwq",
+    "printf 'path/to/data' # ordinary text",
+    "unmatched ' quote and # data",
+    "literal \\$(command) and \\`command\\`",
+    "$'literal' and a standalone $",
+  ])("omits expansion-free body data for path analysis: %s", (body) => {
+    const command = `cat > ./output <<END\n${body}\nEND\nprintf done`;
+    expect(inspectShellHeredocData(command)).toEqual({
+      command: "cat > ./output <<END\nprintf done", expansionCommands: [],
+    });
+    // Default tokenizer/redactor contract stays quoted-only.
+    expect(redactHeredocBodies(command)).toBe(command);
+  });
+
+  it.each([
+    "printf '$(printf expanded)'",
+    '# "$(printf expanded)"',
+    "printf '`printf expanded`'",
+  ])("extracts executable substitutions despite literal quotes/comments: %s", (body) => {
+    const command = `cat <<END\n${body}\nEND`;
+    expect(inspectShellHeredocData(command)).toEqual({ command, expansionCommands: ["printf expanded"] });
+  });
+
+  it.skipIf(process.platform === "win32")("matches actual expansion beneath literal quotes and comments", () => {
+    const command = "cat <<END\nprintf '$(printf first)' # $(printf second)\nEND";
+    expect(execFileSync("/bin/sh", ["-c", command], { encoding: "utf8" })).toBe("printf 'first' # second\n");
+    expect(inspectShellHeredocData(command)?.expansionCommands).toEqual(["printf first", "printf second"]);
+  });
+
+  it("does not truncate a substitution at an escaped or quoted parenthesis", () => {
+    for (const body of ["printf \\); printf later", "printf ')'; printf later"]) {
+      const command = `cat <<END\n'$(${body})'\nEND`;
+      expect(inspectShellHeredocData(command)?.expansionCommands).toEqual([body]);
+    }
+  });
+
+  it("keeps variable bodies in the conservative scan", () => {
+    const command = "cat <<END\n$VALUE\nEND";
+    expect(inspectShellHeredocData(command)).toEqual({ command, expansionCommands: [] });
+  });
+
+  it.each(["sh", "python3 -", "cat | sh", "env cat"])("retains bodies for execution or opaque consumers: %s", (header) => {
+    const command = `${header} <<END\ncat /etc/shadow\nEND`;
+    expect(inspectShellHeredocData(command)?.command).toBe(command);
+    expect(tokenizeShell(command, { heredocBodies: "preserve", literalDataProof: true }).parseError).toBe(true);
+  });
+
+  it.each(["${VALUE:-other}", "$((VALUE + 1))", "$[VALUE]", "$(unclosed", "`unclosed", "`printf \\`nested\\``"])(
+    "refuses an unresolved expansion: %s", (body) => {
+      expect(inspectShellHeredocData(`cat <<END\n${body}\nEND`)).toBeNull();
+    },
+  );
+
+  it("preserves the consuming redirect and does not open a heredoc from body text", () => {
+    const command = "cat <<FIRST <<'SECOND'\n<<'FALSE'\nFIRST\nother\nSECOND\nprintf done";
+    expect(redactHeredocBodies(command)).toBe("cat <<FIRST <<'SECOND'\n<<'FALSE'\nFIRST\nprintf done");
+    expect(inspectShellHeredocData(command)?.command).toBe("cat <<FIRST <<'SECOND'\nprintf done");
+    expect(tokenizeShell(inspectShellHeredocData(command)!.command).leaves[0]!.hasInputRedirect).toBe(true);
+  });
+});

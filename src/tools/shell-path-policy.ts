@@ -3,7 +3,7 @@ import { isAbsolute, resolve as pathResolve } from "node:path";
 
 import { t } from "../i18n/index.js";
 import {
-  redactHeredocBodies,
+  inspectShellHeredocData,
   normalizeShellLineContinuations,
   startsShellComment,
   stripCommandPath,
@@ -159,10 +159,8 @@ function segmentEffect(segment: string): PathEffect {
 
 /**
  * How deep {@link findViolationInCommand} follows `$(…)` nesting before it
- * stops descending. A substitution nested past this is still checked as TEXT by
- * the enclosing scan (its `$` keeps a path operand dynamic); only the extra
- * command-level pass is dropped, so the bound trades depth for termination
- * without giving anything up.
+ * stops descending. An unresolved deeper command is refused: its enclosing
+ * operand may be data, so the flat path scan cannot substitute for inspection.
  */
 const COMMAND_SUBSTITUTION_SCAN_DEPTH = 4;
 
@@ -180,14 +178,17 @@ function findViolationInCommand(
   // operand as unresolvable and refuses a path the outer text fully determines.
   inheritedLoopBindings: ReadonlyMap<string, readonly string[]> = new Map(),
 ): ShellPathPolicyViolation | null {
-  // A quoted heredoc body is stdin data, not commands — see
-  // `redactHeredocBodies`. Removing it here rather than inside each extractor
-  // keeps the flat scan and the leaf walk reading the same text.
+  // Keep both path scans on one view of heredoc data. Expandable bodies also
+  // expose executed substitutions independently of literal quotes/comments.
   const logicalCommand = normalizeShellLineContinuations(rawCommand);
   if (logicalCommand === null) {
     return { kind: "invalid-path", reason: "Shell path policy: cannot resolve a continued here-document boundary" };
   }
-  const command = redactHeredocBodies(logicalCommand);
+  const heredocs = inspectShellHeredocData(logicalCommand);
+  if (heredocs === null) {
+    return { kind: "invalid-path", reason: "Shell path policy: cannot resolve a here-document expansion" };
+  }
+  const command = heredocs.command;
   // What this text declares, on top of what the text around it declared. A body
   // rebinding a name shadows the outer one, which is what the shell does.
   const loopBindings = mergeLoopBindings(inheritedLoopBindings, collectLiteralLoopBindings(command));
@@ -234,22 +235,25 @@ function findViolationInCommand(
   // Re-entering it is what makes `sh -c 'cat /etc/passwd'` visible: the value
   // is program text, so exempting it as such left the operand inside
   // completely unexamined.
-  if (depth < COMMAND_SUBSTITUTION_SCAN_DEPTH) {
-    for (const body of [
-      ...extractCommandSubstitutionBodies(command),
-      ...extractNestedShellCommands(command),
-    ]) {
-      const violation = findViolationInCommand(
-        body,
-        cwd,
-        sandboxRoot,
-        extraAllowedDirectories,
-        blockReadsOutsideWorkingDirectories,
-        depth + 1,
-        loopBindings,
-      );
-      if (violation) return violation;
-    }
+  const nestedCommands = new Set([
+    ...heredocs.expansionCommands,
+    ...extractCommandSubstitutionBodies(command),
+    ...extractNestedShellCommands(command),
+  ]);
+  if (depth >= COMMAND_SUBSTITUTION_SCAN_DEPTH && nestedCommands.size > 0) {
+    return { kind: "dynamic-path", reason: "Shell path policy: nested command inspection depth exceeded" };
+  }
+  for (const body of nestedCommands) {
+    const violation = findViolationInCommand(
+      body,
+      cwd,
+      sandboxRoot,
+      extraAllowedDirectories,
+      blockReadsOutsideWorkingDirectories,
+      depth + 1,
+      loopBindings,
+    );
+    if (violation) return violation;
   }
   // Operands are checked twice, against two different base directories.
   //
