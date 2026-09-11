@@ -12,11 +12,13 @@ import type {
 } from "./file-transfer-types.js";
 
 const TAR_BLOCK_BYTES = 512;
+// Prefixing one PAX path with ./ adds two bytes and at most one length digit.
+const MAX_PAX_PATH_NORMALIZATION_BYTES = 3;
 const META_TYPES = new Set([
   "ExtendedHeader", "OldExtendedHeader", "GlobalExtendedHeader",
   "NextFileHasLongPath", "OldGnuLongPath",
 ]);
-const utf8Decoder = new TextDecoder("utf-8", { fatal: true });
+const utf8Decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 
 function invalid(message: string, cause?: unknown): FileTransferError {
   return new FileTransferError("invalid-archive", message, { cause });
@@ -59,10 +61,11 @@ function hasZeroSizeField(block: Buffer): boolean {
   return field[0] === 0x80 ? isZero(field.subarray(1)) : field.every((byte) => byte === 0 || byte === 0x20 || byte === 0x30);
 }
 
-function validatePax(bytes: Buffer): void {
+function validatePax(bytes: Buffer): { start: number; end: number; valueStart: number } | undefined {
   // Each record is: decimal byte length, space, key=value, newline. Validate
   // boundaries before the maintained decoder discards unrecognized fields.
   let offset = 0;
+  let numericPath: { start: number; end: number; valueStart: number } | undefined;
   while (offset < bytes.length) {
     const space = bytes.indexOf(0x20, offset);
     if (space < offset + 1 || space - offset > 16) throw invalid("Invalid extended metadata length");
@@ -84,8 +87,13 @@ function validatePax(bytes: Buffer): void {
     if (/^GNU\.sparse(?:\.|$)/.test(key) || /^SCHILY\.(?:realsize|holes|sparse(?:\..*)?)$/.test(key) || key === "SUN.holesdata" || (key === "SCHILY.filetype" && value.toString("utf8") === "sparse")) {
       throw new FileTransferError("unsupported-entry", "Sparse archive entries are not supported");
     }
+    if (key === "path") {
+      numericPath = value.length && value.every((byte) => byte >= 0x30 && byte <= 0x39)
+        ? { start: offset, end, valueStart: equals + 1 } : undefined;
+    }
     offset = end;
   }
+  return numericPath;
 }
 
 function relativeMemberPath(raw: string, directory: boolean, limits: Readonly<FileTransferLimits>): string {
@@ -147,7 +155,7 @@ export async function consumeTarArchive(
   let header: Header | undefined;
   let bodyRemaining = 0;
   let payloadRemaining = 0;
-  let metadata: { buffer: Buffer; offset: number; header: Header } | undefined;
+  let metadata: { buffer: Buffer; offset: number; inputBodyBytes: number; header: Header; block: Buffer } | undefined;
   let emittedMeta: string | undefined;
   const members = new Map<string, { kind: "file" | "directory" | "implicit"; spelling: string }>();
 
@@ -284,14 +292,33 @@ export async function consumeTarArchive(
     if (metadata) {
       block.copy(metadata.buffer, metadata.offset);
       metadata.offset += TAR_BLOCK_BYTES;
-      if (metadata.offset === metadata.buffer.length) {
-        const { buffer, header: metaHeader } = metadata;
-        const size = metaHeader.size ?? 0;
-        if (!isZero(buffer.subarray(size))) throw invalid("Archive metadata padding is nonzero");
+      if (metadata.offset === metadata.inputBodyBytes) {
+        const { buffer, header: metaHeader, inputBodyBytes } = metadata;
+        let metaBlock = metadata.block;
+        let size = metaHeader.size ?? 0;
+        if (!isZero(buffer.subarray(size, inputBodyBytes))) throw invalid("Archive metadata padding is nonzero");
         const contents = buffer.subarray(0, size);
-        const text = decodeMetadata(contents);
+        let text = decodeMetadata(contents);
         if (["ExtendedHeader", "OldExtendedHeader", "GlobalExtendedHeader"].includes(metaHeader.type)) {
-          validatePax(contents);
+          const numericPath = validatePax(contents);
+          if (numericPath && metaHeader.type !== "GlobalExtendedHeader") {
+            // Pax.parse coerces digit-only values to Number. Preserve the exact
+            // last local path using a harmless prefix in both maintained decoders.
+            const path = contents.subarray(numericPath.valueStart, numericPath.end - 1).toString("ascii");
+            relativeMemberPath(path, false, limits);
+            const replacement = Buffer.from(new Pax({ path: `./${path}` }).encodeField("path"));
+            const growth = replacement.length - (numericPath.end - numericPath.start);
+            if (growth < 2 || growth > MAX_PAX_PATH_NORMALIZATION_BYTES) throw invalid("Invalid normalized metadata length");
+            const normalizedSize = reserve(size, growth, buffer.length, "normalized metadata bytes");
+            buffer.copy(buffer, numericPath.end + growth, numericPath.end, size);
+            replacement.copy(buffer, numericPath.start);
+            buffer.fill(0, normalizedSize);
+            size = normalizedSize;
+            validatePax(buffer.subarray(0, size));
+            text = decodeMetadata(buffer.subarray(0, size));
+            metaBlock = Buffer.alloc(TAR_BLOCK_BYTES);
+            new Header({ ...metaHeader, type: metaHeader.type, size }).encode(metaBlock);
+          }
           if (metaHeader.type === "GlobalExtendedHeader") globalExtended = Pax.parse(text, globalExtended, true);
           else extended = Pax.parse(text, extended, false);
         } else {
@@ -304,7 +331,15 @@ export async function consumeTarArchive(
         emittedMeta = undefined;
         // Metadata is bounded separately. One write preserves UTF-8 code points
         // across block boundaries without admitting any subsequent header.
-        await writeParser(buffer);
+        // Only this validated record may exceed the original metadata ceiling,
+        // by the derived representation overhead. Source counters stay original.
+        parser.maxMetaEntrySize = Math.max(limits.maxArchiveMetaEntryBytes, size);
+        try {
+          await writeParser(metaBlock);
+          await writeParser(buffer.subarray(0, Math.ceil(size / TAR_BLOCK_BYTES) * TAR_BLOCK_BYTES));
+        } finally {
+          parser.maxMetaEntrySize = limits.maxArchiveMetaEntryBytes;
+        }
         if (emittedMeta !== text) throw invalid("Archive metadata decoder changed the input");
         metadata = undefined;
       }
@@ -346,8 +381,16 @@ export async function consumeTarArchive(
       if (!size && !["ExtendedHeader", "OldExtendedHeader", "GlobalExtendedHeader"].includes(header.type)) {
         throw invalid("Archive long path metadata is empty");
       }
-      metadata = size ? { buffer: Buffer.alloc(Math.ceil(size / TAR_BLOCK_BYTES) * TAR_BLOCK_BYTES), offset: 0, header } : undefined;
-      await writeParser(block);
+      if (size) {
+        const overhead = header.type === "ExtendedHeader" || header.type === "OldExtendedHeader" ? MAX_PAX_PATH_NORMALIZATION_BYTES : 0;
+        const capacity = reserve(size, overhead, Number.MAX_SAFE_INTEGER, "metadata buffer bytes");
+        metadata = {
+          buffer: Buffer.alloc(Math.ceil(capacity / TAR_BLOCK_BYTES) * TAR_BLOCK_BYTES),
+          offset: 0, inputBodyBytes: Math.ceil(size / TAR_BLOCK_BYTES) * TAR_BLOCK_BYTES, header, block,
+        };
+      } else {
+        await writeParser(block);
+      }
       return;
     }
     if (!["File", "OldFile", "Directory"].includes(header.type)) {
@@ -429,6 +472,9 @@ export async function consumeTarArchive(
     await compressedWriter;
     await sourceSettled;
     checkFailure();
+    // Gunzip can stop at a NUL and ignore subsequent compressed input. The
+    // native consumed-input count must cover every byte of the settled source.
+    if (gunzip && gunzip.bytesWritten !== sourceBytes) throw invalid("Gzip stream contains unconsumed trailing data");
     if (used || metadata || bodyRemaining || terminalBlocks < 2) throw invalid("Archive is truncated or lacks complete terminal blocks");
     await settleEntry();
     // A structurally proven all-zero tar has no parser entries. Ending the

@@ -153,6 +153,22 @@ describe("archive entry streaming", () => {
     expect(result.files.get("sized")).toEqual(Buffer.from("abc"));
   });
 
+  it("preserves a leading Unicode BOM in ordinary, PAX and GNU filenames", async () => {
+    const path = "\uFEFFfile";
+    const body = Buffer.from("body");
+    for (const entry of [
+      member({ path, body }),
+      Buffer.concat([pax("path", path), member({ path: "placeholder", body })]),
+      Buffer.concat([member({ path: "LongLink", type: "L", body: Buffer.from(`${path}\0`) }), member({ path: "placeholder", body })]),
+    ]) {
+      for (const input of [Buffer.concat([entry, terminal]), gzipSync(Buffer.concat([entry, terminal]))]) {
+        const result = await consume(input);
+        expect([...result.files.keys()]).toEqual([path]);
+        expect(result.files.get(path)).toEqual(body);
+      }
+    }
+  });
+
   it("preserves the declared header prefix and accepts varied source chunk boundaries", async () => {
     const entry = member({ path: "leaf", body: Buffer.from("body") });
     entry.write("parent/nested", 345, "utf8"); checksum(entry.subarray(0, 512));
@@ -174,6 +190,51 @@ describe("archive entry streaming", () => {
     const result = await consume(Buffer.concat([pax("path", "경로/파일"), entry, terminal]));
     expect([...result.files.keys()]).toEqual(["경로/파일"]);
     expect(result.files.get("경로/파일")).toEqual(Buffer.from("body"));
+  });
+
+  it.each(["123", "00123", "0", "9".repeat(90), "0".repeat(502)])("preserves exact numeric extended paths %j", async (path) => {
+    for (const type of ["x", "X"]) {
+      const input = Buffer.concat([pax("path", path, type), member({ path: "placeholder", body: Buffer.from("body") }), terminal]);
+      const original = Buffer.from(input);
+      for (const bytes of [input, gzipSync(input)]) {
+        const result = await consume(bytes);
+        expect([...result.files.keys()]).toEqual([path]);
+        expect(result.files.get(path)).toEqual(Buffer.from("body"));
+      }
+      expect(input).toEqual(original);
+    }
+  });
+
+  it.each(["0", "0".repeat(502)])("keeps original exact limits when normalized metadata grows across a length or block boundary: %j", async (path) => {
+    const body = Buffer.from(paxRecord("path", path));
+    const input = Buffer.concat([member({ path: "PaxHeader", type: "x", body }), member({ path: "placeholder", body: Buffer.from("payload") }), terminal]);
+    const original = Buffer.from(input);
+    for (const bytes of [input, gzipSync(input)]) {
+      const limits = { ...LIMITS, maxArchiveMetaEntryBytes: body.length, maxArchiveInputBytes: bytes.length, maxDecodedArchiveBytes: input.length, maxRelativePathBytes: path.length };
+      expect((await consume(bytes, limits)).files.get(path)).toEqual(Buffer.from("payload"));
+      expect(await failureCode(bytes, { ...limits, maxArchiveMetaEntryBytes: body.length - 1 })).toBe("limit-exceeded");
+      expect(await failureCode(bytes, { ...limits, maxArchiveInputBytes: bytes.length - 1 })).toBe("limit-exceeded");
+      expect(await failureCode(bytes, { ...limits, maxDecodedArchiveBytes: input.length - 1 })).toBe("limit-exceeded");
+    }
+    expect(input).toEqual(original);
+  });
+
+  it("normalizes only the effective numeric path among unrelated metadata records", async () => {
+    const body = Buffer.from(paxRecord("path", "123") + paxRecord("comment", "unchanged 000123") + paxRecord("path", "00123") + paxRecord("uid", "123"));
+    const input = Buffer.concat([member({ path: "PaxHeader", type: "x", body }), member({ path: "placeholder", body: Buffer.from("payload") }), terminal]);
+    const original = Buffer.from(input);
+    expect((await consume(input, { ...LIMITS, maxArchiveMetaEntryBytes: body.length })).files.get("00123")).toEqual(Buffer.from("payload"));
+    expect(input).toEqual(original);
+  });
+
+  it("keeps final named local paths and global numeric path semantics unchanged", async () => {
+    const metadata = Buffer.from(paxRecord("path", "00123") + paxRecord("path", "named"));
+    const input = Buffer.concat([pax("path", "000123", "g"), member({ path: "PaxHeader", type: "x", body: metadata }), member({ path: "placeholder" }), member({ path: "following" }), terminal]);
+    expect([...(await consume(input)).files.keys()]).toEqual(["named", "following"]);
+  });
+
+  it("detects collisions after numeric path normalization", async () => {
+    expect(await failureCode(Buffer.concat([member({ path: "00123" }), pax("path", "00123"), member({ path: "placeholder" }), terminal]))).toBe("invalid-archive");
   });
 
   it("accepts multiple gzip members containing one tar and rejects a second tar", async () => {
@@ -277,7 +338,6 @@ describe("archive rejection after a completed valid member", () => {
     for (const body of malformed) await rejectsFollowing(Buffer.concat([member({ path: "PaxHeader", type: "x", body: Buffer.from(body) }), member({ path: "placeholder" })]));
     await rejectsFollowing(Buffer.concat([member({ path: "long", type: "L", body: Buffer.from([0xff, 0xfe, 0]) }), member({ path: "placeholder" })]));
     await rejectsFollowing(Buffer.concat([member({ path: "long", type: "L", body: Buffer.from("safe\0../hidden") }), member({ path: "placeholder" })]));
-    await rejectsFollowing(Buffer.concat([pax("path", "123"), member({ path: "placeholder" })]));
   });
 
   it("rejects corrupt checksums, truncated headers/bodies/metadata and missing terminal blocks", async () => {
@@ -353,6 +413,15 @@ describe("archive accounting and owned stream lifecycle", () => {
     const corrupt = Buffer.from(bytes); corrupt[corrupt.length - 8] ^= 1;
     for (const bad of [corrupt, bytes.subarray(0, bytes.length - 1), Buffer.concat([bytes, Buffer.from("garbage")])]) {
       expect(await failureCode(bad)).toBe("invalid-archive");
+    }
+  });
+
+  it.each([1, 17, 1024, 65536])("rejects compressed bytes ignored after a NUL with source chunks of %s bytes", async (chunkSize) => {
+    const valid = gzipSync(Buffer.concat([member({ path: "a", body: Buffer.from("body") }), terminal]));
+    const corrupt = Buffer.from(valid); corrupt[corrupt.length - 8] ^= 1;
+    for (const tail of [Buffer.from([0]), Buffer.from([0, 42]), Buffer.concat([Buffer.from([0]), corrupt])]) {
+      const input = Buffer.concat([valid, tail]);
+      await expect(consumeTarArchive(stream(input, chunkSize), recordingSink().sink, { signal: new AbortController().signal, limits: LIMITS })).rejects.toMatchObject({ code: "invalid-archive" });
     }
   });
 
