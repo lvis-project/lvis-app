@@ -389,11 +389,6 @@
     },
     {
       "type": "exports",
-      "file": "src/lib/shell-resolver.ts",
-      "name": "shellPathForHostPath"
-    },
-    {
-      "type": "exports",
       "file": "src/main/a2a-remote-runtime.ts",
       "name": "A2A_REMOTE_ROUTE_CONTROL_SECRET_KEY"
     },

@@ -1,22 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
+import { describe, expect, it } from "vitest";
+import { useBashStructuralFixture } from "../../__tests__/support/bash-structural.js";
 import { isReadOnlyCommand } from "../../permissions/reviewer/host-risk-inspector.js";
 import { BashAstValidator } from "../bash-ast-validator.js";
 
-const validator = new BashAstValidator();
-let cwd: string;
-beforeEach(() => {
-  cwd = mkdtempSync(join(tmpdir(), "shell-structural-"));
-  for (const name of ["work", "work directory", "eval location"]) mkdirSync(join(cwd, name));
-});
-afterEach(async () => { await cleanupTmpDir(cwd); });
-const validate = (command: string) => validator.validate("bash", { command }, {
-  cwd, facts: { dialect: "bash", environment: { HOME: cwd, PWD: cwd, PATH: "/usr/bin:/bin" } },
-});
+const fixture = useBashStructuralFixture();
+const { validate } = fixture;
 
 describe("structural execution and data roles", () => {
   it.each([
@@ -97,14 +86,14 @@ describe("structural execution and data roles", () => {
     ["cat <<END\n# eval helper\nEND", "# eval helper\n"],
   ])("matches native data bytes without executing their text: %s", (command, expected) => {
     expect(validate(command).decision).toBe("allow");
-    expect(execFileSync("/bin/bash", ["--noprofile", "--norc", "-c", command], { cwd, encoding: "utf8", timeout: 3000 })).toBe(expected);
+    expect(execFileSync("/bin/bash", ["--noprofile", "--norc", "-c", command], { cwd: fixture.cwd, encoding: "utf8", timeout: 3000 })).toBe(expected);
   });
 
   it.skipIf(process.platform === "win32")("keeps literal script writes separate from child script execution", () => {
     const command = "printf '%s' \"eval 'printf owned'\" > script; bash script";
     expect(validate(command).decision).toBe("allow");
     expect(isReadOnlyCommand(command)).toBe(false);
-    expect(execFileSync("/bin/bash", ["--noprofile", "--norc", "-c", command], { cwd, encoding: "utf8", timeout: 3000 })).toBe("owned");
+    expect(execFileSync("/bin/bash", ["--noprofile", "--norc", "-c", command], { cwd: fixture.cwd, encoding: "utf8", timeout: 3000 })).toBe("owned");
   });
 
   it.each(["source ./script", ". ./script"])("refuses opaque loading into the current shell state: %s", command => {

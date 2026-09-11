@@ -1,23 +1,14 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
+import { describe, expect, it } from "vitest";
+import { useBashStructuralFixture } from "../../__tests__/support/bash-structural.js";
 import { shellQuote } from "../../lib/shell-resolver.js";
 import { isReadOnlyCommand } from "../../permissions/reviewer/host-risk-inspector.js";
 import { BashAstValidator } from "../bash-ast-validator.js";
 
-const validator = new BashAstValidator();
-let cwd: string;
-beforeEach(() => {
-  cwd = mkdtempSync(join(tmpdir(), "shell-structural-"));
-  for (const name of ["work", "work directory", "eval location"]) mkdirSync(join(cwd, name));
-});
-afterEach(async () => { await cleanupTmpDir(cwd); });
-const validate = (command: string) => validator.validate("bash", { command }, {
-  cwd, facts: { dialect: "bash", environment: { HOME: cwd, PWD: cwd, PATH: "/usr/bin:/bin" } },
-});
+const fixture = useBashStructuralFixture();
+const { validate, validator } = fixture;
 
 describe("literal program data in complete statement scopes", () => {
   it.each([
@@ -114,12 +105,12 @@ describe("literal program data in complete statement scopes", () => {
   });
 
   it.skipIf(process.platform === "win32")("preserves native program argument bytes through a wrapper and cwd change", () => {
-    const receiver = join(cwd, "argument-receiver");
+    const receiver = join(fixture.cwd, "argument-receiver");
     writeFileSync(receiver, "#!/bin/bash\nprintf '%s' \"$2\"\n", { mode: 0o700 });
     const command = "cd work && env NAME=value " + shellQuote(receiver) + " -c '# eval marker\nprint(1)'";
     expect(validate(command).decision).toBe("allow");
     expect(isReadOnlyCommand(command)).toBe(false);
-    expect(execFileSync("/bin/bash", ["--noprofile", "--norc", "-c", command], { cwd, encoding: "utf8", timeout: 3000 })).toBe("# eval marker\nprint(1)");
+    expect(execFileSync("/bin/bash", ["--noprofile", "--norc", "-c", command], { cwd: fixture.cwd, encoding: "utf8", timeout: 3000 })).toBe("# eval marker\nprint(1)");
   });
 
   it("distinguishes literal examples from actual privilege commands", () => {

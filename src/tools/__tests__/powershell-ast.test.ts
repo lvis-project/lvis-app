@@ -4,8 +4,8 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { normalizePowerShellAstSummary, type PowerShellArgument, type PowerShellAstSummary } from "../powershell-ast.js";
 import { findPowerShellAstPathViolation, validatePowerShellAst } from "../shell-tools.js";
+import { powerShellLiteral as literal } from "../../__tests__/support/powershell-ast.js";
 
-const literal = (value: string, text = value): PowerShellArgument => ({ kind: "literal", value, text });
 const command = (name: string, args: PowerShellArgument[] = []): PowerShellAstSummary => ({
   errors: [], unsupported: [], redirections: [], commands: [{ name, text: name, arguments: [literal(name), ...args] }],
 });

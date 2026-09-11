@@ -33,7 +33,11 @@
         "scripts/smoke-live-app.mjs",
         // Loaded by the installer packager through build.beforePack.
         "scripts/electron-before-pack.cjs",
-        "scripts/hooks/run-local-checks.mjs"
+        "scripts/hooks/run-local-checks.mjs",
+        // Loaded through the local @lvis/shell-parser-runtime package exports.
+        "resources/shell-parser/wasm_exec.cjs",
+        // Explicit parser rebuild entry documented in tools/shell-parser/README.md.
+        "tools/shell-parser/build.mjs"
       ]
     },
     "web": {
@@ -63,6 +67,8 @@
     "shadcn"
   ],
   "ignoreBinaries": [
+    // External Go toolchain for the explicit parser rebuild, pinned by go.mod.
+    "go",
     // Windows ACL inspection from the lvis-home privacy regression.
     "icacls",
     "lsof",

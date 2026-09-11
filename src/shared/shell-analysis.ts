@@ -12,7 +12,7 @@ export type ShellWordPart =
   | { kind: "unknown"; reason: string };
 export interface ShellWord { source: ShellSpan; parts: readonly ShellWordPart[]; preservesEmpty: boolean }
 export interface ShellAssignment { name: string; value: ShellWord; elements?: readonly ShellWord[]; append: boolean; declarationOnly?: boolean; source: ShellSpan }
-export interface ShellRedirect {
+interface ShellRedirect {
   source: ShellSpan;
   effect: "read" | "write";
   target?: ShellWord;

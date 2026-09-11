@@ -18,8 +18,6 @@
       "src/plugins/plugin-storage-layout.ts": 1,
       "src/tools/file-tools.ts": 2
     },
-    "home-tilde": {
-      "src/tools/shell-path-policy.ts": 1
-    }
+    "home-tilde": {}
   }
 }

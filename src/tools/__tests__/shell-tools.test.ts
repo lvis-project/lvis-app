@@ -17,6 +17,7 @@ import { delimiter, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
+import { powerShellLiteral as psLiteral } from "../../__tests__/support/powershell-ast.js";
 import { useTempDirs } from "../../__tests__/test-helpers.js";
 import { setProcessPlatform } from "../../__tests__/support/process-platform.js";
 import { __resetManagedChildProcessesForTest } from "../../main/managed-child-processes.js";
@@ -582,7 +583,6 @@ describe("powershell tool", () => {
     }, 20_000);
   });
 
-  const psLiteral = (value: string, text = value): PowerShellValueArgument => ({ kind: "literal", value, text });
   const psDynamic = (text: string): PowerShellValueArgument => ({ kind: "dynamic", text });
   const psParameter = (name: string, argument?: PowerShellValueArgument): PowerShellArgument => ({
     kind: "parameter", name, text: "-" + name, ...(argument ? { argument } : {}),
