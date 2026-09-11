@@ -1143,11 +1143,12 @@ export async function* fullStreamToStreamEvent(
           stopReason = "max_tokens";
         } else if (
           p.finishReason === "stop" ||
-          p.finishReason === "content-filter" ||
-          p.finishReason === "other"
+          p.finishReason === "content-filter"
         ) {
           stopReason = "end_turn";
         } else {
+          // A finish event can be synthesized at EOF with an unclassified
+          // reason. Its presence alone does not prove provider completion.
           yield createProviderErrorEvent(new Error(
             `Provider stream ended with an unsuccessful finish reason: ${p.finishReason ?? "missing"}`,
           ));

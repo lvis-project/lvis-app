@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TOOL_TIMEOUT_POLICY } from "../../../../shared/tool-timeout-policy.js";
 import type { StreamEvent, StreamTurnParams } from "../../types.js";
-import { fullStreamToStreamEvent, VercelUnifiedProvider } from "../adapter.js";
+import { fullStreamToStreamEvent, VercelUnifiedProvider, type VercelVendor } from "../adapter.js";
 import { collectStreamEvents as collect, streamFromArray } from "./test-helpers.js";
 
 const TURN_PARAMS: StreamTurnParams = {
@@ -23,7 +23,67 @@ const TOOL_TURN_PARAMS: StreamTurnParams = {
   }],
 };
 
-function createResponseFixture() {
+const CHAT_TEXT_CHUNK = {
+  id: "fixture-response",
+  model: TURN_PARAMS.model,
+  choices: [{ index: 0, delta: { content: "Partial result" }, finish_reason: null }],
+};
+const CHAT_STOP_CHUNK = {
+  id: "fixture-response",
+  model: TURN_PARAMS.model,
+  choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+};
+const WIRE_COMPLETION_FIXTURES = [
+  {
+    route: "chat", vendor: "openai", model: TURN_PARAMS.model,
+    partialChunks: [CHAT_TEXT_CHUNK], finishChunks: [CHAT_STOP_CHUNK],
+  },
+  {
+    route: "responses", vendor: "openai", model: "gpt-5",
+    partialChunks: [
+      { type: "response.created", response: { id: "fixture", created_at: 1, model: "gpt-5" } },
+      {
+        type: "response.output_item.added", output_index: 0,
+        item: { id: "fixture-message", type: "message", role: "assistant" },
+      },
+      {
+        type: "response.output_text.delta", item_id: "fixture-message",
+        output_index: 0, delta: "Partial result",
+      },
+    ],
+    finishChunks: [{ type: "response.completed", response: {} }],
+  },
+  {
+    route: "generated-content", vendor: "gemini", model: TURN_PARAMS.model,
+    partialChunks: [{ candidates: [{ content: { parts: [{ text: "Partial result" }] } }] }],
+    finishChunks: [{ candidates: [{ content: { parts: [] }, finishReason: "STOP" }] }],
+  },
+  {
+    route: "messages", vendor: "claude", model: TURN_PARAMS.model,
+    partialChunks: [
+      {
+        type: "message_start",
+        message: { id: "fixture", model: TURN_PARAMS.model, role: "assistant", usage: { input_tokens: 1 } },
+      },
+      { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+      { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Partial result" } },
+    ],
+    finishChunks: [
+      { type: "content_block_stop", index: 0 },
+      {
+        type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null },
+        usage: { output_tokens: 1 },
+      },
+      { type: "message_stop" },
+    ],
+  },
+  {
+    route: "compatible-chat", vendor: "openai-compatible", model: TURN_PARAMS.model,
+    partialChunks: [CHAT_TEXT_CHUNK], finishChunks: [CHAT_STOP_CHUNK],
+  },
+] as const;
+
+function createResponseFixture(vendor: VercelVendor = "openai-compatible") {
   let controller: ReadableStreamDefaultController<Uint8Array>;
   const encoder = new TextEncoder();
   const body = new ReadableStream<Uint8Array>({
@@ -37,17 +97,21 @@ function createResponseFixture() {
     }, { once: true });
     return new Response(body, { headers: { "content-type": "text/event-stream" } });
   });
+  const sendData = (data: Record<string, unknown>) => {
+    controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+  };
   return {
     fetchResponse,
     provider: new VercelUnifiedProvider(
-      "openai-compatible", "fixture-key", "https://provider.invalid/v1", fetchResponse,
+      vendor, "fixture-key", "https://provider.invalid/v1", fetchResponse,
     ),
+    sendData,
     send(delta: Record<string, unknown>, finishReason: string | null = null) {
-      controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+      sendData({
         id: "fixture-response",
         model: TURN_PARAMS.model,
         choices: [{ index: 0, delta, finish_reason: finishReason }],
-      })}\n\n`));
+      });
     },
     close() {
       controller.close();
@@ -132,24 +196,88 @@ describe("provider stream completion", () => {
     expect(await remaining).toEqual([]);
   });
 
-  it("rejects a response body that ends without an explicit finish reason", async () => {
-    const fixture = createResponseFixture();
-    fixture.send({ content: "Partial result" });
+  it.each(WIRE_COMPLETION_FIXTURES)(
+    "rejects EOF without a provider terminal event on $route",
+    async ({ vendor, model, partialChunks }) => {
+      const fixture = createResponseFixture(vendor);
+      for (const chunk of partialChunks) fixture.sendData(chunk);
+      fixture.close();
+      const events = await collect(fixture.provider.streamTurn({ ...TURN_PARAMS, model }));
+      expect(events[0]).toMatchObject({ type: "text_delta", text: "Partial result" });
+      expect(events.at(-1)).toMatchObject({ type: "error" });
+      expect(events.some((event) => event.type === "message_complete")).toBe(false);
+      expect(fixture.fetchResponse).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each(WIRE_COMPLETION_FIXTURES)(
+    "preserves a response with its provider terminal event on $route",
+    async ({ vendor, model, partialChunks, finishChunks }) => {
+      const fixture = createResponseFixture(vendor);
+      for (const chunk of [...partialChunks, ...finishChunks]) fixture.sendData(chunk);
+      fixture.close();
+      expect(await collect(fixture.provider.streamTurn({ ...TURN_PARAMS, model }))).toEqual([
+        { type: "text_delta", text: "Partial result" },
+        expect.objectContaining({ type: "message_complete", stopReason: "end_turn" }),
+      ]);
+      expect(fixture.fetchResponse).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each(["openai", "gemini", "openai-compatible"] as const)(
+    "preserves an explicit empty stop on %s",
+    async (vendor) => {
+      const fixture = createResponseFixture(vendor);
+      if (vendor === "gemini") {
+        fixture.sendData({ candidates: [{ content: { parts: [] }, finishReason: "STOP" }] });
+      } else {
+        fixture.send({}, "stop");
+      }
+      fixture.close();
+      expect(await collect(fixture.provider.streamTurn(TURN_PARAMS))).toEqual([
+        expect.objectContaining({ type: "message_complete", stopReason: "end_turn" }),
+      ]);
+    },
+  );
+
+  it.each(["openai", "gemini", "openai-compatible"] as const)(
+    "preserves an explicit content filter response on %s",
+    async (vendor) => {
+      const fixture = createResponseFixture(vendor);
+      if (vendor === "gemini") {
+        fixture.sendData({ candidates: [{ content: { parts: [] }, finishReason: "SAFETY" }] });
+      } else {
+        fixture.send({}, "content_filter");
+      }
+      fixture.close();
+      expect(await collect(fixture.provider.streamTurn(TURN_PARAMS))).toEqual([
+        expect.objectContaining({ type: "message_complete", stopReason: "end_turn" }),
+      ]);
+    },
+  );
+
+  it.each(["openai", "openai-compatible"] as const)(
+    "rejects a wire error reason normalized to other on %s",
+    async (vendor) => {
+      const fixture = createResponseFixture(vendor);
+      fixture.send({ content: "Partial result" }, "error");
+      fixture.close();
+      const events = await collect(fixture.provider.streamTurn(TURN_PARAMS));
+      expect(events.at(-1)).toMatchObject({ type: "error" });
+      expect(events.some((event) => event.type === "message_complete")).toBe(false);
+      expect(fixture.fetchResponse).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("rejects an unclassified provider finish reason", async () => {
+    const fixture = createResponseFixture("gemini");
+    fixture.sendData({ candidates: [{
+      content: { parts: [{ text: "Partial result" }] }, finishReason: "OTHER",
+    }] });
     fixture.close();
     const events = await collect(fixture.provider.streamTurn(TURN_PARAMS));
-    expect(events[0]).toMatchObject({ type: "text_delta", text: "Partial result" });
     expect(events.at(-1)).toMatchObject({ type: "error" });
     expect(events.some((event) => event.type === "message_complete")).toBe(false);
-    expect(fixture.fetchResponse).toHaveBeenCalledTimes(1);
-  });
-
-  it("preserves an explicit empty stop as a completed model response", async () => {
-    const fixture = createResponseFixture();
-    fixture.send({}, "stop");
-    fixture.close();
-    expect(await collect(fixture.provider.streamTurn(TURN_PARAMS))).toEqual([
-      expect.objectContaining({ type: "message_complete", stopReason: "end_turn" }),
-    ]);
   });
 
   it("treats an unsolicited abort event as a provider error", async () => {
@@ -181,7 +309,7 @@ describe("provider stream completion", () => {
     expect(events.map((event) => event.type)).toEqual(["tool_call", "error"]);
   });
 
-  it.each(["error", "unknown", undefined])(
+  it.each(["error", "other", "unknown", undefined])(
     "rejects an unsuccessful or absent finish reason: %s",
     async (finishReason) => {
       const events = await collect(fullStreamToStreamEvent(streamFromArray([
@@ -196,7 +324,6 @@ describe("provider stream completion", () => {
     ["length", "max_tokens"],
     ["tool-calls", "tool_use"],
     ["content-filter", "end_turn"],
-    ["other", "end_turn"],
   ] as const)("preserves the supported finish reason %s", async (finishReason, stopReason) => {
     const events: StreamEvent[] = await collect(fullStreamToStreamEvent(streamFromArray([
       { type: "finish", finishReason },
