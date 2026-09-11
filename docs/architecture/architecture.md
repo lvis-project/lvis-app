@@ -86,6 +86,10 @@ across the whole command; structural checks preserve executable input.
 Continuation analysis refuses a command when its heredoc boundary cannot be
 resolved; here-strings never consume later lines as a heredoc body.
 Denial guidance distinguishes available operations from missing capabilities.
+The structural eval check can recognize a literal non-shell program argument
+inside a complete simple command list. This opt-in tokenizer proof checks every
+consumer and connector, preserving shell expansion, wrapper and file-access
+checks; it does not validate the other language's program behavior.
 
 Text file reads and previews share `readTextFileWindow` in
 `src/tools/file-read-core.ts`. Its `content` preserves the source separators
