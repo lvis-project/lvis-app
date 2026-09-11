@@ -476,7 +476,7 @@ export class BashTool extends ZodTool<typeof BashToolInputSchema> {
   }
 
   readonly name = "bash";
-  readonly description = "Run a shell command in the local repository.";
+  readonly description = "Run a shell command in the local repository under permission and path checks. Recursive copying and archive creation/extraction are blocked, with no built-in equivalent. Single-file copying and archive listing are distinct operations subject to the same checks.";
   readonly inputSchema = BashToolInputSchema;
   override readonly category: ToolCategory = "shell";
 

@@ -245,7 +245,7 @@ describe("shell-path-policy", () => {
       expect(msg).toContain("list_files");
       // The "preserve original target path" instruction is the load-bearing fix
       // — stops the LLM from narrowing into a guessed sub-path on retry.
-      expect(msg).toContain("원래 target path 를 그대로 유지");
+      expect(msg).toContain("원래 대상 경로와 요청한 작업 범위를 그대로 유지");
     });
   });
 
@@ -253,7 +253,7 @@ describe("shell-path-policy", () => {
     withRoot((root) => {
       const msg = validateShellCommandPathPolicy("rg pattern /tmp/foo", root, root, ["/tmp/foo"], true);
       expect(msg).toContain("grep_files");
-      expect(msg).toContain("원래 target path 를 그대로 유지");
+      expect(msg).toContain("원래 대상 경로와 요청한 작업 범위를 그대로 유지");
     });
   });
 
@@ -261,7 +261,7 @@ describe("shell-path-policy", () => {
     withRoot((root) => {
       const msg = validateShellCommandPathPolicy("grep -r needle ./src", root, root, [], true);
       expect(msg).toContain("grep_files");
-      expect(msg).toContain("원래 target path 를 그대로 유지");
+      expect(msg).toContain("원래 대상 경로와 요청한 작업 범위를 그대로 유지");
     });
   });
 
@@ -270,7 +270,7 @@ describe("shell-path-policy", () => {
       const msg = validateShellCommandPathPolicy("ls -R ./src", root, root, [], true);
       // `ls` has no mapped LVIS alternative (only the explicit flag-set is blocked),
       // so the fallback guidance must still nudge the caller to keep the target path.
-      expect(msg).toContain("원래 target path 를 그대로 유지");
+      expect(msg).toContain("원래 대상 경로와 요청한 작업 범위를 그대로 유지");
     });
   });
 

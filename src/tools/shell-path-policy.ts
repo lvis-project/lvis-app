@@ -593,41 +593,28 @@ export function validateShellCommandPathPolicy(
 }
 
 /**
- * Map of recursive-traversal shell commands → equivalent LVIS builtin tool.
- *
- * The block message threads this hint through so the LLM agent (or human
- * operator reading the error) can retry with a sandbox-aware alternative
- * instead of re-narrowing into an unrelated subdirectory — the failure mode
- * observed when a model fell back from `find /Users/example/Documents` to
- * `list_files /Users/example/Documents/journals` (a guessed sub-path) rather
- * than `list_files /Users/example/Documents` (the original target).
- *
- * Entries that map to "(no direct LVIS equivalent)" still receive the
- * "preserve the original target path" instruction so the LLM doesn't
- * silently scope down on retry.
+ * A recursive-operation refusal either names an available builtin or states
+ * the missing capability. An unrelated supported operation is not an
+ * equivalent, and no refusal should silently narrow the requested scope.
+ * Keys belong to RECURSIVE_TRAVERSAL_COMMANDS or RECURSIVE_FLAG_COMMANDS.
  */
-/**
- * Map keys MUST be a subset of `RECURSIVE_TRAVERSAL_COMMANDS` ∪
- * `RECURSIVE_FLAG_COMMANDS` — any key outside that union is dead code (the
- * lookup site is only reached when one of those two sets matches). Tests in
- * `__tests__/shell-path-policy.test.ts` lock the mapped-vs-fallback contract.
- */
-const LVIS_ALTERNATIVE_BY_COMMAND: Readonly<Record<string, string>> = {
-  // Traversal commands (RECURSIVE_TRAVERSAL_COMMANDS):
-  find: "be_shellPathPolicy.altFind",
-  fd: "be_shellPathPolicy.altFd",
-  fdfind: "be_shellPathPolicy.altFdfind",
-  rg: "be_shellPathPolicy.altRg",
-  tree: "be_shellPathPolicy.altTree",
-  tar: "be_shellPathPolicy.altTar",
-  unzip: "be_shellPathPolicy.altUnzip",
-  zip: "be_shellPathPolicy.altZip",
-  // Flag-recursive commands (RECURSIVE_FLAG_COMMANDS):
-  grep: "be_shellPathPolicy.altGrep",
-  egrep: "be_shellPathPolicy.altEgrep",
-  fgrep: "be_shellPathPolicy.altFgrep",
-  cp: "be_shellPathPolicy.altCp",
-  mv: "be_shellPathPolicy.altMv",
+const SHELL_TRAVERSAL_GUIDANCE: Readonly<Record<string, {
+  kind: "builtin" | "unavailable";
+  messageKey: string;
+}>> = {
+  find: { kind: "builtin", messageKey: "be_shellPathPolicy.altFind" },
+  fd: { kind: "builtin", messageKey: "be_shellPathPolicy.altFd" },
+  fdfind: { kind: "builtin", messageKey: "be_shellPathPolicy.altFdfind" },
+  rg: { kind: "builtin", messageKey: "be_shellPathPolicy.altRg" },
+  tree: { kind: "builtin", messageKey: "be_shellPathPolicy.altTree" },
+  tar: { kind: "unavailable", messageKey: "be_shellPathPolicy.altTar" },
+  unzip: { kind: "unavailable", messageKey: "be_shellPathPolicy.altUnzip" },
+  zip: { kind: "unavailable", messageKey: "be_shellPathPolicy.altZip" },
+  grep: { kind: "builtin", messageKey: "be_shellPathPolicy.altGrep" },
+  egrep: { kind: "builtin", messageKey: "be_shellPathPolicy.altEgrep" },
+  fgrep: { kind: "builtin", messageKey: "be_shellPathPolicy.altFgrep" },
+  cp: { kind: "unavailable", messageKey: "be_shellPathPolicy.altCp" },
+  mv: { kind: "unavailable", messageKey: "be_shellPathPolicy.altMv" },
 };
 
 /**
@@ -1382,12 +1369,12 @@ function buildRecursiveBlockMessage(
   const head = flag
     ? `Sandbox: recursive shell filesystem traversal is not allowed: ${commandToken} ${flag}`
     : `Sandbox: recursive shell filesystem traversal is not allowed: ${commandToken}`;
-  const altKey = LVIS_ALTERNATIVE_BY_COMMAND[commandName];
-  const alt = altKey ? t(altKey) : undefined;
-  const guidance = alt
-    ? ` ${t("be_shellPathPolicy.guidanceWithAlt", { alt })}`
-    : ` ${t("be_shellPathPolicy.guidanceNoAlt")}`;
-  return head + guidance;
+  const capability = SHELL_TRAVERSAL_GUIDANCE[commandName];
+  if (!capability) return `${head} ${t("be_shellPathPolicy.guidanceNoAlt")}`;
+  const guidanceKey = capability.kind === "builtin"
+    ? "be_shellPathPolicy.guidanceWithAlt"
+    : "be_shellPathPolicy.guidanceUnavailable";
+  return `${head} ${t(guidanceKey, { alt: t(capability.messageKey) })}`;
 }
 
 /**
