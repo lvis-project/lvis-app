@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { getLlmThinkingBudgetRungs } from "../shared/llm-vendor-defaults.js";
 import { readRepoFile } from "./test-helpers.js";
 
 describe("chat Thinking toggle styles", () => {
@@ -24,29 +25,26 @@ describe("chat Thinking toggle styles", () => {
     // The gauge reads `var(--reasoning-fill-N)` for the level it is drawing.
     // An undefined custom property is not an error: the fill resolves to
     // nothing and the bulb renders unlit, which is the same picture as
-    // thinking being OFF. Every renderer test still passes, so the ladder has
-    // to be checked against the stylesheet that has to grow with it.
-    const ladder = readRepoFile("src/ui/renderer/constants.ts");
+    // thinking being OFF. Check the complete preset ladder, including depths
+    // hidden by the default output ceiling, against the actual stylesheet.
+    const rungs = getLlmThinkingBudgetRungs(Number.MAX_SAFE_INTEGER);
     const styles = readRepoFile("src/styles.css");
 
-    const rungs = ladder.match(/^\s*\{ key: "\w+",.*budget: [\d_]+ \},$/gmu) ?? [];
-    expect(rungs).toHaveLength(5);
-    for (let n = 1; n <= rungs.length; n += 1) {
-      expect(styles).toContain(`--reasoning-fill-${n}:`);
-    }
-    expect(styles).not.toContain(`--reasoning-fill-${rungs.length + 1}:`);
+    const fills = Array.from(styles.matchAll(/^\s*(--reasoning-fill-\d+):/gmu), (match) => match[1]);
+    expect(rungs.length).toBeGreaterThan(0);
+    expect(fills).toEqual(rungs.map((_, index) => `--reasoning-fill-${index + 1}`));
   });
 
   it("keeps the depth ramp inside the yellow window it documents", () => {
     // The ramp's own comment says a step past hue 42 lands in orange, which is
-    // what `--warning` means elsewhere. The rung added for `max` has to darken
-    // without drifting out of that window, so the hue is asserted, not the
-    // lightness.
+    // what `--warning` means elsewhere. Every used colour must stay in that
+    // window, so assert its hue rather than its lightness.
     const styles = readRepoFile("src/styles.css");
-    const ramp = ["100", "200", "400", "600", "700"].map((step) => {
-      const m = styles.match(new RegExp(`--p-yellow-${step}:\\s*(\\d+)`, "u"));
+    const ramp = Array.from(styles.matchAll(/--reasoning-fill-\d+:\s*hsl\(var\((--p-yellow-\d+)\)\);/gu), (match) => {
+      const m = styles.match(new RegExp(`${match[1]}:\\s*(\\d+)`, "u"));
       return m ? Number(m[1]) : NaN;
     });
+    expect(ramp).toHaveLength(getLlmThinkingBudgetRungs(Number.MAX_SAFE_INTEGER).length);
     expect(ramp.every((hue) => hue >= 42 && hue <= 48)).toBe(true);
   });
 });

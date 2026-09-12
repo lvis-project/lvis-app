@@ -12,6 +12,8 @@ import type {
 } from "../../../../shared/native-context-menu.js";
 import type { InputStatusRow } from "../../hooks/use-input-status-row.js";
 import { TEST_IDS, testIdSelector } from "../../../../shared/test-ids.js";
+import { getLlmThinkingBudgetRungs } from "../../../../shared/llm-vendor-defaults.js";
+import { readRepoFile } from "../../../../__tests__/test-helpers.js";
 
 const mockPreset: RolePreset = { id: "default", name: "기본", systemPromptAdd: "", isDefault: true };
 const codingPreset: RolePreset = { id: "coding", name: "코딩", systemPromptAdd: "Code carefully." };
@@ -580,19 +582,22 @@ describe("model card (status-row model cell)", () => {
     // Each permitted depth has its own yellow, and OFF is the absence of the
     // fill layer rather than another colour — an unlit bulb has to be
     // unmistakable, and any colour at level 0 reads as another depth.
-    const cases: Array<{ budget: number; outputTokenLimit?: number; enabled: boolean; level: string; fill: string | null }> = [
-      { budget: 10_000, enabled: false, level: "0", fill: null },
-      { budget: 4_000, enabled: true, level: "1", fill: "var(--reasoning-fill-1)" },
-      { budget: 8_000, enabled: true, level: "2", fill: "var(--reasoning-fill-2)" },
-      { budget: 16_000, enabled: true, level: "3", fill: "var(--reasoning-fill-3)" },
-      { budget: 32_000, outputTokenLimit: 64_000, enabled: true, level: "4", fill: "var(--reasoning-fill-4)" },
+    const outputTokenLimit = Number.MAX_SAFE_INTEGER;
+    const rungs = getLlmThinkingBudgetRungs(outputTokenLimit);
+    const fillTokens = new Map(Array.from(
+      readRepoFile("src/styles.css").matchAll(/^\s*(--reasoning-fill-\d+):\s*(.+);$/gmu),
+      (match) => [match[1]!, match[2]!] as const,
+    ));
+    const cases = [
+      { budget: 10_000, enabled: false, level: "0" },
+      ...rungs.map((rung, index) => ({ budget: rung.budget, enabled: true, level: String(index + 1) })),
     ];
     const seen = new Set<string>();
     for (const testCase of cases) {
       getSettings.mockResolvedValue({
         llm: {
           provider: "azure-foundry",
-          vendors: { "azure-foundry": { thinkingBudgetTokens: testCase.budget, outputTokenLimit: testCase.outputTokenLimit } },
+          vendors: { "azure-foundry": { thinkingBudgetTokens: testCase.budget, outputTokenLimit } },
         },
       });
       const { getByTestId, findByTestId, unmount } = renderBar({
@@ -605,26 +610,27 @@ describe("model card (status-row model cell)", () => {
       });
       const gauge = getByTestId("iab-reasoning-gauge");
       const layers = gauge.querySelectorAll("svg");
-      if (testCase.fill === null) {
+      if (!testCase.enabled) {
         // The outline, and nothing behind it.
         expect(layers).toHaveLength(1);
       } else {
         expect(layers).toHaveLength(2);
-        expect(layers[0]!.style.fill).toBe(testCase.fill);
+        expect(layers[0]!.style.fill).toBe(`var(--reasoning-fill-${testCase.level})`);
+        const token = layers[0]!.style.fill.match(/^var\((--reasoning-fill-\d+)\)$/u)?.[1];
+        expect(token).toBeDefined();
+        const colour = fillTokens.get(token!);
+        expect(colour).toBeTruthy();
         // The fill is the FIRST layer, so the glyph's own lines draw over it.
         // Painted on top, a solid colour swallows the bulb's outline and the
         // control stops reading as a bulb at 12px.
         expect(layers[1]!.style.fill).toBe("");
-        seen.add(layers[0]!.style.fill);
+        seen.add(colour!);
       }
       unmount();
     }
-    // Each depth is its own step of the ladder — one shared token for two
-    // levels would leave the pair indistinguishable, which is the failure the
-    // rising fill line already had. Counted off the cases rather than written
-    // out, so a rung added to the ladder is checked here without this line
-    // having to be found and edited.
-    expect(seen.size).toBe(cases.filter((c) => c.fill !== null).length);
+    // Every canonical preset must render a distinct colour that exists in the
+    // stylesheet, even when that preset needs a larger output ceiling.
+    expect(seen.size).toBe(rungs.length);
   });
 
   it("the reasoning chip is a second way into the same card, and goes with reasoning", async () => {

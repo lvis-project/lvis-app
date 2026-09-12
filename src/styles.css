@@ -626,7 +626,7 @@
     --diff-remove-fg: hsl(var(--destructive));
 
     /* Reasoning depth — how deep the model thinks, drawn as how yellow the
-     * bulb is. Five steps of ONE hue rather than a rising fill line: at 12px
+     * bulb is. Steps of ONE hue rather than a rising fill line: at 12px
      * a fill edge moving a few pixels is not a difference the eye catches,
      * while pale-to-deep is legible at a glance and survives being small.
      *
@@ -641,7 +641,6 @@
     --reasoning-fill-2: hsl(var(--p-yellow-200));
     --reasoning-fill-3: hsl(var(--p-yellow-400));
     --reasoning-fill-4: hsl(var(--p-yellow-600));
-    --reasoning-fill-5: hsl(var(--p-yellow-700));
 
     /* Brand gradient — violet → blue. The single source for the onboarding
      * brand avatar and primary CTA fills. --gradient-brand-soft is the faint
