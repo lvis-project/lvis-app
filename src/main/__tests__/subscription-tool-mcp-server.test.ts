@@ -170,6 +170,18 @@ describe("subscription tool MCP shim", () => {
     }]);
   });
 
+  it("preserves descriptions at the shared UTF-8 byte budget and rejects excess", async () => {
+    let description = "é".repeat(SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.maxDescriptionBytes / 2);
+    const harness = await createBridgeHarness((_request, response) => {
+      writeJson(response, 200, { tools: [{
+        name: "workspace_search", description, inputSchema: { type: "object", properties: {} },
+      }] });
+    });
+    expect((await clientFor(harness.bridgeUrl).listTools())[0]?.description).toBe(description);
+    description += "x";
+    await expect(clientFor(harness.bridgeUrl).listTools()).resolves.toEqual([]);
+  });
+
   it("forwards a bounded JSON tool call without executing it in the child", async () => {
     const harness = await createBridgeHarness((request, response) => {
       expect(request).toMatchObject({

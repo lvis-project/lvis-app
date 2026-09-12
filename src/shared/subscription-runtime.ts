@@ -27,12 +27,24 @@ export const SUBSCRIPTION_TOOL_BRIDGE_CONTRACT = Object.freeze({
   tokenEnv: "LVIS_SUBSCRIPTION_TOOL_BRIDGE_TOKEN",
   maxToolCount: 256,
   maxSchemaBytes: 64 * 1024,
+  /** Host defensive UTF-8 budget; descriptions are preserved, never truncated. */
+  maxDescriptionBytes: 64 * 1024,
+  /** Complete serialized tool-list response, including schemas and JSON framing. */
+  maxBridgeResponseBytes: 512 * 1024,
   maxJsonDepth: 16,
   maxJsonKeys: 1_024,
   maxJsonArrayItems: 1_024,
   maxJsonStringLength: 64 * 1024,
   maxToolNameLength: 128,
 } as const);
+
+/** Shared text admission for every subscription tool transport. */
+export function isSubscriptionToolDescription(value: unknown): value is string {
+  return typeof value === "string"
+    && value.length <= SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.maxDescriptionBytes
+    && !/[\u0000\u007f]/.test(value)
+    && new TextEncoder().encode(value).byteLength <= SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.maxDescriptionBytes;
+}
 
 /**
  * The name a host tool travels under on the subscription tool bridge: minted

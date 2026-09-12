@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import { dirname, isAbsolute, join, resolve, sep, win32 } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { getLvisAppVersion } from "../shared/app-version.js";
-import { MAX_SUBSCRIPTION_RUNTIME_MODEL_ID_LENGTH } from "../shared/subscription-runtime.js";
+import { MAX_SUBSCRIPTION_RUNTIME_MODEL_ID_LENGTH, isSubscriptionToolDescription } from "../shared/subscription-runtime.js";
 import {
   projectSubscriptionTransportErrorDiagnostics,
   type SubscriptionTransportDiagnosticError,
@@ -30,7 +30,6 @@ const MAX_STREAM_DELTA_BYTES = 256_000;
 const MAX_IDENTIFIER_LENGTH = 512;
 const MAX_DYNAMIC_TOOL_NAME_LENGTH = 128;
 const MAX_DYNAMIC_TOOL_NAMESPACE_LENGTH = 64;
-const MAX_DYNAMIC_TOOL_DESCRIPTION_LENGTH = 1_024;
 const MAX_DYNAMIC_TOOL_RESULT_BYTES = 750_000;
 const STAGED_IMAGE_FILE_NAME = new RegExp(`^lvis-subscription-image-${UUID_SOURCE}\\.(?:png|jpe?g|gif|webp|bmp)$`);
 // A new app process may remove only files that predate this module. Paths
@@ -622,14 +621,7 @@ function boundedDynamicToolName(value: unknown, maxLength: number): string | nul
 }
 
 function boundedDynamicToolDescription(value: unknown): string | null {
-  if (
-    typeof value !== "string"
-    || value.length > MAX_DYNAMIC_TOOL_DESCRIPTION_LENGTH
-    || value.includes("\u0000")
-  ) {
-    return null;
-  }
-  return value;
+  return isSubscriptionToolDescription(value) ? value : null;
 }
 
 function projectJsonValue(value: unknown, depth = 0): CodexConversationJsonValue | null {

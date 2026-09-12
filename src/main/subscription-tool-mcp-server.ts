@@ -31,7 +31,7 @@ import {
   type CallToolResult,
   type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
-import { SUBSCRIPTION_TOOL_BRIDGE_CONTRACT, isSubscriptionBridgeToolName } from "../shared/subscription-runtime.js";
+import { SUBSCRIPTION_TOOL_BRIDGE_CONTRACT, isSubscriptionBridgeToolName, isSubscriptionToolDescription } from "../shared/subscription-runtime.js";
 import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
 import { hasExactKeys } from "../shared/is-record.js";
 import { isPlainRecord } from "../shared/is-record.js";
@@ -41,11 +41,10 @@ const BRIDGE_TOKEN_ENV = SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.tokenEnv;
 const BRIDGE_HOST = "127.0.0.1";
 const TOOLS_PATH = "/v1/tools";
 const TOOL_CALL_PATH = "/v1/tools/call";
-const MAX_BRIDGE_RESPONSE_BYTES = 512 * 1024;
+const MAX_BRIDGE_RESPONSE_BYTES = SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.maxBridgeResponseBytes;
 const MAX_TOOL_CALL_REQUEST_BYTES = 128 * 1024;
 const MAX_TOOL_COUNT = SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.maxToolCount;
 const MAX_TOOL_NAME_LENGTH = SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.maxToolNameLength;
-const MAX_TOOL_DESCRIPTION_LENGTH = 16 * 1024;
 const MAX_SCHEMA_DIALECT_LENGTH = 1_024;
 const MAX_SCHEMA_BYTES = SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.maxSchemaBytes;
 const MAX_JSON_DEPTH = SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.maxJsonDepth;
@@ -201,7 +200,7 @@ function sanitizeTool(value: unknown): SubscriptionMcpTool | null {
   if (
     !isSafeString(name, MAX_TOOL_NAME_LENGTH)
     || !isSubscriptionBridgeToolName(name)
-    || !isBoundedText(description, MAX_TOOL_DESCRIPTION_LENGTH, true)
+    || !isSubscriptionToolDescription(description)
     || !isPlainRecord(rawInputSchema)
   ) {
     return null;

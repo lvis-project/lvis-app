@@ -16,14 +16,12 @@ import { join } from "node:path";
 import type { ToolSchema } from "../engine/llm/types.js";
 import { mainDir } from "./main-paths.js";
 import { sha256Hex } from "../lib/hex-digest-equal.js";
-import { SUBSCRIPTION_TOOL_BRIDGE_CONTRACT, isSubscriptionBridgeToolName } from "../shared/subscription-runtime.js";
+import { SUBSCRIPTION_TOOL_BRIDGE_CONTRACT, isSubscriptionBridgeToolName, isSubscriptionToolDescription } from "../shared/subscription-runtime.js";
 import { isPlainRecord } from "../shared/is-record.js";
 
 const MAX_TOOL_COUNT = SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.maxToolCount;
 const MAX_SOURCE_TOOL_NAME_LENGTH = 256;
 const MAX_REMOTE_TOOL_NAME_LENGTH = SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.maxToolNameLength;
-const MAX_DESCRIPTION_CHARACTERS = 1_024;
-const MAX_DESCRIPTION_BYTES = 64 * 1024;
 const MAX_SCHEMA_BYTES = SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.maxSchemaBytes;
 const MAX_ARGUMENT_BYTES = 128 * 1024;
 const MAX_HTTP_BODY_BYTES = 128 * 1024;
@@ -36,7 +34,6 @@ const MCP_CHILD_ENV = "ELECTRON_RUN_AS_NODE";
 const BRIDGE_URL_ENV = SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.urlEnv;
 const BRIDGE_TOKEN_ENV = SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.tokenEnv;
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/;
-const DESCRIPTION_CONTROL_CHARACTERS = /[\u0000\u007f]/;
 
 type JsonPrimitive = string | number | boolean | null;
 type JsonValue = JsonPrimitive | JsonRecord | JsonValue[];
@@ -115,14 +112,7 @@ function boundedString(value: unknown, maxBytes: number): string | null {
 }
 
 function boundedDescription(value: unknown): string | null {
-  if (
-    typeof value !== "string"
-    || !value
-    || value.length > MAX_DESCRIPTION_CHARACTERS
-    || Buffer.byteLength(value, "utf8") > MAX_DESCRIPTION_BYTES
-    || DESCRIPTION_CONTROL_CHARACTERS.test(value)
-  ) return null;
-  return value;
+  return isSubscriptionToolDescription(value) && value.length > 0 ? value : null;
 }
 
 function cloneToolSchema(schema: ToolSchema): ToolSchema | null {
@@ -249,6 +239,9 @@ export class SubscriptionToolBridge {
         remoteSchema,
       }));
       cloned.push(remoteSchema);
+    }
+    if (Buffer.byteLength(JSON.stringify({ tools: cloned }), "utf8") > SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.maxBridgeResponseBytes) {
+      throw new Error("subscription-host-tool-list-too-large");
     }
     this.schemas = Object.freeze(cloned);
   }
