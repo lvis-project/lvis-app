@@ -265,8 +265,8 @@ export const ViewImageInputSchema = FilePathSchema;
  * `view_image` — load a local image file into the model's context so it can see
  * it. Reuses the same path-scope security as read_file (resolvePath +
  * ensureAllowed). The image rides {@link ToolExecutionResult.image}; the text `output` is
- * a placeholder, and the message mapper turns the image into a visible block on
- * Claude (dropped to the placeholder on vendors whose tool results are text-only).
+ * a placeholder, and the selected transport sends the image through its native
+ * visual input.
  */
 export class ViewImageTool extends FileTool<typeof ViewImageInputSchema> {
   readonly name = "view_image";

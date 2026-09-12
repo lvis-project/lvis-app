@@ -14,6 +14,9 @@ import {
 } from "../codex-conversation-runtime.js";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 import { SUBSCRIPTION_TOOL_BRIDGE_CONTRACT } from "../../shared/subscription-runtime.js";
+import { ViewImageTool } from "../../tools/file-tools.js";
+import { serializeSubscriptionConversationPayload } from "../subscription-llm-provider.js";
+import { MAX_SUBSCRIPTION_ATTACHMENT_BYTES, MAX_SUBSCRIPTION_PROMPT_ATTACHMENTS } from "../subscription-attachment-input.js";
 
 type Spawn = NonNullable<CodexConversationRuntimeOptions["spawn"]>;
 type JsonRecord = Record<string, unknown>;
@@ -385,6 +388,94 @@ describe("CodexConversationRuntime", () => {
       attachments: [{ type: "image", mimeType: "image/png", data: "iVBORw0KGgo=" }],
     })).resolves.toMatchObject({ status: "completed" });
     await vi.waitFor(() => expect(existsSync(stagedPath as string)).toBe(false));
+  });
+
+  it("frames governed image results with original user pixels in order and cleans staged files", async () => {
+    const red = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==";
+    const blue = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYPj/HwADAgH/5ncLrgAAAABJRU5ErkJggg==";
+    const green = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNg+M/wHwAEAQH/cetH5QAAAABJRU5ErkJggg==";
+    const stagedPaths: string[] = [];
+    const harness = createHarness((message, current) => {
+      if (message.method === "initialize") reply(current.child, requestId(message), {});
+      if (message.method === "thread/start") reply(current.child, requestId(message), { thread: { id: "thread-1" } });
+      if (message.method !== "turn/start") return;
+      const turnParams = message.params as { input: Array<{ type: string; text?: string; path?: string }>; cwd: string; environments: unknown[]; sandboxPolicy: { networkAccess: boolean } };
+      const inputImages = turnParams.input.filter((part) => part.type === "localImage");
+      expect(inputImages).toHaveLength(3);
+      stagedPaths.push(...inputImages.map((part) => part.path!));
+      expect(stagedPaths.map((path) => readFileSync(path))).toEqual([green, red, blue].map((data) => Buffer.from(data, "base64")));
+      const text = turnParams.input.find((part) => part.type === "text")?.text ?? "";
+      const requestJson = text.match(/<lvis-request-json>\s*([\s\S]*?)\s*<\/lvis-request-json>/)?.[1];
+      const rows = JSON.parse(requestJson!).messages;
+      expect(rows.filter((row: { role: string }) => row.role === "tool_result").map((row: { toolUseId: string; image: { attachmentIndex: number } }) => [row.toolUseId, row.image.attachmentIndex])).toEqual([
+        ["red-call", 1], ["blue-call", 2],
+      ]);
+      for (const data of [red, blue, green]) expect(JSON.stringify(message)).not.toContain(data);
+      expect(turnParams.cwd).toBe(current.workspaceDir);
+      expect(turnParams.environments).toEqual([]);
+      expect(turnParams.sandboxPolicy.networkAccess).toBe(false);
+      reply(current.child, requestId(message), { turn: { id: "turn-1", status: "inProgress" } });
+      notify(current.child, "turn/completed", { threadId: "thread-1", turn: { id: "turn-1", status: "completed" } });
+    });
+    const projectDir = join(harness.runtimeRoot, "project");
+    mkdirSync(projectDir);
+    writeFileSync(join(projectDir, "red.png"), Buffer.from(red, "base64"));
+    writeFileSync(join(projectDir, "blue.png"), Buffer.from(blue, "base64"));
+    const tool = new ViewImageTool();
+    const context = { cwd: projectDir, extraAllowedDirectories: [], metadata: {} };
+    const redResult = await tool.execute({ path: "red.png" }, context);
+    const blueResult = await tool.execute({ path: "blue.png" }, context);
+    expect(redResult.isError || blueResult.isError).toBe(false);
+    expect(redResult.image?.data).toBe(red);
+    expect(blueResult.image?.data).toBe(blue);
+    const denied = await tool.execute({ path: "../outside.png" }, context);
+    expect(denied.isError).toBe(true);
+    expect(denied.image).toBeUndefined();
+    const payload = serializeSubscriptionConversationPayload({
+      model: "default", systemPrompt: "Use the governed host tools.",
+      messages: [
+        { role: "user", content: [{ type: "image", image: `data:image/png;base64,${green}` }] },
+        { role: "assistant", content: "", toolCalls: [
+          { id: "red-call", name: "view_image", input: { path: "red.png" } },
+          { id: "blue-call", name: "view_image", input: { path: "blue.png" } },
+        ] },
+        { role: "tool_result", toolUseId: "red-call", toolName: "view_image", content: redResult.output, image: redResult.image },
+        { role: "tool_result", toolUseId: "blue-call", toolName: "view_image", content: blueResult.output, image: blueResult.image },
+      ],
+    });
+    await expect(harness.runtime.startTurn(payload)).resolves.toMatchObject({ status: "completed" });
+    await vi.waitFor(() => expect(stagedPaths.every((path) => !existsSync(path))).toBe(true));
+    expect(existsSync(join(projectDir, "red.png"))).toBe(true);
+    expect(existsSync(join(projectDir, "blue.png"))).toBe(true);
+  });
+
+  it("rejects combined user and tool image counts above the native limit before spawning", async () => {
+    const harness = createHarness();
+    const payload = serializeSubscriptionConversationPayload({
+      model: "default", systemPrompt: "Inspect the loaded images.",
+      messages: [
+        { role: "user", content: Array.from({ length: MAX_SUBSCRIPTION_PROMPT_ATTACHMENTS }, () => ({ type: "image", image: "data:image/png;base64,iVBORw0KGgo=" })) },
+        { role: "tool_result", toolUseId: "tool-image", content: "image loaded", image: { data: "iVBORw0KGgo=", mimeType: "image/png" } },
+      ],
+    });
+    await expect(harness.runtime.startTurn(payload)).rejects.toMatchObject({ code: "subscription-attachment-too-large" });
+    expect(harness.spawnCalls).toHaveLength(0);
+  });
+
+  it("rejects combined user and tool image bytes above the native limit before staging", async () => {
+    const harness = createHarness();
+    const bytes = Buffer.alloc(Math.floor(MAX_SUBSCRIPTION_ATTACHMENT_BYTES / 2) + 1);
+    Buffer.from("iVBORw0KGgo=", "base64").copy(bytes);
+    const data = bytes.toString("base64");
+    const payload = serializeSubscriptionConversationPayload({
+      model: "default", systemPrompt: "Inspect the loaded images.",
+      messages: [
+        { role: "user", content: [{ type: "image", image: `data:image/png;base64,${data}` }] },
+        { role: "tool_result", toolUseId: "tool-image", content: "image loaded", image: { data, mimeType: "image/png" } },
+      ],
+    });
+    await expect(harness.runtime.startTurn(payload)).rejects.toMatchObject({ code: "subscription-attachment-too-large" });
+    expect(harness.spawnCalls).toHaveLength(0);
   });
 
   it("removes a staged localImage when turn/start fails", async () => {

@@ -153,9 +153,9 @@ export interface ToolExecutionContext {
  * An image a tool returns for the model to SEE (e.g. `view_image`). Carried on
  * a sibling field of {@link ToolExecutionResult} so `output` stays a plain-text
  * placeholder for every string-only consumer (token estimation, persistence,
- * renderer replay); only the Claude message mapper reads this and emits an image
- * block. `data` is raw base64 (no `data:` URL prefix); non-Claude vendors, which
- * cannot carry an image inside a tool result, fall back to the text placeholder.
+ * renderer replay). Each transport maps the retained image to its native visual
+ * input while preserving the source tool result. `data` is raw base64 without
+ * a `data:` URL prefix.
  */
 export interface ToolResultImage {
   data: string;
