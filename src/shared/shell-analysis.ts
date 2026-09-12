@@ -51,8 +51,20 @@ export function displayShellWord(word: ShellWord): string {
   if (word.parts.some((part) => part.kind === "unknown" || part.kind === "substitution" || part.kind === "unicode-escaped" || part.kind === "parameter-choice" || part.kind === "arithmetic-data")) return word.source.raw;
   return word.parts.map((part) => part.kind === "literal" || part.kind === "pattern" ? part.value : part.kind === "parameter" ? `$${part.name}` : "").join("");
 }
-function decodeLiteral(text: string, context: WordContext): ShellWordPart[] {
-  const parts: ShellWordPart[] = [];
+type LoweredWordPart = ShellWordPart | { kind: "unquoted-bracket"; value: "[" | "]" };
+
+function classifyBracketParts(parts: readonly LoweredWordPart[]): ShellWordPart[] {
+  // Quoted and escaped brackets are already literals. Pair across the complete
+  // word so quoted members do not hide a real expansion. Closed ambiguous forms
+  // remain patterns; only an opening without an unquoted closer is literal.
+  const lastCloser = parts.findLastIndex((part) => part.kind === "unquoted-bracket" && part.value === "]");
+  return parts.map((part, index) => part.kind === "unquoted-bracket"
+    ? { kind: part.value === "[" && index < lastCloser ? "pattern" : "literal", value: part.value }
+    : part);
+}
+
+function decodeLiteral(text: string, context: WordContext): LoweredWordPart[] {
+  const parts: LoweredWordPart[] = [];
   let value = "";
   const flush = (): void => { if (value) parts.push({ kind: "literal", value }); value = ""; };
   for (let index = 0; index < text.length; index += 1) {
@@ -63,7 +75,8 @@ function decodeLiteral(text: string, context: WordContext): ShellWordPart[] {
         || (context === "heredoc" ? "$`\\\n" : "$`\"\\\n").includes(next);
       if (escaped) { if (next !== "\n") value += next; index += 1; continue; }
     }
-    if (context === "unquoted" && "*?[".includes(char)) { flush(); parts.push({ kind: "pattern", value: char }); }
+    if (context === "unquoted" && "*?".includes(char)) { flush(); parts.push({ kind: "pattern", value: char }); }
+    else if (context === "unquoted" && (char === "[" || char === "]")) { flush(); parts.push({ kind: "unquoted-bracket", value: char }); }
     else value += char;
   }
   flush();
@@ -233,11 +246,11 @@ function lowerWord(node: ShellSyntaxNode, source: ShellSource, context: WordCont
     return { source: location, parts: [{ kind: "unknown", reason: "Unsupported brace expansion" }], preservesEmpty: true };
   }
   const syntaxParts = children(node, "Parts");
-  const parts = syntaxParts.flatMap((part, index) => lowerWordPart(part, source, context, index === 0));
+  const parts = classifyBracketParts(syntaxParts.flatMap((part, index) => lowerWordPart(part, source, context, index === 0)));
   const preservesEmpty = context !== "unquoted" || syntaxParts.some((part) => part.Type === "SglQuoted" || part.Type === "DblQuoted");
   return { source: location, parts: parts.length ? parts : [{ kind: "literal", value: "" }], preservesEmpty };
 }
-function lowerWordPart(node: ShellSyntaxNode, source: ShellSource, context: WordContext, first: boolean): ShellWordPart[] {
+function lowerWordPart(node: ShellSyntaxNode, source: ShellSource, context: WordContext, first: boolean): LoweredWordPart[] {
   switch (node.Type) {
     case "Lit": {
       const text = typeof node.Value === "string" ? node.Value : "";

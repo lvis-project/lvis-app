@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, realpathSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -51,9 +51,43 @@ describe.skipIf(process.platform==="win32")("typed shell execution and native ar
     String.raw`HOME=./safe printf '%s\0' "$HOME"; printf '%s\0' "$HOME"`,
     String.raw`HOME=./safe bash -c 'printf "%s\0" "$HOME"'`,
     String.raw`TARGET=./safe; emit(){ printf '%s\0' "$TARGET" "$1"; }; TARGET=./other emit value; printf '%s\0' "$TARGET"`,
+    String.raw`printf '%s\0' [ ] [abc ./safe/file[ ./safe/file[abc`,
+    String.raw`printf '%s\0' \[a] '[a]' "[a]" [a\] [a"]" [a']' ["abc"`,
+    String.raw`printf '%s\0' 'prefix['a] "prefix["a] prefix\[a] [a\\`,
   ])("preserves native argument bytes and scope: %s",command=>{
     const {cwd,environment}=fixture();expect(emitted(command,cwd,environment)).toEqual(native(command,cwd,environment));
   });
+
+  it.each([
+    [String.raw`./safe/[ab]`, ["./safe/a", "./safe/b"]],
+    [String.raw`./safe/["a"]`, ["./safe/a"]],
+    [String.raw`./safe/['!']`, ["./safe/!"]],
+    [String.raw`./safe/[\]]`, ["./safe/]"]],
+    [String.raw`./safe/[]]`, ["./safe/]"]],
+    [String.raw`./safe/[!b]`, ["./safe/!", "./safe/]", "./safe/a"]],
+    [String.raw`./safe/[^b]`, ["./safe/!", "./safe/]", "./safe/a"]],
+    [String.raw`./safe/[[:alpha:]]`, ["./safe/a", "./safe/b"]],
+    [String.raw`./safe/[$TARGET]`, ["./safe/a"]],
+  ])("keeps native bracket expansion unresolved: %s", (operand, expected) => {
+    const { cwd, environment } = fixture();
+    for (const name of ["a", "b", "!", "]"]) writeFileSync(join(cwd, "safe", name), "fixture");
+    const command = `TARGET=a; printf '%s\\0' ${operand}`;
+    expect(native(command, cwd, environment)).toEqual(expected);
+    const arguments_: (string | undefined)[] = [];
+    inspectShellExecution(command, cwd, { dialect: "bash", environment }, {
+      path() {}, command(event) { if (event.argv[0] === "printf") arguments_.push(...event.argv.slice(2)); },
+    });
+    expect(arguments_).toEqual([undefined]);
+  });
+
+  it.each(["[]", "[!]", "[^]", "[[:alpha:]", "[[:unknown:]]", "[a/b]"])(
+    "keeps closed ambiguous bracket forms unresolved: %s", (operand) => {
+      const { cwd, environment } = fixture();
+      expect(() => inspectShellExecution(operand, cwd, { dialect: "bash", environment }, {
+        path() {}, command() {},
+      })).toThrow("unresolved executed command");
+    },
+  );
 
   it("keeps heredoc code distinct from quoted data",()=>{
     const {cwd,environment}=fixture();
