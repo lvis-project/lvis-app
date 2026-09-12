@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../permissions/asrt-sandbox.js", () => ({
   wrapToolCommand: vi.fn(async (command: string, options: { binShell: string }) => ({
@@ -11,6 +12,8 @@ vi.mock("../../permissions/asrt-sandbox.js", () => ({
 }));
 
 import * as shellResolver from "../../lib/shell-resolver.js";
+import { configureHostResources } from "../../main/host-resources.js";
+import { projectRoot } from "../../main/main-paths.js";
 import * as windowsJobLauncher from "../../main/windows-job-launcher.js";
 import { wrapToolCommand } from "../../permissions/asrt-sandbox.js";
 import { BashTool, backgroundShellManager, spawnWithSandbox } from "../shell-tools.js";
@@ -19,6 +22,10 @@ import { preparedSandboxBootstrap } from "../prepared-shell-invocation.js";
 
 const COMMAND = 'values=(alpha beta); read -r value <<< "${values[1]}"; printf "%s" "$value"';
 const context = { cwd: process.cwd(), extraAllowedDirectories: [], metadata: { sessionId: "bash-dialect" } };
+
+beforeEach(() => {
+  configureHostResources({ resourcePath: join(projectRoot, "resources"), isPackaged: false });
+});
 
 afterEach(() => {
   backgroundShellManager.disposeSession("bash-dialect");

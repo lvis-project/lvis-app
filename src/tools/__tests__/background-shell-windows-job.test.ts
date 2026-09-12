@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 import { shellQuote } from "../../lib/shell-resolver.js";
+import { configureHostResources } from "../../main/host-resources.js";
+import { projectRoot } from "../../main/main-paths.js";
 import { resolveWindowsJobLauncher } from "../../main/windows-job-launcher.js";
 import { backgroundShellManager as manager, BashTool } from "../shell-tools.js";
 
@@ -36,6 +38,7 @@ describe.skipIf(process.platform !== "win32")("BashTool Windows background job o
 
   beforeEach(() => {
     dir = "";
+    configureHostResources({ resourcePath: join(projectRoot, "resources"), isPackaged: false });
     // This suite requires the real native asset; missing build setup must fail.
     expect(existsSync(resolveWindowsJobLauncher())).toBe(true);
     const node = process.env.LVIS_TEST_NODE_EXEC_PATH;
