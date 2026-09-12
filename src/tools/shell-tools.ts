@@ -285,7 +285,6 @@ function createManager(): BackgroundShellManager {
           e.readCursor >= e.output.length
         ) {
           e.terminate();
-          e.stopTracking();
           shells.delete(e.shellId);
         }
       }
@@ -392,7 +391,6 @@ function createManager(): BackgroundShellManager {
       for (const entry of [...shells.values()]) {
         if (entry.sessionId !== sessionId) continue;
         entry.terminate();
-        entry.stopTracking();
         shells.delete(entry.shellId);
         notify(entry);
         disposed += 1;
