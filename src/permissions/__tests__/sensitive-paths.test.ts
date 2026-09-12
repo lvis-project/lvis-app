@@ -45,6 +45,7 @@ describe("SENSITIVE_PATH_PATTERNS", () => {
     expect(SENSITIVE_PATH_PATTERNS).toContain("**/.lvis/certs/**");
     expect(SENSITIVE_PATH_PATTERNS).toContain("**/.lvis/secrets/**");
     expect(SENSITIVE_PATH_PATTERNS).toContain("**/.lvis/keys/**");
+    expect(SENSITIVE_PATH_PATTERNS).toContain("**/.lvis/subscription-runtimes/**");
     expect(SENSITIVE_PATH_PATTERNS).toContain("**/.lvis/lvis-secrets.json");
     expect(SENSITIVE_PATH_PATTERNS).toContain("**/lvis-secrets.json");
   });
@@ -141,6 +142,16 @@ describe("isSensitivePath — positive matches", () => {
       "**/.lvis/secrets/**",
     );
   });
+
+  it.each(["", "registry.json", "codex-v3-home/auth.json", "provider-home/config.toml"])(
+    "protects subscription runtime state: %s",
+    (suffix) => {
+      expect(isSensitivePath(`/home/example/.lvis/subscription-runtimes/${suffix}`)).toBe(
+        "**/.lvis/subscription-runtimes/**",
+      );
+      expect(isSensitivePath(`/home/example/project/subscription-runtimes/${suffix}`)).toBeNull();
+    },
+  );
 
   it("matches LVIS permission control-plane files", () => {
     expect(isSensitivePath("/Users/example/.lvis/settings.json")).toBe("**/.lvis/settings.json");

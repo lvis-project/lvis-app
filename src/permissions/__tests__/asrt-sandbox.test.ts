@@ -871,6 +871,19 @@ describe("asrt-sandbox — sensitive read deny-list (host-secret hardening)", ()
     expect(paths).not.toContain(join(home, ".config"));
   });
 
+  it("projects subscription runtime state into both OS deny floors for a custom profile", () => {
+    const profile = join(tmpdir(), "lvis-subscription-custom-profile");
+    process.env.LVIS_HOME = profile;
+    const runtime = join(profile, "subscription-runtimes");
+    expect(getDefaultSensitiveReadDenyPaths()).toContain(runtime);
+    expect(getDefaultSensitiveWriteDenyPaths()).toContain(runtime);
+    const config = buildSandboxConfig({ allowedDomains: [], denyRead: [], denyWrite: [] });
+    expect(config.filesystem.denyRead).toContain(runtime);
+    expect(config.filesystem.denyWrite).toContain(runtime);
+    expect(config.filesystem.denyRead).not.toContain(profile);
+    expect(config.filesystem.denyWrite).not.toContain(profile);
+  });
+
   it("FIX 1 — Linux XDG_CONFIG_HOME: when set, userData base uses $XDG_CONFIG_HOME not ~/.config", () => {
     // This test only exercises the XDG path on Linux (the env var is harmless
     // on other platforms since darwin/win32 branches never read it).
