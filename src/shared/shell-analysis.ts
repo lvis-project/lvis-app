@@ -26,6 +26,8 @@ export interface ShellCommand {
   assignments: readonly ShellAssignment[];
   assignmentScope: "current" | "command";
   redirects: readonly ShellRedirect[];
+  /** Preserves the semantic origin when Bash `[[ ... ]]` lowers to a command. */
+  testForm?: "double-bracket";
 }
 export type ShellStatement =
   | ShellCommand
@@ -50,6 +52,21 @@ export function staticShellWord(word: ShellWord): string | undefined {
 export function displayShellWord(word: ShellWord): string {
   if (word.parts.some((part) => part.kind === "unknown" || part.kind === "substitution" || part.kind === "unicode-escaped" || part.kind === "parameter-choice" || part.kind === "arithmetic-data")) return word.source.raw;
   return word.parts.map((part) => part.kind === "literal" || part.kind === "pattern" ? part.value : part.kind === "parameter" ? `$${part.name}` : "").join("");
+}
+
+/**
+ * True when an unresolved word is still guaranteed to occupy exactly one argv
+ * slot. Known expansion is lowered to a literal before this check. Keep this
+ * proof with the word AST so command-specific policies do not invent their own
+ * quote and field-splitting rules.
+ */
+export function shellWordHasSingleField(word: ShellWord): boolean {
+  return word.parts.every((part) => {
+    if (part.kind === "literal" || part.kind === "unicode-escaped" || part.kind === "arithmetic-data") return true;
+    if (part.kind === "parameter") return part.quoted && part.index !== "@" && part.name !== "@";
+    if (part.kind === "parameter-choice") return part.quoted && shellWordHasSingleField(part.operand);
+    return false;
+  });
 }
 type LoweredWordPart = ShellWordPart | { kind: "unquoted-bracket"; value: "[" | "]" };
 
@@ -196,7 +213,7 @@ function lowerCommandNode(node: ShellSyntaxNode, source: ShellSource): ShellStat
         }
       };
       lowerTest(child(node, "X"));
-      return { kind: "command", source: location, words, assignments: [], assignmentScope: "current", redirects: [] };
+      return { kind: "command", source: location, words, assignments: [], assignmentScope: "current", redirects: [], testForm: "double-bracket" };
     }
     case "TimeClause": return lowerStatement(child(node, "Stmt"), source);
     default: return unsupported(node, source);

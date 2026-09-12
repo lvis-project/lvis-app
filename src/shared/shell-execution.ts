@@ -4,6 +4,7 @@ import { analyzeShell, literalWord, staticShellWord, type ShellCommand, type She
 import { effectiveShellCommand, stripCommandPath, type EffectiveShellCommand } from "./shell-effective-command.js";
 import { SHELL_ANALYSIS_LIMITS } from "./shell-parser.js";
 import { resolveShellFilesystemPath } from "./shell-filesystem-path.js";
+import { analyzeShellTestExpression, parseProvenShellInteger, type ShellTestExpression } from "./shell-test-expression.js";
 
 export interface ShellCommandEvent {
   original: ShellCommand;
@@ -19,6 +20,8 @@ export interface ShellCommandEvent {
   pipeline?: readonly ShellStatement[];
   fromPipe: boolean;
   activeFunctions: readonly string[];
+  dialect: "bash" | "posix";
+  testExpression?: ShellTestExpression;
   inspectNested(text: string, dialect: "bash" | "posix"): void;
 }
 export interface ShellExecutionInspector {
@@ -53,7 +56,9 @@ interface ShellState {
   activeFunctions: readonly string[];
 }
 type ExitStatus = "success" | "failure" | "unknown";
-interface StateResult { state: ShellState; status: ExitStatus }
+interface BreakControl { kind: "break"; levels: number; boundary: number }
+interface StateResult { state: ShellState; status: ExitStatus; control?: BreakControl }
+interface ExecutionContext { boundary: number; loopDepth: number }
 interface WordEvaluation { lastSubstitutionStatus?: ExitStatus; mayFail?: boolean }
 const EXECUTION_ALTERING_VARIABLES = new Set(["IFS", "BASH_ENV", "ENV", "SHELLOPTS", "BASHOPTS", "CDPATH", "PWD"]);
 function stateKey(state: ShellState): string {
@@ -69,7 +74,7 @@ function uniqueResults(results: readonly StateResult[]): StateResult[] {
   const unique = new Map<string, StateResult>();
   for (const result of results) {
     const state = result.state;
-    const key = JSON.stringify([result.status, stateKey(state)]);
+    const key = JSON.stringify([result.status, result.control, stateKey(state)]);
     unique.set(key, result);
     if (unique.size > SHELL_ANALYSIS_LIMITS.states) decline("execution-state limit exceeded");
   }
@@ -88,6 +93,17 @@ export function inspectShellExecution(command: string, cwd: string, facts: Shell
   // not to the clonable shell-variable state or a cross-call cache.
   let filesystemMayChange = false;
   let steps = 0;
+  let nextExecutionBoundary = 0;
+  const freshExecutionContext = (): ExecutionContext => ({ boundary: ++nextExecutionBoundary, loopDepth: 0 });
+  const rootExecutionContext = freshExecutionContext();
+  const leaveLoop = (result: StateResult, context: ExecutionContext): StateResult => {
+    const control = result.control;
+    if (!control) return result;
+    if (control.boundary !== context.boundary) decline("control transfer crossed execution boundary");
+    return control.levels === 1
+      ? { state: result.state, status: "success" }
+      : { ...result, control: { ...control, levels: control.levels - 1 } };
+  };
   const checkPath = (path: string, raw: string, state: ShellState, effect: "read" | "write"): void => {
     if (!isAbsolute(path) && state.cwd === null) decline("working directory is unresolved");
     inspector.path(path, raw, state.cwd, effect);
@@ -158,7 +174,7 @@ export function inspectShellExecution(command: string, cwd: string, facts: Shell
     inspector.word?.(word);
     for (const part of word.parts) {
       if (part.kind === "substitution") {
-        const results = walk(part.body, { ...cloneState(state), backquote: state.backquote || part.backquotes }, depth + 1);
+        const results = walk(part.body, { ...cloneState(state), backquote: state.backquote || part.backquotes }, depth + 1, freshExecutionContext());
         if (!part.process && evaluation) {
           const statuses = new Set(results.map((result) => result.status));
           evaluation.lastSubstitutionStatus = statuses.size === 1 ? results[0]!.status : "unknown";
@@ -214,9 +230,9 @@ export function inspectShellExecution(command: string, cwd: string, facts: Shell
   const inspectNested = (text: string, state: ShellState, depth: number): void => {
     const nested = analyzeShell(text, state.dialect);
     if (!nested.ok) decline(`nested command cannot be analyzed: ${nested.reason}`);
-    walk(nested.program, state, depth + 1);
+    walk(nested.program, state, depth + 1, freshExecutionContext());
   };
-  const executeCommand = (node: ShellCommand, incoming: ShellState, depth: number): StateResult[] => {
+  const executeCommand = (node: ShellCommand, incoming: ShellState, depth: number, context: ExecutionContext): StateResult[] => {
     const state = cloneState(incoming);
     const resolvedWords = resolveWords(node.words, incoming, depth);
     const assigned = cloneState(incoming);
@@ -279,10 +295,33 @@ export function inspectShellExecution(command: string, cwd: string, facts: Shell
     }
     if (effective.unsupported) decline(effective.unsupported, effective.words[0]);
     const functionBody = effective.wrappers.length === 0 && !head.includes("/") && state.functions.get(head);
+    const testForm = functionBody || !shellBuiltin ? undefined
+      : node.testForm === "double-bracket" ? "double-bracket"
+      : verb === "test" ? "test"
+      : verb === "[" ? "bracket"
+      : undefined;
+    const testAnalysis = testForm
+      ? analyzeShellTestExpression(testForm, effective.words, argv, state.dialect)
+      : undefined;
+    if (testAnalysis && !testAnalysis.ok) {
+      decline(testAnalysis.error.reason, testAnalysis.error.operandIndex === undefined ? effective.words[0] : effective.words[testAnalysis.error.operandIndex]);
+    }
+    let breakControl: BreakControl | undefined;
+    if (!functionBody && shellBuiltin && verb === "break") {
+      if (context.loopDepth === 0) decline("break has no local enclosing loop", effective.words[0]);
+      if (argv.length > 2) decline("unsupported break argument count", effective.words[2]);
+      const rawCount = argv.length === 1 ? "1" : argv[1];
+      const count = rawCount !== undefined && /^[0-9]+$/.test(rawCount) ? parseProvenShellInteger(rawCount) : undefined;
+      if (count === undefined || count < 1n) decline("unsupported break count", effective.words[1]);
+      const levels = count > BigInt(context.loopDepth) ? context.loopDepth : Number(count);
+      breakControl = { kind: "break", levels, boundary: context.boundary };
+    }
     inspector.command({
       original: node, node: resolvedNode, effective, argv, cwd: commandState.cwd,
       environment: Object.freeze(Object.fromEntries(commandState.variables)), builtin: shellBuiltin,
       functionCall: !!functionBody, recursiveFunction: !!functionBody && state.activeFunctions.includes(head), backquote: state.backquote, pipeline: state.pipeline, fromPipe: state.fromPipe, activeFunctions: state.activeFunctions,
+      dialect: state.dialect,
+      ...(testAnalysis?.ok ? { testExpression: testAnalysis.expression } : {}),
       inspectNested(text, dialect) {
         const child = cloneState(commandState);
         child.dialect = dialect;
@@ -299,7 +338,7 @@ export function inspectShellExecution(command: string, cwd: string, facts: Shell
       local.activeFunctions = [...state.activeFunctions, head];
       for (const name of local.variables.keys()) if (/^\d+$/.test(name)) local.variables.delete(name);
       argv.slice(1).forEach((argument, index) => local.variables.set(String(index + 1), argument));
-      return walk(functionBody, local, depth + 1).map((result) => {
+      return walk(functionBody, local, depth + 1, freshExecutionContext()).map((result) => {
         result.state.activeFunctions = state.activeFunctions;
         for (const name of result.state.variables.keys()) if (/^\d+$/.test(name)) result.state.variables.delete(name);
         for (const [name, value] of state.variables) if (/^\d+$/.test(name)) result.state.variables.set(name, value);
@@ -321,11 +360,13 @@ export function inspectShellExecution(command: string, cwd: string, facts: Shell
       // their outer argv still used the incoming state above.
       for (const assignment of node.assignments) setScalar(state, assignment.name, assigned.variables.get(assignment.name));
     }
-    if (!functionBody && (!shellBuiltin || !["echo", "printf", "tr", "true", "false", ":", "pwd", "cd", "test", "set", "export", "readonly", "unset", "read"].includes(verb))) {
+    if (!functionBody && (!shellBuiltin || !["echo", "printf", "tr", "true", "false", ":", "pwd", "cd", "test", "[", "break", "set", "export", "readonly", "unset", "read"].includes(verb))) {
       filesystemMayChange = true;
     }
     const knownArgv = argv.map((argument) => argument ?? "");
-    if (["eval", "source", ".", "exec", "builtin", "shopt", "trap", "alias", "unalias", "pushd", "popd", "break", "continue", "return", "shift", "getopts", "mapfile", "readarray", "let", "enable", "hash"].includes(verb)) decline(`unsupported execution-state operation: ${verb}`, effective.words[0]);
+    if (["eval", "source", ".", "exec", "builtin", "shopt", "trap", "alias", "unalias", "pushd", "popd", "continue", "return", "shift", "getopts", "mapfile", "readarray", "let", "enable", "hash"].includes(verb)) decline(`unsupported execution-state operation: ${verb}`, effective.words[0]);
+    if (breakControl) return [{ state, status: "success", control: breakControl }];
+    if (testAnalysis?.ok) return [{ state, status: testAnalysis.expression.status }];
     if (shellBuiltin && verb === "set") {
       for (let index = 1; index < argv.length; index += 1) {
         const option = argv[index];
@@ -437,49 +478,56 @@ export function inspectShellExecution(command: string, cwd: string, facts: Shell
     }
     return [{ state, status: shellBuiltin && ["true", ":"].includes(verb) ? "success" : shellBuiltin && verb === "false" ? "failure" : "unknown" }];
   };
-  const inspectCommand = (node: ShellCommand, incoming: ShellState, depth: number): StateResult[] => {
-    const results = executeCommand(node, incoming, depth);
+  const inspectCommand = (node: ShellCommand, incoming: ShellState, depth: number, context: ExecutionContext): StateResult[] => {
+    const results = executeCommand(node, incoming, depth, context);
     // Opening a redirect can fail before a builtin/function changes shell state.
     // Such I/O outcomes are not established by path admission.
     return node.redirects.length
       ? uniqueResults([...results, { state: cloneState(incoming), status: "failure" }])
       : results;
   };
-  const walk = (node: ShellStatement, state: ShellState, depth: number): StateResult[] => {
+  const walk = (node: ShellStatement, state: ShellState, depth: number, context: ExecutionContext): StateResult[] => {
     if (++steps > SHELL_ANALYSIS_LIMITS.nodes) decline("execution-step limit exceeded");
     if (depth > SHELL_ANALYSIS_LIMITS.depth) decline("execution analysis depth exceeded");
     switch (node.kind) {
       case "unsupported": decline(node.reason);
-      case "command": return inspectCommand(node, state, depth);
+      case "command": return inspectCommand(node, state, depth, context);
       case "sequence": {
         let results: StateResult[] = [{ state, status: "success" }];
-        for (const statement of node.statements) results = uniqueResults(results.flatMap((result) => walk(statement, result.state, depth + 1)));
+        for (const statement of node.statements) results = uniqueResults(results.flatMap((result) =>
+          result.control ? [result] : walk(statement, result.state, depth + 1, context)));
         return results;
       }
       case "and": case "or": {
         const results: StateResult[] = [];
-        for (const left of walk(node.left, state, depth + 1)) {
+        for (const left of walk(node.left, state, depth + 1, context)) {
+          if (left.control) { results.push(left); continue; }
           const desired = node.kind === "and" ? "success" : "failure";
           if (left.status !== desired) results.push({ state: left.state, status: desired === "success" ? "failure" : "success" });
-          if (left.status === desired || left.status === "unknown") results.push(...walk(node.right, left.state, depth + 1));
+          if (left.status === desired || left.status === "unknown") results.push(...walk(node.right, left.state, depth + 1, context));
         }
         return uniqueResults(results);
       }
       case "if": {
         const results: StateResult[] = [];
-        for (const condition of walk(node.condition, state, depth + 1)) {
-          if (condition.status !== "failure") results.push(...walk(node.consequent, condition.state, depth + 1));
-          if (condition.status !== "success") results.push(...walk(node.alternate, condition.state, depth + 1));
+        for (const condition of walk(node.condition, state, depth + 1, context)) {
+          if (condition.control) { results.push(condition); continue; }
+          if (condition.status !== "failure") results.push(...walk(node.consequent, condition.state, depth + 1, context));
+          if (condition.status !== "success") results.push(...walk(node.alternate, condition.state, depth + 1, context));
         }
         return uniqueResults(results);
       }
       case "subshell": case "background": {
-        const result = walk(node.body, cloneState(state), depth + 1);
+        const result = walk(node.body, cloneState(state), depth + 1, freshExecutionContext());
+        if (result.some((entry) => entry.control)) decline("control transfer escaped execution boundary");
         return result.map((entry) => ({ state, status: node.kind === "background" ? "success" : entry.status }));
       }
-      case "negate": return walk(node.body, state, depth + 1).map((result) => ({ ...result, status: result.status === "success" ? "failure" : result.status === "failure" ? "success" : "unknown" }));
+      case "negate": return walk(node.body, state, depth + 1, context).map((result) => result.control ? result : ({ ...result, status: result.status === "success" ? "failure" : result.status === "failure" ? "success" : "unknown" }));
       case "pipeline":
-        node.statements.forEach((statement, index) => walk(statement, { ...cloneState(state), pipeline: node.statements, fromPipe: index > 0 }, depth + 1));
+        node.statements.forEach((statement, index) => {
+          const results = walk(statement, { ...cloneState(state), pipeline: node.statements, fromPipe: index > 0 }, depth + 1, freshExecutionContext());
+          if (results.some((entry) => entry.control)) decline("control transfer escaped execution boundary");
+        });
         return [{ state, status: "unknown" }];
       case "function": { const next = cloneState(state); next.functions.set(node.name, node.body); return [{ state: next, status: "success" }]; }
       case "for": {
@@ -490,28 +538,48 @@ export function inspectShellExecution(command: string, cwd: string, facts: Shell
           return value;
         });
         if (values.length > SHELL_ANALYSIS_LIMITS.states) decline("loop expansion limit exceeded");
-        let results: StateResult[] = [{ state, status: "success" }];
-        for (const value of values) results = uniqueResults(results.flatMap((result) => {
-          const next = cloneState(result.state); setScalar(next, node.name, value); return walk(node.body, next, depth + 1);
-        }));
-        return results;
+        const loopContext = { ...context, loopDepth: context.loopDepth + 1 };
+        let active: StateResult[] = [{ state, status: "success" }];
+        const exited: StateResult[] = [];
+        for (const value of values) {
+          active = uniqueResults(active.flatMap((result) => {
+            const next = cloneState(result.state);
+            setScalar(next, node.name, value);
+            const continuing: StateResult[] = [];
+            for (const body of walk(node.body, next, depth + 1, loopContext)) {
+              if (!body.control) { continuing.push(body); continue; }
+              exited.push(leaveLoop(body, context));
+            }
+            return continuing;
+          }));
+          if (active.length === 0) break;
+        }
+        return uniqueResults([...exited, ...active]);
       }
       case "while": {
         const results: StateResult[] = [];
         const pending: ShellState[] = [state];
         const seen = new Set<string>();
         const terminal = node.until ? "success" : "failure";
+        const loopContext = { ...context, loopDepth: context.loopDepth + 1 };
         while (pending.length) {
           const current = pending.shift()!;
           const key = stateKey(current);
           if (seen.has(key)) continue;
           seen.add(key);
           if (seen.size > SHELL_ANALYSIS_LIMITS.states) decline("loop authority state does not converge within the execution-state limit");
-          for (const condition of walk(node.condition, current, depth + 1)) {
+          for (const condition of walk(node.condition, current, depth + 1, loopContext)) {
+            if (condition.control) {
+              results.push(leaveLoop(condition, context));
+              continue;
+            }
             // The condition runs even when the body runs zero times.
             if (condition.status === terminal || condition.status === "unknown") results.push({ state: condition.state, status: "unknown" });
             if (condition.status !== terminal) {
-              for (const body of walk(node.body, condition.state, depth + 1)) pending.push(body.state);
+              for (const body of walk(node.body, condition.state, depth + 1, loopContext)) {
+                if (!body.control) { pending.push(body.state); continue; }
+                results.push(leaveLoop(body, context));
+              }
             }
           }
         }
@@ -519,5 +587,6 @@ export function inspectShellExecution(command: string, cwd: string, facts: Shell
       }
     }
   };
-  walk(analysis.program, initial, 0);
+  const results = walk(analysis.program, initial, 0, rootExecutionContext);
+  if (results.some((result) => result.control)) decline("unconsumed shell control transfer");
 }
