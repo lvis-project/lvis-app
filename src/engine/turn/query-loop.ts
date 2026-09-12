@@ -115,24 +115,6 @@ const MAX_NUDGE_REASONING_CHARS = 2_000;
  */
 const MAX_TOOL_SCHEMA_DROPS_PER_TURN = 5;
 /**
- * Vendors already reported as running chat rounds with no output ceiling.
- *
- * An uncapped round can generate until the provider's own maximum, which costs
- * the whole turn's time on one call. The host declines to guess a per-model
- * ceiling, so the only honest reaction is to say the ceiling is absent — once
- * per vendor per process, because it is a configuration fact, not a per-round
- * event, and repeating it per round would bury the runs that matter.
- */
-const uncappedChatVendorsLogged = new Set<LLMVendor>();
-
-function noteUncappedChatVendor(vendor: LLMVendor): void {
-  if (uncappedChatVendorsLogged.has(vendor)) return;
-  uncappedChatVendorsLogged.add(vendor);
-  log.info(
-    `queryLoop: vendor "${vendor}" has no llm.vendors.${vendor}.outputTokenLimit — chat rounds run at the provider's own output maximum`,
-  );
-}
-/**
  * Tool errors that have to pile up since the last progress notification before
  * one fires ahead of the round cadence. Below this a couple of recoverable
  * failures inside an otherwise healthy turn would trigger a notification the
@@ -227,9 +209,6 @@ export async function queryLoop(
     const roundLlmSettings = subscriptionRuntime
       ? { streamSmoothing: llmSettings.streamSmoothing, enableThinking: false }
       : { ...activeBlock, streamSmoothing: llmSettings.streamSmoothing };
-    if (subscriptionRuntime === undefined && activeBlock.outputTokenLimit === undefined) {
-      noteUncappedChatVendor(llmSettings.provider);
-    }
     // Subscription transports receive an ordinary serialized prompt for every
     // LVIS round. Until a runtime exposes and proves a native assistant-prefill
     // continuation protocol, a max_tokens response must remain a partial

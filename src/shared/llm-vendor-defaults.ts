@@ -403,6 +403,8 @@ export function isMarketplaceEligibleLLMVendor(
  * marketplace providers are not materialized until selected or installed.
  */
 export const DEFAULT_LLM_VENDOR: LLMVendor = "openai";
+/** Default total output ceiling for an API-backed chat request. */
+export const DEFAULT_LLM_OUTPUT_TOKEN_LIMIT = 32_000;
 
 /** GitHub Copilot's model inference endpoint — used when the vendor block carries no `baseUrl`. */
 export const COPILOT_BASE_URL = "https://models.github.ai/inference";
@@ -603,36 +605,13 @@ export function canUseLlmVendorWithoutApiKey(
 export interface LLMVendorSettings {
   model: string;
   /**
-   * Per-vendor ceiling on a turn's output, forwarded as the request's native
-   * output limit. Unset by default, which is the CTRL policy (vendor SDK
-   * defaults govern) — this is not a sampling control, it is the same
-   * host-owned ceiling `StreamTurnParams.outputTokenLimit` already carries.
-   *
-   * It exists because some gateways PRE-AUTHORIZE credit against the model's
-   * maximum output rather than the tokens actually produced: OpenRouter rejects
-   * a request with 402 "requires more credits, or fewer max_tokens" when a
-   * capped key cannot afford the model's full ceiling, so a credit-limited or
-   * weekly-capped key cannot start ANY turn until this is set.
-   *
-   * It is also the only bound on a RUNAWAY round. A model that keeps generating
-   * until the provider's own maximum burns the whole turn on one call and
-   * returns `finish_reason: length`; the loop then continues that answer rather
-   * than treating it as finished, so an uncapped vendor pays the provider
-   * maximum before the loop can react. No number is assumed on the host's
-   * behalf: the host knows no per-model output ceiling for any vendor, and
-   * inventing one would silently truncate models it guessed low for. Unset
-   * therefore means uncapped, which the loop logs once per vendor.
-   *
-   * What is set is what is sent: the host applies no ceiling of its own to
-   * this value, for the same reason it assumes no default. `generateText`'s
-   * plugin-sized `MAX_BACKGROUND_OUTPUT_TOKEN_LIMIT` is applied by that caller
-   * and does not reach here. A number the provider cannot serve comes back as
-   * the provider's own error, which names the real bound.
-   *
-   * There is deliberately no Settings control for it. It is a per-deployment
-   * fact about a gateway's credit policy or a benchmark's budget, not a choice
-   * a user makes while chatting, so it is configured in settings.json where
-   * that kind of fact already lives.
+   * Per-request total output ceiling for API-backed chat. The settings resolver
+   * supplies DEFAULT_LLM_OUTPUT_TOKEN_LIMIT when absent and preserves a valid
+   * explicit positive integer. This bounds a round's generation, including
+   * reasoning where the provider counts it as output; it is not a claim about
+   * the model's supported maximum. The adapter projects the ceiling into the
+   * native request. Smaller internal generation limits belong to their callers.
+   * Managed subscription runtimes retain their own output control contract.
    */
   outputTokenLimit?: number;
   /**
@@ -805,6 +784,7 @@ function defaultBlock(vendor: LLMVendor): LLMVendorSettings {
     ...(preset ? { baseUrl: preset.baseUrl } : {}),
     enableThinking: true,
     thinkingBudgetTokens: 10_000,
+    outputTokenLimit: DEFAULT_LLM_OUTPUT_TOKEN_LIMIT,
   };
 }
 
@@ -878,7 +858,7 @@ export function getLlmVendorSettings(
     && Number.isSafeInteger(stored.outputTokenLimit)
     && stored.outputTokenLimit > 0
       ? stored.outputTokenLimit
-      : undefined;
+      : DEFAULT_LLM_OUTPUT_TOKEN_LIMIT;
   const contextWindow = normalizeLlmContextWindow(stored?.contextWindow);
   const block: LLMVendorSettings = {
     ...defaults,
@@ -896,8 +876,7 @@ export function getLlmVendorSettings(
   };
   if (presetModels) block.presetModels = presetModels;
   else delete block.presetModels;
-  if (outputTokenLimit !== undefined) block.outputTokenLimit = outputTokenLimit;
-  else delete block.outputTokenLimit;
+  block.outputTokenLimit = outputTokenLimit;
   if (contextWindow !== undefined) block.contextWindow = contextWindow;
   else delete block.contextWindow;
   return block;

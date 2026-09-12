@@ -33,9 +33,8 @@ export interface StreamCollectParams {
    * `streamSmoothing` setting from the top-level LLMSettings — this is
    * the only place those two scopes meet.
    *
-   * CTRL simplification: per-vendor sampling controls removed. Vendor SDK
-   * defaults govern temperature / max output / etc. Only stream smoothing
-   * (UX), thinking toggle, and thinking budget remain user-configurable.
+   * Sampling defaults stay with the provider. The resolved output ceiling and
+   * thinking policy travel separately from presentation-only stream smoothing.
    */
   llmSettings: {
     streamSmoothing: "none" | "word" | "char";
@@ -148,8 +147,8 @@ export async function collectRoundStream(
         ? {}
         : { thinkingBudgetTokens: llmSettings.thinkingBudgetTokens }),
       ...(continuationPrefill ? { continuationPrefill: true } : {}),
-      // Unset by default — see LLMVendorSettings.outputTokenLimit. Only a user
-      // who configured a ceiling changes anything here.
+      // API settings resolve the default or explicit ceiling before collection.
+      // Managed runtimes omit it when their protocol owns output control.
       ...(llmSettings.outputTokenLimit === undefined
         ? {}
         : { outputTokenLimit: llmSettings.outputTokenLimit }),

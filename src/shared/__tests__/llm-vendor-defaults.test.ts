@@ -22,6 +22,7 @@ import {
   isSelfHostedVllmVendor,
   normalizeLlmVendorModel,
   DEFAULT_LLM_VENDOR,
+  DEFAULT_LLM_OUTPUT_TOKEN_LIMIT,
   narrowLlmVendor,
   COPILOT_BASE_URL,
 } from "../llm-vendor-defaults.js";
@@ -301,13 +302,19 @@ describe("getLlmVendorSettings output ceiling", () => {
     expect(block.outputTokenLimit).toBe(16_384);
   });
 
-  it("leaves the ceiling absent when nothing is stored", () => {
-    const block = getLlmVendorSettings(freshVendorBlocks(), "openai");
-    expect(block).not.toHaveProperty("outputTokenLimit");
+  it("supplies the same default for fresh and pre-existing vendor blocks", () => {
+    expect(DEFAULT_LLM_OUTPUT_TOKEN_LIMIT).toBe(32_000);
+    for (const vendor of LLM_VENDORS) {
+      expect(LLM_VENDOR_DEFAULTS[vendor].outputTokenLimit).toBe(DEFAULT_LLM_OUTPUT_TOKEN_LIMIT);
+      expect(getLlmVendorSettings(undefined, vendor).outputTokenLimit).toBe(DEFAULT_LLM_OUTPUT_TOKEN_LIMIT);
+      const stored = { ...LLM_VENDOR_DEFAULTS[vendor] };
+      delete stored.outputTokenLimit;
+      expect(getLlmVendorSettings({ [vendor]: stored }, vendor).outputTokenLimit).toBe(DEFAULT_LLM_OUTPUT_TOKEN_LIMIT);
+    }
   });
 
   it.each([0, -1, 12.5, Number.NaN, "16384"])(
-    "drops %p rather than passing an unusable ceiling to the transport",
+    "resolves malformed ceiling %p to the default",
     (stored) => {
       // The transport reads any non-positive or non-integer value as "no cap",
       // so a value that survived here would look applied and do nothing.
@@ -320,7 +327,7 @@ describe("getLlmVendorSettings output ceiling", () => {
         },
         "openai",
       );
-      expect(block).not.toHaveProperty("outputTokenLimit");
+      expect(block.outputTokenLimit).toBe(DEFAULT_LLM_OUTPUT_TOKEN_LIMIT);
     },
   );
 });
