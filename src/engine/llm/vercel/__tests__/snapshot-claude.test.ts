@@ -11,8 +11,8 @@
  *                    assistant.reasoning part.
  *
  * Also exercises:
- *   - Budget → thinking config mapping (adaptive for claude-4.x, enabled for 3.x).
- *   - interleaved-thinking-2025-05-14 beta header only when thinking+tools.
+ *   - Budget → thinking config mapping for adaptive and numeric-only models.
+ *   - Numeric interleaving beta opt-in only for supported tool requests.
  *   - Short-reasoning-then-tool (#12433 empty-buffer edge) → log-and-skip.
  */
 import { describe, it, expect, vi } from "vitest";
@@ -426,7 +426,7 @@ describe("stream-mapper — Claude signature capture per-step", () => {
 // ────────────────────────────────────────────────────────────────
 
 describe("VercelUnifiedProvider claude — adapter wiring (mocked streamText)", () => {
-  it("projects adaptive thinking and effort separately; tools add beta header", async () => {
+  it("projects adaptive thinking and effort without a numeric interleaving opt-in", async () => {
     vi.resetModules();
     const streamTextSpy = vi.fn(() => ({
       stream: (async function* () {
@@ -475,10 +475,9 @@ describe("VercelUnifiedProvider claude — adapter wiring (mocked streamText)", 
         effort: "high",
       },
     });
-    // Two betas comma-joined: context-1m for the 1M-tier model + interleaved
-    // thinking because thinking+tools coincide.
+    // Adaptive thinking interleaves automatically; only the context opt-in stays.
     expect(callArg.headers).toEqual({
-      "anthropic-beta": "context-1m-2025-08-07,interleaved-thinking-2025-05-14",
+      "anthropic-beta": "context-1m-2025-08-07",
     });
 
     vi.doUnmock("ai");
