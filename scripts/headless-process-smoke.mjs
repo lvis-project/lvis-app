@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawn, execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { Agent, request } from "node:http";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 
@@ -56,18 +57,54 @@ async function waitReady(host) {
     ]), "server-ready");
   } finally { clearInterval(poll); }
 }
+
+function readOwnedDiscovery(infoFile, ready, host) {
+  const discovery = JSON.parse(readFileSync(infoFile, "utf8"));
+  assert.ok(Number.isInteger(ready.port) && ready.port > 0 && ready.port <= 65535, "Invalid ready port");
+  assert.equal(ready.pid, host.process.pid);
+  assert.equal(discovery.pid, host.process.pid);
+  assert.equal(discovery.port, ready.port);
+  assert.ok(typeof discovery.secret === "string" && /^[a-f0-9]{64}$/.test(discovery.secret), "Invalid local API secret");
+  return discovery;
+}
+
+async function health(discovery, authenticated = true) {
+  // The fresh profile's per-boot credential authenticates only its owned
+  // loopback child. The owned agent ignores inherited proxies; request does
+  // not follow redirects. No arbitrary file body or file-sourced host is sent.
+  const agent = new Agent({ keepAlive: false, proxyEnv: {} });
+  try {
+    return await new Promise((done, reject) => {
+      const req = request({
+        hostname: "127.0.0.1",
+        port: discovery.port,
+        path: "/v1/health",
+        agent,
+        ...(authenticated ? { headers: { Authorization: `Bearer ${discovery.secret}` } } : {}),
+        signal: AbortSignal.timeout(30_000),
+      }, (response) => {
+        response.once("error", reject);
+        response.once("aborted", () => reject(new Error("Local health response aborted")));
+        response.once("end", () => done({ status: response.statusCode }));
+        response.resume();
+      });
+      req.once("error", reject);
+      req.end();
+    });
+  } finally {
+    agent.destroy();
+  }
+}
+
 let host = launch();
 let second;
 let ownershipStress;
 try {
   let ready = await waitReady(host);
   const infoFile = join(home, "local-api/server.json");
-  let discovery = JSON.parse(readFileSync(infoFile, "utf8"));
-  assert.equal(ready.pid, host.process.pid);
-  assert.equal(discovery.pid, ready.pid);
-  const url = `http://127.0.0.1:${ready.port}/v1/health`;
-  const unauthorized = await fetch(url);
-  const authorized = await fetch(url, { headers: { Authorization: `Bearer ${discovery.secret}` } });
+  let discovery = readOwnedDiscovery(infoFile, ready, host);
+  const unauthorized = await health(discovery, false);
+  const authorized = await health(discovery);
   assert.equal(unauthorized.status, 401);
   assert.equal(authorized.status, 200);
   const stress = process.argv.includes("--ownership-stress");
@@ -79,18 +116,18 @@ try {
   second = launch();
   const secondExit = await deadline(second.exited, "second-host");
   assert.equal(secondExit.code, 75);
-  assert.deepEqual(JSON.parse(readFileSync(infoFile, "utf8")), discovery);
+  assert.ok(JSON.stringify(JSON.parse(readFileSync(infoFile, "utf8"))) === JSON.stringify(discovery), "Contender changed discovery");
   if (stress) {
     host.process.kill("SIGCONT");
-    assert.equal((await fetch(url, { headers: { Authorization: `Bearer ${discovery.secret}` } })).status, 200);
+    assert.equal((await health(discovery)).status, 200);
     host.process.kill("SIGKILL");
     await deadline(host.exited, "killed-owner");
     writeFileSync(join(profile, "original-stdout.log"), host.stdout());
     writeFileSync(join(profile, "original-stderr.log"), host.stderr());
     host = launch();
     ready = await waitReady(host);
-    discovery = JSON.parse(readFileSync(infoFile, "utf8"));
-    assert.equal(discovery.pid, host.process.pid);
+    discovery = readOwnedDiscovery(infoFile, ready, host);
+    assert.equal((await health(discovery)).status, 200);
     ownershipStress = { pausedMs: 12_000, pausedContenderExit: secondExit.code, resumedOwnerHealthy: true, recoveredAfterKill: true };
   }
   const rows = execFileSync("ps", ["-axo", "pid=,ppid=,comm="], { encoding: "utf8" }).trim().split("\n").map((line) => {
@@ -108,7 +145,8 @@ try {
   host.process.kill("SIGTERM");
   const exit = await deadline(host.exited, "server-shutdown");
   assert.equal(exit.code, 0);
-  assert.deepEqual(JSON.parse(readFileSync(infoFile, "utf8")), { port: 0, secret: "", pid: 0 });
+  const tombstone = JSON.parse(readFileSync(infoFile, "utf8"));
+  assert.ok(tombstone.port === 0 && tombstone.secret === "" && tombstone.pid === 0, "Discovery was not cleared");
   console.log(JSON.stringify({ profile, runtime: process.version, authorized: authorized.status, unauthorized: unauthorized.status, secondWriterExit: secondExit.code, processes, shutdownExit: exit.code, discoveryCleared: true, ownershipStress }));
 } finally {
   if (host.process.exitCode === null && host.process.signalCode === null) {
