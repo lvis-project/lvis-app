@@ -1600,6 +1600,7 @@ B${i}
     [16_000, undefined, 8_000],
     [16_000, 32_000, 8_000],
     [64_000, undefined, 32_000],
+    [32_001, undefined, 32_000],
     [32_000, "32000", 8_000],
   ])("bounds retry thinking with output %i and input %s, then restores settings", async (outputTokenLimit, thinkingBudgetTokens, expected) => {
     const loop = makeConversationLoop("f54c7bda-1854-4991-8708-8d60d079368a", [

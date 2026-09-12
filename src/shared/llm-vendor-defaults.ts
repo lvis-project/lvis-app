@@ -425,9 +425,10 @@ function normalizeLlmOutputTokenLimit(value: unknown): number {
     : DEFAULT_LLM_OUTPUT_TOKEN_LIMIT;
 }
 
-/** Cap the user's numeric thinking budget at half the per-request output limit. */
+/** User budget cap: the highest preset strictly below output, or output minus one. */
 export function getLlmThinkingBudgetLimit(outputTokenLimit?: number): number {
-  return Math.floor(normalizeLlmOutputTokenLimit(outputTokenLimit) / 2);
+  const output = normalizeLlmOutputTokenLimit(outputTokenLimit);
+  return getLlmThinkingBudgetRungs(output).at(-1)?.budget ?? Math.max(0, output - 1);
 }
 
 /** Normalize user input without changing raw internal generation parameters. */
@@ -440,12 +441,12 @@ export function normalizeLlmThinkingBudgetTokens(value: unknown, outputTokenLimi
 
 /**
  * Fixed user presets, filtered by the output ceiling. The default 32k output
- * exposes low/medium/high at 4k/8k/16k; xhigh requires at least 64k output.
+ * exposes low/medium/high at 4k/8k/16k; xhigh requires output above 32k.
  * Reading a valid custom budget does not snap it to one of these presets.
  */
 export function getLlmThinkingBudgetRungs(outputTokenLimit?: number): readonly LlmThinkingBudgetRung[] {
-  const limit = getLlmThinkingBudgetLimit(outputTokenLimit);
-  return THINKING_BUDGET_PRESETS.filter((preset) => preset.budget <= limit);
+  const output = normalizeLlmOutputTokenLimit(outputTokenLimit);
+  return THINKING_BUDGET_PRESETS.filter((preset) => preset.budget < output);
 }
 
 /** GitHub Copilot's model inference endpoint — used when the vendor block carries no `baseUrl`. */

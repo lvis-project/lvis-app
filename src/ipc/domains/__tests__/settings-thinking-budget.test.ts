@@ -23,7 +23,7 @@ afterEach(async () => {
 });
 
 describe("thinking budget settings IPC", () => {
-  it.each([[32_000, 16_000], [16_000, 8_000]])(
+  it.each([[32_000, 16_000], [16_000, 8_000], [32_001, 32_000], [2_000, 1_999]])(
     "normalizes an oversized update with output %i before persistence and broadcast", async (outputTokenLimit, expected) => {
       userDataPath = mkdtempSync(join(tmpdir(), "thinking-settings-ipc-"));
       const settingsService = new SettingsService({ userDataPath, encryption: unavailableSecretEncryption });

@@ -89,7 +89,7 @@ describe("resolved output ceiling on the native wire", () => {
     expect(result).toMatchObject({ kind: "ok", text: "ok" });
   });
 
-  it.each([16_000, 16_001, 24_000, 32_000])("bounds user thinking %i at half the output ceiling", async (thinkingBudgetTokens) => {
+  it.each([16_000, 16_001, 24_000, 32_000])("bounds user thinking %i at the highest allowed preset", async (thinkingBudgetTokens) => {
     const { body } = await collectRequest("claude", "claude-3-7-sonnet-latest", { thinkingBudgetTokens });
     expect(body.max_tokens).toBe(DEFAULT_LLM_OUTPUT_TOKEN_LIMIT);
     expect(body.thinking).toMatchObject({ budget_tokens: 16_000 });
@@ -107,6 +107,36 @@ describe("resolved output ceiling on the native wire", () => {
     const { body } = await collectRequest("openai-compatible", "fixture-model", { outputTokenLimit, thinkingBudgetTokens: 48_000 });
     expect(body.max_tokens).toBe(outputTokenLimit);
     expect(body.thinking_budget_tokens).toBe(expected);
+  });
+
+  it.each([1_025, 2_000, 2_047, 2_048])(
+    "preserves valid ordinary numeric thinking through settings and native serialization at output %i", async (outputTokenLimit) => {
+      for (const thinkingBudgetTokens of [undefined, 1_024, 2_000]) {
+        const expected = Math.min(thinkingBudgetTokens ?? 8_000, outputTokenLimit - 1);
+        const { body, result } = await collectRequest("claude", "claude-3-7-sonnet-latest", {
+          outputTokenLimit, thinkingBudgetTokens,
+        });
+        expect(body.max_tokens).toBe(outputTokenLimit);
+        expect(body.thinking).toEqual({ type: "enabled", budget_tokens: expected });
+        expect(result).toMatchObject({ kind: "ok", text: "ok", stopReason: "end_turn" });
+      }
+    },
+  );
+
+  it.each([1, 1_024])("does not turn off numeric thinking to accept impossible user output %i", async (outputTokenLimit) => {
+    const fetchResponse = vi.fn<typeof fetch>();
+    const provider = new VercelUnifiedProvider("claude", "fixture-key", "https://provider.invalid/v1", fetchResponse);
+    const block = getLlmVendorSettings({ claude: {
+      model: "claude-3-7-sonnet-latest", enableThinking: true, thinkingBudgetTokens: 8_000, outputTokenLimit,
+    } }, "claude");
+    expect(block.enableThinking).toBe(true);
+    const result = await collectRoundStream({
+      provider, model: block.model, systemPrompt: "Return the result.",
+      messages: [{ role: "user", content: "Report the value." }], toolSchemas: [],
+      llmSettings: { ...block, streamSmoothing: "none" },
+    });
+    expect(fetchResponse).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ kind: "stream_error" });
   });
 
   it("transmits adaptive effort in the provider's output configuration", async () => {

@@ -295,13 +295,13 @@ the default for missing or invalid settings and preserves explicit positive
 integer limits. The default is a host budget, not a discovered per-model
 maximum. User-configured thinking budgets apply per API call, including each
 call after a tool result; they introduce no cumulative quota for a user turn.
-They are non-negative integers capped at
-half that effective output ceiling, so the default 32,000 output allows at most
-16,000 thinking tokens. The same resolver normalizes profile loading and settings
-patches. Settings and composer share fixed presets filtered by that ceiling:
-low 4,000, medium 8,000, high 16,000, and xhigh 32,000. The default output exposes
-only low/medium/high; xhigh requires at least 64,000 output. Fresh settings use
-8,000. Valid custom budgets such as 10,000 or 14,000 stay unchanged until an
+They are non-negative integers capped at the highest fixed preset strictly below
+the effective output ceiling. Settings and composer share these presets: low
+4,000, medium 8,000, high 16,000, and xhigh 32,000. The default 32,000 output exposes
+only low/medium/high and caps thinking at 16,000; xhigh returns at 32,001 output.
+If no preset fits, the custom budget is capped at output minus one, with a minimum
+of zero. The same resolver normalizes profile loading and settings patches.
+Fresh settings use 8,000. Valid custom budgets such as 10,000 or 14,000 stay unchanged until an
 explicit preset selection; the UI shows their exact value. If no preset fits,
 the existing custom budget and thinking on/off remain available. Retry uses the
 user ceiling and restores the prior budget afterward. Raw internal generation

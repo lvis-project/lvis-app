@@ -51,7 +51,7 @@ describe("ReasoningSlider depth budget", () => {
     expect(result.current.levelLabels.every((label) => label.trim() !== "")).toBe(true);
   });
 
-  it.each([32_000, 16_000, 64_000])(
+  it.each([32_000, 16_000, 32_001])(
     "persists every distinct offered rung and keeps its level after broadcast with output %i", async (outputTokenLimit) => {
       let current = settings(10_000, outputTokenLimit);
       getSettings.mockImplementation(async () => current);
@@ -118,11 +118,11 @@ describe("ReasoningSlider depth budget", () => {
   });
 
   it("keeps a tiny custom budget when no preset fits and keeps off separate", async () => {
-    getSettings.mockResolvedValue(settings(2, 4));
+    getSettings.mockResolvedValue(settings(1_999, 2_000));
     const onToggle = vi.fn();
     const { result } = renderHook(() => useReasoningLevel({ enabled: true, onToggle }));
     await waitFor(() => expect(result.current.levelLabels).toHaveLength(2));
-    expect(result.current.currentLabel).toContain("2");
+    expect(result.current.currentLabel).toContain("1,999");
     await act(async () => result.current.apply(9));
     expect(updateSettings).not.toHaveBeenCalled();
     await act(async () => result.current.apply(0));
