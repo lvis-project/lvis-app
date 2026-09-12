@@ -58,20 +58,11 @@ export function runEarlyBootEnv(): void {
   // package-name directory instead and never seen the user's choice.
   app.setName("LVIS");
 
-  // §GPU: Prevent the Chromium GPU utility process from spawning on corp/VDI
-  // machines where restricted drivers produce repeated ContextResult::kFatalFailure
-  // errors that eventually kill the renderer process (GPU-lost IPC → render-process-gone).
-  // Must be called before app.whenReady(). The launch-script --disable-gpu flags only
-  // stop renderer compositing; only disableHardwareAcceleration() stops the GPU process.
-  // Linux packaged builds also prune Electron's GPU fallback libraries afterPack,
-  // so dev and packaged Linux both use the same software-rendered path.
-  //
-  // Windows/Linux default OFF stands, but it is now a DEFAULT rather than the
-  // whole policy: a user whose machine renders fine can turn the GPU back on
-  // from Settings. Before this, `LVIS_KEEP_GPU=1` was the only way, which a
-  // packaged app's user has no way to set — the feature existed for developers
-  // only. The env still wins (see resolveHardwareAcceleration) because it is
-  // the lever for a build that will not render at all.
+  // Apply the launch preference before readiness. Software rendering still
+  // uses a separate display-compositor process; disabling acceleration does
+  // not remove that child or protect the app from repeated child failures.
+  // Keep the packaged graphics libraries so an enabled preference and native
+  // fallback paths remain available.
   if (
     !resolveHardwareAcceleration({
       setting: readPersistedHardwareAccelerationSync(app.getPath("userData")),

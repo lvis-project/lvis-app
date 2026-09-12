@@ -44,17 +44,15 @@ export interface HardwareAccelerationInputs {
 }
 
 /**
- * Decide whether Chromium's GPU process may start this launch.
+ * Decide whether this launch enables hardware acceleration. A disabled
+ * preference still permits a separate software display-compositor process.
  *
  * Precedence, highest first:
  *   1. `LVIS_KEEP_GPU=1` — the pre-existing escape hatch, kept because it is
  *      the only lever available to a dev/CI launcher that cannot write the
  *      profile (`scripts/run-electron.mjs` mirrors the same guard).
  *   2. The persisted setting — what the person using the packaged app chose.
- *   3. The platform default: OFF on Windows/Linux, where restricted corp/VDI
- *      drivers produce repeated `ContextResult::kFatalFailure` and eventually
- *      take the renderer down with them; ON on macOS, which has no such
- *      failure mode.
+ *   3. The platform default: OFF on Windows/Linux; ON on macOS.
  *
  * The env sits ABOVE the setting rather than below it on purpose: it is the
  * lever for the case where the app will not render at all, and a lever that a

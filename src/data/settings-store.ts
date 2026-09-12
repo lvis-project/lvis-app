@@ -613,9 +613,9 @@ export interface SystemSettings {
    */
   localApiServer?: boolean;
   /**
-   * Whether Chromium's GPU process may start. Applied ONLY at launch —
-   * `app.disableHardwareAcceleration()` has no effect after `app.whenReady()`,
-   * so the Settings toggle states plainly that it takes effect next launch.
+   * Whether hardware acceleration is enabled at launch. Software rendering
+   * still uses a separate display-compositor process. Changes take effect on
+   * the next launch because the runtime only accepts this choice before ready.
    *
    * Default is platform-derived (`settings-defaults.ts`): OFF on Windows/Linux,
    * where restricted corp/VDI drivers crash the GPU process and take the
