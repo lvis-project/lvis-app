@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import * as asar from "@electron/asar";
@@ -46,6 +46,44 @@ function inventory(root, directory = root) {
     else throw new Error(`Unsupported runtime payload entry: ${path}`);
   }
   return files;
+}
+
+function copyUnpackedPayload(source, destination) {
+  if (!lstatSync(source).isDirectory()) throw new Error(`Unsupported runtime payload entry: ${source}`);
+  mkdirSync(destination, { recursive: true });
+  for (const entry of readdirSync(source, { withFileTypes: true })) {
+    const input = join(source, entry.name);
+    const output = join(destination, entry.name);
+    if (entry.isDirectory()) copyUnpackedPayload(input, output);
+    else if (entry.isFile()) cpSync(input, output, { errorOnExist: true, force: false });
+    else throw new Error(`Unsupported runtime payload entry: ${input}`);
+  }
+}
+
+export function extractPackagedRuntime(archive, app) {
+  mkdirSync(app, { recursive: true });
+  for (const path of asar.listPackage(archive, {})) {
+    const filename = path.slice(1);
+    const destination = resolve(app, filename);
+    const within = relative(app, destination);
+    if (!within || within === ".." || within.startsWith(`..${sep}`) || isAbsolute(within)) {
+      throw new Error(`Runtime archive entry escapes its output: ${path}`);
+    }
+    const entry = asar.statFile(archive, filename, false);
+    // Post-pack pruning and native replacement change the physical sidecar;
+    // its stale archive headers are not the shipped unpacked inventory.
+    if (entry.unpacked) continue;
+    if ("files" in entry) mkdirSync(destination, { recursive: true });
+    else if ("link" in entry) throw new Error(`Unsupported runtime payload entry: ${path}`);
+    else {
+      mkdirSync(dirname(destination), { recursive: true });
+      writeFileSync(destination, asar.extractFile(archive, filename), { flag: "wx" });
+      if (entry.executable) chmodSync(destination, 0o755);
+    }
+  }
+  const unpacked = `${archive}.unpacked`;
+  if (lstatSync(unpacked, { throwIfNoEntry: false })) copyUnpackedPayload(unpacked, app);
+  binding(join(app, "dist/src/main/headless.js"));
 }
 
 function main() {
@@ -95,9 +133,7 @@ function main() {
 
   mkdirSync(options.out, { recursive: true });
   const app = join(options.out, "app");
-  mkdirSync(app);
-  asar.extractAll(archive, app);
-  binding(join(app, "dist/src/main/headless.js"));
+  extractPackagedRuntime(archive, app);
   const resources = join(options.out, "resources");
   mkdirSync(resources);
   for (const entry of readdirSync(appResources)) {
@@ -145,4 +181,4 @@ function main() {
   process.stdout.write(`${JSON.stringify({ output: options.out, manifest: binding(join(options.out, "runtime-manifest.json")), files: Object.keys(manifest.files).length })}\n`);
 }
 
-main();
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();
