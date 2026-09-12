@@ -1,6 +1,7 @@
 import { createHash, createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { MemorySecretStore } from "../../audit/hmac-chain.js";
+import { unavailableSecretEncryption } from "../../__tests__/support/host-runtime.js";
 import type {
   PlatformBridgeInboundAuthorization,
   PlatformBridgeVerifiedEnvelope,
@@ -81,6 +82,7 @@ function harness(): Harness {
       state.paired !== null && actorDigest === state.paired ? state.bound : null,
   };
   const runtime = createTelegramPairedPlatformRuntime({
+    encryption: unavailableSecretEncryption,
     botFingerprint: BOT_FINGERPRINT,
     authority,
     getCurrentConversationId: () => state.current,
@@ -250,6 +252,7 @@ describe("createTelegramPairedPlatformRuntime", () => {
       resolveBoundConversation: () => { throw new Error("store unavailable"); },
     };
     const runtime = createTelegramPairedPlatformRuntime({
+      encryption: unavailableSecretEncryption,
       botFingerprint: BOT_FINGERPRINT,
       authority: throwing,
       getCurrentConversationId: () => CONVERSATION_A,
@@ -267,6 +270,7 @@ describe("createTelegramPairedPlatformRuntime", () => {
       resolveBoundConversation: () => null,
     };
     const base = {
+      encryption: unavailableSecretEncryption,
       botFingerprint: BOT_FINGERPRINT,
       authority,
       getCurrentConversationId: () => CONVERSATION_A,

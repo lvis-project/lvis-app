@@ -1,3 +1,4 @@
+import { unavailableSecretEncryption } from "../../__tests__/support/host-runtime.js";
 /**
  * What happens to a durable Telegram pairing when this machine loses the local
  * key its actor digests were derived under.
@@ -99,7 +100,7 @@ async function connectedAndPaired(
 ): Promise<void> {
   await store.setConnected(BOT_FINGERPRINT);
   await reconcile(store, secretStore);
-  const digester = createTelegramActorDigester({ botFingerprint: BOT_FINGERPRINT, secretStore });
+  const digester = createTelegramActorDigester({ botFingerprint: BOT_FINGERPRINT, secretStore, encryption: unavailableSecretEncryption });
   await pairAndShare(store, digester.digestFor(OWNER_ID)!);
 }
 
@@ -116,6 +117,7 @@ function pairedRuntime(store: TelegramConnectionStore, secretStore: SecretStore)
     getCurrentConversationId: () => CONVERSATION_ID,
     activationEpoch: 1,
     secretStore,
+    encryption: unavailableSecretEncryption,
   });
 }
 
@@ -131,7 +133,7 @@ function ownerEnvelope() {
 
 /** The production step, over whichever key this machine can load right now. */
 async function reconcile(store: TelegramConnectionStore, secretStore: SecretStore): Promise<void> {
-  await reconcileTelegramActorKey({ store, secretStore });
+  await reconcileTelegramActorKey({ store, secretStore, encryption: unavailableSecretEncryption });
 }
 
 /**
@@ -156,7 +158,7 @@ function connectionService(store: TelegramConnectionStore, secretStore: SecretSt
       },
       stop: async () => {},
     },
-    reconcileActorKey: () => reconcileTelegramActorKey({ store, secretStore }),
+    reconcileActorKey: () => reconcileTelegramActorKey({ store, secretStore, encryption: unavailableSecretEncryption }),
     getCurrentConversationId: () => CONVERSATION_ID,
     conversationDigestFor: (conversationId: string) =>
       telegramConversationDigest(BOT_FINGERPRINT, conversationId),
@@ -228,6 +230,7 @@ describe("telegram actor key rotation", () => {
     const digester = createTelegramActorDigester({
       botFingerprint: BOT_FINGERPRINT,
       secretStore: secrets.store,
+      encryption: unavailableSecretEncryption,
     });
     await connectedAndPaired(store, secrets.store);
 
@@ -249,6 +252,7 @@ describe("telegram actor key rotation", () => {
     const digester = createTelegramActorDigester({
       botFingerprint: BOT_FINGERPRINT,
       secretStore: secrets.store,
+      encryption: unavailableSecretEncryption,
     });
     // Deliberately skipping the adoption activation performs, which is the
     // shape of a document written before the field existed, or edited by hand.

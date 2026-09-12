@@ -1,3 +1,4 @@
+import type { SecretEncryption } from "../data/secret-document-store.js";
 /**
  * Composition glue between the owner's durable connection state and the
  * bridge activation.
@@ -25,6 +26,7 @@ import {
 import type { TelegramRemoteApprovalGatePort } from "./telegram-remote-approval.js";
 
 export interface StartTelegramConnectionActivationOptions {
+  readonly encryption: SecretEncryption;
   readonly store: TelegramConnectionStore;
   readonly settingsService: { getEncryptedSecret(key: string): string | null };
   readonly conversationSurfaceRuntime: ConversationSurfaceRuntime;
@@ -95,6 +97,7 @@ export function createUnroutableNotifier(
  * document that has nothing to lose.
  */
 export async function reconcileTelegramActorKey(options: {
+  readonly encryption: SecretEncryption;
   readonly store: TelegramConnectionStore;
   /** Test-only injection; production reads Electron's OS-encrypted store. */
   readonly secretStore?: SecretStore;
@@ -102,6 +105,7 @@ export async function reconcileTelegramActorKey(options: {
   const botFingerprint = options.store.botFingerprint();
   if (botFingerprint === null) return;
   const digestActor = createTelegramActorDigester({
+    encryption: options.encryption,
     botFingerprint,
     ...(options.secretStore ? { secretStore: options.secretStore } : {}),
   });
@@ -127,6 +131,7 @@ export async function startTelegramConnectionActivation(
   if (botFingerprint === null) return;
 
   const digestActor = createTelegramActorDigester({
+    encryption: options.encryption,
     botFingerprint,
     ...(options.secretStore ? { secretStore: options.secretStore } : {}),
   });
@@ -140,6 +145,7 @@ export async function startTelegramConnectionActivation(
   });
 
   await maybeStartTelegramConnectionBridge({
+    encryption: options.encryption,
     conversationSurfaceRuntime: options.conversationSurfaceRuntime,
     conversationCommandPort: options.conversationCommandPort,
     getCurrentConversationId: options.getCurrentConversationId,

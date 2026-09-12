@@ -43,7 +43,8 @@ export function resolveRuntimePathsFromModuleUrl(
     // ancestor in a source checkout.
     if (
       exists(join(candidate, "main", "main.js")) &&
-      exists(join(candidate, "preload.cjs"))
+      (exists(join(candidate, "preload.cjs")) ||
+        exists(join(candidate, "main", "headless-manifest.json")))
     ) {
       const distSrcDir = candidate;
       const distRoot = resolve(distSrcDir, "..");

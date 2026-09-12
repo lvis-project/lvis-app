@@ -12,6 +12,7 @@ import type { PluginManifest, RuntimePlugin } from "../../types.js";
 import { PluginRuntime } from "../index.js";
 import { createNoopHostApiForTests } from "../sandbox.js";
 import { HostApiGenerationScope } from "../../plugin-host-effect-scope.js";
+import { unavailableSecretEncryption } from "../../../__tests__/support/host-runtime.js";
 
 const TARGET_ID = "dispatch-readiness-target";
 const CALLER_ID = "dispatch-readiness-caller";
@@ -103,6 +104,7 @@ function runtimeFixture(
   auditEntries?: Array<{ level: string; message: string; data?: unknown }>,
 ) {
   const runtime = new PluginRuntime({
+    encryption: unavailableSecretEncryption,
     hostRoot: "/tmp",
     createHostApi: createNoopHostApiForTests,
     ...(auditEntries

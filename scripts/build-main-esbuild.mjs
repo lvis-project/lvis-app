@@ -6,7 +6,8 @@
 // provided by Electron at runtime, must share a singleton across plugins, or
 // need real node_modules paths at runtime.
 import { build, context } from "esbuild";
-import { rmSync, writeFileSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -16,6 +17,8 @@ import {
   createMainBundleManifest,
   formatMainBundleBudget,
 } from "./lib/main-bundle-budget.mjs";
+import { assertHeadlessBundleBoundary } from "./lib/headless-bundle-boundary.mjs";
+import { readBuildSourceIdentity } from "./lib/build-source-identity.mjs";
 import { MAIN_BUNDLE_EXTERNALS } from "./lib/main-bundle-externals.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -32,6 +35,7 @@ const buildOptions = {
   absWorkingDir: repoRoot,
   entryPoints: {
     main: resolve(repoRoot, "src", "main.ts"),
+    headless: resolve(repoRoot, "src", "headless.ts"),
     "subscription-grok-tool-policy-hook": resolve(repoRoot, "src", "main", "subscription-grok-tool-policy-hook.ts"),
     "subscription-tool-mcp-server": resolve(repoRoot, "src", "main", "subscription-tool-mcp-server.ts"),
     // The entry of a confined plugin child process. It is its OWN entry point
@@ -92,6 +96,7 @@ if (watchMode) {
   await ctx.watch();
   process.stdout.write(`[esbuild-main] watching -> ${outfile}\n`);
 } else {
+  const sourceBeforeBuild = readBuildSourceIdentity(repoRoot);
   const result = await build(buildOptions);
 
   if (result.errors.length > 0) {
@@ -111,9 +116,20 @@ if (watchMode) {
     }
   }
 
+  const headlessManifest = assertHeadlessBundleBoundary(result.metafile);
+  headlessManifest.source = readBuildSourceIdentity(repoRoot);
+  if (JSON.stringify(sourceBeforeBuild) !== JSON.stringify(headlessManifest.source)) {
+    throw new Error("Build source identity changed while the main bundle was emitted");
+  }
+  headlessManifest.outputs = Object.fromEntries(headlessManifest.files.map(({ path, bytes }) => [path, {
+    bytes,
+    sha256: createHash("sha256").update(readFileSync(resolve(outdir, path))).digest("hex"),
+  }]));
+  writeFileSync(resolve(outdir, "headless-manifest.json"), `${JSON.stringify(headlessManifest, null, 2)}\n`, "utf8");
+
   const bundleMeasurement = analyzeMainBundleMetafile(result.metafile, {
     entryPoint: resolve(repoRoot, "src", "main.ts"),
-    requiredAsyncEntryPoint: resolve(repoRoot, "src", "boot.ts"),
+    requiredAsyncEntryPoint: resolve(repoRoot, "src", "desktop-boot.ts"),
   });
   assertMainBundleBudget(bundleMeasurement, MAIN_BUNDLE_BUDGETS);
   const bundleManifest = createMainBundleManifest(result.metafile, {

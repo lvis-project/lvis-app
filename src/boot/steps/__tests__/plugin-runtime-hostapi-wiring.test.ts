@@ -1,3 +1,4 @@
+import { createBootHostFixture, createDesktopHostFixture } from "../../../__tests__/support/host-runtime.js";
 /**
  * C1 gap-lock — initPluginRuntime HostApi factory: config get/set + emitEvent
  * / onEvent capability wiring.
@@ -191,6 +192,7 @@ async function initAndGetFactory(
   // that do not pass one can still read the sink.
   lastBootAuditLogger = bootAuditLogger;
   await initPluginRuntime({
+    host: createBootHostFixture({ desktop: createDesktopHostFixture({ getAppWindows: () => runtimeTestState.browserWindows as never[] }) }),
     projectRoot: "/tmp/lvis-test/project",
     settingsService: settingsService as never,
     memoryManager: {} as never,

@@ -1,3 +1,4 @@
+import { createBootHostFixture } from "../../../../__tests__/support/host-runtime.js";
 /**
  * What happens to a `config.onChange` listener that THROWS, on the real host.
  *
@@ -86,6 +87,7 @@ function hostApiUnderTest(pluginDataDir: string): {
     generationScope: scope,
   };
   const factory = createHostApiFactory({
+    host: createBootHostFixture(),
     getPluginRuntime: () => ({
       getApprovedPluginAccess: () => undefined,
       listPluginIds: () => [PLUGIN_ID],

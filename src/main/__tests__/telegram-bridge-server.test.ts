@@ -1,3 +1,4 @@
+import { unavailableSecretEncryption } from "../../__tests__/support/host-runtime.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemorySecretStore } from "../../audit/hmac-chain.js";
 import type { ConversationSurfaceRuntime } from "../../engine/conversation-surface-runtime.js";
@@ -133,6 +134,7 @@ function connectionFixture(overrides: {
     onFatal,
     isPairedOwner: (senderId: string) => senderId === OWNER_CHAT_ID,
     secretStore,
+    encryption: unavailableSecretEncryption,
     createBotApiClient,
     ...(overrides.receiptStore === undefined
       ? {}

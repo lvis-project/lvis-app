@@ -1,3 +1,4 @@
+import { unavailableSecretEncryption } from "../../__tests__/support/host-runtime.js";
 /**
  * Boot-time hardware-acceleration reader + resolver tests.
  *
@@ -44,7 +45,7 @@ describe("readPersistedHardwareAccelerationSync", () => {
   });
 
   it("reads back what SettingsService wrote", async () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: unavailableSecretEncryption, userDataPath });
     // Spread the live block rather than patching the one field: `patch` types
     // `system` as the whole `SystemSettings`, and writing the full block is
     // also what SettingsService itself persists.

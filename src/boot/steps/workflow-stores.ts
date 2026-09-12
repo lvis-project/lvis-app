@@ -160,7 +160,7 @@ export async function setupWorkflowStores(
   registerToolSearchMetaTool(toolRegistry);
 
   // §6.1 IdleSchedulerService.
-  const idleScheduler = await wireIdleScheduler();
+  const idleScheduler = await wireIdleScheduler(ctx.host.desktop?.powerMonitor);
 
   ctx.sessionTasksStore = sessionTasksStore;
   ctx.sessionGoalStore = sessionGoalStore;

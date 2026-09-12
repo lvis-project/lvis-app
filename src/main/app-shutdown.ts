@@ -1,3 +1,4 @@
+import type { BootHost } from "../boot/host-runtime.js";
 /**
  * App shutdown cleanup pipeline.
  *
@@ -11,7 +12,6 @@
  * first: teardown with no ordering requirement, collected here so no subsystem
  * needs a `before-quit` listener of its own. See {@link registerShutdownHook}.
  */
-import { app } from "electron";
 import { createLogger, closeFileLogSink } from "../lib/logger.js";
 import { logger as rootPinoLogger } from "../lib/logger.js";
 import { runShutdownRoutines } from "./shutdown-routines.js";
@@ -20,7 +20,6 @@ import { stopTailnetObserverServer } from "./tailnet-surface-server.js";
 import { stopTelegramBridgeServer } from "./telegram-bridge-server.js";
 import { stopRemoteA2AReceiverServer } from "./a2a-remote-receiver-server.js";
 import { stopSubscriptionRuntimes } from "./subscription-runtime-service.js";
-import { unregisterAllGlobalShortcuts } from "./global-shortcuts.js";
 import {
   forceKillAndDrainManagedChildProcesses,
   forceKillManagedChildProcesses,
@@ -37,10 +36,18 @@ import {
   setAppShutdownCompleted,
   setAppShutdownStarted,
 } from "./app-state.js";
-import { peekFloatingDock } from "../boot/steps/plugin-runtime/host-api-factory.js";
 import { errorMessage } from "../shared/error-message.js";
 
 const log = createLogger("lvis");
+let shutdownHost: BootHost | undefined;
+let bootPluginShutdown: (() => Promise<void>) | undefined;
+export function registerBootPluginShutdown(run: () => Promise<void>): void {
+  bootPluginShutdown = run;
+}
+export function configureAppShutdownHost(host: BootHost): void {
+  shutdownHost = host;
+}
+
 
 /**
  * Teardown that needs nothing from the ordered pipeline below.
@@ -145,6 +152,39 @@ async function flushLogger(): Promise<void> {
 export type AppShutdownCleanupOutcome = "completed" | "skipped" | "timed-out" | "failed";
 let appShutdownCleanupPromise: Promise<AppShutdownCleanupOutcome> | null = null;
 
+/** Stop a rejected or interrupted bootstrap before AppServices is published. */
+export async function runIncompleteBootShutdown(host?: BootHost): Promise<AppShutdownCleanupOutcome> {
+  const reason = "host bootstrap interrupted or failed";
+  setAppShutdownStarted(true);
+  sealManagedChildProcessAdmission(reason);
+  runShutdownHooks();
+  const result = await runCleanupWithHardTimeout(async (signal) => {
+    const failures: unknown[] = [];
+    const stages = [
+      () => bootPluginShutdown?.(),
+      () => stopSubscriptionRuntimes(),
+      () => forceKillAllTerminalsForShutdown(),
+      () => forceKillAndDrainManagedChildProcesses(reason),
+      () => host?.close(),
+    ];
+    for (const stage of stages) {
+      if (signal.aborted) return;
+      try { await stage(); } catch (error) { failures.push(error); }
+    }
+    if (failures.length > 0) throw new AggregateError(failures, "incomplete host bootstrap cleanup failed");
+  }, resolveShutdownCleanupTimeoutMs(undefined));
+  if (result.status !== "completed") {
+    forceKillManagedChildProcesses(reason);
+    // PTYs use a separate native owner. Signal them even if an earlier stage
+    // exhausted the deadline; a zero wait budget does not extend that deadline.
+    await forceKillAllTerminalsForShutdown(0);
+    log.error({ status: result.status }, "incomplete host bootstrap cleanup did not complete");
+  }
+  await flushLogger();
+  closeFileLogSink();
+  return result.status;
+}
+
 export async function runAppShutdownCleanup(options: {
   reason: "before-quit" | "app-update-install";
   exitOnTimeout: boolean;
@@ -171,14 +211,14 @@ export async function runAppShutdownCleanup(options: {
       // E4 — release OS-level global shortcuts FIRST (fast, synchronous, cannot
       // throw past its own internal try/catch) so a wedged or throwing later
       // step can't leave accelerators bound after quit.
-      unregisterAllGlobalShortcuts();
+      shutdownHost?.desktop?.beforeShutdown();
       // Same reasoning, same position: the floating dock is an always-on-top
       // window that outlives the app window by design. If a later stage wedges
       // or the hard timeout fires, a dock left up is a window floating over
       // everything with no process behind it. Synchronous, idempotent, and a
       // no-op when nothing ever attached — `peekFloatingDock` does not build
       // one just to tear it down.
-      peekFloatingDock()?.shutdown();
+
       if (signal.aborted) return;
       // Stop the opt-in local API server EARLY — it's fast (destroys idle
       // sockets + ends live SSE streams) and blanks its on-disk discovery file
@@ -244,6 +284,7 @@ export async function runAppShutdownCleanup(options: {
       // Force-kill BEFORE the log line so killedChildCount reflects what
       // actually happened, not an optimistic pre-kill count.
       const killedChildCount = forceKillManagedChildProcesses(`${options.reason} cleanup timeout`);
+      await shutdownHost?.close();
       log.error({
         timeoutMs: cleanupTimeoutMs,
         killedChildCount,
@@ -262,7 +303,8 @@ export async function runAppShutdownCleanup(options: {
       if (options.exitOnTimeout) {
         // A hard exit here never reaches `will-quit`, so the code a headless
         // run already chose is applied directly; a desktop run chose none.
-        app.exit(typeof process.exitCode === "number" ? process.exitCode : 0);
+        if (!shutdownHost) throw new Error("shutdown-host-unavailable");
+        shutdownHost.exit(typeof process.exitCode === "number" ? process.exitCode : 0);
       }
       return "timed-out";
     }
@@ -272,6 +314,7 @@ export async function runAppShutdownCleanup(options: {
       // acknowledging its graceful stop. The normal stop ran in the cleanup
       // finally block; this is only the last-resort descendant-safe backstop.
       const killedChildCount = forceKillManagedChildProcesses(`${options.reason} cleanup failed`);
+      await shutdownHost?.close();
       log.error(
         { killedChildCount },
         "%s: shutdown cleanup failed: %s",
@@ -286,6 +329,7 @@ export async function runAppShutdownCleanup(options: {
       return "failed";
     }
 
+    await shutdownHost?.close();
     // LAST step (happy path): flush any remaining buffered logs, then close
     // the production log file sink after every shutdown step has logged.
     await flushLogger();

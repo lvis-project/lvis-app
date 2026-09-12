@@ -131,10 +131,10 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
   const pluginSurfacePermissionScope = createPluginSurfacePermissionScope({
     readPersistedDirectories: () => readPermissionSettings().permissions.additionalDirectories,
     onSessionDirectoryAdded: () => {
-      broadcastPermissionConfigChangedFromHost();
+      broadcastPermissionConfigChangedFromHost(ctx.host.desktop?.getAppWindows() ?? []);
     },
     onSessionDirectoriesRevoked: () => {
-      broadcastPermissionConfigChangedFromHost();
+      broadcastPermissionConfigChangedFromHost(ctx.host.desktop?.getAppWindows() ?? []);
     },
   });
   // Publish it as a live-scope owner so a workspace-root removal sweeps plugin

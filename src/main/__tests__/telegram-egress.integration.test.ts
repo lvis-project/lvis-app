@@ -1,3 +1,4 @@
+import { unavailableSecretEncryption } from "../../__tests__/support/host-runtime.js";
 /**
  * End-to-end egress coverage for the owner-driven Telegram bridge: a paired
  * inbound message must produce real outbound `sendMessage` calls.
@@ -132,6 +133,7 @@ describe("telegram egress integration (real projection, real delivery)", () => {
       onFatal: vi.fn(),
       isPairedOwner: (senderId: string) => senderId === OWNER_CHAT_ID,
       secretStore,
+    encryption: unavailableSecretEncryption,
       createBotApiClient: vi.fn(() => client as never),
       log: (message: string) => {
         bridgeLogs.push(message);

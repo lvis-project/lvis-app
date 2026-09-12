@@ -12,11 +12,11 @@
  * revocation registry it is the deliberate fail-open default (nothing is
  * blocked) — not a condition the user needs to be warned about.
  */
-import { app } from "electron";
 import { revocationRegistry } from "../../plugins/revocation/revocation-registry.js";
 import type { AuditLogger } from "../../audit/audit-logger.js";
 
 export interface RevocationBootstrapInput {
+  userDataPath: string;
   bootAuditLogger: AuditLogger;
   /** Transport for the document GETs — Chromium's stack, from `ctx.singleHopNetworkFetch`. */
   networkFetch: typeof fetch;
@@ -40,7 +40,7 @@ function isOnlineByDefault(): boolean {
 export async function wireRevocationRegistry(input: RevocationBootstrapInput): Promise<void> {
   const { bootAuditLogger } = input;
   const online = input.online ?? isOnlineByDefault();
-  const userDataDir = app.getPath("userData");
+  const userDataDir = input.userDataPath;
 
   await revocationRegistry.init({
     userDataDir,

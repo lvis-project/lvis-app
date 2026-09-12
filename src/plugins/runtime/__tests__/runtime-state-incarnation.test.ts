@@ -27,6 +27,9 @@ afterEach(async () => {
 });
 
 class IncarnationTestRuntime extends PluginRuntime {
+  constructor(options: Omit<PluginRuntimeOptions, "encryption">) {
+    super({ ...options, encryption: unavailableSecretEncryption });
+  }
   buildPending(pluginId: string, manifest: PluginManifest, dataDir: string) {
     const incarnation = this.buildHostApiIncarnation(pluginId, manifest, dataDir, undefined, null);
     incarnationCleanups.push(incarnation);

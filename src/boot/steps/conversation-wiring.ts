@@ -12,7 +12,6 @@
  * stored on the context so `shutdown()` + `refreshPluginNotifications` can drive
  * them post-boot.
  */
-import { BrowserWindow as BrowserWindowValue } from "electron";
 import type { BrowserWindow } from "electron";
 import { createRoutineEngine } from "../routine.js";
 import { MAIN_CHAT_GROUP_ID, MAX_CHAT_GROUPS } from "../../contract/app-contract.js";
@@ -261,7 +260,7 @@ export async function wireConversation(
     llmFetch,
     networkFetch: singleHopNetworkFetch,
     subscriptionProviderFactory,
-    broadcastPermissionConfigChanged: broadcastPermissionConfigChangedFromHost,
+    broadcastPermissionConfigChanged: () => broadcastPermissionConfigChangedFromHost(ctx.host.desktop?.getAppWindows() ?? []),
   };
   const routineEngine = createRoutineEngine({
     createConversationLoop: (input) => createRoutineConversationLoop(
@@ -286,7 +285,7 @@ export async function wireConversation(
   // through `notificationService` (#841) so they inherit the same focus
   // gate, cooldown, sanitization, and audit policy as the host's lifecycle
   // notifications.
-  ctx.disposePluginNotifications = registerPluginNotifications(pluginRuntime, mainWindow, notificationService, bootAuditLogger,
+  ctx.disposePluginNotifications = registerPluginNotifications(pluginRuntime, mainWindow, notificationService, bootAuditLogger, ctx.host.desktop?.notificationSupported() ?? false,
   );
   ctx.disposePluginEventBridge = registerPluginEventBridge(pluginRuntime, mainWindow,
   );
@@ -350,7 +349,7 @@ export async function wireConversation(
     // PermissionsTab views refresh. Boot hands the loop a callback rather than
     // letting the engine import ipc; every interactive/background loop gets the
     // SAME callback, so a permission mutation on any of them is reported.
-    broadcastPermissionConfigChanged: broadcastPermissionConfigChangedFromHost,
+    broadcastPermissionConfigChanged: () => broadcastPermissionConfigChangedFromHost(ctx.host.desktop?.getAppWindows() ?? []),
     pluginRuntime,
     pluginOperationGrants,
     pluginOperationIdentityProvider,
@@ -404,7 +403,7 @@ export async function wireConversation(
     sideChatMemoryManager,
     getAdditionalDirectories: () => readPermissionSettings().permissions.additionalDirectories,
     subscriptionProviderFactory,
-    broadcastPermissionConfigChanged: broadcastPermissionConfigChangedFromHost,
+    broadcastPermissionConfigChanged: () => broadcastPermissionConfigChangedFromHost(ctx.host.desktop?.getAppWindows() ?? []),
     ...sideChatRationaleBindings,
   });
   ctx.sideChatConversationLoop = sideChatConversationLoop;
@@ -464,7 +463,7 @@ export async function wireConversation(
       hookRunner,
       scriptHookManager,
       getAdditionalDirectories: () => readPermissionSettings().permissions.additionalDirectories,
-      broadcastPermissionConfigChanged: broadcastPermissionConfigChangedFromHost,
+      broadcastPermissionConfigChanged: () => broadcastPermissionConfigChangedFromHost(ctx.host.desktop?.getAppWindows() ?? []),
       pluginRuntime,
       pluginOperationGrants,
       pluginOperationIdentityProvider,
@@ -676,7 +675,7 @@ export async function wireConversation(
       // the itemChanged broadcast in the work-board IPC domain) so detached
       // panels show the live running indicator in lock-step. sendToWindow's
       // destroyed-check + send-race swallow is reused per window.
-      fanOutToAllWindows(BrowserWindowValue.getAllWindows(), WORK_BOARD.runProgress, event, {
+      fanOutToAllWindows(ctx.host.desktop?.getAppWindows() ?? [], WORK_BOARD.runProgress, event, {
         logger: log,
       },
       );

@@ -1,3 +1,4 @@
+import type { SecretEncryption } from "../data/secret-document-store.js";
 /**
  * Main-process lifecycle for the default-OFF Telegram platform bridge.
  *
@@ -721,6 +722,7 @@ let activationSequence = 0;
 const installationReceiptOwnerId = randomUUID();
 
 export interface StartTelegramConnectionBridgeOptions {
+  readonly encryption: SecretEncryption;
   readonly conversationSurfaceRuntime: ConversationSurfaceRuntime;
   readonly conversationCommandPort: ConversationCommandPort;
   readonly getCurrentConversationId: () => string;
@@ -789,6 +791,7 @@ export async function maybeStartTelegramConnectionBridge(
     botToken: options.botToken,
     botFingerprint: options.botFingerprint,
     createRuntime: (activationEpoch) => Promise.resolve(createTelegramPairedPlatformRuntime({
+      encryption: options.encryption,
       botFingerprint: options.botFingerprint,
       authority: options.authority,
       getCurrentConversationId: options.getCurrentConversationId,

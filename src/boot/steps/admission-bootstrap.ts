@@ -17,11 +17,11 @@
  * Consequently, skipping or failing this step cannot weaken the control. It
  * can only make the first install of a session slower.
  */
-import { app } from "electron";
 import { admissionRegistry } from "../../plugins/admission/admission-registry.js";
 import type { AuditLogger } from "../../audit/audit-logger.js";
 
 export interface AdmissionBootstrapInput {
+  userDataPath: string;
   bootAuditLogger: AuditLogger;
   /** Transport for the document GETs — Chromium's stack, from `ctx.singleHopNetworkFetch`. */
   networkFetch: typeof fetch;
@@ -46,7 +46,7 @@ function isOnlineByDefault(): boolean {
 export async function wireAdmissionRegistry(input: AdmissionBootstrapInput): Promise<void> {
   const { bootAuditLogger } = input;
   const online = input.online ?? isOnlineByDefault();
-  const userDataDir = app.getPath("userData");
+  const userDataDir = input.userDataPath;
 
   await admissionRegistry.init({
     userDataDir,

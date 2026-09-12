@@ -1,3 +1,4 @@
+import { unavailableSecretEncryption } from "../../__tests__/support/host-runtime.js";
 import { createServer } from "node:net";
 import { occupyLoopbackPort as occupy } from "../../__tests__/test-helpers.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -67,6 +68,7 @@ function options(
   return {
     startServer,
     input: {
+      encryption: unavailableSecretEncryption,
       conversationSurfaceRuntime: runtime(),
       getCurrentConversationId: () => "main-session",
       isConversationBusy: () => false,

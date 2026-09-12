@@ -4,6 +4,12 @@ import { pathToFileURL } from "node:url";
 import { resolveRuntimePathsFromModuleUrl } from "../main-paths.js";
 
 describe("resolveRuntimePathsFromModuleUrl", () => {
+  it("anchors a native server build without a desktop preload", () => {
+    const distSrcDir = resolve("native-runtime-fixture", "dist", "src");
+    const markers = new Set([join(distSrcDir, "main/main.js"), join(distSrcDir, "main/headless-manifest.json")]);
+    const paths = resolveRuntimePathsFromModuleUrl(pathToFileURL(join(distSrcDir, "main/chunks/core.js")).href, (candidate) => markers.has(candidate));
+    expect(paths.projectRoot).toBe(resolve("native-runtime-fixture"));
+  });
   it("anchors a code-split main chunk at the emitted dist/src asset directory", () => {
     const distSrcDir = resolve("runtime-paths-fixture", "dist", "src");
     const emittedMarkers = new Set([

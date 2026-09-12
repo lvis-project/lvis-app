@@ -46,9 +46,8 @@ import {
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { createHash } from "node:crypto";
-import { app } from "electron";
+import { configureHostResources } from "../host-resources.js";
 
-vi.mock("electron", () => ({ app: { isPackaged: false } }));
 
 import {
   discardLvisHomeDocUpgradeMarker,
@@ -66,19 +65,6 @@ let fixtures: string;
 let home: string;
 const prevLvisHome = process.env.LVIS_HOME;
 const prevResourceRoot = process.env.LVIS_RESOURCE_ROOT;
-const originalResourcesPathDescriptor = Object.getOwnPropertyDescriptor(
-  process,
-  "resourcesPath",
-);
-
-function setResourcesPath(value: string | undefined): void {
-  Object.defineProperty(process, "resourcesPath", {
-    value,
-    configurable: true,
-    writable: true,
-  });
-}
-
 /** Write a packaged resource fixture under <fixtures>/resources/<rel>. */
 function writeRes(rel: string, content: string): void {
   const p = join(fixtures, "resources", rel);
@@ -95,6 +81,7 @@ beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), "lvis-seed-home-"));
   process.env.LVIS_HOME = home;
   process.env.LVIS_RESOURCE_ROOT = fixtures;
+  configureHostResources({ resourcePath: join(fixtures, "resources"), isPackaged: false });
 
   writeRes("AGENTS.md", "AGENTS v1\n");
   writeRes("AGENTS.md.replaceable-sha256", `${sha256("AGENTS v1\n")}\n`);
@@ -111,12 +98,7 @@ afterEach(async () => {
   else process.env.LVIS_HOME = prevLvisHome;
   if (prevResourceRoot === undefined) delete process.env.LVIS_RESOURCE_ROOT;
   else process.env.LVIS_RESOURCE_ROOT = prevResourceRoot;
-  (app as { isPackaged: boolean }).isPackaged = false;
-  if (originalResourcesPathDescriptor) {
-    Object.defineProperty(process, "resourcesPath", originalResourcesPathDescriptor);
-  } else {
-    delete (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
-  }
+
 });
 
 describe("seedLvisHomeDocs — first boot", () => {
@@ -179,11 +161,10 @@ describe("seedLvisHomeDocs — first boot", () => {
     expect(existsSync(join(home, "AGENTS.md.new"))).toBe(false);
   });
 
-it("uses process.resourcesPath in a packaged runtime", async () => {
+it("uses the injected resources directory in a packaged runtime", async () => {
     const resourcesPath = mkdtempSync(join(tmpdir(), "lvis-packaged-resources-"));
     try {
-      (app as { isPackaged: boolean }).isPackaged = true;
-      setResourcesPath(resourcesPath);
+      configureHostResources({ resourcePath: resourcesPath, isPackaged: true });
       writeFileSync(join(resourcesPath, "AGENTS.md"), "PACKAGED AGENTS\n");
       mkdirSync(join(resourcesPath, "agents"), { recursive: true });
       mkdirSync(join(resourcesPath, "skills"), { recursive: true });

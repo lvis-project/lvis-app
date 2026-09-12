@@ -19,7 +19,7 @@ import {
 import {
   wirePluginAuthPartitionPersistence,
   seedPluginAuthPartitions,
-} from "../../main/auth-window-service.js";
+} from "../../main/plugin-auth-partition-tracker.js";
 import { t } from "../../i18n/index.js";
 import { createLogger } from "../../lib/logger.js";
 import type { BootContext } from "../context.js";
@@ -31,16 +31,10 @@ export async function setupAuditAndNotification(ctx: BootContext): Promise<void>
 
   // Shared AuditLogger instance (plugin runtime + hooks + gate).
   const { AuditLogger } = await import("../../audit/audit-logger.js");
-  const { safeStorage } = await import("electron");
-  const {
-    FileSecretStore,
-    SafeStorageSecretStore,
-    ensureAuditSecret,
-  } = await import("../../audit/hmac-chain.js");
+  const { ensureAuditSecret } = await import("../../audit/hmac-chain.js");
+  const { createHostSecretStore } = await import("../../audit/host-secret-store.js");
   const bootAuditLogger = new AuditLogger();
-  const permissionAuditSecretStore = safeStorage.isEncryptionAvailable()
-    ? new SafeStorageSecretStore(safeStorage)
-    : new FileSecretStore();
+  const permissionAuditSecretStore = createHostSecretStore(ctx.host.encryption);
   await bootAuditLogger.setupPermissionAuditChain(
     ensureAuditSecret(permissionAuditSecretStore),
     permissionAuditSecretStore,
@@ -67,6 +61,11 @@ export async function setupAuditAndNotification(ctx: BootContext): Promise<void>
   const notificationService = new NotificationService({
     getMainWindow,
     auditLogger: bootAuditLogger,
+    ...(ctx.host.desktop?.notificationOptions ?? {
+      isReady: () => false,
+      isAnyWindowFocused: () => false,
+      notificationActivationRegistration: null,
+    }),
   });
   if (lvisHomeDocUpgradeMarkers.length > 0) {
     const markerSummary =

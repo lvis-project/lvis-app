@@ -1,3 +1,4 @@
+import { createBootHostFixture } from "../../__tests__/support/host-runtime.js";
 /**
  * host-fetch-verb-snapshot.test.ts
  *
@@ -161,6 +162,7 @@ async function buildRealHostApi(): Promise<{
   harness.capturedRuntimeOptions = null;
   const networkFetch = vi.fn(async () => new Response(""));
   await initPluginRuntime({
+    host: createBootHostFixture(),
     projectRoot: "/tmp/lvis-test/project",
     settingsService: {
       get: vi.fn((key: string) => {

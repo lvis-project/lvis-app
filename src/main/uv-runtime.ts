@@ -6,6 +6,7 @@ import { resolveUvTarget, type UvTarget } from "../../scripts/uv-targets.mjs";
 import { lvisHome } from "../shared/lvis-home.js";
 import { projectRoot } from "./main-paths.js";
 import { sha256Hex } from "../lib/hex-digest-equal.js";
+import { getHostResources } from "./host-resources.js";
 
 const DEFAULT_RUNTIME_UV_DIR = path.join(lvisHome(), "runtime", "uv");
 
@@ -21,9 +22,9 @@ export interface BundledUvRuntimeOptions {
 }
 
 export function isPackagedUvRuntime(options: BundledUvRuntimeOptions = {}): boolean {
-  const defaultApp = options.defaultApp ?? (process as { defaultApp?: boolean }).defaultApp;
-  const resourcesPath = options.resourcesPath ?? process.resourcesPath;
-  return !defaultApp && !!resourcesPath;
+  if (options.defaultApp !== undefined) return !options.defaultApp && !!options.resourcesPath;
+  if (options.resourcesPath !== undefined) return true;
+  return getHostResources().isPackaged;
 }
 
 export function currentUvTarget(options: BundledUvRuntimeOptions = {}): UvTarget {
@@ -47,7 +48,9 @@ function resolveDevUvBinaryPath(uvTarget: UvTarget, options: BundledUvRuntimeOpt
       path.join(options.moduleDir, "..", "..", "..", "resources", "uv", uvTarget.dir, uvTarget.bin),
       path.join(options.moduleDir, "..", "..", "resources", "uv", uvTarget.dir, uvTarget.bin),
     ]
-    : [path.join(options.projectRoot ?? projectRoot, "resources", "uv", uvTarget.dir, uvTarget.bin)];
+    : [path.join(options.projectRoot || options.defaultApp !== undefined
+      ? path.join(options.projectRoot ?? projectRoot, "resources")
+      : getHostResources().resourcePath, "uv", uvTarget.dir, uvTarget.bin)];
   if (options.requireDevBinary === false) {
     return candidates[0];
   }
@@ -63,7 +66,7 @@ function resolveDevUvBinaryPath(uvTarget: UvTarget, options: BundledUvRuntimeOpt
 }
 
 function materializePackagedUvBinary(uvTarget: UvTarget, options: BundledUvRuntimeOptions): string {
-  const resourcesPath = options.resourcesPath ?? process.resourcesPath;
+  const resourcesPath = options.resourcesPath ?? getHostResources().resourcePath;
   if (!resourcesPath) {
     throw new Error("packaged uv resources path is unavailable");
   }

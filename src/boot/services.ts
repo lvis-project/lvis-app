@@ -1,3 +1,4 @@
+import type { BootHost } from "./host-runtime.js";
 /**
  * Boot §4.2 Step 0–1+5 — Core service wiring.
  *
@@ -5,7 +6,6 @@
  * before plugin loading (settings, memory, audit, python runtime coordinator,
  * input classification, route/tool registry, and native builtin tools).
  */
-import { app, session } from "electron";
 import type { BrowserWindow } from "electron";
 import { SettingsService } from "../data/settings-store.js";
 import { initPiiRedactionPolicy } from "../audit/dlp-filter.js";
@@ -111,7 +111,7 @@ export async function applyBootLocale(
   setLocale(loaded ? bootLocale : DEFAULT_LOCALE);
 }
 
-export async function bootstrapCoreServices(mainWindow: BrowserWindow | null,
+export async function bootstrapCoreServices(mainWindow: BrowserWindow | null, host: BootHost,
 ): Promise<CoreServices> {
   // #1499 PR-0: production log file sink — attach FIRST, before any other core
   // service. It depends only on `lvisHome()` (no SettingsService / locale), so
@@ -143,7 +143,7 @@ export async function bootstrapCoreServices(mainWindow: BrowserWindow | null,
     // path this machine actually uses. Chromium's resolver is the same source
     // the host's own requests follow, which keeps one answer to "how does this
     // machine reach the internet" rather than two.
-    resolveOsProxy: (url) => session.defaultSession.resolveProxy(url),
+    ...(host.resolveProxy ? { resolveOsProxy: host.resolveProxy } : {}),
   });
   let pythonPath: string | undefined;
   void mainWindow;
@@ -162,9 +162,10 @@ export async function bootstrapCoreServices(mainWindow: BrowserWindow | null,
   // app.getPreferredSystemLanguages() requires app.whenReady() — bootstrapCoreServices
   // is always called after that point (see boot/index.ts).
   const settingsService = new SettingsService({
-    userDataPath: app.getPath("userData"),
-    systemLocale: app.getPreferredSystemLanguages()[0],
-    secretPolicy: app.isPackaged ? "packaged" : "development",
+    userDataPath: host.userDataPath,
+    systemLocale: host.systemLocale,
+    secretPolicy: host.isPackaged ? "packaged" : "development",
+    encryption: host.encryption,
   });
   await settingsService.migrateSecrets();
   applyBootPiiRedactionPolicy(settingsService);

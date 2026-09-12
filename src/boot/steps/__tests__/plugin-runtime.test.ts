@@ -1,3 +1,4 @@
+import { createBootHostFixture, createDesktopHostFixture } from "../../../__tests__/support/host-runtime.js";
 /**
  * plugin-runtime.test.ts
  *
@@ -20,6 +21,7 @@ const tmpDirs = createTmpDirTracker();
 const runtimeTestState = vi.hoisted(() => ({
   appPrependOnceListener: vi.fn(),
   appOnceListener: vi.fn(),
+  onBootShutdown: vi.fn(),
   browserWindows: [] as Array<{ isDestroyed: () => boolean; webContents: { send: (channel: string, payload: unknown) => void };
   }>,
   capturedRuntimeOptions: null as Record<string, unknown> | null,
@@ -149,7 +151,16 @@ function invokeHostApiFactory<TArgs extends unknown[], TResult>(
   )(pluginId, manifest, pluginDataDir, incarnation, pluginId);
 }
 
+function createRuntimeHost() {
+  return createBootHostFixture({ desktop: createDesktopHostFixture({
+    getAppWindows: () => runtimeTestState.browserWindows as never[],
+    installPluginPartition: (pluginId, pluginRoot) => installPluginPartitionPolicy(pluginPartitionName(pluginId), { pluginRoot }),
+    onBootShutdown: runtimeTestState.onBootShutdown,
+  }) });
+}
+
 beforeEach(() => {
+  runtimeTestState.onBootShutdown.mockReset();
   runtimeTestState.appPrependOnceListener.mockReset();
   runtimeTestState.appOnceListener.mockReset();
   setAppShutdownStarted(false);
@@ -351,6 +362,7 @@ describe("initPluginRuntime partition policy", () => {
     runtimeTestState.runtime.listPluginManifests.mockReturnValue([]);
 
     const output = await initPluginRuntime({
+    host: createRuntimeHost(),
       projectRoot: "/tmp/lvis-test/project",
       settingsService: {
         get: vi.fn((key: string) => {
@@ -390,21 +402,7 @@ describe("initPluginRuntime partition policy", () => {
     const handler = vi.fn(async () => {});
     output.pluginShutdownHandlers.push({ pluginId: "meeting", handler });
 
-    const beforeQuitFallback = runtimeTestState.appOnceListener.mock.calls
-      .find(([eventName]) => eventName === "before-quit")?.[1] as
-      | ((event: { preventDefault: () => void }) => void)
-      | undefined;
-    expect(beforeQuitFallback).toBeDefined();
-
-    // Main's cleanup listener sets this synchronously before later `once`
-    // listeners run. The boot-time fallback must therefore not bypass the
-    // service wrapper that disposes the active-LLM wildcard debounce first.
-    setAppShutdownStarted(true);
-    const event = { preventDefault: vi.fn() };
-    beforeQuitFallback?.(event);
-    expect(event.preventDefault).not.toHaveBeenCalled();
-    expect(handler).not.toHaveBeenCalled();
-    setAppShutdownStarted(false);
+    expect(runtimeTestState.onBootShutdown).toHaveBeenCalledWith(output.runPluginShutdownHandlers, expect.any(Function));
 
     await Promise.all([
       output.runPluginShutdownHandlers(),
@@ -425,6 +423,7 @@ describe("initPluginRuntime partition policy", () => {
     installPolicy.mockClear();
 
     await initPluginRuntime({
+    host: createRuntimeHost(),
       projectRoot: "/tmp/lvis-test/project",
       settingsService: {
         get: vi.fn((key: string) => {
@@ -512,6 +511,7 @@ describe("initPluginRuntime partition policy", () => {
     installPolicy.mockClear();
 
     await initPluginRuntime({
+    host: createRuntimeHost(),
       projectRoot: "/tmp/lvis-test/project",
       settingsService: {
         get: vi.fn((key: string) => {
@@ -608,6 +608,7 @@ describe("initPluginRuntime HostApi factory", () => {
     const bootAuditLogger = options.bootAuditLogger ?? { log: vi.fn() };
 
     await initPluginRuntime({
+    host: createRuntimeHost(),
       projectRoot: "/tmp/lvis-test/project",
       settingsService: {
         get: vi.fn((key: string) => {
@@ -808,6 +809,7 @@ describe("initPluginRuntime HostApi factory", () => {
     const approvalGate = { requestAndWait: vi.fn() };
 
     await initPluginRuntime({
+    host: createRuntimeHost(),
       projectRoot: "/tmp/lvis-test/project",
       settingsService: {
         get: vi.fn((key: string) => {
@@ -913,6 +915,7 @@ describe("initPluginRuntime HostApi factory", () => {
     };
 
     await initPluginRuntime({
+    host: createRuntimeHost(),
       projectRoot: "/tmp/lvis-test/project",
       settingsService: {
         get: vi.fn((key: string) => {
@@ -1010,6 +1013,7 @@ describe("initPluginRuntime HostApi factory", () => {
     runtimeTestState.capturedRuntimeOptions = null;
 
     const output = await initPluginRuntime({
+    host: createRuntimeHost(),
       projectRoot: "/tmp/lvis-test/project",
       settingsService: {
         get: vi.fn((key: string) => {
@@ -1072,6 +1076,7 @@ describe("initPluginRuntime HostApi factory", () => {
   it("keeps a forged manifest from reintroducing a cross-plugin callTool surface", async () => {
     runtimeTestState.capturedRuntimeOptions = null;
     const output = await initPluginRuntime({
+    host: createRuntimeHost(),
       projectRoot: "/tmp/lvis-test/project",
       settingsService: {
         get: vi.fn((key: string) => {
@@ -1220,6 +1225,7 @@ describe("initPluginRuntime HostApi factory", () => {
     });
 
     await initPluginRuntime({
+    host: createRuntimeHost(),
       projectRoot: "/tmp/lvis-test/project",
       settingsService: {
         get: vi.fn((key: string) => {
@@ -1341,6 +1347,7 @@ describe("initPluginRuntime HostApi factory", () => {
     });
 
     await initPluginRuntime({
+    host: createRuntimeHost(),
       projectRoot: "/tmp/lvis-test/project",
       settingsService: {
         get: vi.fn((key: string) => {
@@ -1456,6 +1463,7 @@ describe("initPluginRuntime HostApi factory", () => {
     );
 
     await initPluginRuntime({
+    host: createRuntimeHost(),
       projectRoot: "/tmp/lvis-test/project",
       settingsService: {
         get: vi.fn((key: string) => {
@@ -1542,6 +1550,7 @@ describe("initPluginRuntime HostApi factory", () => {
     resetHostSecretCountersForTesting();
 
     await initPluginRuntime({
+    host: createRuntimeHost(),
       projectRoot: "/tmp/lvis-test/project",
       settingsService: {
         get: vi.fn((key: string) => {
@@ -1622,6 +1631,7 @@ describe("initPluginRuntime HostApi factory", () => {
     resetHostSecretCountersForTesting();
 
     await initPluginRuntime({
+    host: createRuntimeHost(),
       projectRoot: "/tmp/lvis-test/project",
       settingsService: {
         get: vi.fn((key: string) => {
@@ -1736,6 +1746,7 @@ describe("initPluginRuntime HostApi factory", () => {
     });
 
     await initPluginRuntime({
+    host: createRuntimeHost(),
       projectRoot: "/tmp/lvis-test/project",
       settingsService: {
         get: vi.fn((key: string) => {
@@ -1831,6 +1842,7 @@ describe("hostApi.hasRoutineBySource — prefix-scoped idempotency probe", () =>
     runtimeTestState.runtime.listPluginIds.mockReturnValue([]);
     runtimeTestState.runtime.listPluginManifests.mockReturnValue([]);
     await initPluginRuntime({
+    host: createRuntimeHost(),
       projectRoot: "/tmp/lvis-test/project",
       settingsService: {
         get: vi.fn((key: string) => {
@@ -1942,6 +1954,7 @@ describe("initPluginRuntime sandbox union ordering", () => {
     });
 
     const output = await initPluginRuntime({
+    host: createRuntimeHost(),
       projectRoot: "/tmp/lvis-test/project",
       settingsService: {
         get: vi.fn((key: string) => {

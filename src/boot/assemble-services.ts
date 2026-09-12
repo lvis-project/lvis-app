@@ -1,3 +1,4 @@
+import { requireDesktopHost } from "./host-runtime.js";
 /**
  * assembleAppServices — build the final {@link AppServices} return literal from
  * a fully-populated {@link BootContext} (C18).
@@ -12,10 +13,9 @@
  */
 import { registerPluginNotifications } from "./plugins.js";
 import {
-  clearAuthPartition as clearAuthPartitionService,
   forgetTrackedPluginAuthPartitions as forgetPluginAuthPartitionsService,
   getTrackedPluginAuthPartitions as listPluginAuthPartitionsService,
-} from "../main/auth-window-service.js";
+} from "../main/plugin-auth-partition-tracker.js";
 import type { AppServices } from "./types.js";
 import type { ReadyBootContext } from "./context.js";
 
@@ -110,14 +110,14 @@ export function assembleAppServices(ctx: ReadyBootContext): AppServices {
       await ctx.runPluginShutdownHandlers();
     },
     pluginPaths: ctx.pluginPaths,
-    clearAuthPartitionService,
+    clearAuthPartitionService: (partition) => requireDesktopHost(ctx.host).clearAuthPartitionService(partition),
     forgetPluginAuthPartitionsService,
     listPluginAuthPartitionsService,
     startRoutinesScheduler: () => ctx.routinesScheduler.start(),
     startWorkBoardDueSoon: ctx.startWorkBoardDueSoon,
     refreshPluginNotifications: () => {
       ctx.disposePluginNotifications();
-      ctx.disposePluginNotifications = registerPluginNotifications(ctx.pluginRuntime, ctx.pluginEventBridgeWindow, ctx.notificationService, ctx.bootAuditLogger,
+      ctx.disposePluginNotifications = registerPluginNotifications(ctx.pluginRuntime, ctx.pluginEventBridgeWindow, ctx.notificationService, ctx.bootAuditLogger, ctx.host.desktop?.notificationSupported() ?? false,
       );
       ctx.replacePluginEventBridge(ctx.pluginEventBridgeWindow);
     },
@@ -172,6 +172,7 @@ export function assembleAppServices(ctx: ReadyBootContext): AppServices {
         await attemptAsync(() => ctx.mcpManager.disconnectAll());
         await attemptAsync(() => ctx.bootAuditLogger.close());
         await attemptAsync(() => ctx.auditService.stop());
+        await attemptAsync(() => ctx.tracing.shutdown());
 
         if (errors.length > 0) {
           throw new AggregateError(errors, "application service shutdown failed",

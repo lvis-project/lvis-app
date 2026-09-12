@@ -76,6 +76,19 @@ describe("native host external key path protection", () => {
     expect(getDefaultSensitiveWriteDenyPaths()).toContain(keyPath);
   });
 
+  it("protects the process ownership namespace from replacement through granted tool paths", () => {
+    vi.stubEnv("LVIS_HOME", root);
+    const directory = join(root, "host-runtime");
+    mkdirSync(directory);
+    const lock = join(directory, "instance.sqlite");
+    writeFileSync(lock, "ownership fixture");
+    expect(shellViolation("rm -f ./host-runtime/instance.sqlite", false)).toContain("Sensitive path:");
+    expect(shellViolation("printf x > ./host-runtime/instance.sqlite", false)).toContain("Sensitive path:");
+    const config = buildSandboxConfig({ allowedDomains: [], allowRead: [root], allowWrite: [root], denyRead: [], denyWrite: [] });
+    expect(config.filesystem.denyWrite).toContain(directory);
+    expect(config.filesystem.denyRead).toContain(directory);
+  });
+
   it("protects canonical aliases and retains the original target after an ancestor link changes", () => {
     const current = join(root, "current");
     const original = join(root, "original");

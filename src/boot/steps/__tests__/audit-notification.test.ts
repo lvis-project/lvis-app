@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BootContext } from "../../context.js";
+import { createBootHostFixture } from "../../../__tests__/support/host-runtime.js";
 
 const h = vi.hoisted(() => ({
   construct: vi.fn(),
@@ -45,7 +46,7 @@ vi.mock("../../../main/plugin-auth-partition-store.js", () => ({
   cleanupStaleTmpFiles: vi.fn(async () => undefined),
 }));
 
-vi.mock("../../../main/auth-window-service.js", () => ({
+vi.mock("../../../main/plugin-auth-partition-tracker.js", () => ({
   wirePluginAuthPartitionPersistence: h.wirePersistence,
   seedPluginAuthPartitions: h.seedPartitions,
 }));
@@ -59,6 +60,7 @@ import { setupAuditAndNotification } from "../audit-notification.js";
 
 function makeContext(): BootContext {
   return {
+    host: createBootHostFixture(),
     getMainWindow: () => null,
     lvisHomeDocUpgradeMarkers: [],
     settingsService: {

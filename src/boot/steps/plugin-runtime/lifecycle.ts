@@ -8,7 +8,6 @@
  * value-captured at factory construction (both are assigned AFTER this factory
  * is built).
  */
-import { BrowserWindow as ElectronBrowserWindow } from "electron";
 import type { BrowserWindow } from "electron";
 import { t } from "../../../i18n/index.js";
 import { createLogger } from "../../../lib/logger.js";
@@ -24,6 +23,7 @@ const log = createLogger("lvis");
 
 /** Explicit deps for the lifecycle callbacks. Lazy bindings arrive as getters. */
 export interface LifecycleDeps {
+  getAppWindows: () => BrowserWindow[];
   lateBinding: LateBindingRefs;
   getMainWindow?: () => BrowserWindow | null;
   mainWindow: BrowserWindow | null;
@@ -108,7 +108,7 @@ export function createLifecycleCallbacks(
       // Best-effort renderer refresh signal. Runtime/tool registry state is
       // already updated; a closed window must not make reload fail —
       // sendToWindow owns the isDestroyed guard + send try/catch.
-      for (const win of ElectronBrowserWindow.getAllWindows()) {
+      for (const win of deps.getAppWindows()) {
         sendToWindow(win, "lvis:plugins:runtime-updated", { pluginId }, log);
       }
     },
