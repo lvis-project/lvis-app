@@ -146,6 +146,7 @@ describe("SubscriptionLlmProvider", () => {
     });
     expect(payload.text).toContain('"continuationPrefill":true');
     expect(payload.text).toContain('"enableThinking":true');
+    expect(payload.text).toContain("Host tools resolve relative paths and omitted optional cwd values from the active LVIS project context.");
     expect(payload.text).not.toContain("raw stale tool result");
     expect(payload.text).not.toContain("iVBORw0KGgo=");
 
@@ -224,6 +225,25 @@ describe("SubscriptionLlmProvider", () => {
 
     expect(envelope.enableThinking).toBe(false);
     expect(envelope).not.toHaveProperty("thinkingBudgetTokens");
+  });
+
+  it.each(["codex", "kimi-code"] as const)("shares host-directory guidance with the %s transport without adding local path metadata", async (providerId) => {
+    const { session, streamTurn } = sessionWith([{ type: "message_complete", stopReason: "end_turn" }]);
+    const provider = createSubscriptionLlmProvider({
+      selection: { kind: "subscription", provider: providerId },
+      service: { openTextSession: vi.fn(async () => session) },
+    });
+    const input = params();
+    await collect(provider.streamTurn(input));
+    const serialized = streamTurn.mock.calls[0]?.[0] as string;
+    expect(serialized).toBe(serializeSubscriptionConversation(input));
+    expect(serialized).toContain("relative paths and omitted optional cwd values");
+    expect(serialized).not.toContain("subscription-runtimes");
+    const json = serialized.match(/<lvis-request-json>\s*([\s\S]*?)\s*<\/lvis-request-json>/)?.[1];
+    if (!json) throw new Error("subscription JSON envelope missing");
+    expect(Object.keys(JSON.parse(json))).toEqual([
+      "systemPrompt", "messages", "continuationPrefill", "enableThinking",
+    ]);
   });
 
   it("preserves normal conversation context and opens an LVIS-governed tool session", async () => {

@@ -412,6 +412,8 @@ const PLATFORM_TARGETS: Partial<Record<NodeJS.Platform, Partial<Record<NodeJS.Ar
 };
 
 const SAFE_LOCALE_ENV_NAMES = ["LANG", "LC_ALL"] as const;
+/** Host tools own execution; the private runtime workspace is not a model environment. */
+const NO_NATIVE_ENVIRONMENTS = Object.freeze([]);
 // Descriptive lifecycle items neither authorize execution nor establish turn identity.
 const PASSIVE_NATIVE_STREAM_ITEM_TYPES = new Set([
   "userMessage",
@@ -902,6 +904,7 @@ export class CodexConversationRuntime {
         input: promptInput,
         ...(model ? { model } : {}),
         cwd: workspaceDir,
+        environments: NO_NATIVE_ENVIRONMENTS,
         approvalPolicy: "untrusted",
         sandboxPolicy: {
           type: "workspaceWrite",
@@ -1196,6 +1199,9 @@ export class CodexConversationRuntime {
         ...(model ? { model } : {}),
         ...(dynamicTools.definitions.length > 0 ? { dynamicTools: dynamicTools.definitions } : {}),
         cwd: this.currentWorkspaceDir(),
+        environments: NO_NATIVE_ENVIRONMENTS,
+        // Hide native writable-root instructions without changing the sandbox.
+        config: { include_permissions_instructions: false },
         approvalPolicy: "untrusted",
         sandbox: "workspace-write",
         ephemeral: true,
