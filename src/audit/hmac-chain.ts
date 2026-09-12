@@ -244,6 +244,7 @@ export class SafeStorageSecretStore implements SecretStore {
   constructor(
     private readonly safeStorage: SafeStorageLike,
     dir?: string,
+    private readonly unreadablePolicy: "quarantine" | "reject" = "quarantine",
   ) {
     this.dir = dir ?? join(lvisHome(), "secrets");
     hardenSecretDirectory(this.dir);
@@ -318,15 +319,21 @@ export class SafeStorageSecretStore implements SecretStore {
     );
     if (encrypted === null) return null;
     if (!encrypted.startsWith(SAFE_STORAGE_SECRET_PREFIX)) {
+      if (this.unreadablePolicy === "reject") throw new Error("Secret ciphertext has an unsupported encryption format");
       this.quarantineUnreadableSecret(name, p, "invalid-prefix");
       return null;
     }
     let value: string;
     try {
-      value = this.safeStorage.decryptString(
-        Buffer.from(encrypted.slice(SAFE_STORAGE_SECRET_PREFIX.length), "base64"),
-      );
+      const encoded = encrypted.slice(SAFE_STORAGE_SECRET_PREFIX.length);
+      const ciphertext = Buffer.from(encoded, "base64");
+      if (this.unreadablePolicy === "reject"
+        && (ciphertext.length === 0 || ciphertext.toString("base64") !== encoded)) {
+        throw new Error("Secret ciphertext encoding is invalid");
+      }
+      value = this.safeStorage.decryptString(ciphertext);
     } catch (err) {
+      if (this.unreadablePolicy === "reject") throw new Error("Stored secret could not be decrypted");
       this.quarantineUnreadableSecret(name, p, "decrypt-failed", err);
       return null;
     }
@@ -337,6 +344,7 @@ export class SafeStorageSecretStore implements SecretStore {
   write(name: string, value: string): void {
     this.assertAvailable();
     const p = this.path(name);
+    if (this.unreadablePolicy === "reject") this.read(name);
     const encrypted = SAFE_STORAGE_SECRET_PREFIX + this.safeStorage.encryptString(value).toString("base64");
     atomicWriteSecretFile(this.dir, p, encrypted);
   }

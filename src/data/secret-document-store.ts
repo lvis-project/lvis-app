@@ -32,13 +32,14 @@ export interface SecretEncryption {
     | "kwallet"
     | "kwallet5"
     | "kwallet6"
+    | "external_key"
     | "unknown";
   encryptString(value: string): Buffer;
   decryptString(value: Buffer): string;
 }
 
 type SecretEntry =
-  | { encoding: "safe-storage"; value: string }
+  | { encoding: "safe-storage" | "external-key"; value: string }
   | { encoding: "plain-development"; value: string };
 
 interface SecretDocument {
@@ -230,7 +231,7 @@ export class SecretDocumentDecryptionError extends Error {
 
 export class SecretEncryptionUnavailableError extends Error {
   constructor() {
-    super("Electron safeStorage encryption is unavailable for encrypted secret storage");
+    super("Host encryption is unavailable for encrypted secret storage");
     this.name = "SecretEncryptionUnavailableError";
   }
 }
@@ -283,11 +284,11 @@ function validateCanonicalDocument(value: unknown): SecretDocument {
       || typeof candidate.value !== "string") {
       throw new SecretDocumentValidationError("Secret document contains an invalid entry");
     }
-    if (candidate.encoding === "safe-storage") {
+    if (candidate.encoding === "safe-storage" || candidate.encoding === "external-key") {
       if (!isCanonicalBase64(candidate.value)) {
         throw new SecretDocumentValidationError("Secret document contains invalid ciphertext encoding");
       }
-      entries[key] = { encoding: "safe-storage", value: candidate.value };
+      entries[key] = { encoding: candidate.encoding, value: candidate.value };
     } else if (candidate.encoding === "plain-development") {
       entries[key] = { encoding: "plain-development", value: candidate.value };
     } else {
@@ -382,14 +383,16 @@ export class SecretDocumentStore {
   readonly lockAnchorPath: string;
   private readonly policy: SecretPolicy;
   private readonly encryption: SecretEncryption;
+  private readonly externalKey: boolean;
   private readonly platform: NodeJS.Platform;
   private readonly runtime: SecretStoreRuntime;
 
   constructor(options: SecretDocumentStoreOptions) {
     this.path = resolve(options.path);
     this.lockAnchorPath = resolve(dirname(this.path), `${basename(this.path)}.lock-anchor`);
-    this.policy = options.policy;
     this.encryption = options.encryption;
+    this.externalKey = this.encryption.getSelectedStorageBackend() === "external_key";
+    this.policy = this.externalKey ? "packaged" : options.policy;
     this.platform = options.platform ?? process.platform;
     this.runtime = { ...DEFAULT_RUNTIME, ...options.runtime };
   }
@@ -397,6 +400,7 @@ export class SecretDocumentStore {
   get(key: string): string | null {
     validateSecretKey(key);
     const state = this.readState(false);
+    this.assertCompatibleDocument(state);
     if (!Object.hasOwn(state.document.entries, key)) return null;
     const entry = state.document.entries[key];
     if (entry.encoding === "plain-development") {
@@ -410,9 +414,10 @@ export class SecretDocumentStore {
   getEncrypted(key: string): string | null {
     validateSecretKey(key);
     const state = this.readState(false);
+    this.assertCompatibleDocument(state);
     if (!Object.hasOwn(state.document.entries, key)) return null;
     const entry = state.document.entries[key];
-    if (entry.encoding !== "safe-storage") {
+    if (entry.encoding === "plain-development") {
       if (this.policy === "packaged") throw new SecretEncryptionUnavailableError();
       return null;
     }
@@ -495,7 +500,10 @@ export class SecretDocumentStore {
 
   private encode(value: string): SecretEntry {
     if (this.isEncryptionUsable()) {
-      return { encoding: "safe-storage", value: this.encryption.encryptString(value).toString("base64") };
+      return {
+        encoding: this.externalKey ? "external-key" : "safe-storage",
+        value: this.encryption.encryptString(value).toString("base64"),
+      };
     }
     if (this.policy === "packaged") throw new SecretEncryptionUnavailableError();
     return { encoding: "plain-development", value };
@@ -534,6 +542,23 @@ export class SecretDocumentStore {
       return this.encryption.decryptString(Buffer.from(value, "base64"));
     } catch {
       throw new SecretDocumentDecryptionError();
+    }
+  }
+
+  private assertCompatibleDocument(state: StoredState): void {
+    if (this.externalKey && state.kind === "legacy") {
+      throw new SecretDocumentValidationError("External-key storage cannot migrate a legacy secret document");
+    }
+    for (const entry of Object.values(state.document.entries)) {
+      if (this.externalKey ? entry.encoding !== "external-key" : entry.encoding === "external-key") {
+        throw new SecretDocumentValidationError("Secret document requires a different encryption backend");
+      }
+      // Authenticate the entire external-key document before any mutation, so
+      // an incorrect key cannot replace or delete unreadable credentials.
+      if (this.externalKey) {
+        if (!this.isEncryptionUsable()) throw new SecretEncryptionUnavailableError();
+        this.decrypt(entry.value);
+      }
     }
   }
 
@@ -582,12 +607,14 @@ export class SecretDocumentStore {
       let completed: MutationResult<T>;
       try {
         completed = await this.runtime.lock(this.lockAnchorPath, async () => {
+          if (this.externalKey) this.assertCompatibleDocument(this.readState(allowLegacy));
           const modeWasRepaired = options.repairModeBeforeRead === true
             && this.platform !== "win32"
             && this.runtime.exists(this.path)
             ? this.runtime.repairMode(this.path, PRIVATE_FILE_MODE)
             : false;
           const state = this.readState(allowLegacy);
+          this.assertCompatibleDocument(state);
           const document = cloneDocument(state.document);
           const before = canonicalBytes(state.document);
           const value = callback(document, state.kind, modeWasRepaired);
