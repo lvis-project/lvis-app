@@ -4,7 +4,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { writeFixtureFile } from "./gate-script-runner";
+import { writeFixtureFile } from "./gate-script-runner.js";
 
 const require = createRequire(import.meta.url);
 const { resolveBuildAssets } = require("../../scripts/lib/build-assets.mjs") as {
