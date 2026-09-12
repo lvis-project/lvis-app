@@ -106,6 +106,7 @@
     "dist:current": "node scripts/build-installers.mjs --current",
     "dist:mac": "node scripts/build-installers.mjs --mac",
     "dist:linux": "node scripts/build-installers.mjs --linux",
+    "dist:headless": "node scripts/package-headless-runtime.mjs",
     "dist:win": "node scripts/build-installers.mjs --win",
     "dist:fast": "node scripts/build-installers.mjs --current --fast",
     "dist:mac:fast": "node scripts/build-installers.mjs --mac --fast",
