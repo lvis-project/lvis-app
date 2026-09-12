@@ -65,7 +65,7 @@ describe("protected external key encryption", () => {
     expect(() => createNodeSecretEncryption(root)).toThrow(/regular file/);
     const symlink = join(root, "linked");
     symlinkSync(keyFile, symlink);
-    expect(() => createNodeSecretEncryption(symlink)).toThrow(/regular file/);
+    expect(() => createNodeSecretEncryption(symlink)).toThrow(SecretKeyFileError);
     const hardlink = join(root, "hardlink");
     linkSync(keyFile, hardlink);
     expect(() => createNodeSecretEncryption(hardlink)).toThrow(/hard links/);
@@ -78,7 +78,7 @@ describe("protected external key encryption", () => {
       const path = join(root, `mode-${mode}`);
       writeFileSync(path, randomBytes(32), { mode: 0o600 });
       chmodSync(path, mode);
-      expect(() => createNodeSecretEncryption(path)).toThrow(/0400 or 0600/);
+      expect(() => createNodeSecretEncryption(path)).toThrow(SecretKeyFileError);
       expect(statSync(path).mode & 0o7777).toBe(mode);
     }
   });

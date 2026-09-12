@@ -2,9 +2,10 @@ import {
   DEFAULT_CORP_CA_COMMON_NAME,
   normalizeCorpCaCommonName,
 } from "../shared/corp-ca-common-name.js";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { withFileLock } from "../lib/with-file-lock.js";
+import { writeUtf8FileAtomicSync } from "../lib/atomic-file.js";
 import {
   normalizeSidePanelSplitPercent,
   normalizeSidePanelWidth,
@@ -1616,9 +1617,8 @@ export class SettingsService {
   }
 
   private async saveSettings(): Promise<void> {
-    mkdirSync(dirname(this.settingsPath), { recursive: true });
     await withFileLock(this.settingsPath, async () => {
-      writeFileSync(this.settingsPath, JSON.stringify(this.settings, null, 2), "utf-8");
+      writeUtf8FileAtomicSync(this.settingsPath, JSON.stringify(this.settings, null, 2));
     });
   }
 

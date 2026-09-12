@@ -67,14 +67,12 @@ function readPrivateKey(keyFilePath: string): KeyObject {
   const bytes = Buffer.alloc(KEY_BYTES);
   const verification = Buffer.alloc(KEY_BYTES);
   try {
-    const before = lstatSync(keyFilePath);
-    assertPrivateKeyFile(before);
-    // NONBLOCK also prevents a replacement FIFO from hanging startup between
-    // the path check and the descriptor check.
+    // Validate the opened descriptor, not a path check that can become stale
+    // before open. NOFOLLOW rejects links and NONBLOCK prevents a FIFO from
+    // hanging startup before fstat can reject its type.
     fd = openSync(keyFilePath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     const opened = fstatSync(fd);
     assertPrivateKeyFile(opened);
-    if (!sameKeyFile(before, opened)) throw new SecretKeyFileError("Secret key file changed during read");
     readKeyWindow(fd, bytes);
     readKeyWindow(fd, verification);
     const afterHandle = fstatSync(fd);
