@@ -10,6 +10,7 @@ import {
   bindTestPluginRuntimeGeneration,
   writeTestPluginRegistry,
 } from "../../__tests__/test-helpers.js";
+import { unavailableSecretEncryption } from "../../../__tests__/support/host-runtime.js";
 
 const PLUGIN_COUNT = 6;
 
@@ -70,7 +71,7 @@ describe("PluginRuntime boot preflight", () => {
 
   it("bounds receipt checks and reports staggered integrity failures in plan order", async () => {
     const integrityAuditPluginIds: string[] = [];
-    const runtime = bindTestPluginRuntimeGeneration(new PluginRuntime({
+    const runtime = bindTestPluginRuntimeGeneration(new PluginRuntime({ encryption: unavailableSecretEncryption,
       hostRoot,
       pluginsRoot,
       registryPath,
@@ -139,7 +140,7 @@ describe("PluginRuntime boot preflight", () => {
     // installed — while every UI surface that lists plugins (sidebar, Settings,
     // Plugin Doctor) projects from the card list and therefore shows nothing at
     // all. The user gets an install they cannot see, diagnose, or repair.
-    const runtime = bindTestPluginRuntimeGeneration(new PluginRuntime({
+    const runtime = bindTestPluginRuntimeGeneration(new PluginRuntime({ encryption: unavailableSecretEncryption,
       hostRoot,
       pluginsRoot,
       registryPath,
@@ -176,7 +177,7 @@ describe("PluginRuntime boot preflight", () => {
     // never attempted: no instance, no failure, and (because a card needs
     // either a load status or a stub) no row anywhere in the UI, while the
     // registry kept calling them installed.
-    const runtime = bindTestPluginRuntimeGeneration(new PluginRuntime({
+    const runtime = bindTestPluginRuntimeGeneration(new PluginRuntime({ encryption: unavailableSecretEncryption,
       hostRoot,
       pluginsRoot,
       registryPath,
@@ -248,7 +249,7 @@ describe("PluginRuntime boot preflight", () => {
       { id: isolatedId, manifestPath: join(isolatedRoot, "plugin.json") },
       { id: "preflight-0", manifestPath: join(pluginsRoot, "preflight-0", "plugin.json") },
     ]);
-    const runtime = bindTestPluginRuntimeGeneration(new PluginRuntime({
+    const runtime = bindTestPluginRuntimeGeneration(new PluginRuntime({ encryption: unavailableSecretEncryption,
       hostRoot,
       pluginsRoot,
       registryPath,
@@ -292,7 +293,7 @@ describe("PluginRuntime boot preflight", () => {
       { id: "preflight-0", manifestPath: join(pluginsRoot, "preflight-0", "plugin.json") },
     ]);
     const readPaths: string[] = [];
-    const runtime = bindTestPluginRuntimeGeneration(new PluginRuntime({
+    const runtime = bindTestPluginRuntimeGeneration(new PluginRuntime({ encryption: unavailableSecretEncryption,
       hostRoot,
       pluginsRoot,
       registryPath,
@@ -324,7 +325,7 @@ describe("PluginRuntime boot preflight", () => {
 
   it("isolates an unexpected receipt verifier rejection to its plugin", async () => {
     const rejected: Array<{ pluginId: string; reason: string }> = [];
-    const runtime = bindTestPluginRuntimeGeneration(new PluginRuntime({
+    const runtime = bindTestPluginRuntimeGeneration(new PluginRuntime({ encryption: unavailableSecretEncryption,
       hostRoot,
       pluginsRoot,
       registryPath,
@@ -369,7 +370,7 @@ describe("PluginRuntime boot preflight", () => {
       manifestPath: join(pluginsRoot, pluginId, "plugin.json"),
     }]);
     const auditMessages: string[] = [];
-    const runtime = bindTestPluginRuntimeGeneration(new PluginRuntime({
+    const runtime = bindTestPluginRuntimeGeneration(new PluginRuntime({ encryption: unavailableSecretEncryption,
       hostRoot,
       pluginsRoot,
       registryPath,
@@ -412,7 +413,7 @@ describe("PluginRuntime boot preflight", () => {
       manifestPath: join(pluginsRoot, id, "plugin.json"),
     })));
     const auditEvents: Array<{ message: string; pluginId: string }> = [];
-    const runtime = bindTestPluginRuntimeGeneration(new PluginRuntime({
+    const runtime = bindTestPluginRuntimeGeneration(new PluginRuntime({ encryption: unavailableSecretEncryption,
       hostRoot,
       pluginsRoot,
       registryPath,

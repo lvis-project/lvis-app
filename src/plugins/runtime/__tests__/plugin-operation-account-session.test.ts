@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { deferred } from "../../../__tests__/test-helpers.js";
 import { createNoopHostApiForTests, PluginRuntime } from "../../runtime.js";
 import type { PluginManifest } from "../../types.js";
+import { unavailableSecretEncryption } from "../../../__tests__/support/host-runtime.js";
 
 const pluginId = "session-bound-auth";
 const generationId = "generation-1";
@@ -23,7 +24,7 @@ function runtime(options: {
   onPluginUiRevisionChange?: (instance: PluginRuntime) => void;
 } = {}): PluginRuntime {
   let instance!: PluginRuntime;
-  instance = new PluginRuntime({
+  instance = new PluginRuntime({ encryption: unavailableSecretEncryption,
     hostRoot: "/tmp",
     manifestPaths: [],
     createHostApi: createNoopHostApiForTests,

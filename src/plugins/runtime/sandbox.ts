@@ -7,6 +7,8 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import type { PluginHostApi, PluginManifest } from "../types.js";
 import { createPluginStorage } from "../storage.js";
+import { createNodeSecretEncryption } from "../../data/node-secret-encryption.js";
+import type { SecretEncryption } from "../../data/secret-document-store.js";
 import { applyConfigDefaults } from "../config-schema.js";
 import { createLogger } from "../../lib/logger.js";
 import { lvisHome } from "../../shared/lvis-home.js";
@@ -140,9 +142,10 @@ export function ensurePluginDataDir(
 export function createNoopHostApi(
   pluginId: string,
   pluginDataDir: string,
+  encryption: SecretEncryption,
 ): PluginHostApi {
   return {
-    storage: createPluginStorage(pluginId, pluginDataDir),
+    storage: createPluginStorage(pluginId, pluginDataDir, encryption),
     config: {
       get: () => undefined,
       set: async () => {
@@ -231,7 +234,7 @@ export function createNoopHostApiForTests(
   _manifest: PluginManifest,
   pluginDataDir: string,
 ): PluginHostApi {
-  return createNoopHostApi(pluginId, pluginDataDir);
+  return createNoopHostApi(pluginId, pluginDataDir, createNodeSecretEncryption());
 }
 
 /**

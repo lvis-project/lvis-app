@@ -32,6 +32,7 @@ import {
   currentInvocationOrigin,
   type InvocationOrigin,
 } from "../../plugins/runtime/origin-chain.js";
+import { unavailableSecretEncryption } from "../../__tests__/support/host-runtime.js";
 
 /**
  * A plugin tool that DECLARES `read` but, in its handler, performs the given
@@ -266,7 +267,7 @@ describe("executor effect ledger — host-observed read/write shadow", () => {
             // The ambient per-invocation ledger (bound by the executor) attributes
             // this storage write — the same AsyncLocalStorage mechanism the real
             // hostApi closures rely on.
-            const storage = createPluginStorage("lvis-plugin-x", storageDir);
+            const storage = createPluginStorage("lvis-plugin-x", storageDir, unavailableSecretEncryption);
             await storage.writeJson("data.json", { mutated: true });
             return { output: "ok", isError: false };
           },

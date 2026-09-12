@@ -203,3 +203,31 @@ describe("A2A remote startup recovery fence", () => {
     expect(files.get("client-state.quarantine.json")).toMatchObject({ version: 1, entries: expect.any(Array) });
   });
 });
+
+describe("strict encrypted data-key recovery", () => {
+  it.each([false, true])("preserves every stored byte when the configured key cannot decrypt (available=%s)", async (available) => {
+    const original = {
+      version: 3,
+      encryptedDataKey: Buffer.from("incompatible-ciphertext").toString("base64"),
+      attempts: [], payloads: [], tasks: [],
+    };
+    const files = new Map<string, unknown>([["client-state.json", structuredClone(original)]]);
+    const writeJson = vi.fn(async (name: string, value: unknown) => { files.set(name, structuredClone(value)); });
+    const store = new A2ARemoteDurableStore({
+      namespace: {
+        readJson: async <T>(name: string, fallback: T) => structuredClone((files.get(name) ?? fallback) as T),
+        writeJson,
+      },
+      encryption: {
+        isEncryptionAvailable: () => available,
+        encryptString: () => { throw new Error("unexpected key replacement"); },
+        decryptString: () => { throw new Error("unreadable ciphertext"); },
+      },
+      unreadableKeyPolicy: "reject",
+    });
+    await expect(store.cleanup()).rejects.toThrow("a2a-remote-data-key-unreadable");
+    expect(writeJson).not.toHaveBeenCalled();
+    expect(files.size).toBe(1);
+    expect(files.get("client-state.json")).toEqual(original);
+  });
+});

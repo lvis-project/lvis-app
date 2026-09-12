@@ -792,7 +792,7 @@ export interface PluginConfigSchemaProperty {
   /**
    * UI/storage hint:
    * - `"secret"` → masked input; saved via `hostApi.setSecret(plugin.<id>.<key>)`
-   *   into `lvis-secrets.json` (Electron `safeStorage`). Never written to
+   *   into the host-encrypted `lvis-secrets.json`. Never written to
    *   cleartext `settings.pluginConfigs`. Plugins read via `hostApi.getSecret`.
    * - other formats are advisory and rendered as plain inputs today.
    * @optional
@@ -1020,9 +1020,8 @@ export class PluginStorageError extends Error {
 
 /**
  * Thrown by {@link PluginStorage.writeEncrypted} / {@link PluginStorage.readEncrypted}
- * when OS-level encryption is unavailable — Electron `safeStorage` reports
- * `isEncryptionAvailable() === false`, or the main-process `safeStorage` API
- * cannot be reached at all.
+ * when the host encryption provider is unavailable. Desktop hosts use OS
+ * encryption; native hosts can use an explicitly configured external key.
  *
  * FAIL-CLOSED, No-Fallback: the encrypted variants NEVER read or write plaintext
  * when encryption is unavailable. A dynamically-acquired secret must not silently
@@ -1037,7 +1036,7 @@ export class PluginStorageEncryptionUnavailableError extends Error {
   readonly pluginId: string;
   constructor(pluginId: string) {
     super(
-      `[plugin-storage:${pluginId}] OS encryption is unavailable — encrypted storage cannot be used (no plaintext fallback)`,
+      `[plugin-storage:${pluginId}] Host encryption is unavailable; encrypted storage cannot be used (no plaintext fallback)`,
     );
     this.name = "PluginStorageEncryptionUnavailableError";
     this.pluginId = pluginId;
@@ -1104,7 +1103,7 @@ export interface PluginStorage {
   /** Ensure a directory exists (recursive mkdir). */
   mkdir(relPath: string): Promise<void>;
   /**
-   * Encrypt `plaintext` with the host's OS keychain (Electron `safeStorage`) and
+   * Encrypt `plaintext` with the host's configured encryption provider and
    * write the ciphertext bytes to `relPath`, inside the same sandboxed
    * `pluginDataDir` root as every other method — identical absolute-path /
    * lexical `..` / symlink-escape rejection applies. Parent directories are
@@ -1115,7 +1114,7 @@ export interface PluginStorage {
    * own encrypted-at-rest store. Contrast with {@link PluginHostApi.getSecret},
    * which reads HOST-PROVISIONED config secrets declared in the manifest.
    *
-   * FAIL-CLOSED: if OS encryption is unavailable this throws
+   * FAIL-CLOSED: if host encryption is unavailable this throws
    * {@link PluginStorageEncryptionUnavailableError} and writes NOTHING — the
    * plaintext is never persisted unprotected (No-Fallback rule).
    */
@@ -1124,7 +1123,7 @@ export interface PluginStorage {
    * Read the ciphertext previously written by {@link writeEncrypted} at `relPath`
    * and return the decrypted UTF-8 plaintext. Throws ENOENT if the file does not
    * exist (same contract as {@link readText}); throws
-   * {@link PluginStorageEncryptionUnavailableError} if OS encryption is
+   * {@link PluginStorageEncryptionUnavailableError} if host encryption is
    * unavailable — it never returns raw ciphertext or a plaintext guess.
    */
   readEncrypted(relPath: string): Promise<string>;

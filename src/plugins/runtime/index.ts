@@ -53,6 +53,7 @@ import { withPluginInstallLock, hasExclusivePluginLifecycleMutation, isPluginIns
 import { isOutOfProcessPlugin } from "../isolation/out-of-process-plugins.js";
 import { createOutOfProcessPluginFactory } from "../isolation/out-of-process-plugin.js";
 import { createPluginStorage, createPluginStorageAuditSink } from "../storage.js";
+import type { SecretEncryption } from "../../data/secret-document-store.js";
 import { runWithCeiling } from "../../tools/executor-ceiling.js";
 import { checkRuntimeAdmission } from "./runtime-admission.js";
 import type { FloatingDockErrorCode, ResolvedFloatingSurface } from "../../main/floating-dock.js";
@@ -256,6 +257,7 @@ export interface PluginHostApiIncarnation {
 
 export interface PluginRuntimeOptions {
   hostRoot: string;
+  encryption: SecretEncryption;
   manifestPaths?: string[];
   registryPath?: string;
   pluginsRoot?: string;
@@ -1648,6 +1650,7 @@ function createPendingRestartCancellation(): PendingRestartCancellation {
 
 abstract class PluginRuntimeState {
   protected readonly hostRoot: string;
+  protected readonly encryption: SecretEncryption;
   protected readonly manifestPaths: string[];
   protected readonly registryPath?: string;
   protected readonly pluginsRoot?: string;
@@ -1825,6 +1828,7 @@ abstract class PluginRuntimeState {
       );
     }
     this.hostRoot = resolve(options.hostRoot);
+    this.encryption = options.encryption;
     this.manifestPaths = (options.manifestPaths ?? []).map((path) => resolve(path));
     this.registryPath = options.registryPath ? resolve(options.registryPath) : undefined;
     this.pluginsRoot = options.pluginsRoot ? resolve(options.pluginsRoot) : undefined;
@@ -7292,7 +7296,7 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
     // the swap then found and refused. The directory is created at load, and a
     // call arriving while it is absent is refused rather than served from a
     // directory this call invented.
-    return createPluginStorage(pluginId, this.resolveDataDir(pluginId, plugin.pluginRoot), audit);
+    return createPluginStorage(pluginId, this.resolveDataDir(pluginId, plugin.pluginRoot), this.encryption, audit);
   }
 
   /**

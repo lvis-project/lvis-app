@@ -16,6 +16,7 @@ const mockedElectron = vi.hoisted(() => {
   return {
     enc,
     safeStorage: {
+      getSelectedStorageBackend: () => "gnome_libsecret" as const,
       isEncryptionAvailable: vi.fn(() => enc.available),
       encryptString: vi.fn((s: string) => Buffer.from(`ENC(${s})`, "utf-8")),
       decryptString: vi.fn((b: Buffer) => {
@@ -49,18 +50,18 @@ afterEach(async () => {
 
 describe("createPluginStorage path guards", () => {
   it("rejects absolute paths", () => {
-    const s = createPluginStorage("p", dataDir);
+    const s = createPluginStorage("p", dataDir, mockedElectron.safeStorage);
     expect(() => s.resolve("/etc/passwd")).toThrow(/absolute paths are not allowed/);
   });
 
   it("rejects relative paths that escape via ..", () => {
-    const s = createPluginStorage("p", dataDir);
+    const s = createPluginStorage("p", dataDir, mockedElectron.safeStorage);
     expect(() => s.resolve("..", "evil.txt")).toThrow(/escapes plugin storage root/);
     expect(() => s.resolve("nested", "..", "..", "evil.txt")).toThrow(/escapes plugin storage root/);
   });
 
   it("allows paths inside the root", () => {
-    const s = createPluginStorage("p", dataDir);
+    const s = createPluginStorage("p", dataDir, mockedElectron.safeStorage);
     const target = s.resolve("subdir", "file.txt");
     // Compare against the canonical root (mkdtemp on macOS lives under /tmp,
     // which realpath resolves to /private/tmp).
@@ -75,7 +76,7 @@ describe("createPluginStorage path guards", () => {
     // so this still exercises real reparse-point traversal locally.
     writeFileSync(join(outsideDir, "escape.txt"), "untouched", "utf-8");
     symlinkSync(outsideDir, join(dataDir, "escape"), dirLinkType);
-    const s = createPluginStorage("p", dataDir);
+    const s = createPluginStorage("p", dataDir, mockedElectron.safeStorage);
     // The realpath of `escape/escape.txt` resolves outside the root → reject.
     await expect(s.write(join("escape", "escape.txt"), "tampered")).rejects.toThrow(
       /symlink escapes plugin storage root/,
@@ -92,7 +93,7 @@ describe("createPluginStorage path guards", () => {
     // via outsideDir.
     writeFileSync(join(outsideDir, "secret.txt"), "shhh", "utf-8");
     symlinkSync(outsideDir, join(dataDir, "escape"), dirLinkType);
-    const s = createPluginStorage("p", dataDir);
+    const s = createPluginStorage("p", dataDir, mockedElectron.safeStorage);
     await expect(s.read(join("escape", "secret.txt"))).rejects.toThrow(/symlink escapes plugin storage root/);
     await expect(s.readText(join("escape", "secret.txt"))).rejects.toThrow(
       /symlink escapes plugin storage root/,
@@ -105,7 +106,7 @@ describe("createPluginStorage path guards", () => {
     // outside the root. The realpath check must climb up to the symlink
     // and reject before any write touches disk.
     symlinkSync(outsideDir, join(dataDir, "escape"), dirLinkType);
-    const s = createPluginStorage("p", dataDir);
+    const s = createPluginStorage("p", dataDir, mockedElectron.safeStorage);
     await expect(s.write("escape/payload.txt", "x")).rejects.toThrow(
       /symlink escapes plugin storage root/,
     );
@@ -123,7 +124,7 @@ describe("createPluginStorage path guards", () => {
       join(dataDir, process.platform === "win32" ? "dangling" : "dangling.txt"),
       process.platform === "win32" ? "junction" : undefined,
     );
-    const s = createPluginStorage("p", dataDir);
+    const s = createPluginStorage("p", dataDir, mockedElectron.safeStorage);
     await expect(s.write(danglingRel, "x")).rejects.toThrow(/dangling symlink/);
     await expect(s.read(danglingRel)).rejects.toThrow(/dangling symlink/);
     await expect(s.exists(danglingRel)).rejects.toThrow(/dangling symlink/);
@@ -140,7 +141,7 @@ describe("createPluginStorage path guards", () => {
  */
 describe("createPluginStorage — the data root is never recreated", () => {
   it("refuses a write once the data root has been renamed away, and leaves it absent", async () => {
-    const s = createPluginStorage("p", dataDir);
+    const s = createPluginStorage("p", dataDir, mockedElectron.safeStorage);
     const parked = `${dataDir}-parked`;
     renameSync(dataDir, parked);
     try {
@@ -158,7 +159,7 @@ describe("createPluginStorage — the data root is never recreated", () => {
   it("refuses the same way whether the root went missing before or after construction", async () => {
     const parked = `${dataDir}-parked`;
     // AFTER construction: the handle exists, the root moves under it.
-    const built = createPluginStorage("p", dataDir);
+    const built = createPluginStorage("p", dataDir, mockedElectron.safeStorage);
     renameSync(dataDir, parked);
     try {
       await expect(built.writeJson("state.json", { a: 1 })).rejects.toThrow(
@@ -168,7 +169,7 @@ describe("createPluginStorage — the data root is never recreated", () => {
       // so it hands an absent directory here on purpose. Same classified,
       // audited refusal — not a raw ENOENT about a path.
       const rejections: string[] = [];
-      expect(() => createPluginStorage("p", dataDir, (message) => {
+      expect(() => createPluginStorage("p", dataDir, mockedElectron.safeStorage, (message) => {
         rejections.push(message);
       })).toThrow(/data root is absent/);
       expect(rejections).toEqual(["storage: rejected operation against an absent data root"]);
@@ -179,14 +180,14 @@ describe("createPluginStorage — the data root is never recreated", () => {
 
   it("still names a real symlink escape a symlink escape", async () => {
     symlinkSync(outsideDir, join(dataDir, "link"), dirLinkType);
-    const s = createPluginStorage("p", dataDir);
+    const s = createPluginStorage("p", dataDir, mockedElectron.safeStorage);
     await expect(s.writeJson("link/state.json", { a: 1 })).rejects.toThrow(
       /symlink escapes plugin storage root/,
     );
   });
 
   it("creates directories BENEATH an existing data root as before", async () => {
-    const s = createPluginStorage("p", dataDir);
+    const s = createPluginStorage("p", dataDir, mockedElectron.safeStorage);
     await s.writeJson("nested/deep/state.json", { ok: true });
     expect(existsSync(join(dataDir, "nested", "deep", "state.json"))).toBe(true);
   });
@@ -194,7 +195,7 @@ describe("createPluginStorage — the data root is never recreated", () => {
 
 describe("createPluginStorage I/O", () => {
   it("writes and reads bytes / text round-trip", async () => {
-    const s = createPluginStorage("p", dataDir);
+    const s = createPluginStorage("p", dataDir, mockedElectron.safeStorage);
     await s.write("a/b/c.txt", "hello");
     expect(await s.readText("a/b/c.txt")).toBe("hello");
     const bytes = await s.read("a/b/c.txt");
@@ -202,21 +203,21 @@ describe("createPluginStorage I/O", () => {
   });
 
   it("readJson returns null on missing file, throws on malformed", async () => {
-    const s = createPluginStorage("p", dataDir);
+    const s = createPluginStorage("p", dataDir, mockedElectron.safeStorage);
     expect(await s.readJson("missing.json")).toBeNull();
     await s.write("bad.json", "{not-json", "utf-8");
     await expect(s.readJson("bad.json")).rejects.toThrow();
   });
 
   it("writeJson + readJson round-trip", async () => {
-    const s = createPluginStorage("p", dataDir);
+    const s = createPluginStorage("p", dataDir, mockedElectron.safeStorage);
     const value = { name: "meeting", count: 3, nested: { ok: true } };
     await s.writeJson("state.json", value);
     expect(await s.readJson("state.json")).toEqual(value);
   });
 
   it("rm removes files; recursive removes trees; missing is no-op", async () => {
-    const s = createPluginStorage("p", dataDir);
+    const s = createPluginStorage("p", dataDir, mockedElectron.safeStorage);
     await s.write("a/b/c.txt", "x");
     await s.rm("a", { recursive: true });
     expect(await s.exists("a")).toBe(false);
@@ -224,12 +225,12 @@ describe("createPluginStorage I/O", () => {
   });
 
   it("list returns empty array for missing dir", async () => {
-    const s = createPluginStorage("p", dataDir);
+    const s = createPluginStorage("p", dataDir, mockedElectron.safeStorage);
     expect(await s.list("does-not-exist")).toEqual([]);
   });
 
   it("mkdir creates nested directories", async () => {
-    const s = createPluginStorage("p", dataDir);
+    const s = createPluginStorage("p", dataDir, mockedElectron.safeStorage);
     await s.mkdir("deeply/nested/folder");
     expect(await s.exists("deeply/nested/folder")).toBe(true);
   });
@@ -237,7 +238,7 @@ describe("createPluginStorage I/O", () => {
 
 describe("createPluginStorage error shape", () => {
   it("PluginStorageError carries pluginId + attempted path", () => {
-    const s = createPluginStorage("meeting", dataDir);
+    const s = createPluginStorage("meeting", dataDir, mockedElectron.safeStorage);
     try {
       s.resolve("..", "outside.txt");
       throw new Error("should have thrown");
@@ -257,7 +258,7 @@ describe("createPluginStorage encrypted-at-rest variants", () => {
   });
 
   it("writeEncrypted → readEncrypted round-trips through safeStorage and never writes plaintext", async () => {
-    const s = createPluginStorage("p", dataDir);
+    const s = createPluginStorage("p", dataDir, mockedElectron.safeStorage);
     const secret = "s3cr3t-token-値";
     await s.writeEncrypted("auth/token.enc", secret);
 
@@ -272,7 +273,7 @@ describe("createPluginStorage encrypted-at-rest variants", () => {
 
   it("writeEncrypted fails closed when encryption is unavailable and creates NO file", async () => {
     mockedElectron.enc.available = false;
-    const s = createPluginStorage("p", dataDir);
+    const s = createPluginStorage("p", dataDir, mockedElectron.safeStorage);
     await expect(s.writeEncrypted("nope.enc", "secret")).rejects.toBeInstanceOf(
       PluginStorageEncryptionUnavailableError,
     );
@@ -283,7 +284,7 @@ describe("createPluginStorage encrypted-at-rest variants", () => {
 
   it("the thrown error carries the stable kebab-case code", async () => {
     mockedElectron.enc.available = false;
-    const s = createPluginStorage("meeting", dataDir);
+    const s = createPluginStorage("meeting", dataDir, mockedElectron.safeStorage);
     await s.writeEncrypted("x.enc", "y").catch((err: unknown) => {
       expect(err).toBeInstanceOf(PluginStorageEncryptionUnavailableError);
       expect((err as PluginStorageEncryptionUnavailableError).code).toBe("encryption-unavailable");
@@ -292,7 +293,7 @@ describe("createPluginStorage encrypted-at-rest variants", () => {
   });
 
   it("readEncrypted fails closed when encryption is unavailable (even if the file exists)", async () => {
-    const s = createPluginStorage("p", dataDir);
+    const s = createPluginStorage("p", dataDir, mockedElectron.safeStorage);
     await s.writeEncrypted("auth/token.enc", "secret"); // encryption available here
     mockedElectron.enc.available = false;
     await expect(s.readEncrypted("auth/token.enc")).rejects.toBeInstanceOf(
@@ -301,7 +302,7 @@ describe("createPluginStorage encrypted-at-rest variants", () => {
   });
 
   it("readEncrypted throws ENOENT for a missing file (matches readText)", async () => {
-    const s = createPluginStorage("p", dataDir);
+    const s = createPluginStorage("p", dataDir, mockedElectron.safeStorage);
     await expect(s.readEncrypted("missing.enc")).rejects.toMatchObject({ code: "ENOENT" });
   });
 
@@ -312,7 +313,7 @@ describe("createPluginStorage encrypted-at-rest variants", () => {
   it.skipIf(process.platform === "win32")(
     "created files are 0o600 inside 0o700 dirs (encrypted + plaintext, POSIX)",
     async () => {
-      const s = createPluginStorage("p", dataDir);
+      const s = createPluginStorage("p", dataDir, mockedElectron.safeStorage);
       await s.writeEncrypted("auth/token.enc", "secret");
       expect(statSync(join(dataDir, "auth", "token.enc")).mode & 0o777).toBe(0o600);
       expect(statSync(join(dataDir, "auth")).mode & 0o777).toBe(0o700);
@@ -328,7 +329,7 @@ describe("createPluginStorage encrypted-at-rest variants", () => {
 
   it("path-escape rejection applies to the encrypted variants too", async () => {
     // Absolute + lexical .. escapes.
-    const s = createPluginStorage("p", dataDir);
+    const s = createPluginStorage("p", dataDir, mockedElectron.safeStorage);
     await expect(s.writeEncrypted("/etc/passwd", "x")).rejects.toThrow(
       /absolute paths are not allowed/,
     );

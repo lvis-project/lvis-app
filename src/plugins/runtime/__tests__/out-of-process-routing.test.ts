@@ -15,6 +15,7 @@ import { pathToFileURL } from "node:url";
 import { PluginRuntime, createNoopHostApiForTests } from "../../runtime.js";
 import type { PluginManifest, RuntimePluginFactory } from "../../types.js";
 import { OUT_OF_PROCESS_PLUGIN_IDS } from "../../isolation/out-of-process-plugins.js";
+import { unavailableSecretEncryption } from "../../../__tests__/support/host-runtime.js";
 
 const HOST_ROOT = "/tmp/lvis-out-of-process-routing";
 
@@ -28,7 +29,7 @@ interface LifecycleRouting {
 }
 
 function routing(): LifecycleRouting {
-  return new PluginRuntime({
+  return new PluginRuntime({ encryption: unavailableSecretEncryption,
     hostRoot: HOST_ROOT,
     manifestPaths: [],
     createHostApi: createNoopHostApiForTests,

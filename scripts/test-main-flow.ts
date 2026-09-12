@@ -1,6 +1,7 @@
 import { rm, mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createNodeSecretEncryption } from "../src/data/node-secret-encryption.js";
 import {
   createNoopHostApiForTests,
   PluginRuntime,
@@ -20,6 +21,7 @@ async function main() {
   await writeFile(sampleDocPath, "# Main Flow\n\n통합 플로우 테스트 문서입니다.\n", "utf-8");
 
   const runtime = new PluginRuntime({
+    encryption: createNodeSecretEncryption(),
     hostRoot: projectRoot,
     registryPath: resolve(projectRoot, "plugins/registry.json"),
     createHostApi: createNoopHostApiForTests,

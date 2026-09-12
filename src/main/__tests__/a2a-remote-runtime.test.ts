@@ -13,7 +13,7 @@ function settings(features: Record<string, boolean>, secrets: Record<string, str
   const getEncryptedSecret = vi.fn((key: string) => secrets[key] ?? null);
   return { value: { get, getEncryptedSecret } as unknown as Pick<SettingsService, "get" | "getEncryptedSecret">, get, getEncryptedSecret };
 }
-const encryption = { isEncryptionAvailable: () => true, encryptString: (value: string) => Buffer.from(value), decryptString: (value: Buffer) => value.toString() };
+const encryption = { getSelectedStorageBackend: () => "gnome_libsecret" as const, isEncryptionAvailable: () => true, encryptString: (value: string) => Buffer.from(value), decryptString: (value: Buffer) => value.toString() };
 const namespace = { readJson: async <T>(_name: string, fallback: T) => fallback, writeJson: async () => undefined };
 const agentActionApprover = vi.fn(async () => ({
   decisionId: "test-approval",
@@ -23,7 +23,7 @@ const agentActionApprover = vi.fn(async () => ({
 describe("A2A remote boot runtime", () => {
   it("has zero config, secret, namespace, Hub, DNS, and listener effect when both gates are OFF", () => {
     const value = settings({ a2aLoopbackServer: true });
-    expect(createA2ARemoteRuntime({ settings: value.value, agentActionApprover, projectRoot: "/project" })).toBeNull();
+    expect(createA2ARemoteRuntime({ encryption: encryption, settings: value.value, agentActionApprover, projectRoot: "/project" })).toBeNull();
     expect(value.get).toHaveBeenCalledTimes(1); expect(value.get).toHaveBeenCalledWith("features"); expect(value.getEncryptedSecret).not.toHaveBeenCalled();
   });
   it("fails closed before runtime creation when an enabled gate lacks OS encryption or config", () => {

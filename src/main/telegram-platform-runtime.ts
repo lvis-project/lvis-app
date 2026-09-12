@@ -3,16 +3,13 @@
  *
  * Telegram user and private-chat identifiers stay only in this short-lived
  * main-process runtime.  The only durable value created here is a random
- * domain-specific HMAC key stored through Electron safeStorage; it contains
+ * domain-specific HMAC key stored through the host's encryption; it contains
  * no provider identity, bot token, chat id, or conversation id.
  */
 import { createHash, createHmac, randomBytes } from "node:crypto";
-import { safeStorage } from "electron";
-import {
-  SafeStorageSecretStore,
-  type SafeStorageLike,
-  type SecretStore,
-} from "../audit/hmac-chain.js";
+import type { SecretStore } from "../audit/hmac-chain.js";
+import { createHostSecretStore } from "../audit/host-secret-store.js";
+import type { SecretEncryption } from "../data/secret-document-store.js";
 import type {
   PlatformBridgeInboundAuthorization,
   PlatformBridgeInboundAuthorizer,
@@ -177,13 +174,13 @@ export interface TelegramActorDigester {
 export function createTelegramActorDigester(options: {
   readonly botFingerprint: string;
   readonly secretStore?: SecretStore;
-  readonly encryption?: SafeStorageLike;
+  readonly encryption: SecretEncryption;
 }): TelegramActorDigester {
   if (!options || !BOT_FINGERPRINT_PATTERN.test(options.botFingerprint)) {
     throw new Error("telegram-actor-digester-invalid");
   }
   const secretStore = options.secretStore
-    ?? new SafeStorageSecretStore(options.encryption ?? safeStorage);
+    ?? createHostSecretStore(options.encryption);
   const actorSecret = ensureTelegramPlatformActorSecret(secretStore);
   return Object.freeze({
     actorKeyDigest: actorKeyDigestFor(actorSecret),
@@ -200,7 +197,7 @@ export interface CreateTelegramPairedPlatformRuntimeOptions {
   readonly getCurrentConversationId: () => string;
   readonly activationEpoch: number;
   readonly secretStore?: SecretStore;
-  readonly encryption?: SafeStorageLike;
+  readonly encryption: SecretEncryption;
 }
 
 /**
@@ -236,7 +233,7 @@ export function createTelegramPairedPlatformRuntime(
   }
   const { authority, botFingerprint, activationEpoch } = options;
   const secretStore = options.secretStore
-    ?? new SafeStorageSecretStore(options.encryption ?? safeStorage);
+    ?? createHostSecretStore(options.encryption);
   const actorSecret = ensureTelegramPlatformActorSecret(secretStore);
   const bridgeId = deterministicUuid(actorSecret, "bridge", [botFingerprint]);
   const routesByChatId = new Map<string, TelegramPlatformRoute>();

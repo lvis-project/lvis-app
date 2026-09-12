@@ -140,6 +140,7 @@ interface QuarantineEntry {
 export interface CreateA2ARemoteStoreOptions {
   namespace: Pick<FeatureNamespaceHandle, "readJson" | "writeJson">;
   encryption: A2AOsEncryption;
+  unreadableKeyPolicy?: "quarantine" | "reject";
   fileName?: string;
   now?: () => Date;
   random?: (size: number) => Buffer;
@@ -395,7 +396,10 @@ export class A2ARemoteDurableStore {
     let routineRecoveryChanged = false;
     const abortedPayloadIds = new Set<string>();
     if (state.encryptedDataKey !== undefined) {
-      try { const key = this.dataKey(state); key.fill(0); } catch { quarantine.push(this.quarantine("state", "encrypted-data-key-invalid", state.encryptedDataKey)); }
+      try { const key = this.dataKey(state); key.fill(0); } catch {
+        if (this.options.unreadableKeyPolicy === "reject") throw new Error("a2a-remote-data-key-unreadable");
+        quarantine.push(this.quarantine("state", "encrypted-data-key-invalid", state.encryptedDataKey));
+      }
     }
     const uniqueAttempts = new Set<string>();
     const uniqueOwners = new Set<string>();
