@@ -265,6 +265,9 @@ Important rules:
   interruption. An explicitly completed empty response retains its stop reason.
 - Stream activity is observed before event mapping, so incremental tool input
   resets the same idle deadline as text or reasoning deltas.
+- Text and reasoning deltas preserve their original content, including standalone
+  whitespace. Native size bounds and identity checks apply independently of the
+  nonblank validation for complete prompts.
 - Input estimates count the fields a route replays. Display-only assistant
   thought is excluded; signed reasoning selection is shared by the estimator
   and wire mapper. Before a fallback route is selected, preflight reserves the
