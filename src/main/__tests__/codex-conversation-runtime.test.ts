@@ -219,6 +219,7 @@ describe("CodexConversationRuntime", () => {
     expect(harness.spawnCalls[0]).toMatchObject({
       command: "C:\\approved\\codex.exe",
       options: {
+        cwd: harness.workspaceDir,
         shell: false,
         windowsHide: true,
         stdio: ["pipe", "pipe", "pipe"],
@@ -247,6 +248,9 @@ describe("CodexConversationRuntime", () => {
     expect(initializedIndex).toBeGreaterThan(harness.messages.findIndex((message) => message.method === "initialize"));
     expect(threadStart?.params).toMatchObject({
       model: "gpt-5.4",
+      cwd: harness.workspaceDir,
+      environments: [],
+      config: { include_permissions_instructions: false },
       approvalPolicy: "untrusted",
       sandbox: "workspace-write",
       ephemeral: true,
@@ -256,6 +260,7 @@ describe("CodexConversationRuntime", () => {
       model: "gpt-5.4",
       approvalPolicy: "untrusted",
       cwd: harness.workspaceDir,
+      environments: [],
       sandboxPolicy: {
         type: "workspaceWrite",
         writableRoots: [harness.workspaceDir],
