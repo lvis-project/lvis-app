@@ -5,7 +5,9 @@ import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, re
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 import * as asar from "@electron/asar";
+import { readBuildSourceIdentity } from "./lib/build-source-identity.mjs";
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -55,9 +57,7 @@ function main() {
   const archiveBinding = binding(archive);
   const nodeBinding = binding(options.node);
   const licenseBinding = binding(options["node-license"]);
-  const sourceCommit = execFileSync("git", ["-C", repository, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
-  const sourceTree = execFileSync("git", ["-C", repository, "rev-parse", "HEAD^{tree}"], { encoding: "utf8" }).trim();
-  const producerDirty = execFileSync("git", ["-C", repository, "status", "--porcelain", "--untracked-files=normal"], { encoding: "utf8" }).trim() !== "";
+  const sourceIdentity = readBuildSourceIdentity(repository);
   const runtime = JSON.parse(execFileSync(options.node, ["-p", "JSON.stringify({version:process.version,platform:process.platform,arch:process.arch,modules:process.versions.modules,napi:process.versions.napi,electron:process.versions.electron??null})"], { encoding: "utf8" }));
   if (runtime.electron !== null || runtime.platform !== "linux" || !runtime.version.startsWith("v22.")) {
     throw new Error("The server artifact requires the standalone Linux 22.x runtime");
@@ -67,7 +67,7 @@ function main() {
   if (sourcePackage.name !== "lvis-app" || boundary.entryPoint !== "src/headless.ts" || boundary.entry !== "headless.js" || !Array.isArray(boundary.externals) || !Number.isInteger(boundary.inputCount) || boundary.inputCount < 1) {
     throw new Error("The packaged server dependency manifest is invalid");
   }
-  if (producerDirty || boundary.source?.dirty !== false || boundary.source?.commit !== sourceCommit || boundary.source?.tree !== sourceTree) {
+  if (sourceIdentity.dirty || boundary.source?.dirty !== false || !isDeepStrictEqual(boundary.source, sourceIdentity)) {
     throw new Error("The server bundle must come from this exact clean build source");
   }
   if (!boundary.outputs || typeof boundary.outputs !== "object" || Array.isArray(boundary.outputs) || !Array.isArray(boundary.files)) {
@@ -131,8 +131,8 @@ function main() {
   const manifest = {
     schema: "lvis-headless-runtime/v1",
     version: sourcePackage.version,
-    source: { commit: boundary.source.commit, tree: boundary.source.tree },
-    producer: { commit: sourceCommit, tree: sourceTree, script: binding(fileURLToPath(import.meta.url)) },
+    source: boundary.source,
+    producer: { commit: sourceIdentity.commit, tree: sourceIdentity.tree, script: binding(fileURLToPath(import.meta.url)) },
     desktopArchive: { name: basename(archive), ...archiveBinding },
     runtime: { ...runtime, binary: nodeBinding, license: licenseBinding },
     entry: "app/dist/src/main/headless.js",
