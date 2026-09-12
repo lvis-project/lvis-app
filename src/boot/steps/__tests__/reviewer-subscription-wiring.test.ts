@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { PermissionManager } from "../../../permissions/permission-manager.js";
 import type { LLMProvider } from "../../../engine/llm/types.js";
 import { cleanupTmpDir } from "../../../__tests__/support/tmp-dir-teardown.js";
+import { createBootHostFixture } from "../../../__tests__/support/host-runtime.js";
 
 describe("wireReviewerAndPermissions subscription runtime", () => {
   it("uses the shared active subscription factory and a transport-scoped reviewer identity", async () => {
@@ -50,6 +51,7 @@ describe("wireReviewerAndPermissions subscription runtime", () => {
       };
       const permissionManager = new PermissionManager(join(tempDir, "permissions.json"));
       const context = {
+        host: createBootHostFixture(),
         toolRegistry: { setDenyRules: vi.fn() },
         permissionManager,
         settingsService,

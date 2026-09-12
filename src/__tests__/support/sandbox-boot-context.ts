@@ -1,5 +1,6 @@
 import { vi } from "vitest";
 import type { BootContext } from "../../boot/context.js";
+import { createBootHostFixture } from "./host-runtime.js";
 
 export interface SandboxBootHarness {
   /** The gate's audit sink, for asserting outcome and call ordering. */
@@ -29,6 +30,7 @@ export function createSandboxBootHarness(): SandboxBootHarness {
     flush,
     context: (settingOn: boolean): BootContext =>
       ({
+        host: createBootHostFixture(),
         settingsService: {
           get: vi.fn((key: string) =>
             key === "features"

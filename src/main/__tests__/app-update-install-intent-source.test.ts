@@ -26,14 +26,17 @@ describe("app update install intent source contract", () => {
   });
 
   it("keeps the boot-time plugin fallback behind the main shutdown lifecycle", () => {
-    const source = readFileSync(new URL("../../boot/steps/plugin-runtime.ts", import.meta.url), "utf8");
+    const pluginSource = readFileSync(new URL("../../boot/steps/plugin-runtime.ts", import.meta.url), "utf8");
+    expect(pluginSource).toContain("input.host.desktop?.onBootShutdown(");
+    const source = readFileSync(new URL("../../boot/desktop-host-runtime.ts", import.meta.url), "utf8");
     const beforeQuitStart = source.indexOf('app.once("before-quit"');
     const beforeQuitHandler = source.slice(
       beforeQuitStart,
-      source.indexOf("return {", beforeQuitStart),
+      source.indexOf("notificationSupported:", beforeQuitStart),
     );
-    expect(beforeQuitHandler).toContain("if (isAppUpdateInstallRequested()) return;");
-    expect(beforeQuitHandler).toContain("if (isAppShutdownStarted()) return;");
+    expect(beforeQuitHandler).toContain(
+      "if (isAppUpdateInstallRequested() || isAppShutdownStarted() || !needed()) return;",
+    );
     expect(beforeQuitHandler.indexOf("isAppUpdateInstallRequested")).toBeLessThan(
       beforeQuitHandler.indexOf("event.preventDefault();"),
     );
