@@ -1,7 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { isAbsolute } from "node:path";
 import { t } from "../i18n/index.js";
-import { displayShellWord, staticShellWord, type ShellWord } from "../shared/shell-analysis.js";
+import { displayShellWord, shellWordHasSingleField, staticShellWord, type ShellWord } from "../shared/shell-analysis.js";
 import { commandLeaf, stripCommandPath } from "../shared/shell-effective-command.js";
 import { inspectShellExecution, ShellExecutionError, type ShellExecutionFacts, type ShellCommandEvent } from "../shared/shell-execution.js";
 import { validateSandboxPath } from "../sandbox/path-validator.js";
@@ -737,14 +737,8 @@ function decline(reason: string, word?: ShellWord): never {
  * and removes known empty unquoted scalars before producing these words.
  */
 function assertOperandCardinality(event: ShellCommandEvent): void {
-  const singleField = (word: ShellWord): boolean => word.parts.every((part) => {
-    if (part.kind === "literal" || part.kind === "unicode-escaped" || part.kind === "arithmetic-data") return true;
-    if (part.kind === "parameter") return part.quoted && part.index !== "@" && part.name !== "@";
-    if (part.kind === "parameter-choice") return part.quoted && singleField(part.operand);
-    return false;
-  });
   const unknown = event.argv.findIndex((argument, index) => argument === undefined
-    && !singleField(event.effective.words[index]!));
+    && !shellWordHasSingleField(event.effective.words[index]!));
   if (unknown >= 0) decline("unresolved command argument count", event.effective.words[unknown]);
 }
 
@@ -781,7 +775,7 @@ export function findShellPathPolicyViolation(
       // executables and functions named exit keep their own operand checks.
       // No numeric result is inferred; the conservative statement scan remains.
       const dataOnly = ["echo", "printf", "tr", "true", "false", ":", "pwd", "export", "readonly", "unset", "read", "cd"].includes(verb)
-        || (event.builtin && verb === "exit");
+        || (event.builtin && (verb === "exit" || verb === "break"));
       // This role contract mixes option data with executable program values.
       // Establish its argv shape before consuming any option's value count.
       if (verb === "sqlite3") assertOperandCardinality(event);
@@ -796,7 +790,11 @@ export function findShellPathPolicyViolation(
         const selected=knownArgv[1] === "--" ? undefined : knownArgv.slice(1).find((argument)=>flags?.some((flag)=>hasShellFlag(argument,flag)));
         if(selected) throw new PathPolicyError({kind:"recursive-traversal",reason:buildRecursiveBlockMessage(head,verb,selected),candidate:selected});
       }
-      const slots=classifyOperandSlots(knownArgv);
+      const classified=classifyOperandSlots(knownArgv);
+      const slots = event.testExpression ? {
+        ...classified,
+        nonPathIndices: new Set([...classified.nonPathIndices, ...event.testExpression.dataIndices]),
+      } : classified;
       if(slots.dynamicExecution) decline(slots.dynamicExecution);
       const unknown = argv.findIndex((argument, index) => argument === undefined && !dataOnly
         && !(["curl", "wget"].includes(verb) && isQuotedRemoteUrl(effective.words[index]!))
@@ -811,6 +809,10 @@ export function findShellPathPolicyViolation(
         for(let index=1;index<knownArgv.length;index++){
           const argument=knownArgv[index]!;
           if(!optionsEnded && argument === "--"){optionsEnded=true;continue;}
+          if(event.testExpression?.pathIndices.has(index)){
+            checkPath(argument,effective.words[index]!.source.raw,commandCwd,effect);
+            continue;
+          }
           if(slots.nonPathIndices.has(index))continue;
           for(const path of operandPaths(argument,!optionsEnded,verb))checkPath(path,effective.words[index]!.source.raw,commandCwd,effect);
         }
