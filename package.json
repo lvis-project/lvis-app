@@ -176,7 +176,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
-    "electron": "^43.0.0",
+    "electron": "^44.3.0",
     "electron-builder": "26.15.3",
     "eruda": "^3.4.3",
     "esbuild": "^0.28.1",
