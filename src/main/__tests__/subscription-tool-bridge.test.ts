@@ -196,15 +196,42 @@ describe("SubscriptionToolBridge remote tool aliases", () => {
       .toThrow("subscription-host-tools-too-many");
   });
 
-  it("rejects descriptions beyond the shared Codex and ACP limit before opening a runtime", () => {
+  it("rejects descriptions beyond the shared UTF-8 byte budget before opening a runtime", () => {
     expect(() => new SubscriptionToolBridge([{
       name: "describe_project",
-      description: "x".repeat(1_025),
+      description: "x".repeat(SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.maxDescriptionBytes + 1),
       inputSchema: {
         type: "object",
         properties: {},
       },
     }])).toThrow("subscription-host-tool-schema-invalid");
+  });
+
+  it("preserves multiline UTF-8 descriptions at the byte budget and rejects one more byte", () => {
+    const description = "\n\t" + "é".repeat((SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.maxDescriptionBytes - 2) / 2);
+    const tool = { name: "describe_project", description, inputSchema: { type: "object" as const, properties: {} } };
+    const bridge = new SubscriptionToolBridge([tool]);
+    bridges.push(bridge);
+    expect(bridge.tools[0]?.description).toBe(description);
+    expect(() => new SubscriptionToolBridge([{ ...tool, description: description + "x" }]))
+      .toThrow("subscription-host-tool-schema-invalid");
+  });
+
+  it("admits the complete tool-list byte budget and refuses excess before starting a transport", () => {
+    const tools = Array.from({ length: 8 }, (_, index) => ({
+      name: `tool_${index}`,
+      description: "x".repeat(SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.maxDescriptionBytes),
+      inputSchema: { type: "object" as const, properties: {} },
+    }));
+    const last = tools[tools.length - 1]!;
+    const excess = Buffer.byteLength(JSON.stringify({ tools }), "utf8") - SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.maxBridgeResponseBytes;
+    last.description = last.description.slice(excess);
+    expect(Buffer.byteLength(JSON.stringify({ tools }), "utf8")).toBe(SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.maxBridgeResponseBytes);
+    const bridge = new SubscriptionToolBridge(tools);
+    bridges.push(bridge);
+    expect(bridge.tools).toEqual(tools);
+    expect(() => new SubscriptionToolBridge([...tools.slice(0, -1), { ...last, description: last.description + "x" }]))
+      .toThrow("subscription-host-tool-list-too-large");
   });
 
   it("rejects a schema larger than the MCP shim limit before opening a runtime", () => {

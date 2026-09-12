@@ -13,6 +13,7 @@ import {
   type CodexConversationRuntimeOptions,
 } from "../codex-conversation-runtime.js";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
+import { SUBSCRIPTION_TOOL_BRIDGE_CONTRACT } from "../../shared/subscription-runtime.js";
 
 type Spawn = NonNullable<CodexConversationRuntimeOptions["spawn"]>;
 type JsonRecord = Record<string, unknown>;
@@ -874,6 +875,29 @@ describe("CodexConversationRuntime", () => {
     expect(observationJson).not.toContain("secret.txt");
     expect(observationJson).not.toContain("sensitive-project");
     expect(observationJson).not.toContain("runtime-secret");
+  });
+
+  it("serializes the shared UTF-8 description budget unchanged and rejects excess before spawning", async () => {
+    const description = "é".repeat(SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.maxDescriptionBytes / 2);
+    const dynamicTools = [{ name: "describe_project", description, inputSchema: { type: "object", properties: {} } }];
+    const harness = createHarness((message, current) => {
+      if (message.method === "initialize") reply(current.child, requestId(message), {});
+      if (message.method === "thread/start") reply(current.child, requestId(message), { thread: { id: "thread-1" } });
+      if (message.method === "turn/start") {
+        reply(current.child, requestId(message), { turn: { id: "turn-1" } });
+        notify(current.child, "turn/completed", { threadId: "thread-1", turn: { id: "turn-1", status: "completed" } });
+      }
+    });
+    const onDynamicToolCall = vi.fn();
+    await expect(harness.runtime.startTurn({ text: "Describe the project", dynamicTools }, { onDynamicToolCall }))
+      .resolves.toMatchObject({ status: "completed" });
+    expect(methodMessages(harness, "thread/start")[0]?.params).toMatchObject({ dynamicTools: [{ description }] });
+    expect(onDynamicToolCall).not.toHaveBeenCalled();
+    const invalid = createHarness();
+    await expect(invalid.runtime.startTurn({
+      text: "Describe the project", dynamicTools: [{ ...dynamicTools[0]!, description: description + "x" }],
+    }, { onDynamicToolCall })).rejects.toMatchObject({ code: "codex-operation-failed" });
+    expect(invalid.spawnCalls).toHaveLength(0);
   });
 
   it("keeps native command, file, and permission approvals deny-only with dynamic tools enabled", async () => {
