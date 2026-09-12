@@ -3,7 +3,7 @@
  *
  * Several decisions are made before the async bootstrap constructs
  * `SettingsService`: the window is sized and its initial mode primed
- * (`persisted-app-mode.ts`), Chromium's GPU process is allowed or refused
+ * (`persisted-app-mode.ts`), hardware acceleration is enabled or disabled
  * (`persisted-hardware-acceleration.ts`), and the corporate CA is injected into
  * the TLS stack (`persisted-corp-ca.ts`). Each of those needs the user's saved
  * choice, and none of them can ask the service for it.

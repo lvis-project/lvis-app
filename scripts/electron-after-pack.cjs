@@ -3,46 +3,7 @@ const { existsSync, readFileSync, readdirSync, rmSync, statSync } = require("nod
 const { constants: fsConstants, accessSync, chmodSync } = require("node:fs");
 const { join } = require("node:path");
 const { gunzipSync } = require("node:zlib");
-
-const LINUX_GPU_RUNTIME_FILES = [
-  "libEGL.so",
-  "libGLESv2.so",
-  "libvk_swiftshader.so",
-  "libvulkan.so.1",
-  "vk_swiftshader_icd.json",
-];
-
-// macOS defaults hardware acceleration ON (see resolveHardwareAcceleration:
-// the default is `platform !== "win32" && platform !== "linux"`), and the GPU
-// process loads ANGLE — libGLESv2 + libEGL — to do it. Pruning those two made
-// the default unreachable: the GPU process logged
-// `Failed to load .../libGLESv2.dylib` and exited during initialization, so
-// every mac build rendered in software and the Settings toggle changed
-// nothing. They stay. 6.3 MB buys back the accelerated path the policy
-// already asks for.
-//
-// SwiftShader is a different thing and still goes: it is the *software*
-// rasterizer used only when there is no GPU at all, which is 17 MB of weight
-// for a path an accelerated mac never takes.
-const MAC_WEBGL_FALLBACK_FILES = [
-  "libvk_swiftshader.dylib",
-  "vk_swiftshader_icd.json",
-];
-
-const WIN_WEBGL_FALLBACK_FILES = [
-  "vk_swiftshader.dll",
-  "libGLESv2.dll",
-  "libEGL.dll",
-  "vulkan-1.dll",
-  "vk_swiftshader_icd.json",
-  // WebGPU (Dawn D3D12) HLSL shader compiler + its DXIL companion (~27 MB). The
-  // app disables hardware acceleration (early-boot-env.ts) and never renders via
-  // WebGPU/WebGL. These are loaded only for WebGPU capability probing; the
-  // packaged app starts and renders the main window with them absent (verified),
-  // so they are dead weight on the shipped installer.
-  "dxcompiler.dll",
-  "dxil.dll",
-];
+const { assertGraphicsRuntimeFiles } = require("./lib/graphics-runtime-files.cjs");
 
 // electron-builder's `context.arch` is the numeric Arch enum (1=x64, 3=arm64).
 // Native packages name their per-target artifacts by platform+arch (node-pty:
@@ -417,24 +378,15 @@ function assertBetterSqlite3Binary(context) {
 }
 
 module.exports = async function afterPack(context) {
-  const keepWebgl = process.env.LVIS_KEEP_WEBGL === "1";
   assertBundledUvResource(context);
   assertSandboxVendorBinaries(context);
   assertNodePtyBinary(context);
   assertBetterSqlite3Binary(context);
 
-  if (context.electronPlatformName === "linux") {
-    for (const file of LINUX_GPU_RUNTIME_FILES) {
-      rmSync(join(context.appOutDir, file), { force: true });
-    }
-    return;
-  }
-
-  if (keepWebgl) return;
-
+  let libraryDirectory = context.appOutDir;
   if (context.electronPlatformName === "darwin") {
     const productFilename = context.packager.appInfo.productFilename;
-    const frameworkLibs = join(
+    libraryDirectory = join(
       context.appOutDir,
       `${productFilename}.app`,
       "Contents",
@@ -444,24 +396,6 @@ module.exports = async function afterPack(context) {
       "A",
       "Libraries",
     );
-    for (const file of MAC_WEBGL_FALLBACK_FILES) {
-      rmSync(join(frameworkLibs, file), { force: true });
-    }
-    return;
   }
-
-  if (context.electronPlatformName === "win32") {
-    for (const file of WIN_WEBGL_FALLBACK_FILES) {
-      rmSync(join(context.appOutDir, file), { force: true });
-    }
-  }
+  assertGraphicsRuntimeFiles(libraryDirectory, context.electronPlatformName);
 };
-
-// The footprint audit asserts the ABSENCE of exactly what this file prunes.
-// Stating that twice is how the two drifted: restoring ANGLE for macOS here
-// left the audit still demanding it be gone, and the release build failed on
-// a rule no longer in force. Export the lists so "pruned" and "must be
-// absent" cannot disagree.
-module.exports.LINUX_GPU_RUNTIME_FILES = LINUX_GPU_RUNTIME_FILES;
-module.exports.MAC_WEBGL_FALLBACK_FILES = MAC_WEBGL_FALLBACK_FILES;
-module.exports.WIN_WEBGL_FALLBACK_FILES = WIN_WEBGL_FALLBACK_FILES;

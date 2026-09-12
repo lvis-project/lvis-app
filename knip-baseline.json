@@ -1119,11 +1119,6 @@
     },
     {
       "type": "files",
-      "file": "scripts/electron-after-pack.cjs",
-      "name": "scripts/electron-after-pack.cjs"
-    },
-    {
-      "type": "files",
       "file": "scripts/i18n-build-catalog.mjs",
       "name": "scripts/i18n-build-catalog.mjs"
     },

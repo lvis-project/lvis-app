@@ -12,17 +12,12 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { basename, dirname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-// Read the prune lists from the afterPack that removes them, so this audit
-// cannot demand the absence of a file the packager now keeps — which is
-// exactly how the macOS ANGLE restore failed the release build.
 import { createRequire } from "node:module";
 import { gunzipSync } from "node:zlib";
 
-const {
-  LINUX_GPU_RUNTIME_FILES,
-  MAC_WEBGL_FALLBACK_FILES,
-  WIN_WEBGL_FALLBACK_FILES,
-} = createRequire(import.meta.url)("./electron-after-pack.cjs");
+const { assertGraphicsRuntimeFiles } = createRequire(import.meta.url)(
+  "./lib/graphics-runtime-files.cjs",
+);
 import { resolveBuildAssets } from "./lib/build-assets.mjs";
 import {
   findUnexpectedMainBundleRootScripts,
@@ -433,15 +428,8 @@ if (!existsSync(uvLicense)) fail(`uv license notice missing: ${uvLicense}`);
 
 const localeCount = isMacAppPackage() ? validateMacElectronLocales() : validatePakElectronLocales();
 
-if (isLinuxUnpackedPackage()) {
-  const leakedGpuFiles = LINUX_GPU_RUNTIME_FILES.filter((entry) => existsSync(resolve(appOutDir, entry)));
-  if (leakedGpuFiles.length > 0) fail("Linux GPU runtime files leaked into package", leakedGpuFiles);
-}
-
-const keepWebgl = process.env.LVIS_KEEP_WEBGL === "1";
-
-if (!keepWebgl && isMacAppPackage()) {
-  const macFallbackDir = resolve(
+if (isMacAppPackage()) {
+  const libraryDirectory = resolve(
     appOutDir,
     "Frameworks",
     "Electron Framework.framework",
@@ -449,17 +437,13 @@ if (!keepWebgl && isMacAppPackage()) {
     "A",
     "Libraries",
   );
-  const leakedMacWebgl = MAC_WEBGL_FALLBACK_FILES.filter((entry) => existsSync(resolve(macFallbackDir, entry)));
-  if (leakedMacWebgl.length > 0) fail("macOS WebGL fallback libraries leaked into package", leakedMacWebgl);
-}
-
-function isWinUnpackedPackage() {
-  return basename(appOutDir) === "win-unpacked";
-}
-
-if (!keepWebgl && isWinUnpackedPackage()) {
-  const leakedWinWebgl = WIN_WEBGL_FALLBACK_FILES.filter((entry) => existsSync(resolve(appOutDir, entry)));
-  if (leakedWinWebgl.length > 0) fail("Windows WebGL fallback libraries leaked into package", leakedWinWebgl);
+  assertGraphicsRuntimeFiles(libraryDirectory, "darwin");
+} else if (isLinuxUnpackedPackage()) {
+  assertGraphicsRuntimeFiles(appOutDir, "linux");
+} else if (basename(appOutDir) === "win-unpacked") {
+  assertGraphicsRuntimeFiles(appOutDir, "win32");
+} else {
+  fail(`unrecognized graphics runtime package: ${appOutDir}`);
 }
 
 process.stdout.write(

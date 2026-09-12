@@ -106,7 +106,7 @@ describe("runEarlyBootEnv", () => {
 
   it("honors a persisted hardware-acceleration ON over the Windows/Linux default", () => {
     // The beforeEach seed has no `system.hardwareAcceleration`, so the Linux
-    // default (OFF) applies and the GPU process is suppressed.
+    // default (OFF) disables hardware acceleration for this launch.
     runEarlyBootEnv();
     expect(mockedElectron.app.disableHardwareAcceleration).toHaveBeenCalledOnce();
 
