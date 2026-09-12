@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import { spawnSync, type ChildProcess } from "node:child_process";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { TOOL_TIMEOUT_POLICY } from "../../shared/tool-timeout-policy.js";
 
 // These unit tests hand FAKE children with real-looking pids (4321, 5432) to a
 // module whose tree-kill path shells out to the REAL taskkill/pgrep against
@@ -46,8 +47,9 @@ function makeChild(): ChildProcess & FakeChildProcess {
 }
 
 afterEach(() => {
-  vi.restoreAllMocks();
   __resetManagedChildProcessesForTest();
+  vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 
 const itPosix = process.platform === "win32" ? it.skip : it;
@@ -218,5 +220,119 @@ describe("managed child process tracking", () => {
     expect(forceKillManagedChildProcesses("test-timeout")).toBe(1);
     expect(killSpy).toHaveBeenCalledWith(-1234, "SIGKILL");
     expect(getManagedChildProcessCount()).toBe(0);
+  });
+
+  itPosix("retains cancellation ownership past the group warning threshold and warns once", async () => {
+    vi.useFakeTimers();
+    const child = makeChild();
+    child.pid = 1234;
+    let groupAlive = true;
+    const signal = vi.spyOn(process, "kill").mockImplementation((_pid, kind) => {
+      if (!groupAlive) throw Object.assign(new Error("gone"), { code: "ESRCH" });
+      if (kind === "SIGKILL") groupAlive = false;
+      return true;
+    });
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    trackManagedChildProcess(child, { label: "surviving-workers", killProcessGroup: true });
+    child.exitCode = 0;
+    child.emit("exit", 0, null);
+
+    await vi.advanceTimersByTimeAsync(TOOL_TIMEOUT_POLICY.processGroupRetentionWarningMs * 2);
+    expect(getManagedChildProcessCount()).toBe(1);
+    expect(warning).toHaveBeenCalledOnce();
+    expect(signal.mock.calls.every(([, kind]) => kind === 0)).toBe(true);
+
+    forceKillManagedChildProcess(child, "later-shell-timeout");
+    expect(signal).toHaveBeenCalledWith(-1234, "SIGKILL");
+    expect(getManagedChildProcessCount()).toBe(0);
+  });
+
+  itPosix("retains an owned group after denied cancellation for a later retry", () => {
+    const child = makeChild();
+    child.pid = 1234;
+    let denied = true;
+    let groupAlive = true;
+    const signal = vi.spyOn(process, "kill").mockImplementation((_pid, kind) => {
+      if (!groupAlive) throw Object.assign(new Error("gone"), { code: "ESRCH" });
+      if (kind === "SIGKILL") {
+        if (denied) throw Object.assign(new Error("denied"), { code: "EPERM" });
+        groupAlive = false;
+      }
+      return true;
+    });
+    trackManagedChildProcess(child, { label: "temporarily-inaccessible-group", killProcessGroup: true });
+    child.exitCode = 0;
+    child.emit("exit", 0, null);
+
+    forceKillManagedChildProcess(child, "first-cancellation");
+    expect(getManagedChildProcessCount()).toBe(1);
+    denied = false;
+    forceKillManagedChildProcess(child, "second-cancellation");
+    expect(signal.mock.calls.filter(([, kind]) => kind === "SIGKILL")).toHaveLength(2);
+    expect(getManagedChildProcessCount()).toBe(0);
+  });
+
+  itPosix("waits for group disappearance after signalling and never reuses a released handle", async () => {
+    vi.useFakeTimers();
+    const child = makeChild();
+    child.pid = 1234;
+    let groupAlive = true;
+    const signal = vi.spyOn(process, "kill").mockImplementation(() => {
+      if (!groupAlive) throw Object.assign(new Error("gone"), { code: "ESRCH" });
+      return true;
+    });
+    trackManagedChildProcess(child, { label: "terminating-group", killProcessGroup: true });
+    child.exitCode = 0;
+    child.emit("exit", 0, null);
+
+    forceKillManagedChildProcess(child, "cancellation");
+    expect(getManagedChildProcessCount()).toBe(1);
+    groupAlive = false;
+    await vi.advanceTimersByTimeAsync(TOOL_TIMEOUT_POLICY.processGroupPollMs);
+    expect(getManagedChildProcessCount()).toBe(0);
+
+    groupAlive = true;
+    signal.mockClear();
+    forceKillManagedChildProcess(child, "already-released");
+    await vi.advanceTimersByTimeAsync(TOOL_TIMEOUT_POLICY.processGroupPollMs);
+    expect(signal).not.toHaveBeenCalled();
+  });
+
+  itPosix("bounds shutdown drain while an inaccessible group remains owned", async () => {
+    vi.useFakeTimers();
+    const child = makeChild();
+    child.pid = 1234;
+    vi.spyOn(process, "kill").mockImplementation((_pid, kind) => {
+      if (kind === "SIGKILL") throw Object.assign(new Error("denied"), { code: "EPERM" });
+      return true;
+    });
+    trackManagedChildProcess(child, { label: "inaccessible-group", killProcessGroup: true });
+    child.exitCode = 0;
+    child.emit("exit", 0, null);
+
+    const drain = forceKillAndDrainManagedChildProcesses("bounded-shutdown", 20);
+    await vi.advanceTimersByTimeAsync(20);
+    await expect(drain).resolves.toEqual({ killedCount: 0, unresolvedCount: 1 });
+    expect(getManagedChildProcessCount()).toBe(1);
+  });
+
+  itPosix("releases immediately when signalling observes group absence", () => {
+    const child = makeChild();
+    child.pid = 1234;
+    const signal = vi.spyOn(process, "kill").mockImplementation((_pid, kind) => {
+      if (kind === "SIGKILL") throw Object.assign(new Error("gone"), { code: "ESRCH" });
+      return true;
+    });
+    trackManagedChildProcess(child, { label: "disappearing-group", killProcessGroup: true });
+    child.exitCode = 0;
+    child.emit("exit", 0, null);
+    signal.mockClear();
+
+    forceKillManagedChildProcess(child, "cancellation-race");
+    expect(getManagedChildProcessCount()).toBe(0);
+    expect(signal.mock.calls).toEqual([[-1234, 0], [-1234, "SIGKILL"]]);
+    signal.mockClear();
+    forceKillManagedChildProcess(child, "released-group");
+    expect(signal).not.toHaveBeenCalled();
   });
 });

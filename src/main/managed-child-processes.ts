@@ -6,7 +6,7 @@ import { errorMessage } from "../shared/error-message.js";
 const log = createLogger("lvis");
 const PROCESS_TREE_KILL_TIMEOUT_MS = TOOL_TIMEOUT_POLICY.processTreeKillMs;
 const DETACHED_PROCESS_GROUP_POLL_MS = TOOL_TIMEOUT_POLICY.processGroupPollMs;
-const PROCESS_GROUP_DISPOSAL_MAX_MS = TOOL_TIMEOUT_POLICY.processGroupDisposalMaxMs;
+const PROCESS_GROUP_RETENTION_WARNING_MS = TOOL_TIMEOUT_POLICY.processGroupRetentionWarningMs;
 
 interface ManagedChildProcess {
   child: ChildProcess;
@@ -15,6 +15,7 @@ interface ManagedChildProcess {
   processGroupId?: number;
   disposeTimer?: NodeJS.Timeout;
   disposalStartedAt?: number;
+  retentionWarningEmitted?: boolean;
   dispose: () => void;
   onSettled: () => void;
   onError: () => void;
@@ -316,7 +317,9 @@ export function forceKillManagedChildProcess(child: ChildProcess, reason: string
     forceKillProcessTree(child, entry?.killProcessGroup ?? false, entry?.processGroupId);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
-    if (code !== "ESRCH") {
+    if (code === "ESRCH") {
+      entry?.dispose();
+    } else {
       log.warn({
         pid: child.pid ?? null,
         label: entry?.label ?? "untracked-child-process",
@@ -326,7 +329,15 @@ export function forceKillManagedChildProcess(child: ChildProcess, reason: string
       }, "managed-child: force kill failed");
     }
   } finally {
-    entry?.dispose();
+    if (entry && managedChildren.has(entry)) {
+      if (entry.processGroupId !== undefined && processGroupExists(entry.processGroupId)) {
+        // Signal delivery is not proof of termination, including EPERM failures.
+        // Keep the original group handle until disappearance is observed.
+        scheduleProcessGroupDisposal(entry);
+      } else {
+        entry.dispose();
+      }
+    }
   }
 }
 
@@ -352,18 +363,15 @@ function scheduleProcessGroupDisposal(entry: ManagedChildProcess): void {
       return;
     }
     const elapsed = Date.now() - (entry.disposalStartedAt ?? Date.now());
-    if (elapsed >= PROCESS_GROUP_DISPOSAL_MAX_MS) {
-      // Unkillable process group (typically a setuid descendant or one
-      // that crossed a uid boundary). Force-dispose the entry so the
-      // managed-children Set does not retain it for the lifetime of the
-      // host process — the original child has already exited.
+    if (elapsed >= PROCESS_GROUP_RETENTION_WARNING_MS && !entry.retentionWarningEmitted) {
+      // Root exit does not end the lifetime of its surviving descendants.
+      // Warn once while retaining cancellation and shutdown ownership.
+      entry.retentionWarningEmitted = true;
       log.warn({
         label: entry.label,
         processGroupId: entry.processGroupId,
         elapsedMs: elapsed,
-      }, "managed-child: process group disposal exceeded max wall-clock, force-disposing entry");
-      entry.dispose();
-      return;
+      }, "managed-child: process group remains live; retaining ownership");
     }
     entry.disposeTimer = setTimeout(poll, DETACHED_PROCESS_GROUP_POLL_MS);
     entry.disposeTimer.unref?.();

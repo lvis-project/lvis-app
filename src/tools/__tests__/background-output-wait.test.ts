@@ -1,17 +1,18 @@
 import type { ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { __resetManagedChildProcessesForTest } from "../../main/managed-child-processes.js";
+import { __resetManagedChildProcessesForTest, forceKillAndDrainManagedChildProcesses, getManagedChildProcessCount } from "../../main/managed-child-processes.js";
+import { TOOL_TIMEOUT_POLICY } from "../../shared/tool-timeout-policy.js";
 import type { ToolExecutionContext } from "../base.js";
 import { backgroundShellManager as manager, createBashOutputTool, MAX_OUTPUT_CHARS } from "../shell-tools.js";
 
-function register() {
+function register(killProcessGroup = false) {
   const child = new EventEmitter() as ChildProcess;
   const stdout = new EventEmitter();
   const stderr = new EventEmitter();
   const kill = vi.fn(() => true);
-  Object.assign(child, { stdout, stderr, kill, exitCode: null });
-  const shellId = manager.register({ child, sessionId: "owner", command: "work", startedAt: "t" });
+  Object.assign(child, { stdout, stderr, kill, exitCode: null, ...(killProcessGroup ? { pid: 4321 } : {}) });
+  const shellId = manager.register({ child, sessionId: "owner", command: "work", startedAt: "t", killProcessGroup });
   return { child, stdout, stderr, kill, shellId };
 }
 function read(shellId: string, waitMs?: unknown, signal?: AbortSignal, sessionId = "owner") {
@@ -20,7 +21,7 @@ function read(shellId: string, waitMs?: unknown, signal?: AbortSignal, sessionId
 }
 
 beforeEach(() => { vi.useFakeTimers(); manager._resetForTest(); __resetManagedChildProcessesForTest(); });
-afterEach(() => { manager._resetForTest(); __resetManagedChildProcessesForTest(); vi.useRealTimers(); });
+afterEach(() => { manager._resetForTest(); __resetManagedChildProcessesForTest(); vi.useRealTimers(); vi.restoreAllMocks(); });
 
 describe("background output bounded waiting", () => {
   it.each([undefined, 0])("keeps %s wait immediate", async (waitMs) => {
@@ -86,6 +87,34 @@ describe("background output bounded waiting", () => {
     if (action === "dispose") manager.disposeSession("owner"); else manager._resetForTest();
     expect((await pending).output).toContain("no background shell");
     expect(vi.getTimerCount()).toBe(0);
+  });
+  it.skipIf(process.platform === "win32").each(["dispose", "prune"])("%s releases the session handle but retains an inaccessible group for shutdown", async (action) => {
+    let denied = true;
+    let groupAlive = true;
+    const signal = vi.spyOn(process, "kill").mockImplementation((_pid, kind) => {
+      if (!groupAlive) throw Object.assign(new Error("gone"), { code: "ESRCH" });
+      if (kind === "SIGKILL") {
+        if (denied) throw Object.assign(new Error("denied"), { code: "EPERM" });
+        groupAlive = false;
+      }
+      return true;
+    });
+    const f = register(true);
+    f.stdout.emit("data", Buffer.from("finished output"));
+    Object.assign(f.child, { exitCode: 0 });
+    f.child.emit("exit", 0, null);
+    f.child.emit("close", 0);
+    manager.read("owner", f.shellId);
+
+    if (action === "prune") register();
+    manager.disposeSession("owner");
+    expect(manager.read("owner", f.shellId)).toBeUndefined();
+    expect(getManagedChildProcessCount()).toBe(1);
+    denied = false;
+    const drain = forceKillAndDrainManagedChildProcesses("session-cleanup", TOOL_TIMEOUT_POLICY.processGroupPollMs + 20);
+    await vi.advanceTimersByTimeAsync(TOOL_TIMEOUT_POLICY.processGroupPollMs);
+    await expect(drain).resolves.toEqual({ killedCount: 1, unresolvedCount: 0 });
+    expect(signal.mock.calls.filter(([, kind]) => kind === "SIGKILL")).toHaveLength(2);
   });
   it("rejects other sessions immediately without consuming the owner's output", async () => {
     const f = register(); f.stdout.emit("data", Buffer.from("private"));

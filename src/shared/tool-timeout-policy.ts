@@ -162,14 +162,11 @@ export const TOOL_TIMEOUT_POLICY = {
   // a single tracked child. Bounded so shutdown never hangs on a stubborn
   // grandchild while still giving graceful exits a window.
   processTreeKillMs: 1_000,
-  // Polling interval for detached process-group disposal. The total wall
-  // clock for retries is bounded by `processGroupDisposalMaxMs` below.
+  // Unreferenced polling retains detached groups until absence is observed.
   processGroupPollMs: 1_000,
-  // Maximum wall-clock for `scheduleProcessGroupDisposal` retries before
-  // forcing dispose. Prevents the managed-children Map from leaking entries
-  // when a detached process group becomes orphaned into an unkillable
-  // foreign uid.
-  processGroupDisposalMaxMs: 5 * 60 * 1000,
+  // Warn once if an owned group survives this long after root settlement or
+  // a termination request. This never expires cancellation/shutdown ownership.
+  processGroupRetentionWarningMs: 5 * 60 * 1000,
 } as const;
 
 /**

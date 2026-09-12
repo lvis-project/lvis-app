@@ -72,7 +72,7 @@ describe.skipIf(process.platform === "win32")("background shell descendant owner
     expect(manager.read(`${dir}-other`, other.shellId)?.status).toBe("running");
     manager.disposeSession(`${dir}-other`);
     await vi.waitFor(() => expectGone(other.childPid));
-    expect(getManagedChildProcessCount()).toBe(trackedBefore);
+    await vi.waitFor(() => expect(getManagedChildProcessCount()).toBe(trackedBefore), { timeout: 2_000 });
   });
 
   it("cleans descendants retaining output pipes when the parent exits", async () => {
@@ -82,7 +82,7 @@ describe.skipIf(process.platform === "win32")("background shell descendant owner
       expectGone(owned.childPid);
       expect(manager.read(dir, owned.shellId)?.status).toBe("exited");
     });
-    expect(getManagedChildProcessCount()).toBe(trackedBefore);
+    await vi.waitFor(() => expect(getManagedChildProcessCount()).toBe(trackedBefore), { timeout: 2_000 });
   });
 
   it.each(["kill", "dispose"] as const)("cleans descendants when the parent exits before %s", async (action) => {
@@ -90,7 +90,7 @@ describe.skipIf(process.platform === "win32")("background shell descendant owner
     await vi.waitFor(() => expect(manager.read(dir, owned.shellId)?.status).toBe("exited"));
     expectGone(owned.parentPid);
     await vi.waitFor(() => expectGone(owned.childPid));
-    expect(getManagedChildProcessCount()).toBe(trackedBefore);
+    await vi.waitFor(() => expect(getManagedChildProcessCount()).toBe(trackedBefore), { timeout: 2_000 });
 
     const signal = vi.spyOn(process, "kill");
     try {
