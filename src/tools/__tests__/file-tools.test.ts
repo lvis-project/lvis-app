@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 import {
   existsSync,
@@ -296,6 +296,31 @@ describe("file native tools", () => {
     expect(grepped.isError).toBe(false);
     const matches = parse(grepped.output).matches as Array<{ path: string; text: string }>;
     expect(matches.some((match) => match.text.includes("secret") || match.text.includes("key") || match.text.includes("token"))).toBe(false);
+  });
+
+  it.each([".lvis", "custom-profile"])("refuses subscription runtime file access in %s", async (profileName) => {
+    const profile = join(workDir, profileName);
+    const runtime = join(profile, "subscription-runtimes", "codex-v3-home");
+    const target = join(runtime, "auth.json");
+    const inert = '{"token":"inert-test-value"}\n';
+    mkdirSync(runtime, { recursive: true });
+    writeFileSync(target, inert, "utf8");
+    vi.stubEnv("LVIS_HOME", profile);
+    try {
+      const read = await new ReadFileTool().execute({ path: target }, ctx());
+      expect(read.isError).toBe(true);
+      expect(read.output).toContain("Sensitive path:");
+      expect(read.output).not.toContain("inert-test-value");
+      const write = await new WriteFileTool().execute({ path: target, content: "replaced" }, ctx());
+      expect(write.isError).toBe(true);
+      expect(write.output).toContain("Sensitive path:");
+      expect(readFileSync(target, "utf8")).toBe(inert);
+      const scanned = await new GrepFilesTool().execute({ path: ".", pattern: "inert-test-value", limit: 50 }, ctx());
+      expect(scanned.isError).toBe(false);
+      expect(parse(scanned.output).matches).toEqual([]);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("write-capable file tools scope approval cache keys to canonical paths", () => {

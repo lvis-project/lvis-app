@@ -339,6 +339,32 @@ describe("bash tool", () => {
       }
     });
 
+    it.each([".lvis", "custom-profile"])("rejects subscription runtime shell access in %s", async (profileName) => {
+      const root = mkdtempSync(join(tmpdir(), "lvis-subscription-path-"));
+      const profile = join(root, profileName);
+      const runtime = join(profile, "subscription-runtimes", "codex-v3-home");
+      const target = join(runtime, "auth.json");
+      const inert = '{"token":"inert-test-value"}\n';
+      mkdirSync(runtime, { recursive: true });
+      writeFileSync(target, inert, "utf8");
+      vi.stubEnv("LVIS_HOME", profile);
+      try {
+        for (const command of [`cat '${target}'`, `printf replaced > '${target}'`]) {
+          const result = await new BashTool().execute(
+            { command, timeoutSeconds: SHELL_TIMEOUT_SECONDS },
+            ctx(root),
+          );
+          expect(result.isError).toBe(true);
+          expect(result.output).toContain("Sensitive path:");
+          expect(result.output).not.toContain("inert-test-value");
+        }
+        expect(readFileSync(target, "utf8")).toBe(inert);
+      } finally {
+        vi.unstubAllEnvs();
+        await cleanupTmpDir(root);
+      }
+    });
+
     it("rejects redirection-attached sensitive operands before spawning the shell", async () => {
       const result = await new BashTool().execute(
         { command: "cat<$HOME/.ssh/id_rsa", timeoutSeconds: SHELL_TIMEOUT_SECONDS },

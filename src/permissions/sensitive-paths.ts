@@ -212,6 +212,7 @@ export const SENSITIVE_PATH_ENTRIES: readonly SensitiveEntry[] = Object.freeze([
   // ── LVIS home sensitive namespace ────────────────────────────────────
   { anchor: "lvis-home", segments: ["certs"], kind: "dir", why: "corporate CA bundle + extracted certs" },
   { anchor: "lvis-home", segments: ["secrets"], kind: "dir", why: "encrypted API keys, tokens" },
+  { anchor: "lvis-home", segments: ["subscription-runtimes"], kind: "dir", why: "subscription credentials, executable grants, and host-owned runtime state" },
   { anchor: "lvis-home", segments: ["keys"], kind: "dir", why: "signing / encryption keys" },
   { anchor: "lvis-home", segments: ["lvis-secrets.json"], kind: "file", why: "legacy consolidated secrets file" },
   { anchor: "lvis-home", segments: ["settings.json"], kind: "file", why: "app settings + permission configuration" },
