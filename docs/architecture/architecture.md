@@ -46,13 +46,35 @@ primary-product contract.
 
 ## Process Boundaries
 
-One-shot `--exec` and `--set-secret` launches construct the host service graph
-without a main window or renderer. The boot window is explicitly nullable;
-interactive boot requires a window. Desktop event bridges have no subscription
-when that surface is absent. A request that reaches the approval gate without
-a live desktop follows its existing deny-once path, and UI-only HostApi calls
-fail before consuming proposal state. Activation and protocol events cannot
-open the desktop during a one-shot run.
+Host service bootstrap accepts `BootHost` (`src/boot/host-runtime.ts`) for
+user-data and resource paths, packaged mode, encryption, network fetches, and
+shutdown. Desktop capabilities are optional and required explicitly by
+operations that present UI.
+
+The native entrypoint, `src/headless.ts`, runs under standalone Node; its emitted
+dependency graph excludes desktop runtime imports. `--exec` and `--set-secret`
+construct the ordinary host service graph without a window or renderer; `--serve` keeps
+that host available through the authenticated Local API and any explicitly
+configured Tailnet surface. Desktop event bridges have no subscription when
+their surface is absent. Requests requiring unavailable consent follow the
+existing deny-once path, and UI-only HostApi calls fail before consuming
+proposal state. The [native host guide](../guides/native-server.md) owns launcher,
+profile, key-file, and Linux artifact instructions.
+
+`createWindowlessHost` owns one service graph, `ConversationSurfaceRuntime`, and
+`ConversationCommandPort`. Attached clients share the active main conversation,
+command arbitration, and ordered event source. Each transport retains its actor,
+authorization, and projection boundary; attaching clients does not create
+independent concurrent conversation loops. Configured Tailnet surfaces,
+including Web, support bounded canonical replay in memory; Local API event
+streams remain live-only. The
+[surface protocol](multisurface-conversation-runtime.md) owns these contracts.
+
+The desktop still embeds its own host runtime. Its UI has not been converted
+into a detached client of `--serve`; desktop shutdown or fatal host-process
+failure ends that embedded runtime. A separately launched native host has its
+own process lifetime. Shared command and event contracts do not provide desktop
+reattachment or survival of a fatal desktop process failure.
 
 Foreground shell execution shares the output collector, timeout input schema,
 and deadline/cancellation owner in `src/tools/shell-tools.ts`. Timer conversion
