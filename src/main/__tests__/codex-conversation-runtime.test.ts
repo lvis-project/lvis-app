@@ -701,7 +701,69 @@ describe("CodexConversationRuntime", () => {
     expect(harness.runtime.getThreadId()).toBeNull();
     expect(harness.runtime.isTurnActive()).toBe(false);
   });
-  it("terminates the transport when a native tool item starts", async () => {
+  it.each([
+    { type: "userMessage", clientId: null, content: [{ type: "text", text: "Say hello", text_elements: [] }] },
+    { type: "agentMessage", text: "Hello", phase: null, memoryCitation: null },
+    { type: "reasoning", summary: [], content: [] },
+    { type: "plan", text: "Reply to the user." },
+    { type: "contextCompaction" },
+  ])("keeps $type lifecycle events passive before and after turn acknowledgement", async (item) => {
+    let turnStart: JsonRecord | undefined;
+    let signalTurnStart: () => void = () => {};
+    const turnStartReceived = new Promise<void>((resolve) => { signalTurnStart = resolve; });
+    const onTextDelta = vi.fn();
+    const onDynamicToolCall = vi.fn(async () => "must not run");
+    const harness = createHarness((message, current) => {
+      if (message.method === "initialize") reply(current.child, requestId(message), {});
+      if (message.method === "thread/start") {
+        reply(current.child, requestId(message), { thread: { id: "thread-1" } });
+      }
+      if (message.method === "turn/start") {
+        turnStart = message;
+        signalTurnStart();
+      }
+    });
+    const outcome = harness.runtime.startTurn(
+      { text: "Say hello" },
+      { onTextDelta, onDynamicToolCall },
+    ).catch((error: unknown) => error);
+    await turnStartReceived;
+
+    // A replayed descriptive item must not bind the pending turn's identity.
+    const historicalItem = { threadId: "thread-1", turnId: "historic-turn", item: { id: "historic-item", ...item } };
+    notify(harness.child, "item/started", { ...historicalItem, startedAtMs: 1000 });
+    notify(harness.child, "item/completed", { ...historicalItem, completedAtMs: 1001 });
+    expect(harness.runtime.isTurnActive()).toBe(true);
+    notify(harness.child, "item/agentMessage/delta", {
+      threadId: "thread-1", turnId: "turn-live", itemId: "message-1", delta: "Hello",
+    });
+    expect(onTextDelta).toHaveBeenCalledExactlyOnceWith({
+      threadId: "thread-1", turnId: "turn-live", itemId: "message-1", delta: "Hello",
+    });
+
+    if (!turnStart) throw new Error("missing-turn-start-request");
+    reply(harness.child, requestId(turnStart), { turn: { id: "turn-live", status: "inProgress" } });
+    // Resume startTurn so these events follow authoritative acknowledgement.
+    await Promise.resolve();
+    const liveItem = { threadId: "thread-1", turnId: "turn-live", item: { id: "live-item", ...item } };
+    notify(harness.child, "item/started", { ...liveItem, startedAtMs: 2000 });
+    notify(harness.child, "item/completed", { ...liveItem, completedAtMs: 2001 });
+    notify(harness.child, "turn/completed", {
+      threadId: "thread-1", turn: { id: "turn-live", status: "completed" },
+    });
+
+    await expect(outcome).resolves.toEqual({ threadId: "thread-1", turnId: "turn-live", status: "completed" });
+    expect(onTextDelta).toHaveBeenCalledTimes(1);
+    expect(onDynamicToolCall).not.toHaveBeenCalled();
+    expect(methodMessages(harness, "turn/interrupt")).toHaveLength(0);
+    expect(harness.child.kill).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "hookPrompt", "commandExecution", "fileChange", "mcpToolCall", "collabAgentToolCall",
+    "subAgentActivity", "webSearch", "imageView", "sleep", "imageGeneration",
+    "enteredReviewMode", "exitedReviewMode", "unknownNativeItem",
+  ])("terminates the transport when an ungoverned %s item starts", async (type) => {
     const harness = createHarness((message, current) => {
       if (message.method === "initialize") {
         reply(current.child, requestId(message), {});
@@ -716,7 +778,7 @@ describe("CodexConversationRuntime", () => {
         notify(current.child, "item/started", {
           threadId: "thread-1",
           turnId: "turn-1",
-          item: { id: "command-1", type: "commandExecution", command: "unsafe" },
+          item: { id: "native-item-1", type },
         });
       }
     });

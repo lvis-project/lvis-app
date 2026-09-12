@@ -412,9 +412,13 @@ const PLATFORM_TARGETS: Partial<Record<NodeJS.Platform, Partial<Record<NodeJS.Ar
 };
 
 const SAFE_LOCALE_ENV_NAMES = ["LANG", "LC_ALL"] as const;
-const SAFE_NATIVE_STREAM_ITEM_TYPES = new Set([
+// Descriptive lifecycle items neither authorize execution nor establish turn identity.
+const PASSIVE_NATIVE_STREAM_ITEM_TYPES = new Set([
+  "userMessage",
   "agentMessage",
   "reasoning",
+  "plan",
+  "contextCompaction",
 ]);
 
 /**
@@ -1551,7 +1555,7 @@ export class CodexConversationRuntime {
   private rejectUnsafeNativeItemStart(payload: CodexJsonRecord): void {
     const item = isCodexJsonRecord(payload.item) ? payload.item : null;
     const itemType = boundedIdentifier(item?.type, 80);
-    if (itemType && SAFE_NATIVE_STREAM_ITEM_TYPES.has(itemType)) return;
+    if (itemType && PASSIVE_NATIVE_STREAM_ITEM_TYPES.has(itemType)) return;
     if (itemType === "dynamicToolCall" && item && this.acceptsKnownDynamicToolItemStart(payload, item)) {
       return;
     }
