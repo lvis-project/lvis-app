@@ -287,9 +287,8 @@ Important rules:
   the loops share the memory manager and the window-wide idle services. A
   closed tile releases its loop. See `docs/design/tiled-chat-groups.md`.
 
-A long turn is bounded from two directions, because neither the model nor the
-loop can see what the other knows. Each API-backed chat call carries the active
-vendor block's effective `outputTokenLimit` as the request's native output
+A long turn uses per-call limits and progress guidance. Each API-backed chat call
+carries the active vendor block's effective `outputTokenLimit` as its native output
 ceiling. The canonical resolver in `src/shared/llm-vendor-defaults.ts` supplies
 the default for missing or invalid settings and preserves explicit positive
 integer limits. The default is a host budget, not a discovered per-model

@@ -71,8 +71,8 @@ const PARENT_UNLIMITED_ROUNDS = Number.MAX_SAFE_INTEGER;
  * Hard cap on finish_reason=length CONTINUATIONS per logical assistant answer.
  * Published provider guidance converges on 2–3. AND-ed with: (a) a
  * zero-progress break (a round adding no text AND no reasoning ends the chain),
- * (b) the caller-assigned round budget, and (c) the per-iteration `round < 30`
- * for-bound. Any one tripping stops the chain — defense against a model that
+ * (b) the caller-assigned round budget, and (c) the loop's effective round
+ * bound. Any one tripping stops the chain — defense against a model that
  * always returns "max_tokens".
  */
 const MAX_LENGTH_CONTINUATIONS = 3;
