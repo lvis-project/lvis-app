@@ -11,7 +11,7 @@ let service: SettingsService;
 beforeEach(async () => {
   root = mkdtempSync(join(tmpdir(), "lvis-settings-atomic-"));
   service = new SettingsService({ userDataPath: root, encryption: unavailableSecretEncryption });
-  await service.patch({ system: { hardwareAcceleration: false } });
+  await service.patch({ system: { ...service.get("system"), hardwareAcceleration: false } });
 });
 afterEach(async () => cleanupTmpDir(root));
 
@@ -21,7 +21,7 @@ describe("settings persistence", () => {
     const before = readFileSync(path, "utf8");
     const fd = openSync(path, "r");
     try {
-      await service.patch({ system: { hardwareAcceleration: true } });
+      await service.patch({ system: { ...service.get("system"), hardwareAcceleration: true } });
       expect(readFileSync(fd, "utf8")).toBe(before);
       expect(JSON.parse(readFileSync(path, "utf8")).system.hardwareAcceleration).toBe(true);
       const reloaded = new SettingsService({ userDataPath: root, encryption: unavailableSecretEncryption });
@@ -40,7 +40,7 @@ describe("settings persistence", () => {
     unlinkSync(path);
     symlinkSync(outside, path);
 
-    await service.patch({ system: { hardwareAcceleration: true } });
+    await service.patch({ system: { ...service.get("system"), hardwareAcceleration: true } });
 
     expect(readFileSync(outside, "utf8")).toBe(original);
     expect(lstatSync(path).isSymbolicLink()).toBe(false);
