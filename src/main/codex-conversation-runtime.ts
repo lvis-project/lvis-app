@@ -602,6 +602,12 @@ function boundedText(value: unknown, maxBytes: number): string | null {
   return Buffer.byteLength(value, "utf8") <= maxBytes ? value : null;
 }
 
+function boundedStreamDelta(value: unknown): string | null {
+  // A fragment can contain only whitespace even though a complete prompt cannot.
+  if (typeof value !== "string" || value.length === 0) return null;
+  return Buffer.byteLength(value, "utf8") <= MAX_STREAM_DELTA_BYTES ? value : null;
+}
+
 function throwIfAborted(abortSignal: AbortSignal | undefined): void {
   if (!abortSignal?.aborted) return;
   const error = new Error("codex-conversation-aborted");
@@ -1616,7 +1622,7 @@ export class CodexConversationRuntime {
     const threadId = boundedIdentifier(payload.threadId);
     const turnId = boundedIdentifier(payload.turnId);
     const itemId = boundedIdentifier(payload.itemId);
-    const delta = boundedText(payload.delta, MAX_STREAM_DELTA_BYTES);
+    const delta = boundedStreamDelta(payload.delta);
     const active = this.activeTurn;
     if (!active || !threadId || !turnId || !itemId || delta === null) return null;
     if (active.threadId !== threadId || (active.turnId && active.turnId !== turnId)) return null;

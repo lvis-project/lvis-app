@@ -15,8 +15,11 @@ import {
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 import { SUBSCRIPTION_TOOL_BRIDGE_CONTRACT } from "../../shared/subscription-runtime.js";
 import { ViewImageTool } from "../../tools/file-tools.js";
-import { serializeSubscriptionConversationPayload } from "../subscription-llm-provider.js";
+import { createSubscriptionLlmProvider, serializeSubscriptionConversationPayload } from "../subscription-llm-provider.js";
 import { MAX_SUBSCRIPTION_ATTACHMENT_BYTES, MAX_SUBSCRIPTION_PROMPT_ATTACHMENTS } from "../subscription-attachment-input.js";
+import { SubscriptionRuntimeService, type AcpSubscriptionRuntimeRegistry } from "../subscription-runtime-service.js";
+import type { CodexAppServerClient } from "../codex-app-server-client.js";
+import { collectRoundStream } from "../../engine/turn/stream-collector.js";
 
 type Spawn = NonNullable<CodexConversationRuntimeOptions["spawn"]>;
 type JsonRecord = Record<string, unknown>;
@@ -150,6 +153,147 @@ describe("isCodexAppServerRequestId", () => {
 });
 
 describe("CodexConversationRuntime", () => {
+  it.each([
+    { label: "complete fragments", text: ["alpha\n \tbeta\r\n\ngamma "], reasoning: ["first\n\tsecond\r\n third "] },
+    {
+      label: "split whitespace fragments",
+      text: ["alpha", "\n", " ", "\t", "beta", "\r\n", "\n", "gamma", " "],
+      reasoning: ["first", "\n", "\t", "second", "\r\n", " ", "third", " "],
+    },
+    { label: "only whitespace fragments", text: ["\n", " ", "\t", "\r\n"], reasoning: ["\t", "\n", " "] },
+    { label: "completion snapshots without deltas", text: [], reasoning: [] },
+  ])("preserves $label through the runtime, provider and conversation collector", async ({ text, reasoning }) => {
+    const completedText = text.length ? text.join("") : "Snapshot text is not a stream fallback.";
+    const completedThought = reasoning.length ? reasoning.join("") : "Snapshot reasoning is not a stream fallback.";
+    const verification = createHarness((message, current) => {
+      if (message.method === "initialize") reply(current.child, requestId(message), {});
+      if (message.method === "account/read") reply(current.child, requestId(message), { account: { type: "chatgpt" } });
+    });
+    const harness = createHarness((message, current) => {
+      if (message.method === "initialize") reply(current.child, requestId(message), {});
+      if (message.method === "thread/start") reply(current.child, requestId(message), { thread: { id: "thread-1" } });
+      if (message.method !== "turn/start") return;
+
+      const identity = { threadId: "thread-1", turnId: "turn-1" };
+      for (const delta of text) {
+        notify(current.child, "item/agentMessage/delta", { ...identity, itemId: "message-1", delta });
+      }
+      reply(current.child, requestId(message), { turn: { id: "turn-1", status: "inProgress" } });
+      for (const delta of reasoning) {
+        notify(current.child, "item/reasoning/summaryTextDelta", {
+          ...identity, itemId: "reasoning-1", summaryIndex: 0, delta,
+        });
+      }
+      const items = [
+        { id: "message-1", type: "agentMessage", text: completedText, phase: null, memoryCitation: null },
+        { id: "reasoning-1", type: "reasoning", summary: [completedThought], content: [] },
+      ];
+      for (const item of items) notify(current.child, "item/completed", { ...identity, item });
+      notify(current.child, "turn/completed", {
+        threadId: "thread-1", turn: { id: "turn-1", status: "completed", items },
+      });
+    });
+    const runtimes = [verification.runtime, harness.runtime];
+    const service = await SubscriptionRuntimeService.create(async () => undefined, {
+      namespace: {
+        dir: harness.runtimeRoot,
+        childDir: async (name) => {
+          const directory = join(harness.runtimeRoot, name);
+          mkdirSync(directory);
+          return directory;
+        },
+        readJson: async (_name, fallback) => fallback,
+        writeJson: async () => { throw new Error("Unexpected profile write"); },
+      },
+      codexClient: {
+        getStatus: async () => ({ runtime: "ready", connection: "connected", planType: "plus", pendingLogin: null, pendingDeviceCode: null }),
+        stop: vi.fn(),
+      } as unknown as CodexAppServerClient,
+      acpRegistry: { stopAll: async () => undefined } as unknown as AcpSubscriptionRuntimeRegistry,
+      createCodexConversationRuntime: () => {
+        const runtime = runtimes.shift();
+        if (!runtime) throw new Error("Unexpected runtime creation");
+        return runtime;
+      },
+    });
+    const textDeltas: string[] = [];
+    const reasoningDeltas: string[] = [];
+    try {
+      const provider = createSubscriptionLlmProvider({
+        selection: { kind: "subscription", provider: "codex" },
+        service,
+      });
+      const result = await collectRoundStream({
+        provider,
+        model: "default",
+        systemPrompt: "Keep the response formatting.",
+        messages: [{ role: "user", content: "Return the formatted response." }],
+        toolSchemas: [],
+        llmSettings: { streamSmoothing: "none", enableThinking: true },
+        onTextDelta: (delta) => textDeltas.push(delta),
+        onReasoningDelta: (delta) => reasoningDeltas.push(delta),
+      });
+
+      expect(result).toMatchObject({ kind: "ok", text: text.join(""), thought: reasoning.join(""), stopReason: "end_turn" });
+      expect(textDeltas).toEqual(text);
+      expect(reasoningDeltas).toEqual(reasoning);
+      expect(runtimes).toHaveLength(0);
+      expect(methodMessages(harness, "turn/start")).toHaveLength(1);
+      expect(harness.child.kill).toHaveBeenCalled();
+    } finally {
+      await service.stop();
+    }
+  });
+
+  it.each(["item/agentMessage/delta", "item/reasoning/summaryTextDelta"])(
+    "keeps byte and metadata bounds for %s",
+    async (method) => {
+      const deltas: string[] = [];
+      const accepted = [" ".repeat(256_000), "\u00a0".repeat(128_000), "é".repeat(128_000)];
+      const harness = createHarness((message, current) => {
+        if (message.method === "initialize") reply(current.child, requestId(message), {});
+        if (message.method === "thread/start") reply(current.child, requestId(message), { thread: { id: "thread-1" } });
+        if (message.method !== "turn/start") return;
+        reply(current.child, requestId(message), { turn: { id: "turn-1", status: "inProgress" } });
+        // Let the response bind the authoritative turn before testing mismatches.
+        setImmediate(() => {
+          const payload = { threadId: "thread-1", turnId: "turn-1", itemId: "item-1", summaryIndex: 0, delta: "\n" };
+          for (const field of ["threadId", "turnId", "itemId"]) {
+            for (const invalid of ["", " \t\n", "bad\nid", "x".repeat(513), null, 7]) {
+              notify(current.child, method, { ...payload, [field]: invalid });
+            }
+          }
+          notify(current.child, method, { ...payload, threadId: "other-thread" });
+          notify(current.child, method, { ...payload, turnId: "other-turn" });
+          if (method === "item/reasoning/summaryTextDelta") {
+            for (const summaryIndex of [-1, 0.5, "0", null, Number.MAX_SAFE_INTEGER + 1]) {
+              notify(current.child, method, { ...payload, summaryIndex });
+            }
+          }
+          for (const delta of ["", null, 42, {}, [], ...accepted.map((value) => `${value} `)]) {
+            notify(current.child, method, { ...payload, delta });
+          }
+          for (const delta of accepted) notify(current.child, method, { ...payload, delta });
+          notify(current.child, "turn/completed", { threadId: "thread-1", turn: { id: "turn-1", status: "completed" } });
+          notify(current.child, method, payload);
+        });
+      });
+
+      await expect(harness.runtime.startTurn({ text: "Preserve bounded fragments." }, {
+        onTextDelta: ({ delta }) => deltas.push(delta),
+        onReasoningDelta: ({ delta }) => deltas.push(delta),
+      })).resolves.toMatchObject({ status: "completed" });
+      expect(deltas).toHaveLength(accepted.length);
+      for (const [index, expected] of accepted.entries()) expect(deltas[index]).toBe(expected);
+    },
+  );
+
+  it.each(["", " \t\r\n"])("still rejects a blank complete input %j before spawning", async (text) => {
+    const harness = createHarness();
+    await expect(harness.runtime.startTurn({ text })).rejects.toMatchObject({ code: "codex-operation-failed" });
+    expect(harness.spawnCalls).toHaveLength(0);
+  });
+
   it("initializes an isolated blank-workspace thread and streams text and reasoning through callbacks", async () => {
     const textDeltas: unknown[] = [];
     const reasoningDeltas: unknown[] = [];
