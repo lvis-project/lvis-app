@@ -52,6 +52,11 @@ describe("executor program operand gates", () => {
     "sqlite3 /etc/shadow 'SELECT 1;'",
     "sqlite3 -init /etc/shadow sample.db 'SELECT 1;'",
     `sqlite3 sample.db ${shellQuote("SELECT readfile('/etc/shadow');")}`,
+    `sqlite3 :memory: ${shellQuote("SELECT CAST(data AS TEXT) FROM 'fsdir'('../outside/input.txt');")}`,
+    `sqlite3 :memory: ${shellQuote("SELECT data FROM (VALUES(1)), main.'fsdir' WHERE path='../outside/input.txt';")}`,
+    `DATA=${shellQuote("x -cmd SELECT(readfile('../outside/input.txt'));")}; sqlite3 -nullvalue $DATA :memory: 'SELECT 1;'`,
+    'sqlite3 -nullvalue "${DATA[@]}" :memory: "SELECT 1;"',
+    'sqlite3 -separator * :memory: "SELECT 1;"',
     "sqlite3 sample.db '.shell sudo printf blocked'",
     "sqlite3 -unknown operand sample.db 'SELECT 1;'",
     "sqlite3 sample.db 'SELECT 1;' > ../outside/report",
@@ -59,5 +64,18 @@ describe("executor program operand gates", () => {
     const { result, execute } = await invoke(blocked);
     expect(result.is_error).toBe(true);
     expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("admits real string data resembling a quoted table-valued source", async () => {
+    const literal = "SELECT 'fsdir' IS DISTINCT FROM 'csv', 'fsdir' IN ('fsdir');";
+    const { result, execute } = await invoke(`sqlite3 :memory: ${shellQuote(literal)}`);
+    expect(result.is_error).toBeFalsy();
+    expect(execute).toHaveBeenCalledOnce();
+  });
+
+  it("admits unknown quoted scalar data with a fixed field count", async () => {
+    const { result, execute } = await invoke('sqlite3 -nullvalue "$DATA" :memory: "SELECT 1;"');
+    expect(result.is_error).toBeFalsy();
+    expect(execute).toHaveBeenCalledOnce();
   });
 });

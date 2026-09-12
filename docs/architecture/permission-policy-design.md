@@ -91,13 +91,19 @@ the debugger receives the resulting argument.
 
 The `sqlite3` [argument contract](../../src/tools/shell-sqlite-arguments.ts)
 defines the supported options and consumes their values before assigning positional roles.
+Role assignment first requires a fixed argument count after shell expansion.
+Unknown quoted scalar data may occupy one value slot; unresolved word splitting,
+globbing or array multiplicity cannot shift subsequent option or positional roles.
 The database operand and `-init` file remain paths; later operands and `-cmd`
 values carry SQL or dot-commands. Formatting and numeric option values are data.
 Database URI filenames are decoded before normal sensitive-path, symlink and
 directory checks. SQL length does not affect its role or grant authority.
 Literal filenames in supported SQL and dot-command operations receive the same
-path checks. Explicit `.shell` and `.system` commands re-enter structural and
-path inspection using the CLI's argument construction for its POSIX system shell;
+path checks. SQL table names are recognized in their structural context, including
+single-quoted, qualified and grouped sources, joins and `IN` table forms.
+Expression strings and aliases keep their data role. Explicit `.shell` and
+`.system` commands re-enter structural and path inspection using the CLI's
+argument construction for its POSIX system shell;
 the Windows system-shell dialect is unsupported. Computed filenames,
 extension loading, file-backed virtual tables, command pipes, cwd changes,
 unknown options and unsupported dot-command forms are refused before approval

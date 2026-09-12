@@ -203,4 +203,83 @@ describe("database CLI argument roles", () => {
     expect(validator.validate("bash", { command: 'sqlite3 -nullvalue "$DATA" sample.db "SELECT 1;"' }).decision).toBe("allow");
     expect(validator.validate("bash", { command: 'sqlite3 sample.db "SELECT $PROGRAM;"' }).decision).toBe("deny");
   });
+
+  it.each([
+    'sqlite3 -nullvalue "$DATA" :memory: "SELECT 1;"',
+    'sqlite3 -separator "prefix${DATA}suffix" :memory: "SELECT 1;"',
+    'sqlite3 -nullvalue "${DATA:-fallback}" :memory: "SELECT 1;"',
+    'sqlite3 -nullvalue "${DATA[0]}" :memory: "SELECT 1;"',
+    'sqlite3 -nullvalue "$*" :memory: "SELECT 1;"',
+    'DATA=x; sqlite3 -nullvalue $DATA :memory: "SELECT 1;"',
+    'DATA=""; sqlite3 $DATA -nullvalue x :memory: "SELECT 1;"',
+    'unset -v DATA; sqlite3 $DATA -nullvalue x :memory: "SELECT 1;"',
+    'DATA=""; sqlite3 -nullvalue "$DATA" :memory: "SELECT 1;"',
+    'DATA=(); sqlite3 "${DATA[@]}" -nullvalue x :memory: "SELECT 1;"',
+    'DATA=(-nullvalue x); sqlite3 "${DATA[@]}" :memory: "SELECT 1;"',
+  ])("assigns data roles after proving field count or resolving expansion: %s", (command) => {
+    for (const fence of [false, true]) expect(policy(command, fence)).toBeNull();
+    expect(new BashAstValidator({ mode: "deny" }).validate("bash", { command }).decision).toBe("allow");
+  });
+
+  it.each([
+    'sqlite3 -nullvalue $DATA :memory: "SELECT 1;"',
+    'sqlite3 -separator prefix${DATA}suffix :memory: "SELECT 1;"',
+    'sqlite3 -nullvalue ${DATA:-fallback} :memory: "SELECT 1;"',
+    'sqlite3 -nullvalue ${DATA[0]} :memory: "SELECT 1;"',
+    'sqlite3 -nullvalue "${DATA[@]}" :memory: "SELECT 1;"',
+    'sqlite3 -nullvalue "prefix${DATA[@]}suffix" :memory: "SELECT 1;"',
+    'sqlite3 -nullvalue "${UNKNOWN:-${DATA[@]}}" :memory: "SELECT 1;"',
+    'sqlite3 -nullvalue "$@" :memory: "SELECT 1;"',
+    'sqlite3 -nullvalue * :memory: "SELECT 1;"',
+    'sqlite3 -nullvalue data? :memory: "SELECT 1;"',
+    'sqlite3 -nullvalue [ab] :memory: "SELECT 1;"',
+    'sqlite3 -nullvalue "$DATA"* :memory: "SELECT 1;"',
+    'sqlite3 -nullvalue $(printf x) :memory: "SELECT 1;"',
+    `DATA=${shellQuote("x -cmd SELECT(readfile('../outside/input.txt'));")}; sqlite3 -nullvalue $DATA :memory: 'SELECT 1;'`,
+    `DATA=(${shellQuote("x -cmd SELECT(readfile('../outside/input.txt'));")}); sqlite3 -nullvalue \${DATA[@]} :memory: 'SELECT 1;'`,
+    'DATA=("$UNKNOWN"); sqlite3 -nullvalue "${DATA[@]}" :memory: "SELECT 1;"',
+  ])("refuses unresolved splitting, globbing and erasure before consuming option values: %s", (command) => {
+    for (const fence of [false, true]) expect(policy(command, fence)?.kind).toBe("dynamic-path");
+    expect(new BashAstValidator({ mode: "deny" }).validate("bash", { command }).decision).toBe("deny");
+  });
+
+  it.each([
+    "SELECT 'fsdir', 'csv', 'zipfile';",
+    "SELECT 'fsdir' IS DISTINCT FROM 'csv', 'fsdir' IS NOT DISTINCT FROM 'fsdir';",
+    "SELECT 'fsdir' IN ('fsdir', 'csv');",
+    "SELECT 'FROM ''fsdir''(''../outside/input.txt'')';",
+    "SELECT value AS 'fsdir' FROM (SELECT 'csv' AS value) AS zipfile;",
+    "SELECT readfile('fsdir');",
+    "SELECT 'fsdir' '(';",
+    'SELECT "fsdir" FROM (SELECT 1 AS "fsdir");',
+    "SELECT 'fsdir' FROM (VALUES(1)) window, (VALUES(2)) csv;",
+    "SELECT row_number() OVER fsdir FROM (VALUES(1)) WINDOW fsdir AS (ORDER BY column1);",
+  ])("keeps expression literals, columns and aliases separate from relation names: %s", (program) => {
+    expect(policy(call(program))).toBeNull();
+  });
+
+  it.each([
+    "SELECT data FROM 'fsdir'('../outside/input.txt');",
+    'SELECT data FROM "fsdir"(\'../outside/input.txt\');',
+    "SELECT data FROM [fsdir]('../outside/input.txt');",
+    "SELECT data FROM `fsdir`('../outside/input.txt');",
+    "SELECT data FROM main.'fsdir'('../outside/input.txt');",
+    "SELECT data FROM 'main'.'fsdir'('../outside/input.txt');",
+    "SELECT data FROM 'fsdir' WHERE path='../outside/input.txt';",
+    "SELECT data FROM main.fsdir WHERE path='../outside/input.txt';",
+    "SELECT data FROM ('fsdir') WHERE path='../outside/input.txt';",
+    "SELECT data FROM ((main.'fsdir')) WHERE path='../outside/input.txt';",
+    "SELECT data FROM (VALUES(1)), fsdir WHERE path='../outside/input.txt';",
+    "SELECT data FROM (VALUES(1)) window, 'fsdir' WHERE path='../outside/input.txt';",
+    "SELECT data FROM (VALUES(1)) t JOIN 'fsdir' ON path='../outside/input.txt';",
+    "SELECT data FROM (VALUES(1)) CROSS JOIN (main.'fsdir') WHERE path='../outside/input.txt';",
+    "SELECT (1,2,3,4,5) IN 'main'.'fsdir'('../outside/input.txt');",
+    "WITH source AS (SELECT data FROM 'fsdir' WHERE path='../outside/input.txt') SELECT * FROM source;",
+    "UPDATE 'zipfile' SET data='bytes';",
+    "INSERT OR IGNORE INTO main.'zipfile'(name,data) VALUES('name','bytes');",
+    "DELETE FROM 'csv';",
+  ])("checks relation effects across accepted identifier spellings and source structures: %s", (program) => {
+    for (const fence of [false, true]) expect(policy(call(program), fence)?.kind).toBe("dynamic-path");
+    expect(new BashAstValidator({ mode: "deny" }).validate("bash", { command: call(program) }).decision).toBe("deny");
+  });
 });

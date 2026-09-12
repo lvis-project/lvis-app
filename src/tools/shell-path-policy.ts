@@ -732,6 +732,22 @@ function decline(reason: string, word?: ShellWord): never {
   throw new ShellExecutionError(reason, word?.source.raw);
 }
 
+/** Unknown bytes may occupy a data slot only when expansion cannot erase the
+ * word or produce more fields. The state owner already expands known arrays
+ * and removes known empty unquoted scalars before producing these words.
+ */
+function assertOperandCardinality(event: ShellCommandEvent): void {
+  const singleField = (word: ShellWord): boolean => word.parts.every((part) => {
+    if (part.kind === "literal" || part.kind === "unicode-escaped" || part.kind === "arithmetic-data") return true;
+    if (part.kind === "parameter") return part.quoted && part.index !== "@" && part.name !== "@";
+    if (part.kind === "parameter-choice") return part.quoted && singleField(part.operand);
+    return false;
+  });
+  const unknown = event.argv.findIndex((argument, index) => argument === undefined
+    && !singleField(event.effective.words[index]!));
+  if (unknown >= 0) decline("unresolved command argument count", event.effective.words[unknown]);
+}
+
 export function findShellPathPolicyViolation(
   command: string, cwd: string, sandboxRoot: string, extraAllowedDirectories: readonly string[],
   blockReadsOutsideWorkingDirectories: boolean,
@@ -766,6 +782,9 @@ export function findShellPathPolicyViolation(
       // No numeric result is inferred; the conservative statement scan remains.
       const dataOnly = ["echo", "printf", "tr", "true", "false", ":", "pwd", "export", "readonly", "unset", "read", "cd"].includes(verb)
         || (event.builtin && verb === "exit");
+      // This role contract mixes option data with executable program values.
+      // Establish its argv shape before consuming any option's value count.
+      if (verb === "sqlite3") assertOperandCardinality(event);
       const knownArgv = argv.map((argument,index) => argument ?? displayShellWord(effective.words[index]!));
       const leaf = commandLeaf(node, effective);
       const effect: PathEffect = verb === "cd" ? "write" : isReadOnlyShellLeaf(leaf, {ignoreRedirects:true}) ? "read" : "write";
@@ -852,6 +871,7 @@ export function inspectEmbeddedShellPrograms(event: ShellCommandEvent, suppliedS
     }
     return;
   }
+  assertOperandCardinality(event);
   const knownArgv=event.argv.map((argument,index) => argument ?? displayShellWord(effective.words[index]!));
   const slots=suppliedSlots ?? classifyOperandSlots(knownArgv);
   if(slots.dynamicExecution)decline(slots.dynamicExecution);

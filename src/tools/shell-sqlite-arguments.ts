@@ -74,6 +74,71 @@ function sqlTokens(program: string): SqlToken[] | null {
   return tokens;
 }
 
+/** Relation names accept strings as identifiers. Resolve that role from SQL
+ * structure before applying a lexical string-data exemption. Parentheses in
+ * expressions and subqueries do not give their literals a relation-name role.
+ */
+function sqlRelationNames(tokens: readonly SqlToken[]): ReadonlySet<number> | null {
+  const names = new Set<number>();
+  const closes = new Map<number, number>();
+  const stack: number[] = [];
+  const symbol = (index: number, value: string) => tokens[index]?.kind === "symbol" && tokens[index]?.value === value;
+  const keyword = (index: number, ...values: string[]) => tokens[index]?.kind === "word" && values.includes(tokens[index]!.value.toLowerCase());
+  const name = (index: number) => tokens[index] !== undefined && tokens[index]!.kind !== "symbol";
+  for (let i = 0; i < tokens.length; i += 1) {
+    if (symbol(i, "(")) stack.push(i);
+    if (symbol(i, ")")) {
+      const open = stack.pop();
+      if (open === undefined) return null;
+      closes.set(open, i);
+    }
+  }
+  if (stack.length) return null;
+
+  const sources: { start: number; end: number }[] = [];
+  const relation = (start: number, end: number): number => {
+    if (symbol(start, "(")) {
+      const close = closes.get(start)!;
+      if (!keyword(start + 1, "select", "with", "values")) sources.push({ start: start + 1, end: close });
+      return close + 1;
+    }
+    if (!name(start) || start >= end) return start + 1;
+    let target = start;
+    while (target + 2 < end && symbol(target + 1, ".") && name(target + 2)) target += 2;
+    names.add(target);
+    // Table-valued arguments contain expressions, not another source list.
+    return symbol(target + 1, "(") ? closes.get(target + 1)! + 1 : target + 1;
+  };
+  for (let i = 0; i < tokens.length; i += 1) {
+    if (keyword(i, "from") && !(keyword(i - 1, "distinct")
+      && (keyword(i - 2, "is") || (keyword(i - 2, "not") && keyword(i - 3, "is"))))) {
+      sources.push({ start: i + 1, end: tokens.length });
+    }
+    // An unparenthesized right side of IN is a table name, optionally followed
+    // by table-valued arguments. IN (...) instead contains expressions/query.
+    if (keyword(i, "in") && !symbol(i + 1, "(")) relation(i + 1, tokens.length);
+    if (keyword(i, "update")) relation(keyword(i + 1, "or") ? i + 3 : i + 1, tokens.length);
+    if (keyword(i, "into") && (keyword(i - 1, "insert", "replace")
+      || (keyword(i - 2, "or") && keyword(i - 3, "insert")))) relation(i + 1, tokens.length);
+  }
+  // A worklist avoids recursive stack growth for nested source groups.
+  const visited = new Set<number>();
+  for (let source = 0; source < sources.length; source += 1) {
+    const { start, end } = sources[source]!;
+    if (visited.has(start)) continue;
+    visited.add(start);
+    for (let i = relation(start, end); i < end;) {
+      if (symbol(i, ")") || symbol(i, ";")
+        || keyword(i, "where", "group", "having", "order", "limit", "union", "except", "intersect", "returning", "set")
+        || (keyword(i, "window") && keyword(i + 2, "as") && symbol(i + 3, "("))) break;
+      if (symbol(i, ",") || keyword(i, "join")) i = relation(i + 1, end);
+      else if (symbol(i, "(")) i = closes.get(i)! + 1;
+      else i += 1;
+    }
+  }
+  return names;
+}
+
 /** Dot-command quoting is separate from SQL and from the invoking shell. */
 function dotArguments(program: string): string[] | null {
   // Escaped double-quoted strings require a byte-oriented C escape contract.
@@ -132,6 +197,8 @@ export function classifySqliteArgumentSlots(argv: readonly string[]) {
     // filename or guess whether the filesystem makes a script positional.
     if (first.kind !== "word" || !SQL_STARTERS.has(first.value.toLowerCase())
       || /\.(?:sql|txt)$/i.test(program)) { unresolved("program or script-file operand"); return; }
+    const relationNames = sqlRelationNames(tokens);
+    if (!relationNames) { unresolved("program syntax"); return; }
     const literalPath = (at: number, end: readonly string[], database: boolean) => {
       const token = tokens[at], next = tokens[at + 1];
       // Quoted identifiers can resolve to column values; only single-quoted
@@ -143,11 +210,10 @@ export function classifySqliteArgumentSlots(argv: readonly string[]) {
     };
     for (let i = 0; i < tokens.length; i += 1) {
       const token = tokens[i]!, name = token.value.toLowerCase();
-      const call = tokens[i + 1]?.value === "(";
+      const call = tokens[i + 1]?.kind === "symbol" && tokens[i + 1]?.value === "(";
       if (call && FILE_FUNCTIONS.has(name)) literalPath(i + 2, [",", ")"], false);
       if (call && DYNAMIC_FUNCTIONS.has(name)) unresolved("dynamic program or archive function");
-      if (token.kind !== "word" && token.kind !== "identifier") continue;
-      if (FILE_TABLES.has(name) && (call || ["from", "join", "using"].includes(tokens[i - 1]?.value.toLowerCase() ?? ""))) unresolved("filesystem table effects");
+      if (FILE_TABLES.has(name) && (call || relationNames.has(i))) unresolved("filesystem table effects");
       if (token.kind !== "word") continue;
       if (name === "virtual" && tokens[i + 1]?.value.toLowerCase() === "table") unresolved("virtual-table module effects");
       let start = i - 1;
