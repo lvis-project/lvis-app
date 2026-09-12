@@ -33,8 +33,9 @@
  *     sessions/, hooks/ (relocated to ~/.config/lvis/hooks)
  */
 import { realpathSync } from "node:fs";
-import { resolve as pathResolve, relative as pathRelative } from "node:path";
+import { isAbsolute, resolve as pathResolve, relative as pathRelative } from "node:path";
 import { globMatch } from "../lib/glob-matcher.js";
+import { lvisHome } from "../shared/lvis-home.js";
 
 /**
  * Bounded walk-up depth used by {@link canonicalizePathForMatch} when the
@@ -44,6 +45,43 @@ import { globMatch } from "../lib/glob-matcher.js";
  * adversarial inputs (deep paths, symlink cycles).
  */
 export const MAX_WALK_UP = 64;
+
+const NO_RUNTIME_SECRET_KEY_PATHS: readonly string[] = Object.freeze([]);
+let runtimeSecretKeyPaths: { configured: string; paths: readonly string[] } | undefined;
+
+/**
+ * The native host's configured external key is secret regardless of its name
+ * or workspace grants. Both the host guard and the OS deny floor consume these
+ * same literal paths. Host startup resolves them before exposing tools; retain
+ * that target if a directory symlink changes later. The host owns this process
+ * environment setting and keeps it unchanged for the encryption lifetime.
+ */
+export function getRuntimeSensitiveKeyPaths(): readonly string[] {
+  const configured = process.env.LVIS_SECRET_KEY_FILE;
+  if (configured === undefined) return NO_RUNTIME_SECRET_KEY_PATHS;
+  if (runtimeSecretKeyPaths?.configured === configured) return runtimeSecretKeyPaths.paths;
+  if (!isAbsolute(configured) || configured.includes("\0")) {
+    throw new Error("LVIS_SECRET_KEY_FILE must be an absolute file path");
+  }
+  // ASRT interprets these characters as patterns, including within a literal
+  // filename. Refuse an unrepresentable key path instead of losing its deny.
+  const assertSandboxLiteral = (path: string): void => {
+    if (/[*?\[\]]/.test(path)) {
+      throw new Error("LVIS_SECRET_KEY_FILE must not contain sandbox glob characters");
+    }
+  };
+  assertSandboxLiteral(configured);
+  let canonical: string;
+  try {
+    canonical = realpathSync.native(configured);
+  } catch {
+    throw new Error("LVIS_SECRET_KEY_FILE could not be resolved safely");
+  }
+  assertSandboxLiteral(canonical);
+  const paths = Object.freeze([...new Set([pathResolve(configured), canonical])]);
+  runtimeSecretKeyPaths = { configured, paths };
+  return paths;
+}
 
 /**
  * Where a {@link SensitiveEntry}'s segments hang off.
@@ -56,8 +94,8 @@ export const MAX_WALK_UP = 64;
  * canonicalized absolute path with an anchor-free `**\/` prefix, so a
  * credential store dropped outside the user's home (a copied `.ssh` under
  * `/tmp`, a second `HOME` in a container mount) is still caught. The anchor
- * exists for the OS sandbox floor, which needs a LITERAL absolute path because
- * bwrap/seatbelt cannot glob.
+ * also identifies the literal runtime roots. Both enforcement points resolve
+ * `lvis-home` rows at call time so a relocated profile retains its protection.
  */
 type SensitiveAnchor = "lvis-home" | "home" | "root";
 
@@ -99,6 +137,8 @@ type SensitiveAnchor = "lvis-home" | "home" | "root";
  *     being a row, because the exact directory is only knowable at runtime from
  *     `app.getPath("userData")`. The sandbox floor gets the exact path; the host
  *     guard can only pin the per-platform defaults as static globs.
+ *   - the native host's external key has an operator-selected literal path.
+ *     Both surfaces consume {@link getRuntimeSensitiveKeyPaths} for that path.
  */
 export interface SensitiveEntry {
   /** Which root {@link segments} hangs off — see {@link SensitiveAnchor}. */
@@ -192,6 +232,7 @@ export const SENSITIVE_PATH_ENTRIES: readonly SensitiveEntry[] = Object.freeze([
     why: "audit log + rotated archives",
   },
   { anchor: "lvis-home", segments: ["sessions"], kind: "dir", why: "chat session JSONL" },
+  { anchor: "lvis-home", segments: ["host-runtime"], kind: "dir", why: "process ownership lock (replacement creates a second writer)" },
   { anchor: "lvis-home", segments: ["routine"], kind: "dir", why: "routine session history" },
   {
     anchor: "lvis-home",
@@ -206,9 +247,8 @@ export const SENSITIVE_PATH_ENTRIES: readonly SensitiveEntry[] = Object.freeze([
  *
  * Anchor-free (`**` prefix) for every anchor — see {@link SensitiveAnchor} for
  * why the host guard deliberately ignores the anchor. `lvis-home` rows keep the
- * literal `.lvis` segment in the glob because the glob cannot know where
- * `LVIS_HOME` points; a relocated LVIS home is still covered by the sandbox
- * floor, which resolves `lvisHome()` per call.
+ * literal `.lvis` segment to protect copied stores too. `isSensitivePath` also
+ * projects those rows onto the current `lvisHome()`, matching the sandbox floor.
  *
  * A `dir` row needs only the `/**` form: `policyMatchPaths` also tries
  * `<path>/`, so `**\/.ssh/**` already matches the bare directory.
@@ -420,10 +460,29 @@ export function policyMatchPaths(filePath: string): readonly string[] {
 export function isSensitivePath(absPath: string): string | null {
   if (!absPath) return null;
   const candidates = policyMatchPaths(absPath);
+  for (const keyPath of getRuntimeSensitiveKeyPaths()) {
+    const normalizedKey = caseFoldForMatch(foldCanonicalPathSeparators(keyPath));
+    if (candidates.includes(normalizedKey)) return "runtime-secret-key";
+  }
   for (const candidate of candidates) {
     for (const pattern of SENSITIVE_PATH_PATTERNS) {
       if (globMatch(candidate, pattern)) {
         return pattern;
+      }
+    }
+  }
+  // A custom LVIS_HOME need not contain a `.lvis` segment. Use the same table
+  // as the OS deny floor, retaining literal comparisons for paths containing
+  // glob syntax and the frozen-canonical form of the caller's candidate.
+  const home = canonicalizePathForMatch(lvisHome());
+  for (const entry of SENSITIVE_PATH_ENTRIES) {
+    if (entry.anchor !== "lvis-home") continue;
+    const base = caseFoldForMatch(canonicalizePathForMatch(pathResolve(home, ...entry.segments)));
+    for (const candidate of candidates) {
+      if (candidate === base ||
+          (entry.kind === "dir" && candidate.startsWith(`${base}/`)) ||
+          (entry.rotations && candidate.startsWith(`${base}.`))) {
+        return `lvis-home:${entry.segments.join("/")}`;
       }
     }
   }

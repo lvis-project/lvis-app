@@ -1,5 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
-import { safeStorage } from "electron";
+import type { SecretEncryption } from "../data/secret-document-store.js";
 import type { SettingsService } from "../data/settings-store.js";
 import { isCanonicalA2APublicHttpsOrigin } from "../shared/a2a-public-origin.js";
 import type { AgentActionApprover } from "../permissions/agent-action-approver.js";
@@ -8,7 +8,7 @@ import { A2ARouteControlClient } from "../api/a2a-route-control-client.js";
 import { A2AExactReplayHandler } from "../api/a2a-exact-replay-handler.js";
 import { A2AExactReplayStore } from "../api/a2a-exact-replay-store.js";
 import { A2ARemoteClient, type A2ARemoteClientResult, type A2ARemoteExecuteInput } from "../api/a2a-remote-client.js";
-import { A2ARemoteDurableStore, type A2AOsEncryption, type A2ARemoteOperationRecoveryRoute, type A2ARemoteTaskActionDisposition, type A2ARemoteTaskProjection, type A2ARemoteTaskRoute } from "../api/a2a-remote-store.js";
+import { A2ARemoteDurableStore, type A2ARemoteOperationRecoveryRoute, type A2ARemoteTaskActionDisposition, type A2ARemoteTaskProjection, type A2ARemoteTaskRoute } from "../api/a2a-remote-store.js";
 import { createA2AStrictTransport } from "../api/a2a-remote-transport.js";
 import {
   a2aRemoteLineageDigestSha256,
@@ -41,7 +41,7 @@ export interface CreateA2ARemoteRuntimeOptions {
   agentActionApprover: AgentActionApprover;
   projectRoot: string;
   gates?: Readonly<A2ARemoteGateSnapshot>;
-  encryption?: A2AOsEncryption;
+  encryption: SecretEncryption;
   namespace?: Pick<FeatureNamespaceHandle, "readJson" | "writeJson">;
   audit?: (code: string) => void;
 }
@@ -155,7 +155,7 @@ function authorizedBearer(header: string | undefined, secret: Buffer): boolean {
 export function createA2ARemoteRuntime(options: CreateA2ARemoteRuntimeOptions): A2ARemoteRuntime | null {
   const gates = options.gates ?? snapshotA2ARemoteGates(options.settings);
   if (!gates.outboundRouting && !gates.receiverProfile) return null;
-  const encryption = options.encryption ?? safeStorage;
+  const encryption = options.encryption;
   if (!encryption.isEncryptionAvailable()) throw new Error("a2a-remote-os-encryption-unavailable");
   const config = options.settings.get("a2aRemote");
   if (!config.extensionSpecDigestSha256
@@ -172,6 +172,7 @@ export function createA2ARemoteRuntime(options: CreateA2ARemoteRuntimeOptions): 
   const store = gates.outboundRouting ? new A2ARemoteDurableStore({
     namespace,
     encryption,
+    unreadableKeyPolicy: encryption.getSelectedStorageBackend() === "external_key" ? "reject" : "quarantine",
     audit: (event) => options.audit?.(`store:${event.reason}:${event.count}`),
   }) : null;
   const approver: A2ARemoteMutationApprover = {

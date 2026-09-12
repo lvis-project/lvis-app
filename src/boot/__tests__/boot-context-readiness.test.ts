@@ -1,3 +1,4 @@
+import { createBootHostFixture } from "../../__tests__/support/host-runtime.js";
 import { describe, expect, it } from "vitest";
 import type { BrowserWindow } from "electron";
 import { assertBootContextReady, createBootContext } from "../context.js";
@@ -5,6 +6,7 @@ import { assertBootContextReady, createBootContext } from "../context.js";
 describe("BootContext readiness", () => {
   it("reports every producer field that has not run instead of assembling undefined services", () => {
     const ctx = createBootContext({
+    host: createBootHostFixture(),
       projectRoot: "/workspace",
       mainWindow: {} as BrowserWindow,
       getMainWindow: () => null,
@@ -18,6 +20,7 @@ describe("BootContext readiness", () => {
 
   it("distinguishes an explicitly unavailable optional service from a skipped producer", () => {
     const ctx = createBootContext({
+    host: createBootHostFixture(),
       projectRoot: "/workspace",
       mainWindow: {} as BrowserWindow,
       getMainWindow: () => null,

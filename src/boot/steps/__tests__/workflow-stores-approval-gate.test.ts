@@ -1,3 +1,4 @@
+import { createBootHostFixture } from "../../../__tests__/support/host-runtime.js";
 /**
  * Producer-driven coverage for `setupWorkflowStores` wiring.
  *
@@ -71,6 +72,7 @@ function makeCtx(): { ctx: BootContext; registry: InstanceType<typeof ToolRegist
     },
   };
   const ctx = {
+      host: createBootHostFixture(),
     routinesStore: undefined,
     getMainWindow: () => null,
     notificationService: undefined,
@@ -118,6 +120,7 @@ describe("setupWorkflowStores — tool and idle-scheduler wiring", () => {
   it("blocks the skill body when the user denies at that same gate", async () => {
     const registry = new ToolRegistry();
     const ctx = {
+      host: createBootHostFixture(),
       getMainWindow: () => null,
       approvalGate: { requestAndWait: async () => ({ choice: "deny-once" }) },
       toolRegistry: registry,
@@ -155,6 +158,7 @@ describe("setupWorkflowStores — ask_user_question on a headless turn", () => {
     const registry = new ToolRegistry();
     const sent: string[] = [];
     const ctx = {
+      host: createBootHostFixture(),
       getMainWindow: () => ({
         webContents: {
           send: (channel: string) => {
@@ -229,6 +233,7 @@ describe("setupWorkflowStores — web_fetch transport", () => {
     const plain = (async () => new Response("plain")) as unknown as typeof fetch;
     const singleHop = (async () => new Response("single-hop")) as unknown as typeof fetch;
     const ctx = {
+      host: createBootHostFixture(),
       getMainWindow: () => null,
       approvalGate: { requestAndWait: async () => ({ choice: "allow" }) },
       networkFetch: plain,

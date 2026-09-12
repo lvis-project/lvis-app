@@ -9,7 +9,6 @@
  * network allow-list rebuild. Finally it runs the managed enterprise-plugin
  * bootstrap.
  */
-import { app } from "electron";
 import { DisabledMarketplaceFetcher, PluginMarketplaceService } from "../../plugins/marketplace.js";
 import type { MarketplaceFetcher } from "../../plugins/marketplace.js";
 import { CloudMarketplaceFetcher } from "../../plugins/cloud-marketplace-fetcher.js";
@@ -155,7 +154,7 @@ export async function setupMarketplace(ctx: BootContext): Promise<void> {
       await updateAsrtSandboxConfig({
         allowedDomains,
         strictAllowlist: true,
-        userDataDir: app.getPath("userData"),
+        userDataDir: ctx.host.userDataPath,
       });
       log.info(
         "boot: ASRT network config live-refreshed (%d union domains)",

@@ -38,6 +38,7 @@ import { flattenAgentPluginsManifest } from "../public-contract.js";
 import * as installedEntryFs from "../installed-entry-fs.js";
 import * as removalTransaction from "../plugin-removal-transaction.js";
 import { agentPluginsDocument } from "./test-helpers.js";
+import { unavailableSecretEncryption } from "../../__tests__/support/host-runtime.js";
 
 function makePluginZip(manifest: Record<string, unknown>, files: Record<string, string> = {}): Buffer {
   const zip = new AdmZip();
@@ -130,7 +131,7 @@ describe("PluginMarketplaceService install()", () => {
   }
 
   function makeProductionActivationRuntime() {
-    const runtime = new PluginRuntime({
+    const runtime = new PluginRuntime({ encryption: unavailableSecretEncryption,
       hostRoot: testDir,
       registryPath,
       pluginsRoot: installedDir,

@@ -1,3 +1,4 @@
+import type { BootHost } from "./host-runtime.js";
 /**
  * BootContext — the accumulator threaded through the boot pipeline (C18).
  *
@@ -86,12 +87,14 @@ type PluginPaths = ReturnType<typeof import("../plugins/plugin-paths.js").resolv
 type WorkBoardStorage = ReturnType<typeof import("../work-board/storage.js").createDirStorage>;
 
 export interface BootContextInputs {
+  host: BootHost;
   projectRoot: string;
   mainWindow: BrowserWindow | null;
   getMainWindow: () => BrowserWindow | null;
 }
 
 export class BootContext {
+  declare readonly host: BootHost;
   // ── Inputs (available immediately) ─────────────────────────────────────────
   declare readonly projectRoot: string;
   declare readonly mainWindow: BrowserWindow | null;
@@ -262,6 +265,7 @@ export class BootContext {
   declare autoUpdaterStop: (() => void) | undefined;
 
   constructor(inputs: BootContextInputs) {
+    this.host = inputs.host;
     this.projectRoot = inputs.projectRoot;
     this.mainWindow = inputs.mainWindow;
     this.getMainWindow = inputs.getMainWindow;
@@ -270,6 +274,7 @@ export class BootContext {
 }
 
 const BOOT_CONTEXT_FIELDS = [
+  "host",
   "projectRoot",
   "mainWindow",
   "getMainWindow",

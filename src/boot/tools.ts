@@ -41,7 +41,7 @@ import type { SkillOverlay } from "../main/skill-overlay.js";
 import type { SkillApprovalsStore } from "../main/skill-approvals-store.js";
 import type { AgentProfileStore } from "../main/agent-profile-store.js";
 import type { ApprovalGate } from "../permissions/approval-gate.js";
-import { IdleSchedulerService, adaptPowerMonitor } from "../main/idle-scheduler.js";
+import { IdleSchedulerService, type PowerMonitorLike } from "../main/idle-scheduler.js";
 import { createLogger } from "../lib/logger.js";
 const log = createLogger("lvis");
 
@@ -64,11 +64,10 @@ export function registerToolSearchMetaTool(toolRegistry: ToolRegistry): void {
  * present and does nothing at all without it, so anything that can leave it
  * unbuilt disables idle work outright rather than degrading it.
  */
-export async function wireIdleScheduler(): Promise<IdleSchedulerService | undefined> {
+export async function wireIdleScheduler(powerMonitor?: PowerMonitorLike): Promise<IdleSchedulerService | undefined> {
   try {
-    const { powerMonitor } = await import("electron");
     const idleScheduler = new IdleSchedulerService({
-      powerMonitor: adaptPowerMonitor(powerMonitor),
+      powerMonitor,
     });
     idleScheduler.start();
     return idleScheduler;

@@ -15,6 +15,7 @@ import {
   TELEGRAM_PLATFORM_ACTOR_SECRET_NAME,
 } from "../telegram-platform-runtime.js";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
+import { unavailableSecretEncryption } from "../../__tests__/support/host-runtime.js";
 
 const OWNER_ID = "123456789";
 const BOT_FINGERPRINT = "a".repeat(64);
@@ -83,7 +84,7 @@ describe("actor key rotation", () => {
   }
 
   const digesterOver = (secretStore: SecretStore) =>
-    createTelegramActorDigester({ botFingerprint: BOT_FINGERPRINT, secretStore });
+    createTelegramActorDigester({ encryption: unavailableSecretEncryption, botFingerprint: BOT_FINGERPRINT, secretStore });
 
   it("mints a fresh secret when the stored one can no longer be decrypted", () => {
     const secrets = encryptedSecrets();

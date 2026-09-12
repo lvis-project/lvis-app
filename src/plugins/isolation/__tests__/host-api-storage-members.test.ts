@@ -29,6 +29,7 @@ const mockedElectron = vi.hoisted(() => {
   return {
     enc,
     safeStorage: {
+      getSelectedStorageBackend: () => "gnome_libsecret" as const,
       isEncryptionAvailable: vi.fn(() => enc.available),
       encryptString: vi.fn((s: string) => Buffer.from(`ENC(${s})`, "utf-8")),
       decryptString: vi.fn((b: Buffer) => {
@@ -117,7 +118,7 @@ afterEach(async () => {
  * `bind: false` exercises the table as it ships.
  */
 function harness(
-  hostApi: PluginHostApi = createNoopHostApi(PLUGIN_ID, dataDir),
+  hostApi: PluginHostApi = createNoopHostApi(PLUGIN_ID, dataDir, mockedElectron.safeStorage),
   options: { readonly bind?: boolean } = {},
 ): Harness {
   const requests: HostApiRequest[] = [];
@@ -277,7 +278,7 @@ describe("bytes survive the boundary unchanged", () => {
   });
 
   it("refuses an over-limit READ rather than handing back part of the file", async () => {
-    const base = createNoopHostApi(PLUGIN_ID, dataDir);
+    const base = createNoopHostApi(PLUGIN_ID, dataDir, mockedElectron.safeStorage);
     const oversized: PluginHostApi = {
       ...base,
       storage: {
@@ -415,7 +416,7 @@ describe("every member reports the errors its contract lists", () => {
   });
 
   it("carries a denied mutation as effect-boundary-denied", async () => {
-    const base = createNoopHostApi(PLUGIN_ID, dataDir);
+    const base = createNoopHostApi(PLUGIN_ID, dataDir, mockedElectron.safeStorage);
     const denied: PluginHostApi = {
       ...base,
       storage: {
@@ -445,7 +446,7 @@ describe("the group binds to one incarnation and to nothing else", () => {
 
   it("declares a handler for every dispatchable member of the group", () => {
     const handlers: Record<DispatchedStorageHostApiPath, HostApiPathHandler> =
-      createStorageHostApiPaths(createNoopHostApi(PLUGIN_ID, dataDir));
+      createStorageHostApiPaths(createNoopHostApi(PLUGIN_ID, dataDir, mockedElectron.safeStorage));
     expect(Object.keys(handlers).sort()).toEqual([...dispatched].sort());
     for (const path of dispatched) {
       expect(handlers[path].path).toBe(path);
@@ -468,8 +469,8 @@ describe("the group binds to one incarnation and to nothing else", () => {
     const first = mkdtempSync(join(tmpdir(), "lvis-storage-first-"));
     const second = mkdtempSync(join(tmpdir(), "lvis-storage-second-"));
     try {
-      const toFirst = harness(createNoopHostApi(PLUGIN_ID, first));
-      const toSecond = harness(createNoopHostApi(PLUGIN_ID, second));
+      const toFirst = harness(createNoopHostApi(PLUGIN_ID, first, mockedElectron.safeStorage));
+      const toSecond = harness(createNoopHostApi(PLUGIN_ID, second, mockedElectron.safeStorage));
       await toFirst.storage.write("who.txt", "first");
       await toSecond.storage.write("who.txt", "second");
       expect(readFileSync(join(first, "who.txt"), "utf-8")).toBe("first");
@@ -480,7 +481,7 @@ describe("the group binds to one incarnation and to nothing else", () => {
   });
 
   it("keeps the void-drift check reachable by returning the host's promise", async () => {
-    const base = createNoopHostApi(PLUGIN_ID, dataDir);
+    const base = createNoopHostApi(PLUGIN_ID, dataDir, mockedElectron.safeStorage);
     const drifting: PluginHostApi = {
       ...base,
       // A host implementation that started resolving a value where the contract
@@ -526,7 +527,7 @@ describe("the group binds to one incarnation and to nothing else", () => {
   });
 
   it("refuses a member of the group the binding does not cover", () => {
-    const handlers = createStorageHostApiPaths(createNoopHostApi(PLUGIN_ID, dataDir));
+    const handlers = createStorageHostApiPaths(createNoopHostApi(PLUGIN_ID, dataDir, mockedElectron.safeStorage));
     // `storage.resolve` is answered in the child; a host binding for it would
     // be a second implementation of the join, free to disagree with the one the
     // plugin actually calls.
@@ -599,7 +600,7 @@ describe("malformed arguments are refused, never coerced", () => {
 
 describe("the boundary refuses a member the plugin is no longer entitled to", () => {
   it("stops a storage call from a retired incarnation", async () => {
-    const hostApi = createNoopHostApi(PLUGIN_ID, dataDir);
+    const hostApi = createNoopHostApi(PLUGIN_ID, dataDir, mockedElectron.safeStorage);
     const hostLogs: { message: string; meta?: unknown }[] = [];
     const host = new HostApiDispatcher({
       // Captured, not dropped: a sink that discards is what shipped, and a

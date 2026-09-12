@@ -1,3 +1,4 @@
+import { unavailableSecretEncryption } from "../../__tests__/support/host-runtime.js";
 /**
  * Boot-time sync appMode reader tests.
  *
@@ -46,13 +47,13 @@ describe("readPersistedAppModeSync", () => {
   });
 
   it("reads back a 'chat' mode the SettingsService persisted (writer/reader agree on path)", async () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: unavailableSecretEncryption, userDataPath });
     await service.patch({ system: { appMode: "chat" } });
     expect(readPersistedAppModeSync(userDataPath)).toBe("chat");
   });
 
   it("reads back a 'work' mode the SettingsService persisted", async () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: unavailableSecretEncryption, userDataPath });
     await service.patch({ system: { appMode: "chat" } });
     await service.patch({ system: { appMode: "work" } });
     expect(readPersistedAppModeSync(userDataPath)).toBe("work");

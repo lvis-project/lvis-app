@@ -227,7 +227,7 @@ export function wireReviewerAndPermissions(ctx: BootContext): void {
     // would keep showing a stale degrade banner. Push a config-changed event so
     // its onConfigChanged subscription refetches reviewerDegradedToRule and the
     // banner clears the moment a provider/key heals the reviewer.
-    broadcastPermissionConfigChangedFromHost();
+    broadcastPermissionConfigChangedFromHost(ctx.host.desktop?.getAppWindows() ?? []);
   };
   rewireReviewerAgent();
 
@@ -245,7 +245,7 @@ export function wireReviewerAndPermissions(ctx: BootContext): void {
   // handlers all reach multi-window PermissionsTab — without each
   // call site re-implementing the wiring.
   permissionManager.setBroadcastConfigChanged(() => {
-    broadcastPermissionConfigChangedFromHost();
+    broadcastPermissionConfigChangedFromHost(ctx.host.desktop?.getAppWindows() ?? []);
   });
 
   // Manifest integrity proxy. Subscribes the audit logger so every read→write

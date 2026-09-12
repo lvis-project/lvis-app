@@ -16,12 +16,13 @@ import {
   writeTestPluginRegistry,
 } from "./test-helpers.js";
 import { agentPluginsDocument, patchLvisFields } from "./test-helpers.js";
+import { unavailableSecretEncryption } from "../../__tests__/support/host-runtime.js";
 
 function makeGenerationBoundRuntime(
-  options: Omit<ConstructorParameters<typeof PluginRuntime>[0], "createHostApi">
-    & Partial<Pick<ConstructorParameters<typeof PluginRuntime>[0], "createHostApi">>,
+  options: Omit<ConstructorParameters<typeof PluginRuntime>[0], "createHostApi" | "encryption">
+    & Partial<Pick<ConstructorParameters<typeof PluginRuntime>[0], "createHostApi" | "encryption">>,
 ): PluginRuntime {
-  return bindTestPluginRuntimeGeneration(new PluginRuntime({
+  return bindTestPluginRuntimeGeneration(new PluginRuntime({ encryption: unavailableSecretEncryption,
     ...options,
     createHostApi: createTestHostApiFactory(options.createHostApi),
   }));

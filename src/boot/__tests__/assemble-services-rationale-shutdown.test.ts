@@ -56,6 +56,7 @@ describe("assembleAppServices rationale shutdown", () => {
           order.push("audit");
         }),
       },
+      tracing: { shutdown: async () => { order.push("tracing"); } },
       lateBinding: { pluginToolInvokerRef: { fn: undefined } },
     } as unknown as BootContext;
 
@@ -82,6 +83,7 @@ describe("assembleAppServices rationale shutdown", () => {
       "mcp",
       "audit-writer",
       "audit",
+      "tracing",
     ]);
     expect(services.shutdown()).toBe(shutdown);
   });

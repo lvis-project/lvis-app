@@ -2,11 +2,10 @@ import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join, win32 } from "node:path";
 import type { Readable, Writable } from "node:stream";
-import { projectRoot } from "./main-paths.js";
+import { getHostResources } from "./host-resources.js";
 
 export function resolveWindowsJobLauncher(): string {
-  const packaged = !(process as { defaultApp?: boolean }).defaultApp && !!process.resourcesPath;
-  const root = packaged ? process.resourcesPath : join(projectRoot, "resources");
+  const root = getHostResources().resourcePath;
   const binary = join(root, "windows-job", process.arch, "lvis-job.exe");
   if (!existsSync(binary)) throw new Error(`Windows job launcher is missing: ${binary}. Build the Windows native assets first.`);
   return binary;

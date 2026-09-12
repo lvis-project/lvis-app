@@ -228,82 +228,8 @@ function defaultIsTestEnv(): boolean {
   return process.env.NODE_ENV === "test";
 }
 
-/**
- * Default notification factory — uses Electron's native Notification. Imported
- * lazily inside the function so unit tests that mock the module surface aren't
- * forced to load Electron at module-load time.
- */
-function defaultNotificationFactory(opts: {
-  title: string;
-  body: string;
-  silent: boolean;
-  urgency: "normal" | "critical" | "low";
-}): NotificationLike {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { Notification } = require("electron") as typeof import("electron");
-  const n = new Notification({
-    title: opts.title,
-    body: opts.body,
-    silent: opts.silent,
-    urgency: opts.urgency,
-  });
-  return {
-    show: () => n.show(),
-    on: (event, handler) => n.on(event, handler),
-  };
-}
-
-function defaultNotificationActivationRegistration(
-  handler: (details: ActivationArguments) => void,
-): void {
-  if (process.platform !== "win32") return;
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { Notification } = require("electron") as typeof import("electron");
-    if (typeof Notification.handleActivation !== "function") return;
-    Notification.handleActivation(handler);
-  } catch (err) {
-    log.warn(
-      "notification activation handler registration failed: %s",
-      (err as Error).message,
-    );
-  }
-}
-
-function defaultIsReady(): boolean {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { app } = require("electron") as typeof import("electron");
-    return app.isReady();
-  } catch {
-    return false;
-  }
-}
-
-/**
- * #842 — default multi-window focus probe. Scans every LVIS-owned
- * `BrowserWindow` (main plus auth/link/preview auxiliary windows) so
- * "user is actively working in some LVIS window" is detected even when
- * the main window is blurred. `isDestroyed()` filtered out to avoid
- * touching a window that's already being torn down. Wrapped in try/catch
- * so callers without Electron loaded (tests) fall back to "no focus".
- */
-function defaultIsAnyWindowFocused(): boolean {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { BrowserWindow } = require("electron") as typeof import("electron");
-    return BrowserWindow.getAllWindows().some(
-      (w) => !w.isDestroyed() && w.isFocused(),
-    );
-  } catch (err) {
-    // Electron not loaded (e.g. unit tests) — log at warn so a *runtime*
-    // import failure (broken Electron upgrade, missing native binding) does
-    // not silently degrade to "always treat user as away". Tests pass via
-    // the `isAnyWindowFocused` constructor option so the catch is rarely
-    // hit outside true config errors.
-    log.warn("defaultIsAnyWindowFocused fallback: %s", (err as Error).message);
-    return false;
-  }
+function unavailableNotificationFactory(): never {
+  throw new Error("desktop-notification-unavailable");
 }
 
 export class NotificationService {
@@ -325,14 +251,12 @@ export class NotificationService {
   constructor(opts: NotificationServiceOptions) {
     this.getMainWindow = opts.getMainWindow;
     this.auditLogger = opts.auditLogger;
-    this.notificationFactory = opts.notificationFactory ?? defaultNotificationFactory;
-    this.isReady = opts.isReady ?? defaultIsReady;
+    this.notificationFactory = opts.notificationFactory ?? unavailableNotificationFactory;
+    this.isReady = opts.isReady ?? (() => false);
     this.isTestEnv = opts.isTestEnv ?? defaultIsTestEnv;
-    this.isAnyWindowFocused = opts.isAnyWindowFocused ?? defaultIsAnyWindowFocused;
+    this.isAnyWindowFocused = opts.isAnyWindowFocused ?? (() => false);
 
-    const activationRegistration =
-      opts.notificationActivationRegistration ??
-      (opts.notificationFactory ? null : defaultNotificationActivationRegistration);
+    const activationRegistration = opts.notificationActivationRegistration;
     if (activationRegistration && !this.isTestEnv()) {
       try {
         activationRegistration((details) => {

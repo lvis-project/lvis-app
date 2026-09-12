@@ -1,3 +1,4 @@
+import { unavailableSecretEncryption } from "../../__tests__/support/host-runtime.js";
 /**
  * Shared fixtures for the Telegram bridge suites. The lifecycle suite
  * (`telegram-bridge-server.test.ts`, mocked projection store) and the egress
@@ -66,7 +67,7 @@ export function ownerPairedAuthority(secretStore: SecretStore): {
   readonly ownerDigest: string;
   readonly authority: TelegramPairedRouteAuthority;
 } {
-  const digester = createTelegramActorDigester({ botFingerprint: BOT_FINGERPRINT, secretStore });
+  const digester = createTelegramActorDigester({ botFingerprint: BOT_FINGERPRINT, secretStore, encryption: unavailableSecretEncryption });
   const ownerDigest = digester.digestFor(OWNER_CHAT_ID);
   if (ownerDigest === null) throw new Error("fixture-owner-digest");
   const conversationDigest = telegramConversationDigest(BOT_FINGERPRINT, BOUND_CONVERSATION);

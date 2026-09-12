@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import electronPath from "electron";
+import { headlessLaunchArgs } from "./lib/headless-launch-options.mjs";
 import {
   prepareElectronLaunchArgs,
   prepareElectronLaunchEnv,
@@ -12,6 +12,19 @@ const env = { ...process.env };
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 delete env.ELECTRON_RUN_AS_NODE;
 
+// Windowless commands select the server entry before any desktop process starts.
+const commandArgs = headlessLaunchArgs(args);
+if (commandArgs) {
+  const entry = fileURLToPath(new URL("../dist/src/main/headless.js", import.meta.url));
+  const result = spawnSync(process.execPath, [entry, ...commandArgs], {
+    env: { ...env, NODE_ENV: env.NODE_ENV || "development" },
+    stdio: "inherit",
+  });
+  if (result.error) process.stderr.write(`${result.error.message}\n`);
+  process.exit(result.status ?? 1);
+}
+
+const { default: electronPath } = await import("electron");
 ensureElectronNativeModules({ repoRoot });
 
 // Ensure NODE_ENV is set so logger.ts can select pino-pretty at module load

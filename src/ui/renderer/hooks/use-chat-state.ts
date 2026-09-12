@@ -669,7 +669,6 @@ export function useChatState(
     try {
       const res = await api.chatRetryEffort({
         enableThinking: true,
-        thinkingBudgetTokens: 20000,
       });
       if (!res?.ok) {
         setEntries(

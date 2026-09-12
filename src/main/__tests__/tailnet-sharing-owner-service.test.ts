@@ -7,6 +7,7 @@ import type { FeatureNamespaceHandle } from "../storage/feature-namespace.js";
 import { createTailnetPairedSharingRuntime } from "../tailnet-paired-sharing-runtime.js";
 import { createTailnetSharingOwnerService } from "../tailnet-sharing-owner-service.js";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
+import { unavailableSecretEncryption } from "../../__tests__/support/host-runtime.js";
 
 let directories: string[] = [];
 
@@ -40,7 +41,7 @@ async function fixture() {
   directories.push(directory);
   const now = { value: 1_000_000 };
   const current = { id: "private-conversation-a" };
-  const runtime = await createTailnetPairedSharingRuntime({
+  const runtime = await createTailnetPairedSharingRuntime({ encryption: unavailableSecretEncryption,
     getCurrentConversationId: () => current.id,
     secretStore: new MemorySecretStore(),
     storeOptions: {

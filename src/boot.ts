@@ -1,3 +1,5 @@
+import { requireDesktopHost, type BootHost } from "./boot/host-runtime.js";
+import { configureHostResources } from "./main/host-resources.js";
 /**
  * Boot Sequence — §4.2 (thin orchestrator).
  *
@@ -38,7 +40,6 @@
  * No plugin-specific code lives here — all plugins register themselves via the
  * HostApi manufactured in `steps/plugin-runtime.ts`.
  */
-import { shell } from "electron";
 import type { BrowserWindow } from "electron";
 import { resolve } from "node:path";
 import { sweepOrphanUninstallDirs } from "./plugins/orphan-uninstall-sweeper.js";
@@ -48,24 +49,16 @@ import { purgeStaleSessionDiffDirs, clearSessionDiffCache,
 import { resolvePluginPaths } from "./plugins/plugin-paths.js";
 import { StarredStore } from "./data/starred-store.js";
 import { FeedbackStore } from "./data/feedback-store.js";
-import {
-  openAuthWindow as openAuthWindowService,
-  clearAuthPartition as clearAuthPartitionService,
-  forgetTrackedPluginAuthPartitions,
-  getTrackedPluginAuthPartitions,
-} from "./main/auth-window-service.js";
+import { forgetTrackedPluginAuthPartitions, getTrackedPluginAuthPartitions } from "./main/plugin-auth-partition-tracker.js";
 import {
   ensurePluginStateReadyForInstall,
   recoverPendingPluginUninstallCleanups,
   removeQuiescentPluginResidualState,
 } from "./plugins/uninstall-lifecycle.js";
 import { drainPluginInstallLockOperations } from "./plugins/install-lifecycle.js";
-import { registerShutdownHook } from "./main/app-shutdown.js";
-import { openLinkWindow as openLinkWindowService } from "./main/link-window-service.js";
-import { openAuthPartitionViewer as openAuthPartitionViewerService } from "./main/auth-partition-viewer-service.js";
+import { registerShutdownHook, configureAppShutdownHost } from "./main/app-shutdown.js";
 
 import { type AppServices, emitEvent as emitHostEvent, onEvent } from "./boot/types.js";
-import { revokePluginWebviewsForPlugin } from "./ipc/domains/plugins.js";
 import { startWatcherTelemetryCollector } from "./boot/steps/watcher-telemetry-collector.js";
 import { bootstrapCoreServices } from "./boot/services.js";
 import { RoutinesStore } from "./main/routines-store.js";
@@ -203,7 +196,10 @@ export async function bootstrap(
   mainWindow: BrowserWindow | null,
   getMainWindow: () => BrowserWindow | null,
   launch: BootLaunch,
+  host: BootHost,
 ): Promise<AppServices> {
+  configureAppShutdownHost(host);
+  configureHostResources(host);
   log.info("boot: starting...");
   const headless = launch === "headless";
   if (!headless && !mainWindow) throw new Error("Interactive boot requires a main window");
@@ -219,7 +215,7 @@ export async function bootstrap(
    * exactly as it always has, from the step's own default.
    */
   const admissionOffline = headless ? { online: false as const } : {};
-  const ctx = createBootContext({ projectRoot, mainWindow, getMainWindow });
+  const ctx = createBootContext({ projectRoot, mainWindow, getMainWindow, host });
 
   // Before any provider exists, so the AI SDK integration is registered by the
   // time the first model is constructed. An unreadable spec leaves tracing off
@@ -269,7 +265,7 @@ export async function bootstrap(
   ctx.lvisHomeDocUpgradeMarkers = lvisHomeDocUpgradeMarkers;
 
   // §4.2 Step 0-1 + 4-5: Core services.
-  const core = await bootstrapCoreServices(mainWindow);
+  const core = await bootstrapCoreServices(mainWindow, host);
   const {
     pythonPath,
     pythonRuntime,
@@ -396,6 +392,7 @@ export async function bootstrap(
     throw new Error("a2a-remote-approval-unavailable");
   ctx.a2aRemoteRuntime =
     createA2ARemoteRuntime({
+      encryption: host.encryption,
       settings: settingsService,
       agentActionApprover: remoteA2AAgentActionApprover,
       projectRoot,
@@ -558,6 +555,7 @@ export async function bootstrap(
   // a run that skipped it would deny its own plugins their secrets rather than
   // save a request.
   await wireWhitelistRegistry({
+    userDataPath: host.userDataPath,
     bootAuditLogger: ctx.bootAuditLogger,
     networkFetch: ctx.singleHopNetworkFetch,
   });
@@ -572,6 +570,7 @@ export async function bootstrap(
   // headless run must not skip it: a stale or absent document revokes nothing,
   // so skipping the refresh loses the kill switch silently.
   await wireRevocationRegistry({
+    userDataPath: host.userDataPath,
     bootAuditLogger: ctx.bootAuditLogger,
     networkFetch: ctx.singleHopNetworkFetch,
   });
@@ -581,6 +580,7 @@ export async function bootstrap(
   // the install path re-checks freshness itself. Warming here only saves the
   // first install of a session a cold fetch.
   await wireAdmissionRegistry({
+    userDataPath: host.userDataPath,
     bootAuditLogger: ctx.bootAuditLogger,
     networkFetch: ctx.singleHopNetworkFetch,
     ...admissionOffline,
@@ -667,6 +667,7 @@ export async function bootstrap(
     startPlugins,
     admitPreStartOperation,
   } = await initPluginRuntime({
+    host,
     projectRoot,
     settingsService,
     memoryManager,
@@ -677,12 +678,11 @@ export async function bootstrap(
     mainWindow,
     networkFetch: ctx.singleHopNetworkFetch,
     getMainWindow,
-    openAuthWindowService,
-    openLinkWindowService,
-    openAuthPartitionViewerService: (_parent, opts) =>
-      openAuthPartitionViewerService(opts),
-    clearAuthPartitionService,
-    shellOpenExternal: (url: string) => shell.openExternal(url),
+    openAuthWindowService: (parent, opts) => requireDesktopHost(host).openAuthWindowService(parent, opts),
+    openLinkWindowService: (parent, opts) => requireDesktopHost(host).openLinkWindowService(parent, opts),
+    openAuthPartitionViewerService: (parent, opts) => requireDesktopHost(host).openAuthPartitionViewerService(parent, opts),
+    clearAuthPartitionService: (partition) => requireDesktopHost(host).clearAuthPartitionService(partition),
+    shellOpenExternal: (url) => requireDesktopHost(host).shellOpenExternal(url),
     approvalGate,
     // Wire PermissionManager so the per-plugin
     // resolveApiKey host implementation can abort outstanding bearers when
@@ -694,7 +694,7 @@ export async function bootstrap(
     // setupWorkBoard() runs below this call, and plugins only start after it.
     getWorkBoardStore: () => ctx.workBoardStore,
     onPluginUiRevisionChange: (pluginId) => {
-      revokePluginWebviewsForPlugin(pluginId, (appSessionId) =>
+      host.desktop?.revokePluginWebviews(pluginId, (appSessionId) =>
         ctx.revokePluginOperationSession?.(appSessionId),
       );
     },
@@ -738,7 +738,7 @@ export async function bootstrap(
     pluginRuntime,
     settingsService,
     pluginPaths,
-    clearAuthPartitionService,
+    clearAuthPartitionService: (partition: string) => requireDesktopHost(host).clearAuthPartitionService(partition),
     listPluginAuthPartitionsService: getTrackedPluginAuthPartitions,
     forgetPluginAuthPartitionsService: forgetTrackedPluginAuthPartitions,
     drainPluginInstallLockOperationsService: drainPluginInstallLockOperations,
@@ -797,7 +797,7 @@ export async function bootstrap(
   // construct the one main-owned provider factory here and share it with both
   // the reviewer and all conversation-loop variants below.
   ctx.subscriptionProviderFactory = createSubscriptionChatLoopBindings({
-    shellOpenExternal: (url) => shell.openExternal(url),
+    shellOpenExternal: (url) => requireDesktopHost(host).shellOpenExternal(url),
     auditLogger: ctx.bootAuditLogger,
   }).subscriptionProviderFactory;
 
@@ -948,7 +948,7 @@ export async function bootstrap(
     networkFetch: ctx.singleHopNetworkFetch,
     tracing: ctx.tracing,
     discretionaryEgress: !headless,
-  });
+  }, host);
   // Both pollers exist to push a banner at a renderer, and both read the
   // marketplace to do it. A headless run has neither the renderer nor the
   // lifetime, so it schedules neither.

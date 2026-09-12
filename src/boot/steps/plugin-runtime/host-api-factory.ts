@@ -1,3 +1,4 @@
+import { requireDesktopHost, type BootHost } from "../../host-runtime.js";
 /**
  * Boot §4.2 Step 3-5 — per-plugin HostApi factory (C6 extraction).
  *
@@ -14,24 +15,19 @@
  * constructed BEFORE PluginRuntime exists, so the value must never be captured
  * at construction time.
  */
-import { BrowserWindow as ElectronBrowserWindow } from "electron";
 import type { BrowserWindow } from "electron";
 import { randomUUID } from "node:crypto";
 import { normalizeAllowedHosts, urlHostMatchesAllowList } from "../../../main/host-allow-list.js";
 import type { AuthRedirectCatchers } from "../../../main/auth-redirect-catcher.js";
-import { pickFoldersForPlugin } from "../../../main/host-api/pick-folders.js";
 import { resolveMappedDriveRoot } from "../../../main/host-api/mapped-drive-root.js";
 import { AudioCaptureService } from "../../../main/audio-capture.js";
 import type { AttachFloatingPanelRequest, AudioCaptureRequest } from "../../../plugins/public-contract.js";
-import { ElectronAudioCaptureSurface } from "../../../main/audio-capture-surface.js";
 import { FloatingDock } from "../../../main/floating-dock.js";
-import { ElectronFloatingDockSurface } from "../../../main/floating-dock-surface.js";
 import { evaluateHostFetch, runHostFetchHops } from "../../../main/host-fetch-guard.js";
 import {
   partitionCookieHeaderForUrl,
   partitionCookiesForUrl,
 } from "../../../main/auth-partition-cookie-jar.js";
-import { session as electronSession } from "electron";
 import type { AuditLogger } from "../../../audit/audit-logger.js";
 import type { PluginRuntime } from "../../../plugins/runtime.js";
 import { instrumentEffectsByPath } from "../../../permissions/hostapi-effect-recorder.js";
@@ -192,8 +188,8 @@ function enforceActiveHostApi(
  * because the hardware is one.
  */
 let sharedAudioCaptureService: AudioCaptureService | null = null;
-function audioCaptureService(): AudioCaptureService {
-  sharedAudioCaptureService ??= new AudioCaptureService(new ElectronAudioCaptureSurface());
+function audioCaptureService(host: BootHost): AudioCaptureService {
+  sharedAudioCaptureService ??= new AudioCaptureService(requireDesktopHost(host).createAudioCaptureSurface());
   return sharedAudioCaptureService;
 }
 
@@ -211,9 +207,9 @@ function audioCaptureService(): AudioCaptureService {
  * captured reference would be the pre-assignment one.
  */
 let sharedFloatingDock: FloatingDock | null = null;
-function floatingDock(getPluginRuntime: () => PluginRuntime): FloatingDock {
+function floatingDock(host: BootHost, getPluginRuntime: () => PluginRuntime): FloatingDock {
   sharedFloatingDock ??= new FloatingDock(
-    new ElectronFloatingDockSurface(),
+    requireDesktopHost(host).createFloatingDockSurface(),
     (pluginId, extensionId) => getPluginRuntime().resolveFloatingSurface(pluginId, extensionId),
   );
   return sharedFloatingDock;
@@ -226,6 +222,7 @@ export function peekFloatingDock(): FloatingDock | null {
 
 
 export interface CreateHostApiFactoryDeps {
+  host: BootHost;
   /** Getter for the mutable `pluginRuntime` binding (assigned after this factory is built). */
   getPluginRuntime: () => PluginRuntime;
   lateBinding: LateBindingRefs;
@@ -523,6 +520,7 @@ export function createHostApiFactory(
       storage: createPluginStorage(
         pluginId,
         pluginDataDir,
+        deps.host.encryption,
         createPluginStorageAuditSink(pluginId, pluginRuntimeAuditLog),
       ),
       // §9.2 — typed plugin config access, scoped to this pluginId.
@@ -1036,7 +1034,7 @@ export function createHostApiFactory(
             );
           }
           const partition = `persist:plugin-auth:${encodeURIComponent(pluginId)}:${authCookieSub}`;
-          const partitionSession = electronSession.fromPartition(partition);
+          const partitionSession = requireDesktopHost(deps.host).getAuthPartition(partition);
           injectSessionCookie = (target: URL) =>
             partitionCookieHeaderForUrl(partitionSession, target);
         }
@@ -1201,9 +1199,9 @@ export function createHostApiFactory(
        * rather than a failure.
        */
       pickFolders: async () => {
-        const result = await pickFoldersForPlugin(pluginId, {
-          parentWindow: () => ElectronBrowserWindow.getFocusedWindow() ?? getMainWindow?.() ?? null,
-        });
+        const result = await requireDesktopHost(deps.host).pickFolders(pluginId,
+          () => requireDesktopHost(deps.host).getFocusedWindow() ?? getMainWindow?.() ?? null,
+        );
         // Copied out of the host's readonly answer: the contract hands the
         // plugin a list of its own, so nothing the plugin does to it is
         // visible here.
@@ -1226,9 +1224,9 @@ export function createHostApiFactory(
        * and the system mixer are single physical things, and a per-plugin
        * service would let two plugins each believe they held them.
        */
-      listAudioInputDevices: async () => audioCaptureService().listInputDevices(),
+      listAudioInputDevices: async () => audioCaptureService(deps.host).listInputDevices(),
       startAudioCapture: async (request: AudioCaptureRequest) =>
-        audioCaptureService().start(request),
+        audioCaptureService(deps.host).start(request),
       /**
        * The window is the HOST's. What the plugin contributes is the id of a
        * surface it already declared in its own manifest, and a height the host
@@ -1239,9 +1237,9 @@ export function createHostApiFactory(
        * the request, so a plugin cannot attach a surface belonging to another.
        */
       attachFloatingPanel: async (request: AttachFloatingPanelRequest) =>
-        floatingDock(deps.getPluginRuntime).attach(pluginId, request),
+        floatingDock(deps.host, deps.getPluginRuntime).attach(pluginId, request),
       resizeFloatingPanel: async (panelId: string, height: number) =>
-        floatingDock(deps.getPluginRuntime).resizeByPanelId(pluginId, panelId, height),
+        floatingDock(deps.host, deps.getPluginRuntime).resizeByPanelId(pluginId, panelId, height),
       openAuthWindow: (async (opts: OpenAuthWindowBaseOptions & { returnFinalUrl?: boolean }) => {
         const safeUrlForLog = (() => {
           try {
@@ -1316,7 +1314,7 @@ export function createHostApiFactory(
         const effectiveOpts = requested
           ? opts
           : { ...opts, persistPartition: defaultPartition };
-        return openAuthWindowService(ElectronBrowserWindow.getFocusedWindow() ?? requireMainWindow(), effectiveOpts);
+        return openAuthWindowService(requireDesktopHost(deps.host).getFocusedWindow() ?? requireMainWindow(), effectiveOpts);
       }) as PluginHostApi["openAuthWindow"],
 
       // ─── Issue #649 — Auth-partition viewer ───────────────────────────
@@ -1376,13 +1374,13 @@ export function createHostApiFactory(
           );
         }
         return openAuthPartitionViewerService(
-          ElectronBrowserWindow.getFocusedWindow() ?? requireMainWindow(),
+          requireDesktopHost(deps.host).getFocusedWindow() ?? requireMainWindow(),
           {
             pluginId,
             url: opts.url,
             allowedHosts,
             windowTitle: opts.windowTitle,
-            parent: ElectronBrowserWindow.getFocusedWindow() ?? requireMainWindow(),
+            parent: requireDesktopHost(deps.host).getFocusedWindow() ?? requireMainWindow(),
             audit: (event) => {
               try {
                 bootAuditLogger.log({
@@ -1496,7 +1494,7 @@ export function createHostApiFactory(
           { allowLoopback: true },
         );
         const partition = `persist:plugin-auth:${encodeURIComponent(pluginId)}:${partitionSub}`;
-        const partitionSession = electronSession.fromPartition(partition);
+        const partitionSession = requireDesktopHost(deps.host).getAuthPartition(partition);
         const results: Array<{ url: string; cookies: AuthPartitionCookie[] }> = [];
         for (const rawUrl of urls) {
           let parsed: URL | null = null;

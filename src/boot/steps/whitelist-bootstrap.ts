@@ -2,7 +2,6 @@
 
 
 
-import { app } from "electron";
 import { whitelistRegistry } from "../../plugins/whitelist/whitelist-registry.js";
 import { WHITELIST_PRIMARY_KEY_ID } from "../../plugins/marketplace-keys.js";
 import {
@@ -18,6 +17,7 @@ import { isE2eTestRuntime } from "../dev-flags.js";
 const log = createLogger("whitelist-bootstrap");
 
 export interface WhitelistBootstrapInput {
+  userDataPath: string;
   bootAuditLogger: AuditLogger;
   /** Transport for the document GETs — Chromium's stack, from `ctx.singleHopNetworkFetch`. */
   networkFetch: typeof fetch;
@@ -54,7 +54,7 @@ function installE2eWhitelistPublicKeyOverride(): void {
 export async function wireWhitelistRegistry(input: WhitelistBootstrapInput): Promise<void> {
   const { bootAuditLogger } = input;
   const online = input.online ?? isOnlineByDefault();
-  const userDataDir = app.getPath("userData");
+  const userDataDir = input.userDataPath;
   installE2eWhitelistPublicKeyOverride();
 
   await whitelistRegistry.init({

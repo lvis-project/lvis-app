@@ -46,13 +46,35 @@ primary-product contract.
 
 ## Process Boundaries
 
-One-shot `--exec` and `--set-secret` launches construct the host service graph
-without a main window or renderer. The boot window is explicitly nullable;
-interactive boot requires a window. Desktop event bridges have no subscription
-when that surface is absent. A request that reaches the approval gate without
-a live desktop follows its existing deny-once path, and UI-only HostApi calls
-fail before consuming proposal state. Activation and protocol events cannot
-open the desktop during a one-shot run.
+Host service bootstrap accepts `BootHost` (`src/boot/host-runtime.ts`) for
+user-data and resource paths, packaged mode, encryption, network fetches, and
+shutdown. Desktop capabilities are optional and required explicitly by
+operations that present UI.
+
+The native entrypoint, `src/headless.ts`, runs under standalone Node; its emitted
+dependency graph excludes desktop runtime imports. `--exec` and `--set-secret`
+construct the ordinary host service graph without a window or renderer; `--serve` keeps
+that host available through the authenticated Local API and any explicitly
+configured Tailnet surface. Desktop event bridges have no subscription when
+their surface is absent. Requests requiring unavailable consent follow the
+existing deny-once path, and UI-only HostApi calls fail before consuming
+proposal state. The [native host guide](../guides/native-server.md) owns launcher,
+profile, key-file, and Linux artifact instructions.
+
+`createWindowlessHost` owns one service graph, `ConversationSurfaceRuntime`, and
+`ConversationCommandPort`. Attached clients share the active main conversation,
+command arbitration, and ordered event source. Each transport retains its actor,
+authorization, and projection boundary; attaching clients does not create
+independent concurrent conversation loops. Configured Tailnet surfaces,
+including Web, support bounded canonical replay in memory; Local API event
+streams remain live-only. The
+[surface protocol](multisurface-conversation-runtime.md) owns these contracts.
+
+The desktop still embeds its own host runtime. Its UI has not been converted
+into a detached client of `--serve`; desktop shutdown or fatal host-process
+failure ends that embedded runtime. A separately launched native host has its
+own process lifetime. Shared command and event contracts do not provide desktop
+reattachment or survival of a fatal desktop process failure.
 
 Foreground shell execution shares the output collector, timeout input schema,
 and deadline/cancellation owner in `src/tools/shell-tools.ts`. Timer conversion
@@ -265,16 +287,28 @@ Important rules:
   the loops share the memory manager and the window-wide idle services. A
   closed tile releases its loop. See `docs/design/tiled-chat-groups.md`.
 
-A long turn is bounded from two directions, because neither the model nor the
-loop can see what the other knows. Each call carries the active vendor block's
-`outputTokenLimit` as the request's native output ceiling, so one round cannot
-generate until the provider's own maximum and spend the turn on a single call;
-it is unset by default, since the host knows no per-model ceiling and inventing
-one would truncate models it guessed low for, and an uncapped vendor is logged
-once. What is set is what is sent: the plugin-sized background bound belongs to
-the `generateText` callers that own it and is not imposed on chat. A capped call
-ends the same way a provider-capped one does — with `max_tokens` — and takes the
-same length-continuation path, so the cap adds no second truncation branch. From
+A long turn uses per-call limits and progress guidance. Each API-backed chat call
+carries the active vendor block's effective `outputTokenLimit` as its native output
+ceiling. The canonical resolver in `src/shared/llm-vendor-defaults.ts` supplies
+the default for missing or invalid settings and preserves explicit positive
+integer limits. The default is a host budget, not a discovered per-model
+maximum. User-configured thinking budgets apply per API call, including each
+call after a tool result; they introduce no cumulative quota for a user turn.
+They are non-negative integers capped at the highest fixed preset strictly below
+the effective output ceiling. Settings and composer share these presets: low
+4,000, medium 8,000, high 16,000, and xhigh 32,000. The default 32,000 output exposes
+only low/medium/high and caps thinking at 16,000; xhigh returns at 32,001 output.
+If no preset fits, the custom budget is capped at output minus one, with a minimum
+of zero. The same resolver normalizes profile loading and settings patches.
+Fresh settings use 8,000. Valid custom budgets such as 10,000 or 14,000 stay unchanged until an
+explicit preset selection; the UI shows their exact value. If no preset fits,
+the existing custom budget and thinking on/off remain available. Retry uses the
+user ceiling and restores the prior budget afterward. Raw internal generation
+retains its separate protocol contract.
+Smaller purpose-specific limits stay with the internal/background
+`generateText` callers that own them. Managed subscription transports retain
+their own output-control contract. A provider-reported `max_tokens` completion
+uses the existing length-continuation path without a second truncation branch. From
 the other side, every `chat.progressNudgeRounds` assistant rounds (and early when
 tool errors pile up) the loop sends a wire-only progress notification carrying
 the round count, elapsed time and tool call/error totals, with one instruction:

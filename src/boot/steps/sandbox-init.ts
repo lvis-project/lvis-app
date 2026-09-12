@@ -2,7 +2,6 @@
 
 
 
-import { app } from "electron";
 import { createLogger } from "../../lib/logger.js";
 import type { BootContext } from "../context.js";
 import type { SandboxGateAction, SandboxGateReason } from "./sandbox-gate.js";
@@ -225,7 +224,7 @@ export async function initSandboxGate(ctx: BootContext): Promise<void> {
             // Thread the REAL Electron userData path so the deny-list is exact
             // (handles --user-data-dir, XDG_CONFIG_HOME, future renames).
             // Safe: boot.ts is main-process only and already imports electron.
-            userDataDir: app.getPath("userData"),
+            userDataDir: ctx.host.userDataPath,
           });
           // Publish the active capability to the SOT now that ASRT is
           // genuinely initialized (gate ON, deps present). detectSandboxCapability

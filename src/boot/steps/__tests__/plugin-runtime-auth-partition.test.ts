@@ -1,3 +1,4 @@
+import { createBootHostFixture } from "../../../__tests__/support/host-runtime.js";
 /**
  * C1 gap-lock — initPluginRuntime HostApi: openAuthWindow / clearAuthPartition
  * capability + partition allow-list gates (observable effects).
@@ -121,6 +122,7 @@ const ACTIVE_INCARNATION = {
 async function initAndGetFactory(): Promise<CreateHostApi> {
   runtimeTestState.capturedRuntimeOptions = null;
   await initPluginRuntime({
+    host: createBootHostFixture(),
     projectRoot: "/tmp/lvis-test/project",
     settingsService: {
       get: vi.fn((key: string) => {

@@ -403,6 +403,51 @@ export function isMarketplaceEligibleLLMVendor(
  * marketplace providers are not materialized until selected or installed.
  */
 export const DEFAULT_LLM_VENDOR: LLMVendor = "openai";
+/** Default total output ceiling for an API-backed chat request. */
+export const DEFAULT_LLM_OUTPUT_TOKEN_LIMIT = 32_000;
+
+const DEFAULT_THINKING_BUDGET_TOKENS = 8_000;
+const THINKING_BUDGET_PRESETS = [
+  { key: "low", budget: 4_000 },
+  { key: "medium", budget: 8_000 },
+  { key: "high", budget: 16_000 },
+  { key: "xhigh", budget: 32_000 },
+] as const;
+
+interface LlmThinkingBudgetRung {
+  readonly key: (typeof THINKING_BUDGET_PRESETS)[number]["key"];
+  readonly budget: number;
+}
+
+function normalizeLlmOutputTokenLimit(value: unknown): number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0
+    ? value
+    : DEFAULT_LLM_OUTPUT_TOKEN_LIMIT;
+}
+
+/** User budget cap: the highest preset strictly below output, or output minus one. */
+export function getLlmThinkingBudgetLimit(outputTokenLimit?: number): number {
+  const output = normalizeLlmOutputTokenLimit(outputTokenLimit);
+  return getLlmThinkingBudgetRungs(output).at(-1)?.budget ?? Math.max(0, output - 1);
+}
+
+/** Normalize user input without changing raw internal generation parameters. */
+export function normalizeLlmThinkingBudgetTokens(value: unknown, outputTokenLimit?: number): number {
+  const budget = typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : DEFAULT_THINKING_BUDGET_TOKENS;
+  return Math.min(budget, getLlmThinkingBudgetLimit(outputTokenLimit));
+}
+
+/**
+ * Fixed user presets, filtered by the output ceiling. The default 32k output
+ * exposes low/medium/high at 4k/8k/16k; xhigh requires output above 32k.
+ * Reading a valid custom budget does not snap it to one of these presets.
+ */
+export function getLlmThinkingBudgetRungs(outputTokenLimit?: number): readonly LlmThinkingBudgetRung[] {
+  const output = normalizeLlmOutputTokenLimit(outputTokenLimit);
+  return THINKING_BUDGET_PRESETS.filter((preset) => preset.budget < output);
+}
 
 /** GitHub Copilot's model inference endpoint — used when the vendor block carries no `baseUrl`. */
 export const COPILOT_BASE_URL = "https://models.github.ai/inference";
@@ -603,36 +648,13 @@ export function canUseLlmVendorWithoutApiKey(
 export interface LLMVendorSettings {
   model: string;
   /**
-   * Per-vendor ceiling on a turn's output, forwarded as the request's native
-   * output limit. Unset by default, which is the CTRL policy (vendor SDK
-   * defaults govern) — this is not a sampling control, it is the same
-   * host-owned ceiling `StreamTurnParams.outputTokenLimit` already carries.
-   *
-   * It exists because some gateways PRE-AUTHORIZE credit against the model's
-   * maximum output rather than the tokens actually produced: OpenRouter rejects
-   * a request with 402 "requires more credits, or fewer max_tokens" when a
-   * capped key cannot afford the model's full ceiling, so a credit-limited or
-   * weekly-capped key cannot start ANY turn until this is set.
-   *
-   * It is also the only bound on a RUNAWAY round. A model that keeps generating
-   * until the provider's own maximum burns the whole turn on one call and
-   * returns `finish_reason: length`; the loop then continues that answer rather
-   * than treating it as finished, so an uncapped vendor pays the provider
-   * maximum before the loop can react. No number is assumed on the host's
-   * behalf: the host knows no per-model output ceiling for any vendor, and
-   * inventing one would silently truncate models it guessed low for. Unset
-   * therefore means uncapped, which the loop logs once per vendor.
-   *
-   * What is set is what is sent: the host applies no ceiling of its own to
-   * this value, for the same reason it assumes no default. `generateText`'s
-   * plugin-sized `MAX_BACKGROUND_OUTPUT_TOKEN_LIMIT` is applied by that caller
-   * and does not reach here. A number the provider cannot serve comes back as
-   * the provider's own error, which names the real bound.
-   *
-   * There is deliberately no Settings control for it. It is a per-deployment
-   * fact about a gateway's credit policy or a benchmark's budget, not a choice
-   * a user makes while chatting, so it is configured in settings.json where
-   * that kind of fact already lives.
+   * Per-request total output ceiling for API-backed chat. The settings resolver
+   * supplies DEFAULT_LLM_OUTPUT_TOKEN_LIMIT when absent and preserves a valid
+   * explicit positive integer. This bounds a round's generation, including
+   * reasoning where the provider counts it as output; it is not a claim about
+   * the model's supported maximum. The adapter projects the ceiling into the
+   * native request. Smaller internal generation limits belong to their callers.
+   * Managed subscription runtimes retain their own output control contract.
    */
   outputTokenLimit?: number;
   /**
@@ -665,6 +687,7 @@ export interface LLMVendorSettings {
    */
   presetModels?: Record<string, string>;
   enableThinking: boolean;
+  /** Per API call, bounded by the settings resolver; not a cumulative turn quota. */
   thinkingBudgetTokens: number;
 }
 
@@ -804,7 +827,8 @@ function defaultBlock(vendor: LLMVendor): LLMVendorSettings {
     model,
     ...(preset ? { baseUrl: preset.baseUrl } : {}),
     enableThinking: true,
-    thinkingBudgetTokens: 10_000,
+    thinkingBudgetTokens: DEFAULT_THINKING_BUDGET_TOKENS,
+    outputTokenLimit: DEFAULT_LLM_OUTPUT_TOKEN_LIMIT,
   };
 }
 
@@ -873,12 +897,7 @@ export function getLlmVendorSettings(
   // A hand-edited `0`, fraction or negative would otherwise ride the `...stored`
   // spread all the way to the transport, which reads any non-positive value as
   // "no cap" — the setting would look applied and do nothing.
-  const outputTokenLimit =
-    typeof stored?.outputTokenLimit === "number"
-    && Number.isSafeInteger(stored.outputTokenLimit)
-    && stored.outputTokenLimit > 0
-      ? stored.outputTokenLimit
-      : undefined;
+  const outputTokenLimit = normalizeLlmOutputTokenLimit(stored?.outputTokenLimit);
   const contextWindow = normalizeLlmContextWindow(stored?.contextWindow);
   const block: LLMVendorSettings = {
     ...defaults,
@@ -888,16 +907,11 @@ export function getLlmVendorSettings(
       typeof stored?.enableThinking === "boolean"
         ? stored.enableThinking
         : defaults.enableThinking,
-    thinkingBudgetTokens:
-      typeof stored?.thinkingBudgetTokens === "number" &&
-      Number.isFinite(stored.thinkingBudgetTokens)
-        ? stored.thinkingBudgetTokens
-        : defaults.thinkingBudgetTokens,
+    thinkingBudgetTokens: normalizeLlmThinkingBudgetTokens(stored?.thinkingBudgetTokens, outputTokenLimit),
   };
   if (presetModels) block.presetModels = presetModels;
   else delete block.presetModels;
-  if (outputTokenLimit !== undefined) block.outputTokenLimit = outputTokenLimit;
-  else delete block.outputTokenLimit;
+  block.outputTokenLimit = outputTokenLimit;
   if (contextWindow !== undefined) block.contextWindow = contextWindow;
   else delete block.contextWindow;
   return block;

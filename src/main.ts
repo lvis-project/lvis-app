@@ -3,6 +3,7 @@
 
 
 import { app } from "electron";
+import { desktopSecretEncryption } from "./main/desktop-secret-encryption.js";
 import { writeSync } from "node:fs";
 import { t } from "./i18n/index.js";
 import { registerIpcHandlers, unregisterPluginWebview } from "./ipc-bridge.js";
@@ -165,7 +166,7 @@ async function main() {
 
   updateSplashStatus(t("be_main.splashCheckingCerts"));
   const { bootstrap } = await loadMainStartupDependencies(
-    () => import("./boot.js"),
+    () => import("./desktop-boot.js"),
     // The settings file is read synchronously here because injection has to
     // happen before the first outbound request, which is well before
     // `bootstrap()` constructs SettingsService.
@@ -267,6 +268,7 @@ async function main() {
     const { config: tailnetConfig } = await loadTailnetObserverConfig();
     if (tailnetConfig?.pairedSharingEnabled) {
       tailnetPairedSharingRuntime = await createTailnetPairedSharingRuntime({
+        encryption: desktopSecretEncryption,
         getCurrentConversationId,
       });
       tailnetSharingOwnerService = createTailnetSharingOwnerService({
@@ -301,6 +303,7 @@ async function main() {
       networkFetch: services.singleHopNetworkFetch,
       bridgeControl: {
         start: () => startTelegramConnectionActivation({
+          encryption: desktopSecretEncryption,
           store: telegramStore,
           settingsService: services.settingsService,
           conversationSurfaceRuntime,
@@ -321,7 +324,7 @@ async function main() {
       // Sequenced by the service ahead of its own credential read: one keychain
       // reset takes the bot token and the actor key together, and only the
       // service can put the reconcile before the read that would abandon it.
-      reconcileActorKey: () => reconcileTelegramActorKey({ store: telegramStore }),
+      reconcileActorKey: () => reconcileTelegramActorKey({ store: telegramStore, encryption: desktopSecretEncryption }),
       getCurrentConversationId,
       conversationDigestFor: (conversationId: string) => {
         const digest = telegramConversationDigestFor(telegramStore, conversationId);
@@ -410,6 +413,7 @@ async function main() {
   // controller capability; it never exposes Local API/A2A or configures Serve.
   try {
     const observer = await maybeStartTailnetObserverServer({
+      encryption: desktopSecretEncryption,
       conversationSurfaceRuntime,
       conversationCommandPort,
       getCurrentConversationId,

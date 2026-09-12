@@ -128,7 +128,7 @@ export async function readJsonFileOrEmpty<T>(
  */
 async function syncDirectoryEntry(dir: string): Promise<void> {
   if (platform === "win32") return;
-  const handle = await fs.open(dir, constants.O_RDONLY);
+  const handle = await fs.open(dir, "r");
   try {
     await handle.sync();
   } finally {

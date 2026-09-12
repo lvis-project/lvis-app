@@ -48,7 +48,8 @@ describe("Chat retry (Phase 3.2 regression net)", () => {
       thinkingBudgetTokens?: number;
     };
     expect(arg?.enableThinking).toBe(true);
-    expect(arg?.thinkingBudgetTokens).toBe(20000);
+    // The host resolves the latest active provider's ceiling when retry starts.
+    expect(arg).toEqual({ enableThinking: true });
   });
 
   it("retry success lets new streaming replace the old assistant text", async () => {

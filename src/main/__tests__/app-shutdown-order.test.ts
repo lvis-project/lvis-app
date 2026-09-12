@@ -1,3 +1,4 @@
+import { createBootHostFixture, createDesktopHostFixture } from "../../__tests__/support/host-runtime.js";
 /**
  * Shutdown ordering.
  *
@@ -19,6 +20,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 
 const calls: string[] = [];
+const hostExit = vi.fn();
 
 const unregisterAllGlobalShortcuts = vi.fn(() => calls.push("unregister"));
 const closeFileLogSink = vi.fn(() => calls.push("closeFileLogSink"));
@@ -104,6 +106,15 @@ vi.mock("../app-state.js", () => ({
   setAppShutdownStarted: vi.fn(),
 }));
 
+async function configuredShutdown() {
+  const runtime = await import("../app-shutdown.js");
+  runtime.configureAppShutdownHost(createBootHostFixture({
+    exit: hostExit,
+    desktop: createDesktopHostFixture({ beforeShutdown: unregisterAllGlobalShortcuts }),
+  }));
+  return runtime;
+}
+
 function makeServices() {
   return {
     runPluginShutdownHandlers: vi.fn(async () => { calls.push("pluginShutdownHandlers"); }),
@@ -122,18 +133,63 @@ beforeEach(() => {
 });
 
 describe("runAppShutdownCleanup ordering (critic M1)", () => {
+  it("drains partial bootstrap callbacks and children without published AppServices", async () => {
+    getServices.mockReturnValue(undefined);
+    vi.resetModules();
+    const shutdown = await configuredShutdown();
+    shutdown.registerBootPluginShutdown(async () => { calls.push("partialPluginShutdown"); });
+    shutdown.registerShutdownHook("partial-watcher", () => { calls.push("partialWatcher"); });
+    const host = createBootHostFixture({ close: async () => { calls.push("closeHost"); } });
+    expect(await shutdown.runIncompleteBootShutdown(host)).toBe("completed");
+    expect(calls).toEqual([
+      "partialWatcher", "partialPluginShutdown", "stopSubscriptionRuntimes",
+      "forceKillTerminals", "drainManagedChildren", "closeHost", "closeFileLogSink",
+    ]);
+    expect(sealManagedChildProcessAdmission).toHaveBeenCalledWith("host bootstrap interrupted or failed");
+    shutdown.registerShutdownHook("late-watcher", () => { calls.push("lateWatcher"); });
+    expect(calls.at(-1)).toBe("lateWatcher");
+  });
+
+  it("force-kills managed children when partial bootstrap cleanup exceeds its deadline", async () => {
+    getServices.mockReturnValue(undefined);
+    vi.resetModules();
+    const shutdown = await configuredShutdown();
+    hardTimeoutFires = true;
+    try {
+      expect(await shutdown.runIncompleteBootShutdown()).toBe("timed-out");
+      expect(forceKillManagedChildProcesses).toHaveBeenCalledWith("host bootstrap interrupted or failed");
+      expect(forceKillAllTerminalsForShutdown).toHaveBeenCalled();
+      expect(calls.at(-1)).toBe("closeFileLogSink");
+    } finally {
+      hardTimeoutFires = false;
+    }
+  });
+
+  it("attempts independent partial cleanup stages after a plugin shutdown rejection", async () => {
+    getServices.mockReturnValue(undefined);
+    vi.resetModules();
+    const shutdown = await configuredShutdown();
+    shutdown.registerBootPluginShutdown(async () => { throw new Error("plugin stop failed"); });
+    const close = vi.fn(async () => {});
+    expect(await shutdown.runIncompleteBootShutdown(createBootHostFixture({ close }))).toBe("failed");
+    expect(stopSubscriptionRuntimes).toHaveBeenCalledOnce();
+    expect(forceKillAllTerminalsForShutdown).toHaveBeenCalled();
+    expect(forceKillAndDrainManagedChildProcesses).toHaveBeenCalledOnce();
+    expect(close).toHaveBeenCalledOnce();
+    expect(calls.at(-1)).toBe("closeFileLogSink");
+  });
+
   it("exits a timed-out cleanup with the code a headless run already chose", async () => {
     getServices.mockReturnValue(makeServices());
     vi.resetModules();
-    const { app } = await import("electron");
-    const { runAppShutdownCleanup } = await import("../app-shutdown.js");
+    const { runAppShutdownCleanup } = await configuredShutdown();
     const previous = process.exitCode;
     process.exitCode = 2;
     hardTimeoutFires = true;
     try {
       const outcome = await runAppShutdownCleanup({ reason: "before-quit", exitOnTimeout: true });
       expect(outcome).toBe("timed-out");
-      expect(app.exit).toHaveBeenCalledWith(2);
+      expect(hostExit).toHaveBeenCalledWith(2);
     } finally {
       process.exitCode = previous;
       hardTimeoutFires = false;
@@ -147,7 +203,7 @@ describe("runAppShutdownCleanup ordering (critic M1)", () => {
   it("closes the file log sink LAST, after unregister runs FIRST", async () => {
     getServices.mockReturnValue(makeServices());
     vi.resetModules();
-    const { runAppShutdownCleanup } = await import("../app-shutdown.js");
+    const { runAppShutdownCleanup } = await configuredShutdown();
     const outcome = await runAppShutdownCleanup({ reason: "before-quit", exitOnTimeout: false });
     expect(outcome).toBe("completed");
     expect(sealManagedChildProcessAdmission).toHaveBeenCalledWith("before-quit");
@@ -159,7 +215,7 @@ describe("runAppShutdownCleanup ordering (critic M1)", () => {
   it("keeps subscription runtimes live through shutdown callbacks, then stops them at the service boundary", async () => {
     getServices.mockReturnValue(makeServices());
     vi.resetModules();
-    const { runAppShutdownCleanup } = await import("../app-shutdown.js");
+    const { runAppShutdownCleanup } = await configuredShutdown();
     await runAppShutdownCleanup({ reason: "before-quit", exitOnTimeout: false });
     expect(calls.indexOf("stopLocalApi")).toBeLessThan(calls.indexOf("stopRemoteReceiver"));
     expect(calls.indexOf("stopLocalApi")).toBeLessThan(calls.indexOf("stopTailnetObserver"));
@@ -191,7 +247,7 @@ describe("runAppShutdownCleanup ordering (critic M1)", () => {
     });
     getServices.mockReturnValue(services);
     vi.resetModules();
-    const { runAppShutdownCleanup } = await import("../app-shutdown.js");
+    const { runAppShutdownCleanup } = await configuredShutdown();
 
     await expect(runAppShutdownCleanup({ reason: "before-quit", exitOnTimeout: false }))
       .resolves.toBe("failed");
@@ -218,7 +274,7 @@ describe("runAppShutdownCleanup ordering (critic M1)", () => {
     });
     getServices.mockReturnValue(services);
     vi.resetModules();
-    const { runAppShutdownCleanup } = await import("../app-shutdown.js");
+    const { runAppShutdownCleanup } = await configuredShutdown();
 
     await expect(runAppShutdownCleanup({ reason: "before-quit", exitOnTimeout: false }))
       .resolves.toBe("failed");
@@ -258,7 +314,7 @@ describe("runAppShutdownCleanup ordering (critic M1)", () => {
 describe("shutdown hooks", () => {
   it("runs every hook once, in registration order", async () => {
     vi.resetModules();
-    const { registerShutdownHook, runShutdownHooks } = await import("../app-shutdown.js");
+    const { registerShutdownHook, runShutdownHooks } = await configuredShutdown();
     const ran: string[] = [];
     registerShutdownHook("first", () => ran.push("first"));
     registerShutdownHook("second", () => ran.push("second"));
@@ -276,7 +332,7 @@ describe("shutdown hooks", () => {
     // arrives then belongs to a drain that has passed, and a second drain
     // never comes — so it has to run on the spot.
     vi.resetModules();
-    const { registerShutdownHook, runShutdownHooks } = await import("../app-shutdown.js");
+    const { registerShutdownHook, runShutdownHooks } = await configuredShutdown();
     runShutdownHooks();
 
     const late = vi.fn();
@@ -302,7 +358,7 @@ describe("shutdown hooks", () => {
 
   it("contains a throwing hook so the ones after it still run", async () => {
     vi.resetModules();
-    const { registerShutdownHook, runShutdownHooks } = await import("../app-shutdown.js");
+    const { registerShutdownHook, runShutdownHooks } = await configuredShutdown();
     const ran: string[] = [];
     registerShutdownHook("throws", () => {
       throw new Error("timer already gone");
@@ -339,7 +395,7 @@ describe("before-quit listener inventory", () => {
       "the quit orchestrator: runs the hooks, then defers the quit for the ordered cleanup",
     ],
     [
-      "src/boot/steps/plugin-runtime.ts",
+      "src/boot/desktop-host-runtime.ts",
       "defers the quit to await plugin shutdown handlers during the boot window, before AppServices is published",
     ],
   ]);

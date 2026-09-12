@@ -1,15 +1,12 @@
 /**
  * Main-process composition for explicit Tailnet pairing and scoped sharing.
  *
- * The actor HMAC key is always loaded through Electron safeStorage in
- * production. Pairing records themselves contain only digests and opaque ids.
+ * The actor HMAC key uses the host's encrypted storage. Pairing records
+ * themselves contain only digests and opaque ids.
  */
-import { safeStorage } from "electron";
-import {
-  SafeStorageSecretStore,
-  type SafeStorageLike,
-  type SecretStore,
-} from "../audit/hmac-chain.js";
+import type { SecretStore } from "../audit/hmac-chain.js";
+import { createHostSecretStore } from "../audit/host-secret-store.js";
+import type { SecretEncryption } from "../data/secret-document-store.js";
 import {
   createTailnetPairedShareAuthorizer,
   ensureTailnetPairedShareActorSecret,
@@ -28,12 +25,11 @@ export interface TailnetPairedSharingRuntime {
 
 export interface CreateTailnetPairedSharingRuntimeOptions {
   readonly getCurrentConversationId: () => string;
-  /** Test-only injection; production uses OS-encrypted safeStorage. */
+  /** Test-only injection; production uses the host's encrypted storage. */
   readonly secretStore?: SecretStore;
   /** Test-only store options; production uses the encrypted-feature namespace. */
   readonly storeOptions?: CreateTailnetPairingShareStoreOptions;
-  /** Test-only Electron safeStorage injection. */
-  readonly encryption?: SafeStorageLike;
+  readonly encryption: SecretEncryption;
 }
 
 export async function createTailnetPairedSharingRuntime(
@@ -45,7 +41,7 @@ export async function createTailnetPairedSharingRuntime(
   const store = createTailnetPairingShareStore(options.storeOptions);
   await store.open();
   const secretStore = options.secretStore
-    ?? new SafeStorageSecretStore(options.encryption ?? safeStorage);
+    ?? createHostSecretStore(options.encryption);
   const actorSecret = ensureTailnetPairedShareActorSecret(secretStore);
   const authorizer = createTailnetPairedShareAuthorizer({
     store,

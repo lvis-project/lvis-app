@@ -2,10 +2,10 @@ import {
   DEFAULT_CORP_CA_COMMON_NAME,
   normalizeCorpCaCommonName,
 } from "../shared/corp-ca-common-name.js";
-import { safeStorage } from "electron";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { withFileLock } from "../lib/with-file-lock.js";
+import { writeUtf8FileAtomicSync } from "../lib/atomic-file.js";
 import {
   normalizeSidePanelSplitPercent,
   normalizeSidePanelWidth,
@@ -60,7 +60,7 @@ import {
   type ShortcutSettingsPatch,
 } from "../shared/shortcuts.js";
 import { createLogger } from "../lib/logger.js";
-import { SecretDocumentStore, type SecretPolicy } from "./secret-document-store.js";
+import { SecretDocumentStore, type SecretEncryption, type SecretPolicy } from "./secret-document-store.js";
 import { DEFAULT_SETTINGS } from "./settings-defaults.js";
 import {
   appearanceMigration,
@@ -882,7 +882,8 @@ export interface MarketplaceSettings {
 
 export interface SettingsServiceOptions {
   userDataPath: string;
-  /** Host-owned policy derived from Electron app.isPackaged, never NODE_ENV. */
+  encryption: SecretEncryption;
+  /** Host-owned policy, never inferred from NODE_ENV. */
   secretPolicy?: SecretPolicy;
   /**
    * BCP-47 locale tag from the host OS (e.g. `app.getPreferredSystemLanguages()[0]`).
@@ -908,7 +909,7 @@ export class SettingsService {
     this.secretStore = new SecretDocumentStore({
       path: this.secretsPath,
       policy: options.secretPolicy ?? "packaged",
-      encryption: safeStorage,
+      encryption: options.encryption,
     });
     const { settings: loaded, writeBack: needsWriteBack } = this.loadSettings();
     this.settings = loaded;
@@ -1357,7 +1358,7 @@ export class SettingsService {
       // rejected call leaves the previous secret document intact, so only
       // the settings write performed immediately before this call needs to
       // be rolled back. Avoid reading individual secrets here; encrypted
-      // reads correctly fail closed when safeStorage is unavailable.
+      // reads correctly fail closed when host encryption is unavailable.
       this.settings = previousSettings;
       await this.saveSettings().catch((rollbackErr: Error) => {
         log.warn(
@@ -1616,9 +1617,8 @@ export class SettingsService {
   }
 
   private async saveSettings(): Promise<void> {
-    mkdirSync(dirname(this.settingsPath), { recursive: true });
     await withFileLock(this.settingsPath, async () => {
-      writeFileSync(this.settingsPath, JSON.stringify(this.settings, null, 2), "utf-8");
+      writeUtf8FileAtomicSync(this.settingsPath, JSON.stringify(this.settings, null, 2));
     });
   }
 

@@ -10,6 +10,7 @@ import type {
   PluginRuntimeGenerationProjection,
 } from "../plugin-host-generation.js";
 import { agentPluginsDocument, makeTestTreeWritable } from "./test-helpers.js";
+import { unavailableSecretEncryption } from "../../__tests__/support/host-runtime.js";
 
 const roots: string[] = [];
 
@@ -102,7 +103,7 @@ export default async function createPlugin(ctx) {
       }),
       waitForRetirements: vi.fn(async () => undefined),
     };
-    runtime = new PluginRuntime({
+    runtime = new PluginRuntime({ encryption: unavailableSecretEncryption,
       hostRoot: root,
       registryPath,
       pluginsRoot,

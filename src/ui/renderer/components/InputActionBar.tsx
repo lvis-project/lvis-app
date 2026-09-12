@@ -575,13 +575,12 @@ function PermissionQuickPicker({
  */
 // One step of the yellow ladder per level; level 0 has no entry because it
 // draws no fill at all — an unlit bulb is the value, and giving it a colour
-// would make "off" look like a sixth depth.
+// would make "off" look like an active depth.
 const REASONING_FILL: Record<Exclude<ReasoningLevel, 0>, string> = {
   1: "var(--reasoning-fill-1)",
   2: "var(--reasoning-fill-2)",
   3: "var(--reasoning-fill-3)",
   4: "var(--reasoning-fill-4)",
-  5: "var(--reasoning-fill-5)",
 };
 
 function ReasoningGauge({ level }: { level: ReasoningLevel }): React.JSX.Element {
@@ -635,7 +634,7 @@ function ModelQuickPicker({
   const [choices, setChoices] = useState<ModelCardChoice[]>([]);
   const [anyPinned, setAnyPinned] = useState(true);
   const runtimeRef = useRef<string>("api");
-  const { level, levelLabels, apply } = useReasoningLevel({ enabled: enableThinking, onToggle: onToggleThinking });
+  const { level, levelLabels, currentLabel, custom, apply } = useReasoningLevel({ enabled: enableThinking, onToggle: onToggleThinking });
 
   // Read on open and follow the broadcast while open: a pin added in
   // Settings, or a pick made in another tile, shows up without reopening.
@@ -711,8 +710,8 @@ function ModelQuickPicker({
           data-level={level}
           aria-haspopup="dialog"
           aria-expanded={open}
-          aria-label={`${reasoningLabel}: ${levelLabels[level]}`}
-          title={`${reasoningLabel}: ${levelLabels[level]}`}
+          aria-label={`${reasoningLabel}: ${currentLabel}`}
+          title={`${reasoningLabel}: ${currentLabel}`}
           onClick={() => {
             openedByChipRef.current = !open;
             setOpen(!open);
@@ -783,7 +782,7 @@ function ModelQuickPicker({
         {reasoningAvailable ? (
           <div className="border-t border-border/(--opacity-medium) px-3 py-3" data-testid="model-quick-picker-reasoning">
             <div className="mb-2 text-caption font-medium text-muted-foreground">{reasoningLabel}</div>
-            <ReasoningLevelControl level={level} levelLabels={levelLabels} apply={apply} label={reasoningLabel} />
+            <ReasoningLevelControl level={level} levelLabels={levelLabels} currentLabel={currentLabel} custom={custom} apply={apply} label={reasoningLabel} />
           </div>
         ) : null}
         <button

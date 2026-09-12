@@ -51,7 +51,7 @@ import {
 } from "../shared/mcp-prompt-bounds.js";
 import { isMcpAppUiUri } from "../shared/mcp-app-partition.js";
 import { createLogger } from "../lib/logger.js";
-import { resolveBundledUvBinaryPath } from "../main/uv-runtime.js";
+import { resolveBundledUvBinaryPath, type BundledUvRuntimeOptions } from "../main/uv-runtime.js";
 import {
   assertManagedChildProcessAdmissionOpen,
   trackManagedChildProcess,
@@ -2923,13 +2923,13 @@ export interface StdioSpawnCommand {
   args: string[];
 }
 
-export function resolveStdioSpawnCommand(command: string, args: string[] = []): StdioSpawnCommand {
+export function resolveStdioSpawnCommand(command: string, args: string[] = [], uvOptions: BundledUvRuntimeOptions = {}): StdioSpawnCommand {
   const uvxInlineArgs = parseUvxCommand(command);
   if (!uvxInlineArgs) {
     return { command, args };
   }
   return {
-    command: resolveBundledUvBinaryPath(),
+    command: resolveBundledUvBinaryPath(uvOptions),
     args: ["tool", "run", ...uvxInlineArgs, ...args],
   };
 }

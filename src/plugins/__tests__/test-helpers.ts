@@ -35,6 +35,7 @@ import type {
   PluginRuntimeGenerationProjection,
 } from "../plugin-host-generation.js";
 import type { ActivePluginGeneration } from "../plugin-generation-coordinator.js";
+import { unavailableSecretEncryption } from "../../__tests__/support/host-runtime.js";
 
 type GenerationCommitScope = <T>(operation: () => Promise<T>) => Promise<T>;
 
@@ -525,7 +526,7 @@ export function makeTestPluginRuntime(
   fixture: TestPluginRuntimeFixture,
   options: Partial<PluginRuntimeOptions> = {},
 ): PluginRuntime {
-  return bindTestPluginRuntimeGeneration(new PluginRuntime({
+  return bindTestPluginRuntimeGeneration(new PluginRuntime({ encryption: unavailableSecretEncryption,
     hostRoot: fixture.rootDir,
     registryPath: fixture.registryPath,
     pluginsRoot: fixture.pluginsRoot,
@@ -815,10 +816,11 @@ export function createTestHostApiFactory(
 /** PluginRuntime constructor for tests that need the complete generation fixture. */
 export class TestPluginRuntime extends PluginRuntime {
   constructor(
-    options: Omit<PluginRuntimeOptions, "createHostApi">
-      & Partial<Pick<PluginRuntimeOptions, "createHostApi">>,
+    options: Omit<PluginRuntimeOptions, "createHostApi" | "encryption">
+      & Partial<Pick<PluginRuntimeOptions, "createHostApi" | "encryption">>,
   ) {
     super({
+      encryption: unavailableSecretEncryption,
       ...options,
       createHostApi: createTestHostApiFactory(options.createHostApi),
     });

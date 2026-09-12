@@ -1593,6 +1593,36 @@ B${i}
     }
   });
 
+  it.each([
+    [32_000, undefined, 16_000],
+    [32_000, 20_000, 16_000],
+    [32_000, 14_000, 14_000],
+    [16_000, undefined, 8_000],
+    [16_000, 32_000, 8_000],
+    [64_000, undefined, 32_000],
+    [32_001, undefined, 32_000],
+    [32_000, "32000", 8_000],
+  ])("bounds retry thinking with output %i and input %s, then restores settings", async (outputTokenLimit, thinkingBudgetTokens, expected) => {
+    const loop = makeConversationLoop("f54c7bda-1854-4991-8708-8d60d079368a", [
+      { role: "user", content: "retry text" }, { role: "assistant", content: "old answer" },
+    ]);
+    loop.runTurn.mockResolvedValue({ text: "ok", toolCalls: [], stopReason: "end_turn" });
+    const deps = await setupHandlers(loop);
+    const llm = fakeLlmSettings({ outputTokenLimit });
+    llm.vendors.openai.thinkingBudgetTokens = Math.min(14_000, Math.floor(outputTokenLimit / 2));
+    const originalGet = deps.settingsService.get.getMockImplementation();
+    deps.settingsService.get.mockImplementation((key?: string) => key === "llm" ? llm : originalGet(key));
+    await invokeRegisteredHandler(handlers, "lvis:chat:retry-effort", { enableThinking: true, thinkingBudgetTokens }, "main");
+    expect(deps.settingsService.patch).toHaveBeenCalledTimes(2);
+    expect(deps.settingsService.patch).toHaveBeenNthCalledWith(1, {
+      llm: { vendors: { openai: { ...llm.vendors.openai, enableThinking: true, thinkingBudgetTokens: expected } } },
+    });
+    expect(deps.settingsService.patch).toHaveBeenNthCalledWith(2, {
+      llm: { vendors: { openai: llm.vendors.openai } },
+    });
+    expect(loop.runTurn).toHaveBeenCalledOnce();
+  });
+
   it("resolves stored persona prompt id when retrying with effort settings", async () => {
     const loop = makeConversationLoop("f54c7bda-1854-4991-8708-8d60d079368a", [
       {

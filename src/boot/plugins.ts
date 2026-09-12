@@ -2,7 +2,6 @@
 
 
 
-import { Notification } from "electron";
 import type { BrowserWindow } from "electron";
 import type { PluginRuntime } from "../plugins/runtime.js";
 import type { SettingsService } from "../data/settings-store.js";
@@ -162,8 +161,9 @@ export function registerPluginNotifications(
   mainWindow: BrowserWindow | null,
   notificationService: NotificationService,
   auditLogger?: Pick<AuditLogger, "log">,
+  supported = true,
 ): () => void {
-  if (!mainWindow || !Notification.isSupported()) return () => {};
+  if (!mainWindow || !supported) return () => {};
 
   const registered: Array<{ type: string; handler: EventHandler }> = [];
   // Manifests come from JSON, so runtime validation is required. Multiple plugins

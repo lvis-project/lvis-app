@@ -32,6 +32,7 @@ import {
   OPENAI_COMPATIBLE_PRESET_VENDOR_IDS,
   OPENAI_COMPATIBLE_VENDOR_PRESETS,
   isLLMVendor,
+  getLlmThinkingBudgetRungs,
   type OpenAICompatiblePresetVendor,
   type LLMVendor,
 } from "../../shared/llm-vendor-defaults.js";
@@ -147,33 +148,33 @@ export const WEB_PROVIDERS: { id: AppSettings["webSearch"]["provider"]; label: s
   { id: "google", label: "Google Search", get placeholder() { return t("constants.webProviderGooglePlaceholder"); }, needsKey: true },
 ];
 
-// How deep the model thinks, as ONE ladder. The settings tab and the
-// composer both write `thinkingBudgetTokens` on the same vendor, and until
-// they shared this array they disagreed about what the stored number meant:
-// picking "High" in settings wrote 12,000, which the composer then displayed
-// as "Medium" because 12,000 was nearest its own 10,000 rung. Two controls,
-// one value, two answers.
-//
-// The budget is what is stored and sent. Vendors that take a coarse effort
-// enum instead get it from `mapReasoningEffort()` / `mapBudgetToEffort()` in
-// vercel/adapter.ts, and those enums have fewer levels than this ladder has
-// rungs, so neighbouring rungs can map to the same effort. That is the enum
-// being coarse, not the ladder being wrong -- for a vendor that accepts a
-// budget, every rung is distinct.
-export const REASONING_DEPTHS = [
-  { key: "low", get label() { return t("constants.reasoningEffortLow"); }, budget: 4_000 },
-  { key: "medium", get label() { return t("constants.reasoningEffortMedium"); }, budget: 10_000 },
-  { key: "high", get label() { return t("constants.reasoningEffortHigh"); }, budget: 16_000 },
-  { key: "xhigh", get label() { return t("constants.reasoningEffortXHigh"); }, budget: 24_000 },
-  { key: "max", get label() { return t("constants.reasoningEffortMax"); }, budget: 32_000 },
-] as const;
+const REASONING_DEPTH_LABELS = {
+  low: "constants.reasoningEffortLow",
+  medium: "constants.reasoningEffortMedium",
+  high: "constants.reasoningEffortHigh",
+  xhigh: "constants.reasoningEffortXHigh",
+} as const;
+
+/** Settings and composer label the same output-dependent user budget ladder. */
+export function getReasoningDepths(outputTokenLimit?: number) {
+  return getLlmThinkingBudgetRungs(outputTokenLimit).map((rung) => ({
+    ...rung,
+    get label() { return t(REASONING_DEPTH_LABELS[rung.key]); },
+  }));
+}
+
+/** An off-preset stored value keeps its exact budget and a custom label. */
+export function reasoningBudgetLabel(budget: number, depths: readonly { label: string; budget: number }[]): string {
+  return depths.find((depth) => depth.budget === budget)?.label ?? t("constants.reasoningEffortCustom");
+}
 
 /** The rung a stored budget sits closest to. Any persisted value resolves. */
-export function budgetToDepthIndex(budget: number): number {
+export function budgetToDepthIndex(budget: number, depths: readonly { budget: number }[]): number {
+  if (depths.length === 0) return -1;
   let closest = 0;
-  let minDiff = Math.abs(REASONING_DEPTHS[0]!.budget - budget);
-  for (let i = 1; i < REASONING_DEPTHS.length; i++) {
-    const diff = Math.abs(REASONING_DEPTHS[i]!.budget - budget);
+  let minDiff = Math.abs(depths[0]!.budget - budget);
+  for (let i = 1; i < depths.length; i++) {
+    const diff = Math.abs(depths[i]!.budget - budget);
     if (diff < minDiff) {
       minDiff = diff;
       closest = i;

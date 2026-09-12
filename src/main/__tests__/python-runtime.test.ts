@@ -12,11 +12,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { gzipSync } from "node:zlib";
-
-// ─── electron mock ────────────────────────────────────────────────────────────
-vi.mock("electron", () => ({
-  default: {},
-}));
+import { configureHostResources } from "../host-resources.js";
 
 // ─── node:fs/promises mock ────────────────────────────────────────────────────
 vi.mock("node:fs/promises", async (importOriginal) => {
@@ -257,14 +253,7 @@ describe("PythonRuntimeBootstrapper", () => {
     vi.mocked(fsMock.readdir).mockRejectedValue(
       Object.assign(new Error("ENOENT"), { code: "ENOENT" }),
     );
-    // Electron 43 exposes resourcesPath as a read-only process property.
-    // Re-declare it as a writable test fixture so packaged/development cases
-    // can isolate their process state without depending on Electron internals.
-    Object.defineProperty(process, "resourcesPath", {
-      value: undefined,
-      configurable: true,
-      writable: true,
-    });
+    configureHostResources({ resourcePath: path.resolve("resources"), isPackaged: false });
   });
 
   afterEach(async () => {
@@ -705,7 +694,7 @@ describe("PythonRuntimeBootstrapper", () => {
     expect(pipSyncCalls).toHaveLength(2);
   });
 
-  it("packaged Electron에서는 gzip uv archive를 사용자 런타임 캐시에 materialize한다", async () => {
+  it("packaged host에서는 gzip uv archive를 사용자 런타임 캐시에 materialize한다", async () => {
     const resourcesPath = mkdtempSync(path.join(tmpdir(), "lvis-packaged-resources-"));
     const uvRuntimeDir = mkdtempSync(path.join(tmpdir(), "lvis-uv-runtime-"));
     const manifestRoot = mkdtempSync(path.join(tmpdir(), "lvis-python-plugin-"));
@@ -723,13 +712,9 @@ describe("PythonRuntimeBootstrapper", () => {
 
     const originalPlatform = process.platform;
     const originalArch = process.arch;
-    const originalDefaultApp = (process as { defaultApp?: boolean }).defaultApp;
-    const originalResourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
-
     Object.defineProperty(process, "platform", { value: "linux", configurable: true });
     Object.defineProperty(process, "arch", { value: "arm64", configurable: true });
-    (process as { defaultApp?: boolean }).defaultApp = false;
-    (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath = resourcesPath;
+    configureHostResources({ resourcePath: resourcesPath, isPackaged: true });
 
     mockedReadFile.mockResolvedValue(JSON.stringify({ python: { managedBy: "lvis-app" } }));
     mockedAccess.mockImplementation(async (filePath) => {
@@ -763,15 +748,13 @@ describe("PythonRuntimeBootstrapper", () => {
     } finally {
       Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true });
       Object.defineProperty(process, "arch", { value: originalArch, configurable: true });
-      (process as { defaultApp?: boolean }).defaultApp = originalDefaultApp;
-      (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath = originalResourcesPath;
       await cleanupTmpDir(resourcesPath);
       await cleanupTmpDir(uvRuntimeDir);
       await cleanupTmpDir(manifestRoot);
     }
   });
 
-  it("packaged Electron에서 .ready sentinel이 있으면 uv materialize 없이 resolve한다", async () => {
+  it("packaged host에서 .ready sentinel이 있으면 uv materialize 없이 resolve한다", async () => {
     const resourcesPath = mkdtempSync(path.join(tmpdir(), "lvis-packaged-ready-resources-"));
     const uvRuntimeDir = mkdtempSync(path.join(tmpdir(), "lvis-packaged-ready-uv-"));
     const targetDirName = `${process.platform}-${process.arch}`;
@@ -784,10 +767,7 @@ describe("PythonRuntimeBootstrapper", () => {
     writeFileSync(path.join(packagedUvDir, `${binName}.gz`), gzipSync(Buffer.from("ready-uv-bin")));
     writeFileSync(path.join(packagedUvDir, "uv.meta.json"), JSON.stringify({ binarySha256: uvSha }));
 
-    const originalDefaultApp = (process as { defaultApp?: boolean }).defaultApp;
-    const originalResourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
-    (process as { defaultApp?: boolean }).defaultApp = false;
-    (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath = resourcesPath;
+    configureHostResources({ resourcePath: resourcesPath, isPackaged: true });
     mockedAccess.mockResolvedValue(undefined);
 
     try {
@@ -797,8 +777,6 @@ describe("PythonRuntimeBootstrapper", () => {
       expect(existsSync(expectedUvBin)).toBe(false);
       expect(mockedSpawn).not.toHaveBeenCalled();
     } finally {
-      (process as { defaultApp?: boolean }).defaultApp = originalDefaultApp;
-      (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath = originalResourcesPath;
       await cleanupTmpDir(resourcesPath);
       await cleanupTmpDir(uvRuntimeDir);
     }
@@ -817,10 +795,7 @@ describe("PythonRuntimeBootstrapper", () => {
       binarySha256: "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
     }));
 
-    const originalDefaultApp = (process as { defaultApp?: boolean }).defaultApp;
-    const originalResourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
-    (process as { defaultApp?: boolean }).defaultApp = false;
-    (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath = resourcesPath;
+    configureHostResources({ resourcePath: resourcesPath, isPackaged: true });
     mockedAccess.mockResolvedValue(undefined);
 
     try {
@@ -828,8 +803,6 @@ describe("PythonRuntimeBootstrapper", () => {
       await expect(bootstrapper.ensureReady(makeBrowserWindow())).rejects.toThrow(/SHA mismatch/);
       expect(mockedSpawn).not.toHaveBeenCalled();
     } finally {
-      (process as { defaultApp?: boolean }).defaultApp = originalDefaultApp;
-      (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath = originalResourcesPath;
       await cleanupTmpDir(resourcesPath);
       await cleanupTmpDir(uvRuntimeDir);
     }
@@ -852,10 +825,7 @@ describe("PythonRuntimeBootstrapper", () => {
     writeFileSync(expectedUvBin, "stale-uv-bin");
     writeFileSync(path.join(pluginRoot, "python-requirements.lock"), "");
 
-    const originalDefaultApp = (process as { defaultApp?: boolean }).defaultApp;
-    const originalResourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
-    (process as { defaultApp?: boolean }).defaultApp = false;
-    (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath = resourcesPath;
+    configureHostResources({ resourcePath: resourcesPath, isPackaged: true });
     mockedAccess.mockResolvedValue(undefined);
     mockedSpawn
       .mockReturnValueOnce(makeSpawnMock("uv 0.7.3\n"))
@@ -874,8 +844,6 @@ describe("PythonRuntimeBootstrapper", () => {
       expect(readFileSync(expectedUvBin, "utf8")).toBe("ready-uv-bin");
       expect(mockedSpawn.mock.calls[0]?.[0]).toBe(expectedUvBin);
     } finally {
-      (process as { defaultApp?: boolean }).defaultApp = originalDefaultApp;
-      (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath = originalResourcesPath;
       await cleanupTmpDir(resourcesPath);
       await cleanupTmpDir(uvRuntimeDir);
       await cleanupTmpDir(pluginRoot);
@@ -1182,10 +1150,7 @@ describe("PythonRuntimeBootstrapper", () => {
       writeFileSync(manifestPath, JSON.stringify({ python: { managedBy: "lvis-app" } }));
       writeFileSync(lockFilePath, "");
 
-      const originalDefaultApp = (process as { defaultApp?: boolean }).defaultApp;
-      const originalResourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
-      (process as { defaultApp?: boolean }).defaultApp = false;
-      (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath = resourcesPath;
+      configureHostResources({ resourcePath: resourcesPath, isPackaged: true });
 
       mockedReadFile.mockResolvedValue(JSON.stringify({ python: { managedBy: "lvis-app" } }));
       mockedAccess.mockImplementation(async (filePath) => {
@@ -1216,8 +1181,6 @@ describe("PythonRuntimeBootstrapper", () => {
         const permBits = stat.mode & 0o777;
         expect(permBits).toBe(0o700);
       } finally {
-        (process as { defaultApp?: boolean }).defaultApp = originalDefaultApp;
-        (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath = originalResourcesPath;
         await cleanupTmpDir(resourcesPath);
         await cleanupTmpDir(uvRuntimeDir);
         await cleanupTmpDir(manifestRoot);

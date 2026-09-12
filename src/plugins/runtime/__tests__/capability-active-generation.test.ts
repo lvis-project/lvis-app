@@ -26,6 +26,7 @@ import type { PluginManifest } from "../../types.js";
 import { canonicalJSON } from "../../whitelist/canonical-json.js";
 import { agentPluginsDocument } from "../../__tests__/test-helpers.js";
 import { settleMacrotask as nextTurn } from "../../../__tests__/test-helpers.js";
+import { unavailableSecretEncryption } from "../../../__tests__/support/host-runtime.js";
 
 type WrittenPlugin = {
   id: string;
@@ -232,7 +233,7 @@ describe("PluginRuntime capability dependencies use active generations", () => {
     await Promise.all([writeReceipt(consumer), writeReceipt(provider)]);
 
     const providerPreparation = deferredGate();
-    const runtime = new PluginRuntime({
+    const runtime = new PluginRuntime({ encryption: unavailableSecretEncryption,
       hostRoot: root,
       pluginsRoot,
       registryPath,

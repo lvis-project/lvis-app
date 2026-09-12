@@ -1,3 +1,4 @@
+import { createBootHostFixture } from "../../__tests__/support/host-runtime.js";
 /**
  * bootstrap() integration lock — §4.2 Boot Sequence.
  *
@@ -94,6 +95,8 @@ vi.mock("electron", async () => {
 // this file's graph, and the hook NAMES are what the listener-ceiling suite
 // asserts bootstrap registers.
 vi.mock("../../main/app-shutdown.js", () => ({
+  configureAppShutdownHost: vi.fn(),
+  registerBootPluginShutdown: vi.fn(),
   registerShutdownHook: vi.fn((name: string) => {
     (h.captured["shutdownHooks"] as string[]).push(name);
   }),
@@ -386,7 +389,7 @@ vi.mock("../../mcp/mcp-elicitation-resolver.js", () => ({
 }));
 
 // ── main/* services + helpers ────────────────────────────────────────────────
-vi.mock("../../main/auth-window-service.js", () => ({
+vi.mock("../../main/plugin-auth-partition-tracker.js", () => ({
   openAuthWindow: vi.fn(),
   clearAuthPartition: vi.fn(),
   forgetTrackedPluginAuthPartitions: vi.fn(),
@@ -469,6 +472,7 @@ vi.mock("../../main/storage/feature-namespace.js", () => ({
   })),
 }));
 vi.mock("../../main/seed-lvis-home-docs.js", () => ({
+  configureHomeDocResources: vi.fn(),
   seedLvisHomeDocs: vi.fn(() => ({ seeded: [], upgraded: [] })),
   listLvisHomeDocUpgradeMarkers: vi.fn(() => []),
 }));
@@ -635,11 +639,6 @@ function emittedWarningNames(): string[] {
   );
 }
 
-/** The mocked Electron `App` emitter, so listener counts can be read back. */
-function appEventEmitter(): import("node:events").EventEmitter {
-  return h.captured["appEvents"] as import("node:events").EventEmitter;
-}
-
 function fakeWindow() {
   return {
     isDestroyed: () => false,
@@ -678,6 +677,7 @@ describe("bootstrap() integration lock", () => {
       win,
       () => win,
       "interactive",
+      createBootHostFixture(),
     );
   }, 180_000);
 
@@ -952,7 +952,7 @@ describe("bootstrap() integration lock", () => {
     // The interactive launch still wires both of bootstrap's teardown paths —
     // it just no longer spends an Electron listener on either.
     expect(h.captured["shutdownHooks"]).toEqual(["watcher-telemetry", "diff-cache"]);
-    expect(appEventEmitter().listenerCount("before-quit")).toBe(0);
+    expect(h.captured["appEvents"]).toBeUndefined();
   });
 
   it("opens the host's own service connections (interactive launch is unchanged)", () => {
@@ -999,6 +999,7 @@ describe("bootstrap() headless launch opens no discretionary service connection"
       null,
       () => null,
       "headless",
+      createBootHostFixture(),
     );
   }, 180_000);
 
@@ -1049,7 +1050,7 @@ describe("bootstrap() headless launch opens no discretionary service connection"
       "watcher-telemetry",
       "diff-cache",
     ]);
-    expect(appEventEmitter().listenerCount("before-quit")).toBe(0);
+    expect(h.captured["appEvents"]).toBeUndefined();
     expect(emittedWarningNames()).not.toContain("MaxListenersExceededWarning");
   });
 });

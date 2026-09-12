@@ -162,7 +162,7 @@ export function supportsReasoningEffortNone(model: string): boolean {
  *   budget ≤ 6 000 → "medium"
  *   budget ≤ 16 000 → "high"
  *   budget >  16 000 → "max"
- * Used for claude-4.x adaptive thinking. claude-3.x uses `budgetTokens` directly.
+ * Numeric thinking routes use their token budget directly.
  */
 export function mapBudgetToEffort(
   budget: number,
@@ -174,22 +174,80 @@ export function mapBudgetToEffort(
 }
 
 /**
- * Detect Claude families that support adaptive thinking (≥ v4).
- *
- * Version-parse so claude-5.x (and later) are future-proofed automatically.
- * Matches:
- *   claude-sonnet-4-20260101 → major 4
- *   claude-opus-4            → major 4
- *   claude-5-sonnet-...      → major 5
- *   claude-5                 → major 5
- * Non-matches (→ budget-based "enabled" thinking):
- *   claude-3-5-sonnet-latest, claude-3-opus-20240229
+ * Adaptive thinking starts with version 4.6. A release date after the major
+ * version is not a minor version; earlier models retain numeric thinking.
  */
 export function supportsAdaptiveThinking(modelId: string): boolean {
   const m = modelId.toLowerCase();
-  const match = m.match(/claude-[a-z]+-(\d+)/) || m.match(/claude-(\d+)/);
+  const match = m.match(/claude-(?:[a-z]+-)?(\d+)(?:[-.](\d{1,2})(?=$|[-.]))?/);
   if (!match) return false;
-  return parseInt(match[1]!, 10) >= 4;
+  const major = Number(match[1]);
+  const minor = Number(match[2] ?? 0);
+  return major > 4 || (major === 4 && minor >= 6);
+}
+
+function supportsInterleavedNumericThinking(modelId: string): boolean {
+  // Only these numeric-thinking generations support a budget across tool calls.
+  // Release dates do not change a generation's capabilities.
+  const match = modelId.toLowerCase().match(
+    /^claude-(opus|sonnet)-4(?:-(0|1|5))?(?:-(?:\d{8}|latest))?$/,
+  );
+  return match !== null && (match[1] === "opus" || match[2] !== "1");
+}
+
+interface NumericThinkingOutputProjection {
+  outputTokenLimit: number;
+  interleavedThinking: boolean;
+}
+
+function projectNumericThinkingOutput(
+  fetchImpl: typeof fetch,
+  projection: NumericThinkingOutputProjection,
+): typeof fetch {
+  return async (input, init) => {
+    if (typeof init?.body !== "string") {
+      throw new Error("Numeric thinking request must contain a serialized JSON body");
+    }
+    let request: Record<string, unknown>;
+    try {
+      request = JSON.parse(init.body) as Record<string, unknown>;
+    } catch {
+      throw new Error("Numeric thinking request must contain valid serialized JSON");
+    }
+    if (!request || typeof request !== "object" || Array.isArray(request)) {
+      throw new Error("Numeric thinking request must contain a JSON object");
+    }
+    const sdkOutputTokenLimit = request.max_tokens;
+    const thinking = request.thinking as Record<string, unknown> | undefined;
+    const thinkingBudget = thinking?.budget_tokens;
+    if (
+      typeof sdkOutputTokenLimit !== "number" || !Number.isSafeInteger(sdkOutputTokenLimit) || sdkOutputTokenLimit < 1
+      || !thinking || thinking.type !== "enabled"
+      || typeof thinkingBudget !== "number" || !Number.isSafeInteger(thinkingBudget) || thinkingBudget < 1_024
+    ) {
+      throw new Error("Numeric thinking request has invalid output or thinking limits");
+    }
+    // The SDK adds numeric thinking to its output argument and may then apply
+    // a model limit. Project the host's total afterward, preserving that limit
+    // and the original guarded transport. SDK diagnostics retain its input body.
+    const outputTokenLimit = Math.min(sdkOutputTokenLimit, projection.outputTokenLimit);
+    if (!projection.interleavedThinking && outputTokenLimit <= 1_024) {
+      throw new Error("Output token limit must exceed 1024 when numeric thinking is not interleaved");
+    }
+    return fetchImpl(input, {
+      ...init,
+      body: JSON.stringify({
+        ...request,
+        max_tokens: outputTokenLimit,
+        thinking: {
+          ...thinking,
+          budget_tokens: projection.interleavedThinking
+            ? thinkingBudget
+            : Math.min(thinkingBudget, outputTokenLimit - 1),
+        },
+      }),
+    });
+  };
 }
 
 const INTERLEAVED_THINKING_BETA = "interleaved-thinking-2025-05-14";
@@ -292,8 +350,18 @@ export class VercelUnifiedProvider implements LLMProvider {
       );
       const hasTools = Boolean(tools && Object.keys(tools).length > 0);
 
-      // Per-vendor model resolution.
-      const model = this.resolveModel(params.model, hasTools);
+      const outputTokenLimit = normalizeOutputTokenLimit(params.outputTokenLimit);
+      const numericThinking = slot === "claude" && params.enableThinking === true
+        && !supportsAdaptiveThinking(params.model);
+      const interleavedNumericThinking = numericThinking && hasTools
+        && supportsInterleavedNumericThinking(params.model);
+      const model = this.resolveModel(
+        params.model,
+        hasTools,
+        numericThinking && outputTokenLimit !== undefined
+          ? { outputTokenLimit, interleavedThinking: interleavedNumericThinking }
+          : undefined,
+      );
 
       // How much reasoning we are willing to pay for. Both families read this
       // value: the OpenAI family as a coarse effort level, the self-hosted class
@@ -417,9 +485,7 @@ export class VercelUnifiedProvider implements LLMProvider {
         };
       }
 
-      // Anthropic-specific wiring: adaptive (4.x) vs budget-based (3.x) thinking
-      // plus beta-header opt-ins (interleaved-thinking when thinking+tools,
-      // context-1m for 1M-tier models).
+      // Project the selected thinking mode and supported beta opt-ins.
       let headers: Record<string, string> | undefined;
       if (slot === "claude") {
         const thinkingEnabled = params.enableThinking === true;
@@ -428,8 +494,8 @@ export class VercelUnifiedProvider implements LLMProvider {
           if (supportsAdaptiveThinking(params.model)) {
             anthropicOpts.thinking = {
               type: "adaptive",
-              effort: mapBudgetToEffort(budget),
             };
+            anthropicOpts.effort = mapBudgetToEffort(budget);
           } else {
             anthropicOpts.thinking = {
               type: "enabled",
@@ -446,7 +512,7 @@ export class VercelUnifiedProvider implements LLMProvider {
         if (lookupPricing("claude", params.model).contextWindow1MBeta !== undefined) {
           betas.push(CONTEXT_1M_BETA);
         }
-        if (thinkingEnabled && hasTools) {
+        if (interleavedNumericThinking) {
           betas.push(INTERLEAVED_THINKING_BETA);
         }
         if (betas.length > 0) {
@@ -454,9 +520,8 @@ export class VercelUnifiedProvider implements LLMProvider {
         }
       }
 
-      // CTRL simplification: temperature / seed / responseFormat / stopSequences /
-      // maxOutputTokens removed. Modern frontier models (GPT-5+, Claude 4+)
-      // deprecate fine-grained sampling — vendor SDK defaults govern.
+      // Sampling defaults stay with the provider. The host's output budget is
+      // a separate request limit and does not change those sampling controls.
 
       // smoothStream transform (Vercel path only).
       // `"word"` uses Vercel's built-in word chunker; `"char"` uses a regex
@@ -468,10 +533,6 @@ export class VercelUnifiedProvider implements LLMProvider {
           : smoothing === "char"
             ? smoothStream({ chunking: /./u })
             : undefined;
-
-      // Unlike removed user tuning controls, this is a host-owned safety cap
-      // for bounded background calls and is absent from normal chat requests.
-      const outputTokenLimit = normalizeOutputTokenLimit(params.outputTokenLimit);
 
       // Idle ceiling: compose the caller's abortSignal with an idle-deadline
       // controller so a stalled provider stream (no deltas) aborts instead of
@@ -572,7 +633,11 @@ export class VercelUnifiedProvider implements LLMProvider {
     }
   }
 
-  private resolveModel(modelId: string, _hasTools: boolean) {
+  private resolveModel(
+    modelId: string,
+    _hasTools: boolean,
+    numericOutputProjection?: NumericThinkingOutputProjection,
+  ) {
     const slot = this.vendorSlot;
     assertCredentialedBaseUrlUsesHttps(
       slot,
@@ -582,10 +647,13 @@ export class VercelUnifiedProvider implements LLMProvider {
     );
 
     if (slot === "claude") {
+      const fetchImpl = numericOutputProjection
+        ? projectNumericThinkingOutput(this.customFetch ?? globalThis.fetch, numericOutputProjection)
+        : this.customFetch;
       const anthropic = createAnthropic({
         apiKey: this.apiKey,
         ...(this.baseUrl ? { baseURL: this.baseUrl } : {}),
-        ...(this.customFetch ? { fetch: this.customFetch } : {}),
+        ...(fetchImpl ? { fetch: fetchImpl } : {}),
       });
       return anthropic.languageModel(modelId);
     }

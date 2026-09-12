@@ -6,6 +6,7 @@ const LEGACY_SINGLE_MAIN_BUNDLE_BYTES = 10_828_547;
 // arbitrary extra root JavaScript file in app.asar.
 export const MAIN_BUNDLE_ROOT_FILES = Object.freeze([
   "main.js",
+  "headless.js",
   "subscription-grok-tool-policy-hook.js",
   "subscription-tool-mcp-server.js",
   // Confined plugin child entry — its OWN root entrypoint because a different

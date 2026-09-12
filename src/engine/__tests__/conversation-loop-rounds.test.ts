@@ -29,6 +29,7 @@ import { genericToModelMessages, fullStreamToStreamEvent } from "../llm/vercel/a
 import { t } from "../../i18n/index.js";
 import { DEFAULT_SETTINGS } from "../../data/settings-defaults.js";
 import { MAX_BACKGROUND_OUTPUT_TOKEN_LIMIT } from "../llm/output-token-limit.js";
+import { DEFAULT_LLM_OUTPUT_TOKEN_LIMIT } from "../../shared/llm-vendor-defaults.js";
 
 class FakeProvider implements LLMProvider {
   readonly vendor = "openai" as const;
@@ -1911,7 +1912,9 @@ describe("ConversationLoop output ceiling", () => {
     expect(32_768).toBeGreaterThan(MAX_BACKGROUND_OUTPUT_TOKEN_LIMIT);
   });
 
-  it("sends no output ceiling when the vendor block declares none", async () => {
+  it("supplies the default ceiling when an existing vendor block declares none", async () => {
+    const settings = fakeLlmSettings();
+    delete settings.vendors[settings.provider].outputTokenLimit;
     const provider = new RecordingPromptProvider([
       [
         { type: "text_delta", text: "done" },
@@ -1919,7 +1922,7 @@ describe("ConversationLoop output ceiling", () => {
       ],
     ]);
     const loop = new ConversationLoop({
-      settingsService: { get: () => fakeLlmSettings(), getSecret: () => "test-key" },
+      settingsService: { get: () => settings, getSecret: () => "test-key" },
       systemPromptBuilder: { build: () => "system" },
       inputClassifier: new InputClassifier(),
       routeEngine: new RouteEngine(),
@@ -1930,7 +1933,7 @@ describe("ConversationLoop output ceiling", () => {
 
     await loop.runTurn("answer", undefined, undefined, { inputOrigin: "user-keyboard" });
 
-    expect(provider.params[0]).not.toHaveProperty("outputTokenLimit");
+    expect(provider.params[0]?.outputTokenLimit).toBe(DEFAULT_LLM_OUTPUT_TOKEN_LIMIT);
   });
 
   // A host-capped call and a provider-capped one both come back as

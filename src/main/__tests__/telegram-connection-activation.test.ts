@@ -1,3 +1,4 @@
+import { unavailableSecretEncryption } from "../../__tests__/support/host-runtime.js";
 /**
  * The activation is the only place that knows a fatal poll outcome and an
  * owner-initiated disconnect have to converge. Ingress stopping on its own
@@ -128,6 +129,7 @@ function activationInput(
 ) {
   return {
     store,
+    encryption: unavailableSecretEncryption,
     networkFetch,
     settingsService: { getEncryptedSecret: (key: string) => (
       key === TELEGRAM_BOT_TOKEN_SECRET_KEY ? BOT_TOKEN : null

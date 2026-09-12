@@ -49,7 +49,7 @@ describe("SettingsService remote A2A canonical route-control origin", () => {
   });
 
   it("accepts the canonical root slash and rejects a value URL would rewrite", async () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
 
     await service.patch({ a2aRemote: { routeControlBaseUrl: "https://hub.example.test/" } } as never);
     expect(service.get("a2aRemote").routeControlBaseUrl).toBe("https://hub.example.test/");
@@ -84,7 +84,7 @@ describe("SettingsService marketplace defaults", () => {
     // now points at the production tunnel so a fresh install lands on the
     // live catalog with no extra setup. Local-marketplace operators
     // override via Settings → 마켓플레이스 tab.
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
 
     expect(service.get("marketplace")).toEqual({
       backend: "real-cloud",
@@ -113,7 +113,7 @@ describe("SettingsService marketplace defaults", () => {
       "utf-8",
     );
 
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
 
     expect(service.get("marketplace")).toEqual({
       backend: "real-cloud",
@@ -155,7 +155,7 @@ describe("SettingsService marketplace defaults", () => {
       "utf-8",
     );
 
-    const service = new SettingsService({ userDataPath, secretPolicy: "development" });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath, secretPolicy: "development" });
     expect(service.get("marketplace").installedMessagingConnections).toEqual([{
       connectionId: "telegram",
       label: "Telegram",
@@ -209,7 +209,7 @@ describe("SettingsService marketplace defaults", () => {
       "utf-8",
     );
 
-    const service = new SettingsService({ userDataPath, secretPolicy: "development" });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath, secretPolicy: "development" });
     expect(service.get("marketplace")).toMatchObject({
       installedProviderIds: ["groq"],
       installedProviderPresets: [{
@@ -258,7 +258,7 @@ describe("SettingsService marketplace defaults", () => {
   });
 
   it("resets the active custom provider preset when the preset is uninstalled", async () => {
-    const service = new SettingsService({ userDataPath, secretPolicy: "development" });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath, secretPolicy: "development" });
     const preset = {
       providerId: "future-router",
       label: "Future Router",
@@ -328,7 +328,7 @@ describe("SettingsService marketplace defaults", () => {
   });
 
   it("keeps a generic custom-provider endpoint patch while a preset is active", async () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await service.patch({
       marketplace: {
         installedProviderPresets: [{
@@ -369,7 +369,7 @@ describe("SettingsService marketplace defaults", () => {
   });
 
   it("preserves existing custom provider preset metadata when settings patch tries to mutate its endpoint", async () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     const preset = {
       providerId: "future-router",
       label: "Future Router",
@@ -422,7 +422,7 @@ describe("SettingsService marketplace defaults", () => {
   });
 
   it("refreshes existing custom provider preset metadata through the trusted marketplace install path", async () => {
-    const service = new SettingsService({ userDataPath, secretPolicy: "development" });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath, secretPolicy: "development" });
     const preset = {
       providerId: "future-router",
       label: "Future Router",
@@ -478,7 +478,7 @@ describe("SettingsService marketplace defaults", () => {
     mockedElectron.safeStorage.decryptString.mockImplementation(
       (value: Buffer) => value.toString("utf-8").slice(7),
     );
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     const preset = {
       providerId: "future-router",
       label: "Future Router",
@@ -510,7 +510,7 @@ describe("SettingsService marketplace defaults", () => {
 
     await expect(service.patch({
       marketplace: { installedProviderPresets: [] },
-    })).rejects.toThrow("safeStorage encryption is unavailable");
+    })).rejects.toThrow("Host encryption is unavailable");
 
     expect(service.get("marketplace").installedProviderPresets).toEqual([preset]);
     expect(service.get("llm")).toMatchObject({
@@ -542,7 +542,7 @@ describe("SettingsService marketplace defaults", () => {
       "utf-8",
     );
 
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     const mk = service.get("marketplace") as Record<string, unknown>;
 
     expect(mk.cloudBaseUrl).toBe("https://legacy.example");
@@ -581,7 +581,7 @@ describe("SettingsService marketplace defaults", () => {
       "utf-8",
     );
 
-    const llm = new SettingsService({ userDataPath }).get("llm");
+    const llm = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath }).get("llm");
 
     expect(getLlmVendorSettings(llm.vendors, "openai-compatible").baseUrl)
       .toBeUndefined();
@@ -613,7 +613,7 @@ describe("SettingsService marketplace defaults", () => {
       "utf-8",
     );
 
-    const llm = new SettingsService({ userDataPath }).get("llm");
+    const llm = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath }).get("llm");
 
     expect(getLlmVendorSettings(llm.vendors, "openai-compatible").baseUrl)
       .toBe("http://localhost:8001/v1");
@@ -657,7 +657,7 @@ describe("SettingsService marketplace defaults", () => {
       "utf-8",
     );
 
-    const llm = new SettingsService({ userDataPath }).get("llm");
+    const llm = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath }).get("llm");
 
     expect(getLlmVendorSettings(llm.vendors, "openai-compatible").baseUrl)
       .toBe("https://other.example/v1");
@@ -691,7 +691,7 @@ describe("SettingsService marketplace defaults", () => {
       "utf-8",
     );
 
-    const llm = new SettingsService({ userDataPath }).get("llm");
+    const llm = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath }).get("llm");
     const block = getLlmVendorSettings(llm.vendors, "openai-compatible");
 
     expect(block.presetModels).toEqual({ "future-router": "future/free" });
@@ -720,7 +720,7 @@ describe("SettingsService marketplace defaults", () => {
       }),
       "utf-8",
     );
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
 
     await service.patch({
       llm: { vendors: { "openai-compatible": { presetModels: { "alpha-gw": "alpha/chosen" } } } },
@@ -751,7 +751,7 @@ describe("SettingsService marketplace defaults", () => {
       }),
       "utf-8",
     );
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
 
     await service.patch({
       llm: { vendors: { "openai-compatible": { presetModels: { "alpha-gw": "" } } } },
@@ -776,7 +776,7 @@ describe("SettingsService marketplace defaults", () => {
     );
 
     const block = getLlmVendorSettings(
-      new SettingsService({ userDataPath }).get("llm").vendors,
+      new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath }).get("llm").vendors,
       "openai-compatible",
     );
 
@@ -791,7 +791,7 @@ describe("SettingsService marketplace defaults", () => {
       "utf-8",
     );
 
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     const mk = service.get("marketplace") as Record<string, unknown>;
 
     // Whitespace-only legacy value is dropped → default, not "   ".
@@ -825,7 +825,7 @@ describe("SettingsService removes plugin-specific legacy host settings", () => {
       "utf-8",
     );
 
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(service.getAll()).not.toHaveProperty("msGraph");
 
     await service.patch({ msGraph: { enabled: true } } as never);
@@ -865,7 +865,7 @@ describe("SettingsService removed manual host-resolver map", () => {
       "utf-8",
     );
 
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     // Sibling llm fields still load — the drop is selective, not the whole block.
     expect(service.get("llm").provider).toBe("openai");
     expect(service.get("llm")).not.toHaveProperty("hostResolverMap");
@@ -881,7 +881,7 @@ describe("SettingsService removed manual host-resolver map", () => {
   // A patch cannot reintroduce the key either — `llm` is rebuilt field by field
   // from a fixed literal, so an unknown key never survives normalization.
   it("ignores an attempt to write llm.hostResolverMap back", async () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
 
     await service.patch({ llm: { hostResolverMap: "10.0.0.11 other.example.com" } } as never);
 
@@ -905,7 +905,7 @@ describe("SettingsService plugin uninstall cleanup", () => {
   });
 
   it("deletes only the selected plugin config", async () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
 
     await service.setPluginConfig("meeting", { apiKey: "abc" });
     await service.setPluginConfig("calendar", { tenant: "example" });
@@ -916,7 +916,7 @@ describe("SettingsService plugin uninstall cleanup", () => {
   });
 
   it("deletes only requested secret keys for the selected plugin", async () => {
-    const service = new SettingsService({ userDataPath, secretPolicy: "development" });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath, secretPolicy: "development" });
 
     await service.setSecret("plugin.meeting.token", "abc");
     await service.setSecret("plugin.meeting.unlisted", "preserved");
@@ -932,7 +932,7 @@ describe("SettingsService plugin uninstall cleanup", () => {
   });
 
   it("does not delete another dotted plugin id's secret by prefix", async () => {
-    const service = new SettingsService({ userDataPath, secretPolicy: "development" });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath, secretPolicy: "development" });
 
     await service.setSecret("plugin.com.example.token", "abc");
     await service.setSecret("plugin.com.example.mail.token", "preserved");
@@ -967,13 +967,13 @@ describe("SettingsService role presets", () => {
       "utf-8",
     );
 
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(service.get("chat").systemPrompt).toBe("preserved-prompt");
     expect(service.get("chat").autoCompact).toBe(false);
   });
 
   it("defaults idle preference refresh off and normalizes the flag to boolean only", async () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(service.get("features")?.idlePreferenceRefresh).toBe(false);
 
     await service.patch({ features: { idlePreferenceRefresh: false } });
@@ -989,7 +989,7 @@ describe("SettingsService role presets", () => {
   });
 
   it("defaults idle long-term-memory consolidation off and accepts booleans only", async () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(service.get("features")?.idleMemoryConsolidation).toBe(false);
 
     await service.patch({ features: { idleMemoryConsolidation: false } });
@@ -1004,7 +1004,7 @@ describe("SettingsService role presets", () => {
   });
 
   it("defaults LLM-reviewed memory capture off and accepts only the supported modes", async () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(service.get("features")?.memoryCaptureMode).toBe("off");
 
     await service.patch({ features: { memoryCaptureMode: "review" } });
@@ -1015,7 +1015,7 @@ describe("SettingsService role presets", () => {
     // Invalid data must not silently alter the user's provider-backed capture choice.
     await service.patch({ features: { memoryCaptureMode: "always" as never } });
     expect(service.get("features")?.memoryCaptureMode).toBe("auto");
-    expect(new SettingsService({ userDataPath }).get("features")?.memoryCaptureMode).toBe("auto");
+    expect(new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath }).get("features")?.memoryCaptureMode).toBe("auto");
 
     const corruptPath = mkdtempSync(join(tmpdir(), "settings-memory-capture-mode-"));
     try {
@@ -1024,14 +1024,14 @@ describe("SettingsService role presets", () => {
         JSON.stringify({ features: { memoryCaptureMode: "always" } }),
         "utf-8",
       );
-      expect(new SettingsService({ userDataPath: corruptPath }).get("features")?.memoryCaptureMode).toBe("off");
+      expect(new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath: corruptPath }).get("features")?.memoryCaptureMode).toBe("off");
     } finally {
       await cleanupTmpDir(corruptPath);
     }
   });
 
   it("keeps the A2A loopback server off by default and accepts booleans only", async () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(service.get("features")?.a2aLoopbackServer).toBe(false);
 
     await service.patch({ features: { a2aLoopbackServer: true } });
@@ -1040,7 +1040,7 @@ describe("SettingsService role presets", () => {
     await service.patch({ features: { a2aLoopbackServer: "yes" } as never });
     expect(service.get("features")?.a2aLoopbackServer).toBe(true);
 
-    const reloaded = new SettingsService({ userDataPath });
+    const reloaded = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(reloaded.get("features")?.a2aLoopbackServer).toBe(true);
   });
 
@@ -1056,7 +1056,7 @@ describe("SettingsService role presets", () => {
     // here would be a platform-specific plugin-isolation policy — which is what
     // the former darwin-only default was, and it left Windows and Linux with a
     // plugin path that required a sandbox the host never asked for.
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(service.get("features")?.hostClassifiesRisk ?? false).toBe(true);
     expect(service.get("features")?.osToolSandbox ?? false).toBe(false);
   });
@@ -1082,7 +1082,7 @@ describe("SettingsService role presets", () => {
         const { SettingsService: FreshSettingsService } = await import(
           "../settings-store.js"
         );
-        const service = new FreshSettingsService({ userDataPath: dir });
+        const service = new FreshSettingsService({ userDataPath: dir, encryption: mockedElectron.safeStorage });
         expect(service.get("features")?.osToolSandbox ?? false).toBe(expected);
       } finally {
         setProcessPlatform(original);
@@ -1106,11 +1106,63 @@ describe("SettingsService LLM per-vendor patching", () => {
     await cleanupTmpDir(userDataPath);
   });
 
+  it("bounds legacy profile budgets and persists the normalized value without changing the output cap", async () => {
+    writeFileSync(join(userDataPath, "lvis-settings.json"), JSON.stringify({
+      llm: {
+        provider: "openai",
+        vendors: { openai: { model: "fixture-model", enableThinking: true, thinkingBudgetTokens: 24_000, outputTokenLimit: 32_000 } },
+      },
+    }));
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
+    expect(service.get("llm").vendors.openai).toMatchObject({
+      model: "fixture-model", enableThinking: true, thinkingBudgetTokens: 16_000, outputTokenLimit: 32_000,
+    });
+    await service.patch({ llm: { vendors: { openai: { thinkingBudgetTokens: 14_000 } } } });
+    const reloaded = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
+    expect(reloaded.get("llm").vendors.openai).toMatchObject({ thinkingBudgetTokens: 14_000, outputTokenLimit: 32_000 });
+  });
+
+  it("clamps thinking on patches and output changes while preserving unrelated vendor fields", async () => {
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
+    await service.patch({ llm: { vendors: { "openai-compatible": {
+      model: "fixture-model", baseUrl: "https://provider.example/v1", enableThinking: false,
+      contextWindow: 128_000, outputTokenLimit: 32_000, thinkingBudgetTokens: 32_000,
+    } } } });
+    expect(service.get("llm").vendors["openai-compatible"]?.thinkingBudgetTokens).toBe(16_000);
+    await service.patch({ llm: { vendors: { "openai-compatible": { outputTokenLimit: 16_000 } } } });
+    expect(service.get("llm").vendors["openai-compatible"]).toMatchObject({
+      model: "fixture-model", baseUrl: "https://provider.example/v1", enableThinking: false,
+      contextWindow: 128_000, outputTokenLimit: 16_000, thinkingBudgetTokens: 8_000,
+    });
+    await service.patch({ llm: { vendors: { "openai-compatible": { outputTokenLimit: 64_000 } } } });
+    expect(service.get("llm").vendors["openai-compatible"]?.thinkingBudgetTokens).toBe(8_000);
+    await service.patch({ llm: { vendors: { "openai-compatible": { thinkingBudgetTokens: 48_000 } } } });
+    expect(service.get("llm").vendors["openai-compatible"]?.thinkingBudgetTokens).toBe(32_000);
+    const reloaded = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
+    expect(reloaded.get("llm").vendors["openai-compatible"]).toEqual(service.get("llm").vendors["openai-compatible"]);
+  });
+
+  it("retains an inactive provider customized only by its output cap across pruning and reload", async () => {
+    writeFileSync(join(userDataPath, "lvis-settings.json"), JSON.stringify({
+      llm: { provider: "openai", vendors: { groq: { outputTokenLimit: 64_000 } } },
+    }));
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
+    expect(service.get("llm").vendors.groq).toMatchObject({ outputTokenLimit: 64_000, thinkingBudgetTokens: 8_000 });
+    expect(service.get("marketplace").installedProviderIds).toContain("groq");
+    await service.patch({ llm: { provider: "groq" } });
+    await service.patch({ llm: { provider: "openai" } });
+    const reloaded = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
+    expect(reloaded.get("llm").provider).toBe("openai");
+    expect(reloaded.get("llm").vendors.groq).toMatchObject({ outputTokenLimit: 64_000, thinkingBudgetTokens: 8_000 });
+    await reloaded.patch({ llm: { provider: "groq", vendors: { groq: { thinkingBudgetTokens: 40_000 } } } });
+    expect(reloaded.get("llm").vendors.groq).toMatchObject({ outputTokenLimit: 64_000, thinkingBudgetTokens: 32_000 });
+  });
+
   it("round-trips a per-vendor output ceiling through patch", async () => {
     // The ceiling is the only brake on a runaway round, and it is configured
     // rather than assumed — so it has to survive the write path a caller
     // actually uses, not just the block normalizer.
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await service.patch({
       llm: { vendors: { "openai-compatible": { outputTokenLimit: 16_384 } } },
     });
@@ -1119,7 +1171,7 @@ describe("SettingsService LLM per-vendor patching", () => {
   });
 
   it("fresh installs persist only default-visible provider blocks", () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     const llm = service.get("llm");
 
     expect(llm.provider).toBe(DEFAULT_LLM_VENDOR);
@@ -1148,7 +1200,7 @@ describe("SettingsService LLM per-vendor patching", () => {
       "utf-8",
     );
 
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     const llm = service.get("llm");
 
     expect(llm.activeChatRuntime).toEqual({ kind: "api" });
@@ -1157,7 +1209,7 @@ describe("SettingsService LLM per-vendor patching", () => {
   });
 
   it("keeps API configuration and secrets while selecting a subscription runtime", async () => {
-    const service = new SettingsService({ userDataPath, secretPolicy: "development" });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath, secretPolicy: "development" });
     await service.patch({
       llm: {
         provider: "openai",
@@ -1186,13 +1238,13 @@ describe("SettingsService LLM per-vendor patching", () => {
     expect(getLlmVendorSettings(llm.vendors, "openai").model).toBe("gpt-5-turbo");
     expect(service.getSecret("llm.apiKey.openai")).toBe("existing-api-key");
 
-    const reloaded = new SettingsService({ userDataPath, secretPolicy: "development" });
+    const reloaded = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath, secretPolicy: "development" });
     expect(reloaded.get("llm").activeChatRuntime).toEqual(llm.activeChatRuntime);
     expect(reloaded.getSecret("llm.apiKey.openai")).toBe("existing-api-key");
   });
 
   it("drops invalid subscription models without changing the selected runtime", async () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await service.patch({
       llm: {
         activeChatRuntime: {
@@ -1226,7 +1278,7 @@ describe("SettingsService LLM per-vendor patching", () => {
         "utf-8",
       );
 
-      const service = new SettingsService({ userDataPath });
+      const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
       expect(service.get("llm").activeChatRuntime).toEqual({
         kind: "subscription",
         provider,
@@ -1251,7 +1303,7 @@ describe("SettingsService LLM per-vendor patching", () => {
       "utf-8",
     );
 
-    const service = new SettingsService({ userDataPath, secretPolicy: "development" });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath, secretPolicy: "development" });
     await service.setSecret("llm.apiKey.openai", "existing-api-key");
     expect(service.get("llm").activeChatRuntime).toEqual({ kind: "api" });
     expect(service.get("llm").provider).toBe("openai");
@@ -1286,7 +1338,7 @@ describe("SettingsService LLM per-vendor patching", () => {
       "utf-8",
     );
 
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     const settings = service.getAll();
 
     expect(settings.llm.vendors["azure-foundry"]).toBeUndefined();
@@ -1298,7 +1350,7 @@ describe("SettingsService LLM per-vendor patching", () => {
   });
 
   it("rejects uninstalled marketplace providers as active or fallback providers", async () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
 
     await service.patch({
       llm: {
@@ -1317,7 +1369,7 @@ describe("SettingsService LLM per-vendor patching", () => {
   });
 
   it("persists model list cache and prunes uninstalled marketplace provider caches", async () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
 
     await service.patch({
       marketplace: { installedProviderIds: ["groq"] },
@@ -1385,7 +1437,7 @@ describe("SettingsService LLM per-vendor patching", () => {
   });
 
   it("prunes manual and static marketplace provider model list caches", async () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
 
     await service.patch({
       marketplace: {
@@ -1478,7 +1530,7 @@ describe("SettingsService LLM per-vendor patching", () => {
   });
 
   it("allows installed marketplace providers and removes them durably on uninstall", async () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
 
     await service.patch({
       marketplace: { installedProviderIds: ["groq", "ollama"] },
@@ -1513,7 +1565,7 @@ describe("SettingsService LLM per-vendor patching", () => {
   // CTRL simplification: test rewritten to use `model` instead of the
   // removed `maxOutputTokens` field.
   it("vendor switch + save does not leak model across vendors", async () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
 
     // Establish a non-default OpenAI model (simulating a user who switched to
     // a specific model for OpenAI).
@@ -1549,7 +1601,7 @@ describe("SettingsService LLM per-vendor patching", () => {
   });
 
   it("replaceLlm removes optional transport fields that merge patches would retain", async () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     const original = service.get("llm");
 
     await service.patch({
@@ -1583,7 +1635,7 @@ describe("SettingsService LLM per-vendor patching", () => {
       "utf-8",
     );
 
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     const llm = service.get("llm");
 
     expect(llm.provider).toBe(DEFAULT_LLM_VENDOR);
@@ -1605,7 +1657,7 @@ describe("SettingsService webView (B1 — external URL viewer policy)", () => {
   });
 
   it("defaults preferredFlow to 'in-app' on a fresh install", () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(service.get("webView")).toEqual({ preferredFlow: "in-app" });
   });
 
@@ -1615,16 +1667,16 @@ describe("SettingsService webView (B1 — external URL viewer policy)", () => {
       JSON.stringify({ marketplace: { backend: "real-cloud" } }),
       "utf-8",
     );
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(service.get("webView")).toEqual({ preferredFlow: "in-app" });
   });
 
   it("round-trips a system-browser preference across restart", async () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await service.patch({ webView: { preferredFlow: "system-browser" } });
     expect(service.get("webView")).toEqual({ preferredFlow: "system-browser" });
 
-    const reloaded = new SettingsService({ userDataPath });
+    const reloaded = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(reloaded.get("webView")).toEqual({ preferredFlow: "system-browser" });
   });
 
@@ -1645,7 +1697,7 @@ describe("SettingsService webView (B1 — external URL viewer policy)", () => {
       }),
       "utf-8",
     );
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(service.get("webView")).toEqual({ preferredFlow: "in-app" });
     // Unrelated sections must be preserved (no full default reset).
     expect(service.get("chat").systemPrompt).toBe("preserved-prompt");
@@ -1659,7 +1711,7 @@ describe("SettingsService webView (B1 — external URL viewer policy)", () => {
       JSON.stringify({ webView: "garbage" }),
       "utf-8",
     );
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(service.get("webView")).toEqual({ preferredFlow: "in-app" });
   });
 
@@ -1674,7 +1726,7 @@ describe("SettingsService webView (B1 — external URL viewer policy)", () => {
     ["array", ["in-app"]],
     ["object", { preferredFlow: "in-app" }],
   ])("ignores an invalid preferredFlow patch (%s) and keeps the stored preference", async (_label, badValue) => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await service.patch({ webView: { preferredFlow: "system-browser" } });
 
     await service.patch({
@@ -1688,13 +1740,13 @@ describe("SettingsService webView (B1 — external URL viewer policy)", () => {
       webView: { preferredFlow: unknown };
     };
     expect(onDisk.webView).toEqual({ preferredFlow: "system-browser" });
-    expect(new SettingsService({ userDataPath }).get("webView")).toEqual({
+    expect(new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath }).get("webView")).toEqual({
       preferredFlow: "system-browser",
     });
   });
 
   it("keeps a valid preferredFlow patch working after validation", async () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await service.patch({ webView: { preferredFlow: "system-browser" } });
     expect(service.get("webView")).toEqual({ preferredFlow: "system-browser" });
     await service.patch({ webView: { preferredFlow: "in-app" } });
@@ -1708,7 +1760,7 @@ describe("SettingsService webView (B1 — external URL viewer policy)", () => {
   // "system-browser" user back into the in-app viewer for the rest of the
   // session — the validated patch keeps the routing on the user's choice.
   it("keeps routeExternalUrl on system-browser after an invalid preferredFlow patch", async () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await service.patch({ webView: { preferredFlow: "system-browser" } });
     await service.patch({ webView: { preferredFlow: "systembrowser" as never } });
 
@@ -1742,7 +1794,7 @@ describe("SettingsService system — close behavior (PR #1032)", () => {
   });
 
   it("defaults closeBehavior to 'hide-to-tray' on a fresh install", () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(service.get("system")).toEqual({ closeBehavior: "hide-to-tray", appMode: "work", localApiServer: false, hardwareAcceleration: DEFAULT_SETTINGS.system.hardwareAcceleration, corpCaEnabled: DEFAULT_SETTINGS.system.corpCaEnabled, corpCaCommonName: DEFAULT_SETTINGS.system.corpCaCommonName, corpCaDebugLog: DEFAULT_SETTINGS.system.corpCaDebugLog, sidePanelWidth: DEFAULT_SETTINGS.system.sidePanelWidth, sidebarWidth: 232, sidePanelSplitFilePercent: 45, sidePanelSplitPreviewPercent: 45, sidePanelSplitSubagentPercent: 45, sidePanelSplitBrowserPercent: 45, sidebarActiveTab: "chats", activeView: "home", settingsTab: "llm", pinnedProjectRoots: [], archivedProjectRoots: [], projectLabels: {}, launchAtStartup: false, launchMinimized: false, shutdownCleanupTimeoutMs: DEFAULT_SETTINGS.system.shutdownCleanupTimeoutMs });
   });
 
@@ -1752,16 +1804,16 @@ describe("SettingsService system — close behavior (PR #1032)", () => {
       JSON.stringify({ marketplace: { backend: "real-cloud" } }),
       "utf-8",
     );
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(service.get("system")).toEqual({ closeBehavior: "hide-to-tray", appMode: "work", localApiServer: false, hardwareAcceleration: DEFAULT_SETTINGS.system.hardwareAcceleration, corpCaEnabled: DEFAULT_SETTINGS.system.corpCaEnabled, corpCaCommonName: DEFAULT_SETTINGS.system.corpCaCommonName, corpCaDebugLog: DEFAULT_SETTINGS.system.corpCaDebugLog, sidePanelWidth: DEFAULT_SETTINGS.system.sidePanelWidth, sidebarWidth: 232, sidePanelSplitFilePercent: 45, sidePanelSplitPreviewPercent: 45, sidePanelSplitSubagentPercent: 45, sidePanelSplitBrowserPercent: 45, sidebarActiveTab: "chats", activeView: "home", settingsTab: "llm", pinnedProjectRoots: [], archivedProjectRoots: [], projectLabels: {}, launchAtStartup: false, launchMinimized: false, shutdownCleanupTimeoutMs: DEFAULT_SETTINGS.system.shutdownCleanupTimeoutMs });
   });
 
   it("round-trips a 'quit' preference across restart", async () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await service.patch({ system: { closeBehavior: "quit" } });
     expect(service.get("system")).toEqual({ closeBehavior: "quit", appMode: "work", localApiServer: false, hardwareAcceleration: DEFAULT_SETTINGS.system.hardwareAcceleration, corpCaEnabled: DEFAULT_SETTINGS.system.corpCaEnabled, corpCaCommonName: DEFAULT_SETTINGS.system.corpCaCommonName, corpCaDebugLog: DEFAULT_SETTINGS.system.corpCaDebugLog, sidePanelWidth: DEFAULT_SETTINGS.system.sidePanelWidth, sidebarWidth: 232, sidePanelSplitFilePercent: 45, sidePanelSplitPreviewPercent: 45, sidePanelSplitSubagentPercent: 45, sidePanelSplitBrowserPercent: 45, sidebarActiveTab: "chats", activeView: "home", settingsTab: "llm", pinnedProjectRoots: [], archivedProjectRoots: [], projectLabels: {}, launchAtStartup: false, launchMinimized: false, shutdownCleanupTimeoutMs: DEFAULT_SETTINGS.system.shutdownCleanupTimeoutMs });
 
-    const reloaded = new SettingsService({ userDataPath });
+    const reloaded = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(reloaded.get("system")).toEqual({ closeBehavior: "quit", appMode: "work", localApiServer: false, hardwareAcceleration: DEFAULT_SETTINGS.system.hardwareAcceleration, corpCaEnabled: DEFAULT_SETTINGS.system.corpCaEnabled, corpCaCommonName: DEFAULT_SETTINGS.system.corpCaCommonName, corpCaDebugLog: DEFAULT_SETTINGS.system.corpCaDebugLog, sidePanelWidth: DEFAULT_SETTINGS.system.sidePanelWidth, sidebarWidth: 232, sidePanelSplitFilePercent: 45, sidePanelSplitPreviewPercent: 45, sidePanelSplitSubagentPercent: 45, sidePanelSplitBrowserPercent: 45, sidebarActiveTab: "chats", activeView: "home", settingsTab: "llm", pinnedProjectRoots: [], archivedProjectRoots: [], projectLabels: {}, launchAtStartup: false, launchMinimized: false, shutdownCleanupTimeoutMs: DEFAULT_SETTINGS.system.shutdownCleanupTimeoutMs });
   });
 
@@ -1782,7 +1834,7 @@ describe("SettingsService system — close behavior (PR #1032)", () => {
       }),
       "utf-8",
     );
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(service.get("system")).toEqual({ closeBehavior: "hide-to-tray", appMode: "work", localApiServer: false, hardwareAcceleration: DEFAULT_SETTINGS.system.hardwareAcceleration, corpCaEnabled: DEFAULT_SETTINGS.system.corpCaEnabled, corpCaCommonName: DEFAULT_SETTINGS.system.corpCaCommonName, corpCaDebugLog: DEFAULT_SETTINGS.system.corpCaDebugLog, sidePanelWidth: DEFAULT_SETTINGS.system.sidePanelWidth, sidebarWidth: 232, sidePanelSplitFilePercent: 45, sidePanelSplitPreviewPercent: 45, sidePanelSplitSubagentPercent: 45, sidePanelSplitBrowserPercent: 45, sidebarActiveTab: "chats", activeView: "home", settingsTab: "llm", pinnedProjectRoots: [], archivedProjectRoots: [], projectLabels: {}, launchAtStartup: false, launchMinimized: false, shutdownCleanupTimeoutMs: DEFAULT_SETTINGS.system.shutdownCleanupTimeoutMs });
     expect(service.get("chat").systemPrompt).toBe("preserved-prompt");
     expect(service.get("chat").autoCompact).toBe(false);
@@ -1795,7 +1847,7 @@ describe("SettingsService system — close behavior (PR #1032)", () => {
       JSON.stringify({ system: "garbage" }),
       "utf-8",
     );
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(service.get("system")).toEqual({ closeBehavior: "hide-to-tray", appMode: "work", localApiServer: false, hardwareAcceleration: DEFAULT_SETTINGS.system.hardwareAcceleration, corpCaEnabled: DEFAULT_SETTINGS.system.corpCaEnabled, corpCaCommonName: DEFAULT_SETTINGS.system.corpCaCommonName, corpCaDebugLog: DEFAULT_SETTINGS.system.corpCaDebugLog, sidePanelWidth: DEFAULT_SETTINGS.system.sidePanelWidth, sidebarWidth: 232, sidePanelSplitFilePercent: 45, sidePanelSplitPreviewPercent: 45, sidePanelSplitSubagentPercent: 45, sidePanelSplitBrowserPercent: 45, sidebarActiveTab: "chats", activeView: "home", settingsTab: "llm", pinnedProjectRoots: [], archivedProjectRoots: [], projectLabels: {}, launchAtStartup: false, launchMinimized: false, shutdownCleanupTimeoutMs: DEFAULT_SETTINGS.system.shutdownCleanupTimeoutMs });
   });
 
@@ -1803,7 +1855,7 @@ describe("SettingsService system — close behavior (PR #1032)", () => {
   // an invalid value arrives via the renderer/IPC layer. Field-level guard
   // mirrors the `appearance` block's behavior.
   it("ignores invalid closeBehavior patch and preserves prior 'quit' preference", async () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await service.patch({ system: { closeBehavior: "quit" } });
     expect(service.get("system").closeBehavior).toBe("quit");
 
@@ -1829,7 +1881,7 @@ describe("SettingsService system — pinned project roots", () => {
   });
 
   it("de-dupes case/slash-variant roots via projectRootKey, keeping the first-seen casing", async () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await service.patch({
       system: {
         pinnedProjectRoots: [
@@ -1848,12 +1900,12 @@ describe("SettingsService system — pinned project roots", () => {
   });
 
   it("round-trips a de-duped pinned-roots list across restart", async () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await service.patch({
       system: { pinnedProjectRoots: ["/ws/alpha", "/ws/alpha/", "/ws/beta"] },
     });
 
-    const reloaded = new SettingsService({ userDataPath });
+    const reloaded = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(reloaded.get("system").pinnedProjectRoots).toEqual(["/ws/alpha", "/ws/beta"]);
   });
 });
@@ -1874,16 +1926,16 @@ describe("SettingsService system — workspace appMode", () => {
   });
 
   it("defaults appMode to 'work' on a fresh install", () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(service.get("system").appMode).toBe("work");
   });
 
   it("round-trips a 'chat' appMode across restart", async () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await service.patch({ system: { appMode: "chat" } });
     expect(service.get("system").appMode).toBe("chat");
 
-    const reloaded = new SettingsService({ userDataPath });
+    const reloaded = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(reloaded.get("system").appMode).toBe("chat");
   });
 
@@ -1893,7 +1945,7 @@ describe("SettingsService system — workspace appMode", () => {
       JSON.stringify({ system: { closeBehavior: "quit", appMode: "not-a-mode" } }),
       "utf-8",
     );
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     // closeBehavior preserved; appMode falls back to default — neither clobbers the other.
     expect(service.get("system")).toEqual({ closeBehavior: "quit", appMode: "work", localApiServer: false, hardwareAcceleration: DEFAULT_SETTINGS.system.hardwareAcceleration, corpCaEnabled: DEFAULT_SETTINGS.system.corpCaEnabled, corpCaCommonName: DEFAULT_SETTINGS.system.corpCaCommonName, corpCaDebugLog: DEFAULT_SETTINGS.system.corpCaDebugLog, sidePanelWidth: DEFAULT_SETTINGS.system.sidePanelWidth, sidebarWidth: 232, sidePanelSplitFilePercent: 45, sidePanelSplitPreviewPercent: 45, sidePanelSplitSubagentPercent: 45, sidePanelSplitBrowserPercent: 45, sidebarActiveTab: "chats", activeView: "home", settingsTab: "llm", pinnedProjectRoots: [], archivedProjectRoots: [], projectLabels: {}, launchAtStartup: false, launchMinimized: false, shutdownCleanupTimeoutMs: DEFAULT_SETTINGS.system.shutdownCleanupTimeoutMs });
   });
@@ -1904,18 +1956,18 @@ describe("SettingsService system — workspace appMode", () => {
       JSON.stringify({ system: { closeBehavior: "quit", appMode: "action" } }),
       "utf-8",
     );
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(service.get("system")).toEqual({ closeBehavior: "quit", appMode: "work", localApiServer: false, hardwareAcceleration: DEFAULT_SETTINGS.system.hardwareAcceleration, corpCaEnabled: DEFAULT_SETTINGS.system.corpCaEnabled, corpCaCommonName: DEFAULT_SETTINGS.system.corpCaCommonName, corpCaDebugLog: DEFAULT_SETTINGS.system.corpCaDebugLog, sidePanelWidth: DEFAULT_SETTINGS.system.sidePanelWidth, sidebarWidth: 232, sidePanelSplitFilePercent: 45, sidePanelSplitPreviewPercent: 45, sidePanelSplitSubagentPercent: 45, sidePanelSplitBrowserPercent: 45, sidebarActiveTab: "chats", activeView: "home", settingsTab: "llm", pinnedProjectRoots: [], archivedProjectRoots: [], projectLabels: {}, launchAtStartup: false, launchMinimized: false, shutdownCleanupTimeoutMs: DEFAULT_SETTINGS.system.shutdownCleanupTimeoutMs });
   });
 
   it("normalizes a legacy 'action' appMode patch to 'work'", async () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await service.patch({ system: { appMode: "action" as never } });
     expect(service.get("system").appMode).toBe("work");
   });
 
   it("ignores invalid appMode patch and preserves prior 'chat' preference", async () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await service.patch({ system: { appMode: "chat" } });
     expect(service.get("system").appMode).toBe("chat");
 
@@ -1924,45 +1976,45 @@ describe("SettingsService system — workspace appMode", () => {
   });
 
   it("patching appMode does not clobber a prior closeBehavior", async () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await service.patch({ system: { closeBehavior: "quit" } });
     await service.patch({ system: { appMode: "chat" } });
     expect(service.get("system")).toEqual({ closeBehavior: "quit", appMode: "chat", localApiServer: false, hardwareAcceleration: DEFAULT_SETTINGS.system.hardwareAcceleration, corpCaEnabled: DEFAULT_SETTINGS.system.corpCaEnabled, corpCaCommonName: DEFAULT_SETTINGS.system.corpCaCommonName, corpCaDebugLog: DEFAULT_SETTINGS.system.corpCaDebugLog, sidePanelWidth: DEFAULT_SETTINGS.system.sidePanelWidth, sidebarWidth: 232, sidePanelSplitFilePercent: 45, sidePanelSplitPreviewPercent: 45, sidePanelSplitSubagentPercent: 45, sidePanelSplitBrowserPercent: 45, sidebarActiveTab: "chats", activeView: "home", settingsTab: "llm", pinnedProjectRoots: [], archivedProjectRoots: [], projectLabels: {}, launchAtStartup: false, launchMinimized: false, shutdownCleanupTimeoutMs: DEFAULT_SETTINGS.system.shutdownCleanupTimeoutMs });
   });
 
   it("round-trips a localApiServer=true preference across restart", async () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await service.patch({ system: { localApiServer: true } });
     expect(service.get("system")).toEqual({ closeBehavior: "hide-to-tray", appMode: "work", localApiServer: true, hardwareAcceleration: DEFAULT_SETTINGS.system.hardwareAcceleration, corpCaEnabled: DEFAULT_SETTINGS.system.corpCaEnabled, corpCaCommonName: DEFAULT_SETTINGS.system.corpCaCommonName, corpCaDebugLog: DEFAULT_SETTINGS.system.corpCaDebugLog, sidePanelWidth: DEFAULT_SETTINGS.system.sidePanelWidth, sidebarWidth: 232, sidePanelSplitFilePercent: 45, sidePanelSplitPreviewPercent: 45, sidePanelSplitSubagentPercent: 45, sidePanelSplitBrowserPercent: 45, sidebarActiveTab: "chats", activeView: "home", settingsTab: "llm", pinnedProjectRoots: [], archivedProjectRoots: [], projectLabels: {}, launchAtStartup: false, launchMinimized: false, shutdownCleanupTimeoutMs: DEFAULT_SETTINGS.system.shutdownCleanupTimeoutMs });
 
-    const reloaded = new SettingsService({ userDataPath });
+    const reloaded = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(reloaded.get("system").localApiServer).toBe(true);
   });
 
   it("ignores an invalid localApiServer patch and preserves prior value", async () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await service.patch({ system: { localApiServer: true } });
     await service.patch({ system: { localApiServer: "yes" as never } });
     expect(service.get("system").localApiServer).toBe(true);
   });
 
   it("round-trips a rounded sidePanelWidth across restart", async () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await service.patch({ system: { sidePanelWidth: 640.6 } });
     expect(service.get("system").sidePanelWidth).toBe(641);
 
-    const reloaded = new SettingsService({ userDataPath });
+    const reloaded = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(reloaded.get("system").sidePanelWidth).toBe(641);
   });
 
   it("clamps a sidePanelWidth below the minimum up to the floor", async () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await service.patch({ system: { sidePanelWidth: 100 } });
     expect(service.get("system").sidePanelWidth).toBe(SIDE_PANEL_MIN_RESERVE);
   });
 
   it("ignores an invalid sidePanelWidth patch and preserves prior value", async () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await service.patch({ system: { sidePanelWidth: 700 } });
     await service.patch({ system: { sidePanelWidth: Number.NaN } });
     await service.patch({ system: { sidePanelWidth: "wide" as never } });
@@ -1970,7 +2022,7 @@ describe("SettingsService system — workspace appMode", () => {
   });
 
   it("round-trips per-tab vertical split percents (rounded) across restart", async () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await service.patch({
       system: {
         sidePanelSplitFilePercent: 60.4,
@@ -1982,14 +2034,14 @@ describe("SettingsService system — workspace appMode", () => {
     expect(service.get("system").sidePanelSplitPreviewPercent).toBe(34);
     expect(service.get("system").sidePanelSplitSubagentPercent).toBe(50);
 
-    const reloaded = new SettingsService({ userDataPath });
+    const reloaded = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(reloaded.get("system").sidePanelSplitFilePercent).toBe(60);
     expect(reloaded.get("system").sidePanelSplitPreviewPercent).toBe(34);
     expect(reloaded.get("system").sidePanelSplitSubagentPercent).toBe(50);
   });
 
   it("clamps out-of-range split percents to the [22, 78] pane range", async () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await service.patch({ system: { sidePanelSplitFilePercent: 5 } });
     expect(service.get("system").sidePanelSplitFilePercent).toBe(22);
     await service.patch({ system: { sidePanelSplitFilePercent: 95 } });
@@ -1997,7 +2049,7 @@ describe("SettingsService system — workspace appMode", () => {
   });
 
   it("ignores an invalid split-percent patch and preserves prior value", async () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await service.patch({ system: { sidePanelSplitPreviewPercent: 40 } });
     await service.patch({ system: { sidePanelSplitPreviewPercent: Number.NaN } });
     await service.patch({ system: { sidePanelSplitPreviewPercent: "mid" as never } });
@@ -2021,21 +2073,21 @@ describe("SettingsService appearance v2 — fresh install defaults", () => {
   });
 
   it("fresh install returns schemaVersion:2 with DEFAULT_BUNDLE_ID", () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(service.get("appearance")).toEqual({ schemaVersion: 2, language: "en", bundleId: DEFAULT_BUNDLE_ID });
   });
 
   it("v2 appearance round-trips across restart", async () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await service.patch({ appearance: { schemaVersion: 2, language: "en", bundleId: "midnight" } });
-    const reloaded = new SettingsService({ userDataPath });
+    const reloaded = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(reloaded.get("appearance")).toEqual({ schemaVersion: 2, language: "en", bundleId: "midnight" });
   });
 
   it("v2 with followSystem=true round-trips", async () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await service.patch({ appearance: { schemaVersion: 2, language: "en", bundleId: "violet-light", followSystem: true } });
-    const reloaded = new SettingsService({ userDataPath });
+    const reloaded = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(reloaded.get("appearance")).toEqual({ schemaVersion: 2, language: "en", bundleId: "violet-light", followSystem: true });
   });
 
@@ -2045,7 +2097,7 @@ describe("SettingsService appearance v2 — fresh install defaults", () => {
       JSON.stringify({ appearance: { schemaVersion: 2, language: "en", bundleId: "nonexistent-bundle" } }),
       "utf-8",
     );
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(service.get("appearance")).toEqual({ schemaVersion: 2, language: "en", bundleId: DEFAULT_BUNDLE_ID });
   });
 
@@ -2056,7 +2108,7 @@ describe("SettingsService appearance v2 — fresh install defaults", () => {
   // outer spread straight onto disk.
 
   it("ignores an unknown bundleId patch and keeps the stored theme", async () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await service.patch({ appearance: { schemaVersion: 2, bundleId: "midnight" } });
 
     await service.patch({ appearance: { schemaVersion: 2, bundleId: "nonexistent-bundle" } });
@@ -2066,7 +2118,7 @@ describe("SettingsService appearance v2 — fresh install defaults", () => {
       appearance: { bundleId: string };
     };
     expect(onDisk.appearance.bundleId).toBe("midnight");
-    expect(new SettingsService({ userDataPath }).get("appearance").bundleId).toBe("midnight");
+    expect(new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath }).get("appearance").bundleId).toBe("midnight");
   });
 
   // The sharpest consequence: a non-2 schemaVersion on disk sends the next load
@@ -2078,7 +2130,7 @@ describe("SettingsService appearance v2 — fresh install defaults", () => {
     ["string", "2"],
     ["null", null],
   ])("ignores a non-2 schemaVersion patch (%s) so appearance is not wiped on next load", async (_label, badVersion) => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await service.patch({
       appearance: {
         schemaVersion: 2,
@@ -2092,7 +2144,7 @@ describe("SettingsService appearance v2 — fresh install defaults", () => {
       appearance: { schemaVersion: badVersion as never, bundleId: "midnight" },
     });
 
-    const reloaded = new SettingsService({ userDataPath });
+    const reloaded = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(reloaded.get("appearance")).toEqual({
       schemaVersion: 2,
       bundleId: "midnight",
@@ -2102,7 +2154,7 @@ describe("SettingsService appearance v2 — fresh install defaults", () => {
   });
 
   it("ignores a non-boolean followSystem patch and keeps the stored value", async () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await service.patch({ appearance: { schemaVersion: 2, bundleId: "violet-light", followSystem: true } });
 
     await service.patch({
@@ -2110,11 +2162,11 @@ describe("SettingsService appearance v2 — fresh install defaults", () => {
     });
 
     expect(service.get("appearance").followSystem).toBe(true);
-    expect(new SettingsService({ userDataPath }).get("appearance").followSystem).toBe(true);
+    expect(new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath }).get("appearance").followSystem).toBe(true);
   });
 
   it("still accepts every valid bundleId through patch", async () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     for (const bundleId of BUNDLE_IDS) {
       await service.patch({ appearance: { schemaVersion: 2, bundleId } });
       expect(service.get("appearance").bundleId).toBe(bundleId);
@@ -2127,7 +2179,7 @@ describe("SettingsService appearance v2 — fresh install defaults", () => {
       JSON.stringify({ chat: { systemPrompt: "preserved", autoCompact: false } }),
       "utf-8",
     );
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(service.get("appearance")).toEqual({ schemaVersion: 2, language: "en", bundleId: DEFAULT_BUNDLE_ID });
     // Unrelated section preserved
     expect(service.get("chat").systemPrompt).toBe("preserved");
@@ -2150,22 +2202,22 @@ describe("SettingsService system locale detection", () => {
   });
 
   it("fresh install with systemLocale=ko-KR keeps English as the default language", () => {
-    const service = new SettingsService({ userDataPath, systemLocale: "ko-KR" });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath, systemLocale: "ko-KR" });
     expect(service.get("appearance").language).toBe("en");
   });
 
   it("fresh install with systemLocale=en-US keeps English as the default language", () => {
-    const service = new SettingsService({ userDataPath, systemLocale: "en-US" });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath, systemLocale: "en-US" });
     expect(service.get("appearance").language).toBe("en");
   });
 
   it("fresh install with unsupported systemLocale falls back to 'en'", () => {
-    const service = new SettingsService({ userDataPath, systemLocale: "it-IT" });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath, systemLocale: "it-IT" });
     expect(service.get("appearance").language).toBe("en");
   });
 
   it("fresh install without systemLocale defaults to 'en'", () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(service.get("appearance").language).toBe("en");
   });
 
@@ -2176,7 +2228,7 @@ describe("SettingsService system locale detection", () => {
       "utf-8",
     );
     // Even if OS is Korean, the stored "en" is the user's explicit choice — respect it.
-    const service = new SettingsService({ userDataPath, systemLocale: "ko-KR" });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath, systemLocale: "ko-KR" });
     expect(service.get("appearance").language).toBe("en");
   });
 
@@ -2186,7 +2238,7 @@ describe("SettingsService system locale detection", () => {
       JSON.stringify({ appearance: { schemaVersion: 2, language: "ko", bundleId: DEFAULT_BUNDLE_ID } }),
       "utf-8",
     );
-    const service = new SettingsService({ userDataPath, systemLocale: "en-US" });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath, systemLocale: "en-US" });
     expect(service.get("appearance").language).toBe("ko");
   });
 });
@@ -2229,73 +2281,73 @@ describe("SettingsService appearance v1 → v2 migration", () => {
 
   it("dark + default → tokyo-night", () => {
     writeV1({ theme: "dark", chatTheme: "default", codeTheme: "auto" });
-    const s = new SettingsService({ userDataPath });
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(s.get("appearance")).toEqual({ schemaVersion: 2, language: "en", bundleId: "tokyo-night" });
   });
 
   it("dark + lg → violet-dark", () => {
     writeV1({ theme: "dark", chatTheme: "lg", codeTheme: "auto" });
-    const s = new SettingsService({ userDataPath });
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(s.get("appearance")).toEqual({ schemaVersion: 2, language: "en", bundleId: "violet-dark" });
   });
 
   it("light + default → forest", () => {
     writeV1({ theme: "light", chatTheme: "default", codeTheme: "auto" });
-    const s = new SettingsService({ userDataPath });
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(s.get("appearance")).toEqual({ schemaVersion: 2, language: "en", bundleId: "forest" });
   });
 
   it("light + lg → violet-light", () => {
     writeV1({ theme: "light", chatTheme: "lg", codeTheme: "auto" });
-    const s = new SettingsService({ userDataPath });
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(s.get("appearance")).toEqual({ schemaVersion: 2, language: "en", bundleId: "violet-light" });
   });
 
   it("dark + lg + dark (code override) → violet-dark (code override ignored)", () => {
     writeV1({ theme: "dark", chatTheme: "lg", codeTheme: "dark" });
-    const s = new SettingsService({ userDataPath });
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(s.get("appearance")).toEqual({ schemaVersion: 2, language: "en", bundleId: "violet-dark" });
   });
 
   it("light + default + dark (code override) → forest (code override ignored)", () => {
     writeV1({ theme: "light", chatTheme: "default", codeTheme: "dark" });
-    const s = new SettingsService({ userDataPath });
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(s.get("appearance")).toEqual({ schemaVersion: 2, language: "en", bundleId: "forest" });
   });
 
   it("* + purple → midnight (closest accent coercion)", () => {
     writeV1({ theme: "dark", chatTheme: "purple", codeTheme: "auto" });
-    const s = new SettingsService({ userDataPath });
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(s.get("appearance")).toEqual({ schemaVersion: 2, language: "en", bundleId: "midnight" });
   });
 
   it("* + orange → midnight", () => {
     writeV1({ theme: "light", chatTheme: "orange", codeTheme: "auto" });
-    const s = new SettingsService({ userDataPath });
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(s.get("appearance")).toEqual({ schemaVersion: 2, language: "en", bundleId: "midnight" });
   });
 
   it("* + blue → midnight", () => {
     writeV1({ theme: "dark", chatTheme: "blue", codeTheme: "dark" });
-    const s = new SettingsService({ userDataPath });
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(s.get("appearance")).toEqual({ schemaVersion: 2, language: "en", bundleId: "midnight" });
   });
 
   it("high-contrast + * → high-contrast (HC always wins)", () => {
     writeV1({ theme: "high-contrast", chatTheme: "purple", codeTheme: "dark" });
-    const s = new SettingsService({ userDataPath });
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(s.get("appearance")).toEqual({ schemaVersion: 2, language: "en", bundleId: "high-contrast" });
   });
 
   it("invalid theme string → DEFAULT_BUNDLE_ID", () => {
     writeV1({ theme: "sepia", chatTheme: "default", codeTheme: "auto" });
-    const s = new SettingsService({ userDataPath });
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(s.get("appearance")).toEqual({ schemaVersion: 2, language: "en", bundleId: DEFAULT_BUNDLE_ID });
   });
 
   it("v1 write-back: migrated appearance is written to disk as v2", async () => {
     writeV1({ theme: "dark", chatTheme: "lg", codeTheme: "auto" });
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     // The constructor triggers async write-back — poll until disk reflects v2
     let onDisk: Record<string, unknown> = {};
     for (let i = 0; i < 20; i++) {
@@ -2316,7 +2368,7 @@ describe("SettingsService appearance v1 → v2 migration", () => {
       JSON.stringify({ appearance: { schemaVersion: 2, language: "en", bundleId: "forest" } }),
       "utf-8",
     );
-    const s = new SettingsService({ userDataPath });
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(s.get("appearance")).toEqual({ schemaVersion: 2, language: "en", bundleId: "forest" });
   });
 
@@ -2324,19 +2376,19 @@ describe("SettingsService appearance v1 → v2 migration", () => {
   // produce a deterministic DEFAULT_BUNDLE_ID result (no silent OS-scheme access).
   it("system + default → DEFAULT_BUNDLE_ID (main process: no matchMedia needed)", () => {
     writeV1({ theme: "system", chatTheme: "default", codeTheme: "auto" });
-    const s = new SettingsService({ userDataPath });
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(s.get("appearance")).toEqual({ schemaVersion: 2, language: "en", bundleId: DEFAULT_BUNDLE_ID });
   });
 
   it("system + lg → violet-dark + followSystem:true (main process: renderer will track OS)", () => {
     writeV1({ theme: "system", chatTheme: "lg", codeTheme: "auto" });
-    const s = new SettingsService({ userDataPath });
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(s.get("appearance")).toEqual({ schemaVersion: 2, language: "en", bundleId: "violet-dark", followSystem: true });
   });
 
   it("codeTheme-only v1 triggers write-back (needsV2WriteBack includes codeTheme)", async () => {
     writeV1({ codeTheme: "light" });
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     let onDisk: Record<string, unknown> = {};
     for (let i = 0; i < 20; i++) {
       await new Promise<void>((res) => setTimeout(res, 50));
@@ -2367,26 +2419,26 @@ describe("SettingsService appearance.font — Track A user-configurable font", (
 
   it("accepts `family: 'system'` verbatim", () => {
     writeAppearance({ family: "system" });
-    const s = new SettingsService({ userDataPath });
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(s.get("appearance")).toMatchObject({ font: { family: "system" } });
   });
 
   it("accepts a valid user stack and roundtrips it", () => {
     const stack = 'Pretendard, system-ui, "Apple SD Gothic Neo", sans-serif';
     writeAppearance({ family: stack });
-    const s = new SettingsService({ userDataPath });
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(s.get("appearance")).toMatchObject({ font: { family: stack } });
   });
 
   it("rejects a stack that contains injection metachars and drops the field", () => {
     writeAppearance({ family: 'Arial; color: red; url(http://evil)' });
-    const s = new SettingsService({ userDataPath });
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(s.get("appearance").font?.family).toBeUndefined();
   });
 
   it("rejects a stack longer than 200 chars and drops the field", () => {
     writeAppearance({ family: "A".repeat(201) });
-    const s = new SettingsService({ userDataPath });
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(s.get("appearance").font?.family).toBeUndefined();
   });
 
@@ -2396,7 +2448,7 @@ describe("SettingsService appearance.font — Track A user-configurable font", (
       JSON.stringify({ appearance: { schemaVersion: 2, language: "en", bundleId: "tokyo-night", font: { sizeScale: 1.25 } } }),
       "utf-8",
     );
-    expect(new SettingsService({ userDataPath }).get("appearance").font?.sizeScale).toBe(1.125);
+    expect(new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath }).get("appearance").font?.sizeScale).toBe(1.125);
   });
 
   it("accepts each preset sizeScale value", async () => {
@@ -2407,7 +2459,7 @@ describe("SettingsService appearance.font — Track A user-configurable font", (
           join(dir, "lvis-settings.json"),
           JSON.stringify({ appearance: { schemaVersion: 2, language: "en", bundleId: "tokyo-night", font: { sizeScale: value } } }),
         );
-        const s = new SettingsService({ userDataPath: dir });
+        const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath: dir });
         expect(s.get("appearance")).toMatchObject({ font: { sizeScale: value } });
       } finally {
         await cleanupTmpDir(dir);
@@ -2417,18 +2469,18 @@ describe("SettingsService appearance.font — Track A user-configurable font", (
 
   it("rejects an off-preset sizeScale (e.g. 0.4) and drops the field", () => {
     writeAppearance({ sizeScale: 0.4 });
-    const s = new SettingsService({ userDataPath });
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(s.get("appearance").font?.sizeScale).toBeUndefined();
   });
 
   it("drops the entire `font` field when both fields are invalid", () => {
     writeAppearance({ family: 123, sizeScale: "huge" });
-    const s = new SettingsService({ userDataPath });
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(s.get("appearance").font).toBeUndefined();
   });
 
   it("patch family-only preserves a previously patched sizeScale (PR #672 review HIGH#1)", async () => {
-    const s = new SettingsService({ userDataPath });
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await s.patch({ appearance: { schemaVersion: 2, language: "en", bundleId: "tokyo-night", font: { sizeScale: 1.125 } } });
     await s.patch({ appearance: { schemaVersion: 2, language: "en", bundleId: "tokyo-night", font: { family: "Pretendard, system-ui, sans-serif" } } });
     expect(s.get("appearance").font).toEqual({
@@ -2438,7 +2490,7 @@ describe("SettingsService appearance.font — Track A user-configurable font", (
   });
 
   it("patch sizeScale-only preserves a previously patched family (PR #672 review HIGH#1, reverse order)", async () => {
-    const s = new SettingsService({ userDataPath });
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await s.patch({ appearance: { schemaVersion: 2, language: "en", bundleId: "tokyo-night", font: { family: "Pretendard, sans-serif" } } });
     await s.patch({ appearance: { schemaVersion: 2, language: "en", bundleId: "tokyo-night", font: { sizeScale: 1.125 } } });
     expect(s.get("appearance").font).toEqual({
@@ -2448,7 +2500,7 @@ describe("SettingsService appearance.font — Track A user-configurable font", (
   });
 
   it("validates font.family at patch time — drops injection metachars (PR #672 review MAJOR#4)", async () => {
-    const s = new SettingsService({ userDataPath });
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await s.patch({
       appearance: {
         schemaVersion: 2,
@@ -2460,7 +2512,7 @@ describe("SettingsService appearance.font — Track A user-configurable font", (
   });
 
   it("patch accepts unquoted Hangul family names with Unicode-aware validator (PR #672 review CRITICAL#3)", async () => {
-    const s = new SettingsService({ userDataPath });
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await s.patch({
       appearance: {
         schemaVersion: 2,
@@ -2472,7 +2524,7 @@ describe("SettingsService appearance.font — Track A user-configurable font", (
   });
 
   it("rejects font.family containing embedded newlines (PR #672 review MAJOR#6)", async () => {
-    const s = new SettingsService({ userDataPath });
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await s.patch({
       appearance: {
         schemaVersion: 2,
@@ -2484,7 +2536,7 @@ describe("SettingsService appearance.font — Track A user-configurable font", (
   });
 
   it("patch with `font: null` is a no-op — does not crash on null deref (PR #672 2차 critic N3)", async () => {
-    const s = new SettingsService({ userDataPath });
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await s.patch({ appearance: { schemaVersion: 2, language: "en", bundleId: "tokyo-night", font: { sizeScale: 1.125 } } });
     // Caller deliberately sends `font: null` (some defensive call sites do this
     // to "clear" without specifying subfields). Must not throw, must preserve
@@ -2508,27 +2560,27 @@ describe("SettingsService E4 — shortcuts + launch-at-startup", () => {
   });
 
   it("defaults shortcuts OFF with no accelerator + launch flags false", () => {
-    const s = new SettingsService({ userDataPath });
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(s.get("shortcuts")).toEqual({ toggleWindow: null, enabled: false });
     expect(s.get("system").launchAtStartup).toBe(false);
     expect(s.get("system").launchMinimized).toBe(false);
   });
 
   it("persists a valid accelerator + enabled through patch", async () => {
-    const s = new SettingsService({ userDataPath });
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await s.patch({ shortcuts: { toggleWindow: "CommandOrControl+Shift+Space", enabled: true } });
     expect(s.get("shortcuts")).toEqual({
       toggleWindow: "CommandOrControl+Shift+Space",
       enabled: true,
     });
     // Reload from disk to confirm round-trip persistence.
-    const reloaded = new SettingsService({ userDataPath });
+    const reloaded = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(reloaded.get("shortcuts").toggleWindow).toBe("CommandOrControl+Shift+Space");
     expect(reloaded.get("shortcuts").enabled).toBe(true);
   });
 
   it("drops an invalid accelerator (lone modifier) but keeps the previous value", async () => {
-    const s = new SettingsService({ userDataPath });
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await s.patch({ shortcuts: { toggleWindow: "Alt+F1", enabled: true } });
     // Invalid: lone modifier — must be ignored, prior value preserved.
     await s.patch({ shortcuts: { toggleWindow: "Shift" } });
@@ -2538,7 +2590,7 @@ describe("SettingsService E4 — shortcuts + launch-at-startup", () => {
   });
 
   it("clears the accelerator when patched with null", async () => {
-    const s = new SettingsService({ userDataPath });
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await s.patch({ shortcuts: { toggleWindow: "Alt+F1", enabled: true } });
     await s.patch({ shortcuts: { toggleWindow: null } });
     expect(s.get("shortcuts").toggleWindow).toBeNull();
@@ -2546,17 +2598,17 @@ describe("SettingsService E4 — shortcuts + launch-at-startup", () => {
   });
 
   it("persists launchAtStartup + launchMinimized booleans", async () => {
-    const s = new SettingsService({ userDataPath });
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await s.patch({ system: { launchAtStartup: true, launchMinimized: true } });
     expect(s.get("system").launchAtStartup).toBe(true);
     expect(s.get("system").launchMinimized).toBe(true);
-    const reloaded = new SettingsService({ userDataPath });
+    const reloaded = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(reloaded.get("system").launchAtStartup).toBe(true);
     expect(reloaded.get("system").launchMinimized).toBe(true);
   });
 
   it("ignores a non-boolean launchAtStartup patch, keeping the prior value", async () => {
-    const s = new SettingsService({ userDataPath });
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await s.patch({ system: { launchAtStartup: true } });
     await s.patch({ system: { launchAtStartup: "yes" as unknown as boolean } });
     expect(s.get("system").launchAtStartup).toBe(true);
@@ -2568,7 +2620,7 @@ describe("SettingsService E4 — shortcuts + launch-at-startup", () => {
       JSON.stringify({ shortcuts: { toggleWindow: 42, enabled: "nope" } }),
       "utf-8",
     );
-    const s = new SettingsService({ userDataPath });
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     // Corrupt fields fall back to defaults (No-Fallback at boundary).
     expect(s.get("shortcuts")).toEqual({ toggleWindow: null, enabled: false });
   });
@@ -2584,7 +2636,7 @@ describe("SettingsService diagnostics (#1499 E2)", () => {
   });
 
   it("defaults: includeCrashDumps false, logRetentionDays = LOG_RETENTION_DAYS SOT", () => {
-    const s = new SettingsService({ userDataPath });
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(s.get("diagnostics")).toEqual({
       includeCrashDumps: false,
       logRetentionDays: LOG_RETENTION_DAYS,
@@ -2592,13 +2644,13 @@ describe("SettingsService diagnostics (#1499 E2)", () => {
   });
 
   it("patch persists valid values", async () => {
-    const s = new SettingsService({ userDataPath });
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await s.patch({ diagnostics: { includeCrashDumps: true, logRetentionDays: 30 } });
     expect(s.get("diagnostics")).toEqual({ includeCrashDumps: true, logRetentionDays: 30 });
   });
 
   it("patch clamps out-of-range retention and drops non-boolean includeCrashDumps", async () => {
-    const s = new SettingsService({ userDataPath });
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await s.patch({ diagnostics: { logRetentionDays: 99999 } });
     expect(s.get("diagnostics").logRetentionDays).toBe(LOG_RETENTION_MAX_DAYS); // clamped to max
     await s.patch({ diagnostics: { logRetentionDays: 0 } });
@@ -2613,7 +2665,7 @@ describe("SettingsService diagnostics (#1499 E2)", () => {
       JSON.stringify({ diagnostics: { includeCrashDumps: 1, logRetentionDays: "seven" } }),
       "utf-8",
     );
-    const s = new SettingsService({ userDataPath });
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(s.get("diagnostics")).toEqual({
       includeCrashDumps: false,
       logRetentionDays: LOG_RETENTION_DAYS,
@@ -2631,12 +2683,12 @@ describe("SettingsService telemetry normalization", () => {
   });
 
   it("defaults to everything off and no destination", () => {
-    const s = new SettingsService({ userDataPath });
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(s.get("telemetry")).toEqual({ enabled: false, crashReportingEnabled: false });
   });
 
   it("patches one field without disturbing the rest of the block", async () => {
-    const s = new SettingsService({ userDataPath });
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await s.patch({ telemetry: { endpoint: "https://metrics.corp.example/v1" } });
     await s.patch({ telemetry: { enabled: true } });
     expect(s.get("telemetry")).toEqual({
@@ -2647,7 +2699,7 @@ describe("SettingsService telemetry normalization", () => {
   });
 
   it("trims a submitted address and clears the field when it is emptied", async () => {
-    const s = new SettingsService({ userDataPath });
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await s.patch({ telemetry: { endpoint: "  https://metrics.corp.example/v1  " } });
     expect(s.get("telemetry").endpoint).toBe("https://metrics.corp.example/v1");
     await s.patch({ telemetry: { endpoint: "" } });
@@ -2655,7 +2707,7 @@ describe("SettingsService telemetry normalization", () => {
   });
 
   it("drops a non-boolean switch and a non-string address, keeping the stored value", async () => {
-    const s = new SettingsService({ userDataPath });
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await s.patch({ telemetry: { enabled: true, sentryDsn: "https://k@sentry.example/1" } });
     await s.patch({ telemetry: { enabled: "yes" as never, sentryDsn: 42 as never } });
     expect(s.get("telemetry")).toEqual({
@@ -2678,7 +2730,7 @@ describe("SettingsService telemetry normalization", () => {
       }),
       "utf-8",
     );
-    const s = new SettingsService({ userDataPath });
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(s.get("telemetry")).toEqual({
       enabled: false,
       crashReportingEnabled: true,
@@ -2697,7 +2749,7 @@ describe("SettingsService chat normalization", () => {
   });
 
   it("floors a fractional sub-agent round budget and drops mistyped fields", async () => {
-    const s = new SettingsService({ userDataPath });
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await s.patch({
       chat: {
         ...s.get("chat"),
@@ -2714,7 +2766,7 @@ describe("SettingsService chat normalization", () => {
   });
 
   it("raises a non-positive round budget to the runnable minimum", async () => {
-    const s = new SettingsService({ userDataPath });
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await s.patch({ chat: { ...s.get("chat"), subAgentMaxRounds: 0 } });
     expect(s.get("chat").subAgentMaxRounds).toBe(1);
     await s.patch({ chat: { ...s.get("chat"), subAgentMaxRounds: -5 } });
@@ -2725,7 +2777,7 @@ describe("SettingsService chat normalization", () => {
     // Deliberate: an absolute ceiling above the configured budget can only
     // surface as an agent that stops mid-task. The 32-bit timer bound this
     // could once overflow is enforced where the timer is armed instead.
-    const s = new SettingsService({ userDataPath });
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await s.patch({ chat: { ...s.get("chat"), subAgentMaxRounds: 300_000 } });
     expect(s.get("chat").subAgentMaxRounds).toBe(300_000);
   });
@@ -2738,12 +2790,12 @@ describe("SettingsService chat normalization", () => {
       }),
       "utf-8",
     );
-    const s = new SettingsService({ userDataPath });
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(s.get("chat")).toEqual(DEFAULT_SETTINGS.chat);
   });
 
   it("rejects a non-finite round budget rather than persisting NaN", async () => {
-    const s = new SettingsService({ userDataPath });
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await s.patch({ chat: { ...s.get("chat"), subAgentMaxRounds: Number.NaN } });
     expect(s.get("chat").subAgentMaxRounds).toBe(
       DEFAULT_SETTINGS.chat.subAgentMaxRounds,
@@ -2753,13 +2805,13 @@ describe("SettingsService chat normalization", () => {
   it("keeps 0 as the off value for the progress-notification cadence", async () => {
     // Unlike the round budget above, 0 is meaningful here: it is how the
     // notification is turned off, so it must not be raised to a minimum.
-    const s = new SettingsService({ userDataPath });
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await s.patch({ chat: { ...s.get("chat"), progressNudgeRounds: 0 } });
     expect(s.get("chat").progressNudgeRounds).toBe(0);
   });
 
   it("floors a fractional cadence and reads a negative one as off", async () => {
-    const s = new SettingsService({ userDataPath });
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await s.patch({ chat: { ...s.get("chat"), progressNudgeRounds: 7.9 } });
     expect(s.get("chat").progressNudgeRounds).toBe(7);
     await s.patch({ chat: { ...s.get("chat"), progressNudgeRounds: -4 } });
@@ -2767,7 +2819,7 @@ describe("SettingsService chat normalization", () => {
   });
 
   it("rejects a mistyped cadence rather than disabling the notification", async () => {
-    const s = new SettingsService({ userDataPath });
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await s.patch({ chat: { ...s.get("chat"), progressNudgeRounds: "often" as never } });
     expect(s.get("chat").progressNudgeRounds).toBe(
       DEFAULT_SETTINGS.chat.progressNudgeRounds,
@@ -2787,19 +2839,19 @@ describe("SettingsService — persisted main-window location", () => {
   });
 
   it("round-trips an inline view key across restart", async () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await service.patch({ system: { activeView: "work-board" } as SystemSettings });
     expect(service.get("system").activeView).toBe("work-board");
 
-    expect(new SettingsService({ userDataPath }).get("system").activeView).toBe("work-board");
+    expect(new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath }).get("system").activeView).toBe("work-board");
   });
 
   it("round-trips a plugin view key, which only the renderer can confirm still exists", async () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await service.patch({
       system: { activeView: "plugin:example-plugin:MainView" } as unknown as SystemSettings,
     });
-    expect(new SettingsService({ userDataPath }).get("system").activeView).toBe(
+    expect(new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath }).get("system").activeView).toBe(
       "plugin:example-plugin:MainView",
     );
   });
@@ -2819,14 +2871,14 @@ describe("SettingsService — persisted main-window location", () => {
       }),
       "utf-8",
     );
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(service.get("system").activeView).toBe("home");
     // The rest of the file is untouched by one bad field.
     expect(service.get("chat").systemPrompt).toBe("preserved-prompt");
   });
 
   it("refuses to patch an invalid location, keeping the stored one", async () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await service.patch({ system: { activeView: "work-board" } as SystemSettings });
     // A retired key: valid in an older build, absent from the table now.
     await service.patch({ system: { activeView: "reminders" } as unknown as SystemSettings });
@@ -2834,14 +2886,14 @@ describe("SettingsService — persisted main-window location", () => {
   });
 
   it("folds a retired settings tab id onto its replacement", async () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     // "general" was split up; a value persisted by an older build must still
     // land somewhere real rather than on a tab that no longer exists.
     await service.patch({ system: { settingsTab: "general" } as unknown as SystemSettings });
     expect(service.get("system").settingsTab).toBe("llm");
 
     await service.patch({ system: { settingsTab: "permissions" } as SystemSettings });
-    expect(new SettingsService({ userDataPath }).get("system").settingsTab).toBe("permissions");
+    expect(new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath }).get("system").settingsTab).toBe("permissions");
   });
 });
 
@@ -2863,7 +2915,7 @@ describe("subAgentAutonomousWake un-fossilize migration", () => {
     const path = join(userDataPath, "lvis-settings.json");
     writeFileSync(path, JSON.stringify({ features: { subAgentAutonomousWake: false } }), "utf-8");
 
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(service.get("features")?.subAgentAutonomousWake).toBe(true);
 
     // Any save persists the marker; afterwards the migration never re-runs.
@@ -2878,10 +2930,10 @@ describe("subAgentAutonomousWake un-fossilize migration", () => {
     // Fresh installs have no settings file; loadSettings seeds KNOWN_MIGRATIONS
     // so a user opt-out saved in the very first session (before any migration
     // marker could exist on disk) is not treated as a fossil on the next load.
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await service.patch({ features: { subAgentAutonomousWake: false } } as never);
 
-    const rebooted = new SettingsService({ userDataPath });
+    const rebooted = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(rebooted.get("features")?.subAgentAutonomousWake).toBe(false);
   });
 
@@ -2892,7 +2944,7 @@ describe("subAgentAutonomousWake un-fossilize migration", () => {
       features: { subAgentAutonomousWake: false },
     }), "utf-8");
 
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     expect(service.get("features")?.subAgentAutonomousWake).toBe(false);
   });
 });

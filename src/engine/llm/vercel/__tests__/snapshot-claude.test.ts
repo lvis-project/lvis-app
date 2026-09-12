@@ -11,8 +11,8 @@
  *                    assistant.reasoning part.
  *
  * Also exercises:
- *   - Budget → thinking config mapping (adaptive for claude-4.x, enabled for 3.x).
- *   - interleaved-thinking-2025-05-14 beta header only when thinking+tools.
+ *   - Budget → thinking config mapping for adaptive and numeric-only models.
+ *   - Numeric interleaving beta opt-in only for supported tool requests.
  *   - Short-reasoning-then-tool (#12433 empty-buffer edge) → log-and-skip.
  */
 import { describe, it, expect, vi } from "vitest";
@@ -44,11 +44,13 @@ describe("Claude helpers — budget → thinking effort mapping", () => {
     expect(mapBudgetToEffort(32_000)).toBe("max");
   });
 
-  it("detects adaptive-thinking-capable Claude families (≥ v4, version-parsed)", () => {
-    expect(supportsAdaptiveThinking("claude-sonnet-4-5")).toBe(true);
+  it("separates adaptive-capable versions from numeric-only versions and release dates", () => {
+    expect(supportsAdaptiveThinking("claude-sonnet-4-5")).toBe(false);
     expect(supportsAdaptiveThinking("claude-sonnet-4-6")).toBe(true);
-    expect(supportsAdaptiveThinking("claude-opus-4")).toBe(true);
-    expect(supportsAdaptiveThinking("claude-haiku-4")).toBe(true);
+    expect(supportsAdaptiveThinking("claude-opus-4.6")).toBe(true);
+    expect(supportsAdaptiveThinking("claude-opus-4")).toBe(false);
+    expect(supportsAdaptiveThinking("claude-haiku-4")).toBe(false);
+    expect(supportsAdaptiveThinking("claude-sonnet-4-20250514")).toBe(false);
     // Future-proof: claude-5.x and later are picked up without code changes.
     expect(supportsAdaptiveThinking("claude-sonnet-5-20270101")).toBe(true);
     expect(supportsAdaptiveThinking("claude-5-opus")).toBe(true);
@@ -424,7 +426,7 @@ describe("stream-mapper — Claude signature capture per-step", () => {
 // ────────────────────────────────────────────────────────────────
 
 describe("VercelUnifiedProvider claude — adapter wiring (mocked streamText)", () => {
-  it("claude-4.x + thinking uses adaptive thinking; tools add beta header", async () => {
+  it("projects adaptive thinking and effort without a numeric interleaving opt-in", async () => {
     vi.resetModules();
     const streamTextSpy = vi.fn(() => ({
       stream: (async function* () {
@@ -469,13 +471,13 @@ describe("VercelUnifiedProvider claude — adapter wiring (mocked streamText)", 
     const callArg = streamTextSpy.mock.calls[0]![0] as Record<string, unknown>;
     expect(callArg.providerOptions).toEqual({
       anthropic: {
-        thinking: { type: "adaptive", effort: "high" },
+        thinking: { type: "adaptive" },
+        effort: "high",
       },
     });
-    // Two betas comma-joined: context-1m for the 1M-tier model + interleaved
-    // thinking because thinking+tools coincide.
+    // Adaptive thinking interleaves automatically; only the context opt-in stays.
     expect(callArg.headers).toEqual({
-      "anthropic-beta": "context-1m-2025-08-07,interleaved-thinking-2025-05-14",
+      "anthropic-beta": "context-1m-2025-08-07",
     });
 
     vi.doUnmock("ai");

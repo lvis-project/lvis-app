@@ -14,7 +14,7 @@
  * importing `node:fs` directly — this is the framework boundary for
  * plugin-owned data.
  */
-import { safeStorage } from "electron";
+import type { SecretEncryption } from "../data/secret-document-store.js";
 import { realpathSync } from "node:fs";
 import { lstat, mkdir, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
@@ -149,6 +149,7 @@ function canonicaliseDataRoot(
 export function createPluginStorage(
   pluginId: string,
   pluginDataDir: string,
+  encryption: SecretEncryption,
   log?: PluginStorageRejectionLog,
 ): PluginStorage {
   // Construction-time canonicalisation is intentionally sync: it runs once
@@ -361,15 +362,14 @@ export function createPluginStorage(
       await mkdir(target, { recursive: true, mode: PLUGIN_DIR_MODE });
     },
 
-    // ─── Encrypted-at-rest variants (Electron safeStorage) ─────────────────
+    // Encrypted-at-rest variants use the explicit host provider.
     // Ciphertext is written through the SAME sandboxed `guard()` machinery as
     // every plaintext method, so absolute-path / lexical `..` / symlink-escape
     // rejection applies identically. Intended for dynamically-acquired plugin
     // secrets/tokens (OAuth/MSAL caches) — the plugin's own encrypted store,
     // distinct from host-provisioned `hostApi.getSecret` config secrets.
     //
-    // FAIL-CLOSED, No-Fallback: when OS encryption is unavailable (safeStorage
-    // reports false, or electron `safeStorage` is unreachable) both methods
+    // FAIL-CLOSED, No-Fallback: when host encryption is unavailable both methods
     // throw {@link PluginStorageEncryptionUnavailableError} — the encrypted
     // variants NEVER read or write plaintext. The availability check runs AFTER
     // `guard()` so a path-escape attempt still surfaces as a PluginStorageError
@@ -384,10 +384,17 @@ export function createPluginStorage(
         );
       }
       const target = await guard(rel);
-      if (!safeStorage || !safeStorage.isEncryptionAvailable()) {
+      if (!encryption.isEncryptionAvailable()) {
         throw new PluginStorageEncryptionUnavailableError(pluginId);
       }
-      const ciphertext = safeStorage.encryptString(plaintext);
+      if (encryption.getSelectedStorageBackend() === "external_key") {
+        let existing: Buffer | undefined;
+        try { existing = await readFile(target); } catch (error) {
+          if (!isMissingPathError(error)) throw error;
+        }
+        if (existing !== undefined) encryption.decryptString(existing);
+      }
+      const ciphertext = encryption.encryptString(plaintext);
       await ensureParent(target);
       // 0o600 — the ciphertext is a secret blob; keep it owner-only at rest.
       await writeFile(target, ciphertext, { mode: PLUGIN_FILE_MODE });
@@ -395,13 +402,13 @@ export function createPluginStorage(
 
     async readEncrypted(rel) {
       const target = await guard(rel);
-      if (!safeStorage || !safeStorage.isEncryptionAvailable()) {
+      if (!encryption.isEncryptionAvailable()) {
         throw new PluginStorageEncryptionUnavailableError(pluginId);
       }
       // Raw ciphertext bytes; readFile throws ENOENT for a missing file, matching
       // readText's contract.
       const ciphertext = await readFile(target);
-      return safeStorage.decryptString(Buffer.from(ciphertext));
+      return encryption.decryptString(Buffer.from(ciphertext));
     },
   };
   return instrumentEffectsByPath(raw, "storage");

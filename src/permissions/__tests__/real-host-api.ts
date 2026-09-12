@@ -1,3 +1,4 @@
+import { createBootHostFixture } from "../../__tests__/support/host-runtime.js";
 /**
  * Construction of the REAL plugin hostApi object, and the traversal every
  * hostApi-surface gate runs over.
@@ -82,6 +83,7 @@ export async function buildRealHostApi(
   harness.capturedRuntimeOptions = null;
   const bootAuditLogger = { log: vi.fn() };
   await initPluginRuntime({
+    host: createBootHostFixture(),
     projectRoot: "/tmp/lvis-test/project",
     settingsService: {
       get: vi.fn((key: string) => {

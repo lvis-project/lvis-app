@@ -13,6 +13,8 @@ import {
   freshAllVendorBlocks,
   freshVendorBlocks,
   getLlmVendorSettings,
+  getLlmThinkingBudgetLimit,
+  getLlmThinkingBudgetRungs,
   type LLMVendorSettings,
   isApiKeyOptionalLlmVendor,
   isDefaultVisibleLLMVendor,
@@ -22,6 +24,7 @@ import {
   isSelfHostedVllmVendor,
   normalizeLlmVendorModel,
   DEFAULT_LLM_VENDOR,
+  DEFAULT_LLM_OUTPUT_TOKEN_LIMIT,
   narrowLlmVendor,
   COPILOT_BASE_URL,
 } from "../llm-vendor-defaults.js";
@@ -65,6 +68,83 @@ describe("isLLMVendor", () => {
 });
 
 describe("LLMVendorSettings", () => {
+  it.each([
+    [undefined, undefined, 8_000],
+    [10_000, undefined, 10_000],
+    [14_000, undefined, 14_000],
+    [16_000, 32_000, 16_000],
+    [16_001, 32_000, 16_000],
+    [32_000, undefined, 16_000],
+    [14_000, 16_000, 8_000],
+    [48_000, 64_000, 32_000],
+    [10_000, 25_001, 10_000],
+    [20_000, 25_001, 16_000],
+    [10_000, 1, 0],
+    [0, 32_000, 0],
+  ])("normalizes thinking %s with output %s to %i", (thinkingBudgetTokens, outputTokenLimit, expected) => {
+    const block = getLlmVendorSettings({
+      openai: { ...LLM_VENDOR_DEFAULTS.openai, thinkingBudgetTokens: thinkingBudgetTokens as number, outputTokenLimit },
+    }, "openai");
+    expect(block.thinkingBudgetTokens).toBe(expected);
+    expect(block.outputTokenLimit).toBe(outputTokenLimit ?? 32_000);
+  });
+
+  it.each([NaN, Infinity, -Infinity, -1, 1.5, "20000", null, {}, Number.MAX_VALUE])(
+    "replaces invalid thinking input %s with the bounded default", (value) => {
+      const stored = { ...LLM_VENDOR_DEFAULTS.openai, thinkingBudgetTokens: value as number };
+      expect(getLlmVendorSettings({ openai: stored }, "openai").thinkingBudgetTokens).toBe(8_000);
+      expect(getLlmVendorSettings({ openai: { ...stored, outputTokenLimit: 8_000 } }, "openai").thinkingBudgetTokens).toBe(4_000);
+    },
+  );
+
+  it("shows only low, medium and high at the default output ceiling", () => {
+    expect(getLlmThinkingBudgetRungs(32_000)).toEqual([
+      { key: "low", budget: 4_000 },
+      { key: "medium", budget: 8_000 },
+      { key: "high", budget: 16_000 },
+    ]);
+    expect(LLM_VENDOR_DEFAULTS.openai.thinkingBudgetTokens).toBe(8_000);
+    expect(getLlmThinkingBudgetRungs(16_000).map((rung) => rung.budget)).toEqual([4_000, 8_000]);
+    expect(getLlmThinkingBudgetRungs(64_000).map((rung) => rung.budget)).toEqual([4_000, 8_000, 16_000, 32_000]);
+    expect(getLlmThinkingBudgetRungs(4_000)).toEqual([]);
+  });
+
+  it.each([
+    [4_000, 3_999, []],
+    [4_001, 4_000, [4_000]],
+    [8_000, 4_000, [4_000]],
+    [8_001, 8_000, [4_000, 8_000]],
+    [16_000, 8_000, [4_000, 8_000]],
+    [16_001, 16_000, [4_000, 8_000, 16_000]],
+    [32_000, 16_000, [4_000, 8_000, 16_000]],
+    [32_001, 32_000, [4_000, 8_000, 16_000, 32_000]],
+  ] as const)("admits only presets strictly below output %i", (outputTokenLimit, cap, budgets) => {
+    expect(getLlmThinkingBudgetLimit(outputTokenLimit)).toBe(cap);
+    expect(getLlmThinkingBudgetRungs(outputTokenLimit).map((rung) => rung.budget)).toEqual(budgets);
+    expect(getLlmVendorSettings({ openai: {
+      ...LLM_VENDOR_DEFAULTS.openai, outputTokenLimit, thinkingBudgetTokens: 32_000,
+    } }, "openai").thinkingBudgetTokens).toBe(cap);
+  });
+
+  it.each([
+    [1_025, 1_024], [2_000, 1_999], [2_047, 2_046], [2_048, 2_047],
+  ])("retains numeric thinking capacity below the first preset with output %i", (outputTokenLimit, cap) => {
+    expect(getLlmThinkingBudgetLimit(outputTokenLimit)).toBe(cap);
+    expect(getLlmVendorSettings({ openai: {
+      ...LLM_VENDOR_DEFAULTS.openai, outputTokenLimit, thinkingBudgetTokens: 1_024,
+    } }, "openai").thinkingBudgetTokens).toBe(1_024);
+  });
+
+  it.each([1, 2, 3, 4, 7, 9, 10, 11, 12, 25_001, 32_000, Number.MAX_SAFE_INTEGER])(
+    "offers distinct bounded integer depths for output %i", (outputTokenLimit) => {
+      const budgets = getLlmThinkingBudgetRungs(outputTokenLimit).map((rung) => rung.budget);
+      expect(budgets.every((budget) => [4_000, 8_000, 16_000, 32_000].includes(budget))).toBe(true);
+      expect(new Set(budgets).size).toBe(budgets.length);
+      expect(budgets).toEqual([...budgets].sort((a, b) => a - b));
+      expect(budgets.every((budget) => Number.isSafeInteger(budget) && budget > 0 && budget < outputTokenLimit)).toBe(true);
+    },
+  );
+
   it("freshVendorBlocks() returns default-visible mutable copies", () => {
     const blocks = freshVendorBlocks();
     expect(Object.keys(blocks).sort()).toEqual(
@@ -301,13 +381,19 @@ describe("getLlmVendorSettings output ceiling", () => {
     expect(block.outputTokenLimit).toBe(16_384);
   });
 
-  it("leaves the ceiling absent when nothing is stored", () => {
-    const block = getLlmVendorSettings(freshVendorBlocks(), "openai");
-    expect(block).not.toHaveProperty("outputTokenLimit");
+  it("supplies the same default for fresh and pre-existing vendor blocks", () => {
+    expect(DEFAULT_LLM_OUTPUT_TOKEN_LIMIT).toBe(32_000);
+    for (const vendor of LLM_VENDORS) {
+      expect(LLM_VENDOR_DEFAULTS[vendor].outputTokenLimit).toBe(DEFAULT_LLM_OUTPUT_TOKEN_LIMIT);
+      expect(getLlmVendorSettings(undefined, vendor).outputTokenLimit).toBe(DEFAULT_LLM_OUTPUT_TOKEN_LIMIT);
+      const stored = { ...LLM_VENDOR_DEFAULTS[vendor] };
+      delete stored.outputTokenLimit;
+      expect(getLlmVendorSettings({ [vendor]: stored }, vendor).outputTokenLimit).toBe(DEFAULT_LLM_OUTPUT_TOKEN_LIMIT);
+    }
   });
 
   it.each([0, -1, 12.5, Number.NaN, "16384"])(
-    "drops %p rather than passing an unusable ceiling to the transport",
+    "resolves malformed ceiling %p to the default",
     (stored) => {
       // The transport reads any non-positive or non-integer value as "no cap",
       // so a value that survived here would look applied and do nothing.
@@ -320,7 +406,7 @@ describe("getLlmVendorSettings output ceiling", () => {
         },
         "openai",
       );
-      expect(block).not.toHaveProperty("outputTokenLimit");
+      expect(block.outputTokenLimit).toBe(DEFAULT_LLM_OUTPUT_TOKEN_LIMIT);
     },
   );
 });

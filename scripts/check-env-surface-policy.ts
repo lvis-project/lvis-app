@@ -103,6 +103,10 @@ const INTERNAL: readonly string[] = [
  */
 const PRE_LAUNCH: readonly string[] = [
   "LVIS_HOME",
+  // Host paths and the pinned external encryption provider are fixed at startup.
+  "LVIS_USER_DATA_DIR",
+  "LVIS_RESOURCES_DIR",
+  "LVIS_SECRET_KEY_FILE",
   // Names the trace sink for one run — a collector URL or a file path. It is
   // decided by whoever starts the process (a benchmark harness, a support
   // capture), before there is a window to ask in, and it is off unless set.

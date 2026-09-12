@@ -1,3 +1,4 @@
+import { createBootHostFixture, createDesktopHostFixture } from "../../../__tests__/support/host-runtime.js";
 /**
  * HostApi window targeting — a host→renderer send must go to the CURRENT main
  * window, not the one captured at boot.
@@ -146,6 +147,7 @@ async function overlayHostApi(input: {
 }): Promise<OverlayHostApi> {
   runtimeTestState.capturedRuntimeOptions = null;
   await initPluginRuntime({
+    host: createBootHostFixture({ desktop: createDesktopHostFixture({ getAppWindows: () => runtimeTestState.browserWindows as never[] }) }),
     projectRoot: "/tmp/lvis-test/project",
     settingsService: {
       get: vi.fn((key: string) => {

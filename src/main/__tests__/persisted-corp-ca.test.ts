@@ -1,3 +1,4 @@
+import { unavailableSecretEncryption } from "../../__tests__/support/host-runtime.js";
 /**
  * The boot-time corporate-CA read, and the shared synchronous settings parse
  * underneath it.
@@ -46,7 +47,7 @@ describe("readPersistedCorpCaConfigSync", () => {
   });
 
   it("reads back what the Settings UI wrote", async () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ encryption: unavailableSecretEncryption, userDataPath });
     await service.patch({
       system: {
         ...service.get("system"),

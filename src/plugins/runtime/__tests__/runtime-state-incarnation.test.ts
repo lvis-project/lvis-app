@@ -4,6 +4,7 @@ import { PluginRuntime, type PluginRuntimeOptions } from "../index.js";
 import { createNoopHostApi } from "../sandbox.js";
 import type { PluginManifest } from "../../types.js";
 import { useTempDirs } from "../../../__tests__/test-helpers.js";
+import { unavailableSecretEncryption } from "../../../__tests__/support/host-runtime.js";
 
 type IncarnationCleanup = {
   disposers: Array<() => void>;
@@ -26,6 +27,9 @@ afterEach(async () => {
 });
 
 class IncarnationTestRuntime extends PluginRuntime {
+  constructor(options: Omit<PluginRuntimeOptions, "encryption">) {
+    super({ ...options, encryption: unavailableSecretEncryption });
+  }
   buildPending(pluginId: string, manifest: PluginManifest, dataDir: string) {
     const incarnation = this.buildHostApiIncarnation(pluginId, manifest, dataDir, undefined, null);
     incarnationCleanups.push(incarnation);
@@ -80,7 +84,7 @@ describe("pending HostApi incarnation lifecycle", () => {
       hostRoot: "/tmp/lvis-incarnation-host",
       createHostApi: (pluginId, _manifest, pluginDataDir, incarnation) => {
         captured = incarnation;
-        return createNoopHostApi(pluginId, pluginDataDir);
+        return createNoopHostApi(pluginId, pluginDataDir, unavailableSecretEncryption);
       },
     });
     const manifest = {
@@ -116,7 +120,7 @@ describe("pending HostApi incarnation lifecycle", () => {
         incarnation.registerDisposer(() => {
           disposeCalls += 1;
         });
-        return createNoopHostApi(pluginId, pluginDataDir);
+        return createNoopHostApi(pluginId, pluginDataDir, unavailableSecretEncryption);
       },
     });
     const manifest = {
@@ -144,7 +148,7 @@ describe("pending HostApi incarnation lifecycle", () => {
       hostRoot: "/tmp/lvis-incarnation-host",
       createHostApi: (pluginId, _manifest, pluginDataDir, incarnation) => {
         captured = incarnation;
-        return createNoopHostApi(pluginId, pluginDataDir);
+        return createNoopHostApi(pluginId, pluginDataDir, unavailableSecretEncryption);
       },
     });
     const manifest = {
@@ -171,7 +175,7 @@ describe("pending HostApi incarnation lifecycle", () => {
       hostRoot: "/tmp/lvis-incarnation-host",
       createHostApi: (pluginId, _manifest, pluginDataDir, incarnation) => {
         captured = incarnation;
-        return createNoopHostApi(pluginId, pluginDataDir);
+        return createNoopHostApi(pluginId, pluginDataDir, unavailableSecretEncryption);
       },
     });
     const manifest = {
@@ -194,7 +198,7 @@ describe("pending HostApi incarnation lifecycle", () => {
     const runtime = new IncarnationTestRuntime({
       hostRoot: "/tmp/lvis-incarnation-host",
       createHostApi: (pluginId, _manifest, pluginDataDir) =>
-        createNoopHostApi(pluginId, pluginDataDir),
+        createNoopHostApi(pluginId, pluginDataDir, unavailableSecretEncryption),
     });
     const manifest = {
       id: "plugin-a", name: "Plugin A", version: "1.0.0", entry: "entry.mjs",
@@ -227,7 +231,7 @@ describe("pending HostApi incarnation lifecycle", () => {
       hostRoot: "/tmp/lvis-incarnation-host",
       createHostApi: (pluginId, _manifest, pluginDataDir, incarnation) => {
         captured = incarnation;
-        return createNoopHostApi(pluginId, pluginDataDir);
+        return createNoopHostApi(pluginId, pluginDataDir, unavailableSecretEncryption);
       },
     });
     const manifest = {

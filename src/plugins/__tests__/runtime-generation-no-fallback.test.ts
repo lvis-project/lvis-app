@@ -2,10 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 import { createNoopHostApiForTests, PluginRuntime } from "../runtime.js";
 import type { PluginManifest, RuntimePlugin } from "../runtime/types.js";
 import type { PluginRuntimeGenerationProjection } from "../plugin-host-generation.js";
+import { unavailableSecretEncryption } from "../../__tests__/support/host-runtime.js";
 
 describe("PluginRuntime generation isolation", () => {
   it("does not fall back to a live handler missing from the leased generation", async () => {
-    const runtime = new PluginRuntime({
+    const runtime = new PluginRuntime({ encryption: unavailableSecretEncryption,
       hostRoot: "/tmp/lvis-runtime-generation-test",
       createHostApi: createNoopHostApiForTests,
     });
@@ -72,7 +73,7 @@ describe("PluginRuntime generation isolation", () => {
   });
 
   it("fails closed when an operation is attempted before lifecycle binding", async () => {
-    const runtime = new PluginRuntime({
+    const runtime = new PluginRuntime({ encryption: unavailableSecretEncryption,
       hostRoot: "/tmp/lvis-runtime-unbound-test",
       createHostApi: createNoopHostApiForTests,
     });
@@ -84,7 +85,7 @@ describe("PluginRuntime generation isolation", () => {
   });
 
   it("lets an admitted exact-generation call finish after the live pointer retires", async () => {
-    const runtime = new PluginRuntime({
+    const runtime = new PluginRuntime({ encryption: unavailableSecretEncryption,
       hostRoot: "/tmp/lvis-runtime-drain-test",
       createHostApi: createNoopHostApiForTests,
     });

@@ -1,3 +1,4 @@
+import type { SecretEncryption } from "../data/secret-document-store.js";
 /**
  * Main-process lifecycle for the dedicated Tailnet observer listener.
  *
@@ -173,6 +174,7 @@ interface TailnetObserverServerDependencies {
 }
 
 export interface StartTailnetObserverServerOptions {
+  readonly encryption: SecretEncryption;
   readonly conversationSurfaceRuntime: ConversationSurfaceRuntime;
   readonly getCurrentConversationId: () => string;
   readonly isConversationBusy: () => boolean;
@@ -783,6 +785,7 @@ async function startForBoot(
   }
   const pairedSharingRuntime = config.pairedSharingEnabled
     ? injectedPairedSharingRuntime ?? await createTailnetPairedSharingRuntime({
+      encryption: options.encryption,
         getCurrentConversationId: options.getCurrentConversationId,
       })
     : undefined;

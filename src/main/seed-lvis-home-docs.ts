@@ -1,4 +1,3 @@
-import { app } from "electron";
 import {
   closeSync,
   existsSync,
@@ -18,6 +17,7 @@ import { AGENTS_DOC_NAME, lvisHome } from "../shared/lvis-home.js";
 import * as atomicFile from "../lib/atomic-file.js";
 import { sha256Hex } from "../lib/hex-digest-equal.js";
 import { isMissingPathError } from "../lib/atomic-file.js";
+import { getConfiguredHostResources } from "./host-resources.js";
 
 export interface LvisHomeDocUpgradeMarker {
   sourcePath: string;
@@ -551,10 +551,9 @@ function seedDir(
 }
 
 function resolvePackagedResource(name: string): string | null {
-  // Packaged app: process.resourcesPath points to `.../<App>.app/Contents/Resources`
-  // on macOS or `.../resources` on Windows/Linux. extraResources entries land here.
-  if (app.isPackaged) {
-    const packaged = join(process.resourcesPath, name);
+  const resourceRoot = getConfiguredHostResources()?.resourcePath;
+  if (resourceRoot !== undefined) {
+    const packaged = join(resourceRoot, name);
     return existsSync(packaged) ? packaged : null;
   }
 

@@ -478,16 +478,16 @@ export type StreamSmoothing = "none" | "word" | "char";
  * documented architectural reason.
  *
  * `outputTokenLimit` below is deliberately not a sampling control: it is a
- * host-owned ceiling used only by bounded background one-shot generation.
- * API-key transports map it to their native request limit, while the engine
- * enforces the same ceiling for transports that cannot do so natively.
+ * host-owned ceiling for API chat and bounded one-shot generation. API-key
+ * transports map it to their native total output limit. Background callers
+ * additionally enforce their own returned-text bound.
  */
 export interface StreamTurnParams {
   model: string;
   systemPrompt: string;
   messages: GenericMessage[];
   tools?: ToolSchema[];
-  /** Host-owned bounded output ceiling for background one-shot calls only. */
+  /** Host-owned total output ceiling, projected into the native request. */
   outputTokenLimit?: number;
   /** Client-side stream smoothing (word/char chunking via Vercel smoothStream). */
   streamSmoothing?: StreamSmoothing;

@@ -29,6 +29,8 @@
       // there is invisible to Knip — so a dead export under scripts/hooks/
       // could never be reported, and seven of them had accumulated.
       "entry": [
+        // Standalone Node command emitted by build:main and invoked by the native launcher.
+        "src/headless.ts",
         "scripts/smoke-live-model.mjs",
         "scripts/smoke-live-app.mjs",
         // Loaded by the installer packager through build.beforePack.

@@ -588,6 +588,7 @@ export function mergeLlmPatch(
 
 const LLM_VENDOR_SETTING_KEYS = [
   "model",
+  "outputTokenLimit",
   // A block whose only content is a preset's model is still configuration:
   // without this the openai-compatible block is pruned the moment chat moves
   // to another vendor, and every preset's model goes with it.

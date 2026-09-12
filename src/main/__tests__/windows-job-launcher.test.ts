@@ -6,10 +6,12 @@ vi.mock("node:child_process", () => ({ spawn: mocks.spawn }));
 vi.mock("node:fs", () => ({ existsSync: mocks.existsSync }));
 vi.mock("../main-paths.js", () => ({ projectRoot: "/trusted/app" }));
 import { resolveWindowsJobLauncher, spawnWindowsJobProcess } from "../windows-job-launcher.js";
+import { configureHostResources } from "../host-resources.js";
 
 describe("Windows job launcher", () => {
   afterEach(() => vi.unstubAllGlobals());
   beforeEach(() => {
+    configureHostResources({ resourcePath: "/trusted/resources", isPackaged: true });
     vi.restoreAllMocks();
     mocks.spawn.mockReset();
     mocks.existsSync.mockReset().mockReturnValue(true);
@@ -19,6 +21,7 @@ describe("Windows job launcher", () => {
     expect(resolveWindowsJobLauncher()).toBe(join("/trusted/resources", "windows-job", "x64", "lvis-job.exe"));
   });
   it("resolves development assets from the app root", () => {
+    configureHostResources({ resourcePath: "/trusted/app/resources", isPackaged: false });
     vi.stubGlobal("process", { ...process, defaultApp: true });
     expect(resolveWindowsJobLauncher()).toBe(join("/trusted/app", "resources", "windows-job", "x64", "lvis-job.exe"));
   });

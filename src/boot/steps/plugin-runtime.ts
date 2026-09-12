@@ -1,3 +1,4 @@
+import type { BootHost } from "../host-runtime.js";
 /**
  * Boot §4.2 Step 3-5 — Plugin runtime + HostApi factory.
  *
@@ -13,14 +14,9 @@
  *
  * No plugin-specific literals here — everything is manifest-driven.
  */
-import { app } from "electron";
 import type { BrowserWindow } from "electron";
 import { mkdirSync } from "node:fs";
-import { installPluginPartitionPolicy } from "../../main/html-preview-partition.js";
-import { isAppUpdateInstallRequested } from "../../main/app-update-install-intent.js";
-import { isAppShutdownStarted } from "../../main/app-state.js";
-import { registerShutdownHook } from "../../main/app-shutdown.js";
-import { pluginPartitionName } from "../../shared/plugin-partition.js";
+import { registerBootPluginShutdown, registerShutdownHook } from "../../main/app-shutdown.js";
 import { onEvent as onHostEvent } from "../types.js";
 import { AuditLogger } from "../../audit/audit-logger.js";
 import { PluginRuntime } from "../../plugins/runtime.js";
@@ -125,6 +121,7 @@ export interface LateBindingRefs {
 }
 
 export interface InitPluginRuntimeInput {
+  host: BootHost;
   projectRoot: string;
   settingsService: SettingsService;
   memoryManager: MemoryManager;
@@ -335,16 +332,8 @@ export async function initPluginRuntime(
   // published the ordered cleanup in `main/app-shutdown.ts` runs these same
   // handlers and `isAppShutdownStarted()` makes this a no-op; before that, the
   // ordered cleanup returns "skipped" and nothing else would run them.
-  app.once("before-quit", (event) => {
-    if (isAppUpdateInstallRequested()) return;
-    if (isAppShutdownStarted()) return;
-    if (pluginShutdownHandlers.length === 0 || pluginShutdownRan) return;
-    event.preventDefault();
-    void (async () => {
-      await runPluginShutdownHandlers();
-      app.quit();
-    })();
-  });
+  input.host.desktop?.onBootShutdown(runPluginShutdownHandlers,
+    () => pluginShutdownHandlers.length > 0 && !pluginShutdownRan);
 
   // Generic configOverrides plus declarative pythonExecutable injection.
   const configOverrides = buildPluginConfigOverrides(settingsService);
@@ -393,7 +382,7 @@ export async function initPluginRuntime(
   // §Step 4 — wire `app.isPackaged` into the dev-flag gate before any
   // helper or downstream module reads it. Packaged builds with LVIS_DEV* set
   // get a single audit warning, never a per-flag enumeration.
-  setIsPackaged(app.isPackaged);
+  setIsPackaged(input.host.isPackaged);
   if (shouldWarnPackagedFlagsIgnored()) {
     // Snapshot was captured at `dev-flags.ts` import time, BEFORE
     // `main.ts:67-73` scrubbed the vars from `process.env`. Listing the
@@ -414,9 +403,7 @@ export async function initPluginRuntime(
   let bundleLifecycle: PluginBundleLifecycleHandler | undefined;
 
   const installLoadedPluginPartitionPolicy = (pluginId: string): void => {
-    installPluginPartitionPolicy(pluginPartitionName(pluginId), {
-      pluginRoot: pluginRuntime.getPluginRoot(pluginId),
-    });
+    input.host.desktop?.installPluginPartition(pluginId, pluginRuntime.getPluginRoot(pluginId));
   };
 
   // §Step 1 + §Step 2 — thread the canonical installed-plugin root through
@@ -455,6 +442,7 @@ export async function initPluginRuntime(
    */
   const authRedirectCatchers = new AuthRedirectCatchers();
   const createHostApi = createHostApiFactory({
+    host: input.host,
     getPluginRuntime: () => pluginRuntime,
     lateBinding,
     getRegistryEntry,
@@ -480,6 +468,7 @@ export async function initPluginRuntime(
   });
   const { preparePluginStart, onDisable, onActiveStateChange, onEnable } =
     createLifecycleCallbacks({
+      getAppWindows: () => input.host.desktop?.getAppWindows() ?? [],
       lateBinding,
       getMainWindow,
       mainWindow,
@@ -489,6 +478,7 @@ export async function initPluginRuntime(
     });
 
   pluginRuntime = new PluginRuntime({
+    encryption: input.host.encryption,
     hostRoot: projectRoot,
     pluginsRoot: pluginPaths.pluginsRoot,
     registryPath: pluginPaths.registryPath,
@@ -502,6 +492,10 @@ export async function initPluginRuntime(
     onEnable,
     onPluginUiRevisionChange: input.onPluginUiRevisionChange,
     createHostApi,
+  });
+  registerBootPluginShutdown(async () => {
+    await runPluginShutdownHandlers();
+    await pluginRuntime.stopAll();
   });
 
   // AC1.2 — periodic purge of stale ApprovalIssuerRegistry entries.

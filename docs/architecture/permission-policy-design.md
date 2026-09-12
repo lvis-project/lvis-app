@@ -89,6 +89,34 @@ risk review and the execution sandbox govern the program's internal effects,
 as they do for other interpreters. Shell substitutions are still checked before
 the debugger receives the resulting argument.
 
+The `sqlite3` [argument contract](../../src/tools/shell-sqlite-arguments.ts)
+defines the supported options and consumes their values before assigning positional roles.
+Role assignment first requires a fixed argument count after shell expansion.
+Unknown quoted scalar data may occupy one value slot; unresolved word splitting,
+globbing or array multiplicity cannot shift subsequent option or positional roles.
+The database operand and `-init` file remain paths; later operands and `-cmd`
+values carry SQL or dot-commands. Formatting and numeric option values are data.
+Database URI filenames are decoded before normal sensitive-path, symlink and
+directory checks. SQL length does not affect its role or grant authority.
+Literal filenames in supported SQL and dot-command operations receive the same
+path checks. SQL table names are recognized in their structural context, including
+single-quoted, qualified and grouped sources, joins and `IN` table forms.
+Expression strings and aliases keep their data role. Explicit `.shell` and
+`.system` commands re-enter structural and path inspection using the CLI's
+argument construction for its POSIX system shell;
+the Windows system-shell dialect is unsupported. Computed filenames,
+extension loading, file-backed virtual tables, command pipes, cwd changes,
+unknown options and unsupported dot-command forms are refused before approval
+or execution. Database URIs combined with alternate file-opening modes are also
+refused because those modes can interpret filename bytes differently. Conditional
+home-directory expansion is unresolved; file-loading modes keep `:memory:` as a path.
+Positional script-file detection is unsupported when it can change later argument
+roles; explicit `-init` and `.read` keep their program-file path checks.
+Those program files and database-resident code are not read or evaluated
+by this pass; they retain write-risk review and execution sandbox controls.
+This contract does not establish read-only execution or change permission grants.
+Shell redirects and substitutions remain independently checked.
+
 For `find`, starting points and file-valued primaries remain paths. Name/path
 patterns, regular expressions, timestamps, numeric tests, and output formats
 are expression values. In particular, `-printf` takes one format, while

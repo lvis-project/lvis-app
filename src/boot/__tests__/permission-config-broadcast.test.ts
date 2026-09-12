@@ -103,7 +103,7 @@ describe("host permission-config broadcast — window set", () => {
     h.mainWindow = curated;
     h.getAllWindows.mockReturnValue([curated, oauthWindow]);
 
-    broadcastPermissionConfigChangedFromHost();
+    broadcastPermissionConfigChangedFromHost([curated as never]);
 
     expect(curated.webContents.send).toHaveBeenCalledWith(PERMISSIONS.configChanged, {});
     // The OAuth / external-link / partition-viewer class of top-level window is
