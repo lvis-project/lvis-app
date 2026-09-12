@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as asar from "@electron/asar";
@@ -56,14 +57,35 @@ function main() {
   const licenseBinding = binding(options["node-license"]);
   const sourceCommit = execFileSync("git", ["-C", repository, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
   const sourceTree = execFileSync("git", ["-C", repository, "rev-parse", "HEAD^{tree}"], { encoding: "utf8" }).trim();
+  const producerDirty = execFileSync("git", ["-C", repository, "status", "--porcelain", "--untracked-files=normal"], { encoding: "utf8" }).trim() !== "";
   const runtime = JSON.parse(execFileSync(options.node, ["-p", "JSON.stringify({version:process.version,platform:process.platform,arch:process.arch,modules:process.versions.modules,napi:process.versions.napi,electron:process.versions.electron??null})"], { encoding: "utf8" }));
   if (runtime.electron !== null || runtime.platform !== "linux" || !runtime.version.startsWith("v22.")) {
     throw new Error("The server artifact requires the standalone Linux 22.x runtime");
   }
   const sourcePackage = JSON.parse(asar.extractFile(archive, "package.json").toString("utf8"));
   const boundary = JSON.parse(asar.extractFile(archive, "dist/src/main/headless-manifest.json").toString("utf8"));
-  if (boundary.entryPoint !== "src/headless.ts" || !Array.isArray(boundary.externals) || !Number.isInteger(boundary.inputCount) || boundary.inputCount < 1) {
+  if (sourcePackage.name !== "lvis-app" || boundary.entryPoint !== "src/headless.ts" || boundary.entry !== "headless.js" || !Array.isArray(boundary.externals) || !Number.isInteger(boundary.inputCount) || boundary.inputCount < 1) {
     throw new Error("The packaged server dependency manifest is invalid");
+  }
+  if (producerDirty || boundary.source?.dirty !== false || boundary.source?.commit !== sourceCommit || boundary.source?.tree !== sourceTree) {
+    throw new Error("The server bundle must come from this exact clean build source");
+  }
+  if (!boundary.outputs || typeof boundary.outputs !== "object" || Array.isArray(boundary.outputs) || !Array.isArray(boundary.files)) {
+    throw new Error("The server bundle has no output inventory");
+  }
+  const outputPaths = Object.keys(boundary.outputs).sort();
+  if (!outputPaths.includes("headless.js") || JSON.stringify(outputPaths) !== JSON.stringify(boundary.files.map((file) => file.path).sort())) {
+    throw new Error("The server dependency closure does not match its output inventory");
+  }
+  for (const path of outputPaths) {
+    if (!/^(?:[a-zA-Z0-9_-]+\/)*[a-zA-Z0-9_.-]+\.js$/.test(path) || path.split("/").some((segment) => segment === "." || segment === "..")) {
+      throw new Error("The server output inventory contains an invalid path");
+    }
+    const bytes = asar.extractFile(archive, `dist/src/main/${path}`);
+    const expected = boundary.outputs[path];
+    if (bytes.length !== expected.bytes || createHash("sha256").update(bytes).digest("hex") !== expected.sha256) {
+      throw new Error(`The server output differs from its build manifest: ${path}`);
+    }
   }
   for (const dependency of boundary.externals) {
     if (typeof dependency !== "string" || /^(?:electron(?:\/|$)|electron-updater(?:\/|$)|@sentry\/electron(?:\/|$))/.test(dependency)) {
@@ -89,13 +111,28 @@ function main() {
   cpSync(options["node-license"], join(options.out, "licenses/node-LICENSE"));
   writeFileSync(join(options.out, "lvis"), '#!/bin/sh\nset -eu\nlvis_runtime_root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\nexport NODE_ENV=production\nexport LVIS_RESOURCES_DIR="$lvis_runtime_root/resources"\nexec "$lvis_runtime_root/bin/node" "$lvis_runtime_root/app/dist/src/main/headless.js" "$@"\n', { mode: 0o755 });
 
-  const addonProbe = execFileSync(join(options.out, "bin/node"), [join(repository, "scripts/headless-runtime-smoke.mjs"), app], { encoding: "utf8", cwd: options.out });
-  const nativeRuntime = JSON.parse(addonProbe.trim());
+  const probeProfile = mkdtempSync(join(tmpdir(), "lvis-package-runtime-"));
+  let nativeRuntime;
+  try {
+    const probeEnv = {
+      ...process.env, NODE_ENV: "production", LVIS_RESOURCES_DIR: resources,
+      LVIS_HOME: join(probeProfile, "home"), LVIS_USER_DATA_DIR: join(probeProfile, "user-data"),
+    };
+    delete probeEnv.NODE_OPTIONS;
+    delete probeEnv.NODE_PATH;
+    delete probeEnv.ELECTRON_RUN_AS_NODE;
+    delete probeEnv.LVIS_SECRET_KEY_FILE;
+    const addonProbe = execFileSync(join(options.out, "bin/node"), [join(repository, "scripts/headless-runtime-smoke.mjs"), app], { encoding: "utf8", cwd: options.out, env: probeEnv, timeout: 60_000 });
+    nativeRuntime = JSON.parse(addonProbe.trim());
+  } finally {
+    rmSync(probeProfile, { recursive: true, force: true });
+  }
   if (nativeRuntime.database !== "ok" || nativeRuntime.terminal !== "ok") throw new Error("Native runtime qualification did not complete");
   const manifest = {
     schema: "lvis-headless-runtime/v1",
     version: sourcePackage.version,
-    source: { commit: sourceCommit, tree: sourceTree },
+    source: { commit: boundary.source.commit, tree: boundary.source.tree },
+    producer: { commit: sourceCommit, tree: sourceTree, script: binding(fileURLToPath(import.meta.url)) },
     desktopArchive: { name: basename(archive), ...archiveBinding },
     runtime: { ...runtime, binary: nodeBinding, license: licenseBinding },
     entry: "app/dist/src/main/headless.js",
