@@ -90,8 +90,13 @@ output and structured parser output have separate contracts.
 The Bash tool resolves the same Bash dialect for foreground, background, and
 sandbox execution through `src/lib/shell-resolver.ts`; discovery probes use the
 same filtered child environment. Background handles belong to a session and
-retain bounded incremental output. `bash_output` can wait for an output or
-lifecycle event without extending the command's lifetime. POSIX background
+retain bounded incremental output. `bash_output.waitMs` is an integer from 0 to
+30,000 ms, default 0. Its default `waitFor: "output"` returns on unread/new output
+or completion. Opt-in `waitFor: "completion"` keeps waiting through progress
+output until the shell ends or that same wait expires. Both return accumulated
+unread output and current status, preserve the output cap and session ownership,
+and cancel without consuming unread output. Waiting does not extend any command,
+tool, or turn deadline; expiry can return a still-running shell. POSIX background
 commands own process groups; Windows background commands use the native job
 launcher described in `native/windows-job/README.md`. Session disposal and root
 exit release those owned descendants. The native job is a lifecycle mechanism,
