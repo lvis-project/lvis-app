@@ -197,6 +197,7 @@ const shellTimeoutSchema = z.number().int().min(1)
 export const MAX_OUTPUT_CHARS = 200_000;
 /** Terminal statuses a background shell can settle into. */
 type BackgroundShellStatus = "running" | "exited" | "killed" | "failed";
+type BackgroundShellWaitFor = z.infer<typeof backgroundOutputWaitForSchema>;
 
 interface BackgroundShellEntry {
   shellId: string;
@@ -237,7 +238,7 @@ export interface BackgroundShellManager {
     killProcessGroup?: boolean;
   }): string;
   read(sessionId: string, shellId: string): BackgroundShellReadResult | undefined;
-  waitForOutput(sessionId: string, shellId: string, waitMs: number, signal?: AbortSignal): Promise<void>;
+  waitForOutput(sessionId: string, shellId: string, waitMs: number, signal?: AbortSignal, waitFor?: BackgroundShellWaitFor): Promise<void>;
   kill(sessionId: string, shellId: string): BackgroundShellReadResult | undefined;
   /** Kill + drop every shell owned by a session (call on session end). */
   disposeSession(sessionId: string): number;
@@ -371,26 +372,32 @@ function createManager(): BackgroundShellManager {
       return entry ? snapshot(entry) : undefined;
     },
 
-    async waitForOutput(sessionId, shellId, waitMs, signal): Promise<void> {
+    async waitForOutput(sessionId, shellId, waitMs, signal, waitFor): Promise<void> {
       const delay = backgroundOutputWaitSchema.parse(waitMs);
+      const condition = backgroundOutputWaitForSchema.parse(waitFor);
       signal?.throwIfAborted();
       const entry = owned(sessionId, shellId);
-      if (!entry || delay === 0 || entry.status !== "running" || entry.output.length > entry.readCursor) return;
+      if (!entry || delay === 0 || entry.status !== "running"
+        || (condition === "output" && entry.output.length > entry.readCursor)) return;
       await new Promise<void>((resolve, reject) => {
         const cleanup = (): void => {
           clearTimeout(timer);
           entry.waiters.delete(wake);
           signal?.removeEventListener("abort", abort);
         };
-        const wake = (): void => {
+        const finish = (): void => {
           cleanup();
           resolve();
+        };
+        const wake = (): void => {
+          if (condition === "completion" && entry.status === "running" && owned(sessionId, shellId) === entry) return;
+          finish();
         };
         const abort = (): void => {
           cleanup();
           reject(signal?.reason);
         };
-        const timer = setTimeout(wake, delay);
+        const timer = setTimeout(finish, delay);
         entry.waiters.add(wake);
         signal?.addEventListener("abort", abort, { once: true });
         if (signal?.aborted) abort();
@@ -1103,7 +1110,11 @@ const NOT_FOUND =
 const backgroundOutputWaitSchema = z.number().int().min(0)
   .max(Math.min(30_000, TOOL_TIMEOUT_POLICY.globalCeilingMs - TOOL_TIMEOUT_POLICY.shellCeilingGraceMs))
   .default(0)
-  .describe("Milliseconds to wait for new output or completion; 0 returns immediately.");
+  .describe("Maximum milliseconds to wait for the waitFor condition; 0 returns immediately. Does not extend the command's lifetime.");
+
+const backgroundOutputWaitForSchema = z.enum(["output", "completion"])
+  .default("output")
+  .describe("output returns on unread/new output or completion. completion keeps waiting through progress output until the shell ends or waitMs expires, then returns accumulated output and current status.");
 
 /**
  * `bash_output` — read newly-accumulated output (and current status/exit code)
@@ -1119,7 +1130,8 @@ export function createBashOutputTool(
       "Read output produced since your last check from a background shell started by `bash` " +
       "with run_in_background: true. Returns the new output plus the shell's status " +
       "(running | exited | killed | failed), exit code and observed termination signal. " +
-      "Set waitMs to wait for new output or completion.",
+      "Set waitMs to wait for new output or completion. Set waitFor: 'completion' to keep waiting " +
+      "through progress output within that same waitMs limit.",
     source: "builtin",
     category: "read",
     isReadOnly: () => true,
@@ -1129,6 +1141,7 @@ export function createBashOutputTool(
       properties: {
         shellId: { type: "string", description: "The shell id returned by the background bash call." },
         waitMs: z.toJSONSchema(backgroundOutputWaitSchema),
+        waitFor: z.toJSONSchema(backgroundOutputWaitForSchema),
       },
     },
     execute: async (rawInput, ctx) => {
@@ -1140,8 +1153,12 @@ export function createBashOutputTool(
       if (!wait.success) {
         return { output: `bash_output: invalid waitMs: ${wait.error.message}`, isError: true };
       }
+      const waitFor = backgroundOutputWaitForSchema.safeParse((rawInput as Record<string, unknown>)?.waitFor);
+      if (!waitFor.success) {
+        return { output: `bash_output: invalid waitFor: ${waitFor.error.message}`, isError: true };
+      }
       try {
-        await manager.waitForOutput(sessionIdOf(ctx), shellId, wait.data, ctx?.abortSignal);
+        await manager.waitForOutput(sessionIdOf(ctx), shellId, wait.data, ctx?.abortSignal, waitFor.data);
         ctx?.abortSignal?.throwIfAborted();
       } catch (error) {
         if (!ctx?.abortSignal?.aborted) throw error;

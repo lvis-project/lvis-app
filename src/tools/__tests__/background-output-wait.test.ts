@@ -15,9 +15,9 @@ function register(killProcessGroup = false) {
   const shellId = manager.register({ child, sessionId: "owner", command: "work", startedAt: "t", killProcessGroup });
   return { child, stdout, stderr, kill, shellId };
 }
-function read(shellId: string, waitMs?: unknown, signal?: AbortSignal, sessionId = "owner") {
+function read(shellId: string, waitMs?: unknown, signal?: AbortSignal, sessionId = "owner", waitFor?: unknown) {
   const ctx = { metadata: { sessionId }, abortSignal: signal } as ToolExecutionContext;
-  return createBashOutputTool().execute({ shellId, ...(waitMs === undefined ? {} : { waitMs }) }, ctx);
+  return createBashOutputTool().execute({ shellId, ...(waitMs === undefined ? {} : { waitMs }), ...(waitFor === undefined ? {} : { waitFor }) }, ctx);
 }
 
 beforeEach(() => { vi.useFakeTimers(); manager._resetForTest(); __resetManagedChildProcessesForTest(); });
@@ -133,5 +133,102 @@ describe("background output bounded waiting", () => {
   it.each([-1, 0.5, 30001, Infinity, NaN, "100", null])("rejects invalid wait %s during execution", async (waitMs) => {
     const f = register(); expect((await read(f.shellId, waitMs)).isError).toBe(true);
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe("background completion waiting", () => {
+  it.each([undefined, 0])("keeps completion reads immediate when waitMs is %s", async (waitMs) => {
+    const f = register(); f.stdout.emit("data", Buffer.from("ready"));
+    expect(JSON.parse((await read(f.shellId, waitMs, undefined, "owner", "completion")).output))
+      .toMatchObject({ status: "running", output: "ready" });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("ignores unread and new output until the original maximum wait expires", async () => {
+    const f = register(); f.stdout.emit("data", Buffer.from("buffered\n"));
+    let settled = false;
+    const pending = read(f.shellId, 30_000, undefined, "owner", "completion").then((result) => { settled = true; return result; });
+    await vi.advanceTimersByTimeAsync(15_000);
+    f.stdout.emit("data", Buffer.from("progress\n"));
+    await vi.advanceTimersByTimeAsync(14_999);
+    f.stderr.emit("data", Buffer.from("last progress\n"));
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(JSON.parse((await pending).output)).toMatchObject({
+      status: "running", output: "buffered\nprogress\nlast progress\n", truncated: false,
+    });
+    expect(manager.read("owner", f.shellId)?.output).toBe("");
+    expect(f.kill).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each(["close", "error", "kill", "dispose", "reset"])("releases completion wait on %s", async (event) => {
+    const f = register(); const controller = new AbortController();
+    const remove = vi.spyOn(controller.signal, "removeEventListener");
+    const pending = read(f.shellId, 30_000, controller.signal, "owner", "completion");
+    f.stdout.emit("data", Buffer.from("retained\n"));
+    if (event === "close") f.child.emit("close", 7);
+    else if (event === "error") f.child.emit("error", new Error("failed"));
+    else if (event === "kill") manager.kill("owner", f.shellId);
+    else if (event === "dispose") manager.disposeSession("owner");
+    else manager._resetForTest();
+    const result = await pending;
+    if (event === "dispose" || event === "reset") expect(result.output).toContain("no background shell");
+    else expect(JSON.parse(result.output).status).toBe(event === "close" ? "exited" : event === "error" ? "failed" : "killed");
+    expect(remove).toHaveBeenCalledWith("abort", expect.any(Function));
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each(["before", "during", "after-close"])("cancels %s without consuming output", async (timing) => {
+    const f = register(); const controller = new AbortController();
+    f.stdout.emit("data", Buffer.from("retained"));
+    if (timing === "before") controller.abort();
+    const pending = read(f.shellId, 30_000, controller.signal, "owner", "completion");
+    if (timing === "after-close") f.child.emit("close", 0);
+    controller.abort();
+    expect((await pending).metadata?.aborted).toBe(true);
+    expect(manager.read("owner", f.shellId)?.output).toBe("retained");
+    expect(f.kill).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("preserves the output cap while waiting for final status", async () => {
+    const f = register();
+    const pending = read(f.shellId, 1000, undefined, "owner", "completion");
+    f.stdout.emit("data", Buffer.from("x".repeat(MAX_OUTPUT_CHARS + 1)));
+    f.stderr.emit("data", Buffer.from("dropped"));
+    await vi.advanceTimersByTimeAsync(999);
+    expect(vi.getTimerCount()).toBe(1);
+    f.child.emit("close", 0);
+    expect(JSON.parse((await pending).output)).toMatchObject({
+      status: "exited", output: "x".repeat(MAX_OUTPUT_CHARS), truncated: true,
+    });
+    expect(manager.read("owner", f.shellId)?.output).toBe("");
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("returns terminal and non-owned handles immediately without widening access", async () => {
+    const f = register(); f.stdout.emit("data", Buffer.from("private"));
+    expect((await read(f.shellId, 1000, undefined, "other", "completion")).isError).toBe(true);
+    f.child.emit("close", 0);
+    expect(JSON.parse((await read(f.shellId, 1000, undefined, "owner", "completion")).output))
+      .toMatchObject({ status: "exited", output: "private" });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each(["exit", "", true, null, 1])("rejects unsupported waitFor %s", async (waitFor) => {
+    const f = register(); f.stdout.emit("data", Buffer.from("retained"));
+    expect((await read(f.shellId, 1000, undefined, "owner", waitFor)).output).toContain("invalid waitFor");
+    expect(manager.read("owner", f.shellId)?.output).toBe("retained");
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("advertises both modes with the unchanged default and wait bound", () => {
+    expect(createBashOutputTool().toJsonSchema()).toMatchObject({
+      properties: {
+        waitFor: { enum: ["output", "completion"], default: "output" },
+        waitMs: { minimum: 0, maximum: 30_000, default: 0 },
+      },
+    });
   });
 });
