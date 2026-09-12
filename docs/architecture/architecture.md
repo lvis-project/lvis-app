@@ -266,15 +266,15 @@ Important rules:
   closed tile releases its loop. See `docs/design/tiled-chat-groups.md`.
 
 A long turn is bounded from two directions, because neither the model nor the
-loop can see what the other knows. Each call carries the active vendor block's
-`outputTokenLimit` as the request's native output ceiling, so one round cannot
-generate until the provider's own maximum and spend the turn on a single call;
-it is unset by default, since the host knows no per-model ceiling and inventing
-one would truncate models it guessed low for, and an uncapped vendor is logged
-once. What is set is what is sent: the plugin-sized background bound belongs to
-the `generateText` callers that own it and is not imposed on chat. A capped call
-ends the same way a provider-capped one does — with `max_tokens` — and takes the
-same length-continuation path, so the cap adds no second truncation branch. From
+loop can see what the other knows. Each API-backed chat call carries the active
+vendor block's effective `outputTokenLimit` as the request's native output
+ceiling. The canonical resolver in `src/shared/llm-vendor-defaults.ts` supplies
+the default for missing or invalid settings and preserves explicit positive
+integer limits. The default is a host budget, not a discovered per-model
+maximum. Smaller purpose-specific limits stay with the internal/background
+`generateText` callers that own them. Managed subscription transports retain
+their own output-control contract. A provider-reported `max_tokens` completion
+uses the existing length-continuation path without a second truncation branch. From
 the other side, every `chat.progressNudgeRounds` assistant rounds (and early when
 tool errors pile up) the loop sends a wire-only progress notification carrying
 the round count, elapsed time and tool call/error totals, with one instruction:
