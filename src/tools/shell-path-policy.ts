@@ -10,6 +10,7 @@ import { inspectSedScriptFileAccess, isReadOnlyShellLeaf } from "../permissions/
 import { pathEffectIsConfined, type PathEffect } from "../permissions/allowed-directories.js";
 import { parseTarListing } from "../shared/shell-tar-listing.js";
 import { resolveShellFilesystemPath } from "../shared/shell-filesystem-path.js";
+import { classifySqliteArgumentSlots } from "./shell-sqlite-arguments.js";
 
 export type ShellPathPolicyViolationKind =
   | "dynamic-path"
@@ -269,6 +270,8 @@ const NON_PATH_OPERAND_SPECS: ReadonlyMap<string, NonPathOperandSpec> = new Map<
 interface OperandSlotClassification {
   /** Indices in `argv` that hold code, a pattern or a format rather than a path. */
   nonPathIndices: ReadonlySet<number>;
+  /** Program roles that require exact expansion even when they contain no literal file effect. */
+  programIndices?: ReadonlySet<number>;
   /**
    * Paths recovered from INSIDE an operand that is otherwise not one. A sed
    * script is a single token, so the filename in `1r /etc/shadow` is reachable
@@ -534,6 +537,7 @@ function classifyOperandSlots(argv: readonly string[]): OperandSlotClassificatio
   const head = argv[verbIndex];
   if (head === undefined) return empty;
   const verb = stripCommandPath(head).toLowerCase();
+  if (verb === "sqlite3") return classifySqliteArgumentSlots(argv);
   if (verb === "find") return classifyFindOperandSlots(argv, verbIndex);
   if (["grep", "egrep", "fgrep"].includes(verb)) return classifyGrepOperandSlots(argv, verbIndex);
   if (verb === "pgrep") return classifyProcessPatternOperandSlots(argv, verbIndex);
@@ -777,7 +781,7 @@ export function findShellPathPolicyViolation(
       if(slots.dynamicExecution) decline(slots.dynamicExecution);
       const unknown = argv.findIndex((argument, index) => argument === undefined && !dataOnly
         && !(["curl", "wget"].includes(verb) && isQuotedRemoteUrl(effective.words[index]!))
-        && (verb === "curl" || !slots.nonPathIndices.has(index) || slots.extraCandidates.some((path) => path.index === index)));
+        && (verb === "curl" || slots.programIndices?.has(index) || !slots.nonPathIndices.has(index) || slots.extraCandidates.some((path) => path.index === index)));
       if (unknown >= 0) decline("unresolved command operand", effective.words[unknown]);
       // Command-path operands carry the same proven effect as the command.
       // An unknown executable has no read-only proof merely because its bytes
@@ -841,16 +845,18 @@ export function validateShellCommandPathPolicy(
 export function inspectEmbeddedShellPrograms(event: ShellCommandEvent, suppliedSlots?: OperandSlotClassification): void {
   const { node, effective } = event;
   const verb=stripCommandPath(event.argv[0]!);
-  if (event.argv.some((argument)=>argument === undefined)) {
+  if (event.argv.some((argument)=>argument === undefined) && verb !== "sqlite3") {
     if(NON_PATH_OPERAND_SPECS.get(verb)?.nestedCommandOptions || verb === "sed") {
       const index=event.argv.findIndex((argument)=>argument === undefined);
       decline("unresolved embedded program",effective.words[index]);
     }
     return;
   }
-  const knownArgv=event.argv as readonly string[];
+  const knownArgv=event.argv.map((argument,index) => argument ?? displayShellWord(effective.words[index]!));
   const slots=suppliedSlots ?? classifyOperandSlots(knownArgv);
   if(slots.dynamicExecution)decline(slots.dynamicExecution);
+  const unknownProgram = event.argv.findIndex((argument, index) => argument === undefined && slots.programIndices?.has(index));
+  if (unknownProgram >= 0) decline("unresolved embedded program", effective.words[unknownProgram]);
       for(const program of slots.nestedCommands)event.inspectNested(program.value,"posix");
       const shellOptions=NON_PATH_OPERAND_SPECS.get(verb)?.nestedCommandOptions;
       if(shellOptions){
