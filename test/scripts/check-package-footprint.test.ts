@@ -1,9 +1,10 @@
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { writeFixtureFile } from "./gate-script-runner";
 
 const require = createRequire(import.meta.url);
 const { resolveBuildAssets } = require("../../scripts/lib/build-assets.mjs") as {
@@ -12,11 +13,6 @@ const { resolveBuildAssets } = require("../../scripts/lib/build-assets.mjs") as 
 const node = process.env.LVIS_TEST_NODE_EXEC_PATH ?? process.execPath;
 const roots: string[] = [];
 const repo = process.cwd();
-
-function putFile(path: string, content = "") {
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, content);
-}
 
 function fixture(outputDirectory: string, mac: boolean) {
   const root = mkdtempSync(join(tmpdir(), "footprint-cli-"));
@@ -29,8 +25,8 @@ function fixture(outputDirectory: string, mac: boolean) {
     "dist/src/main/main.js", "dist/src/renderer.js", "dist/src/preload.cjs",
     "dist/src/renderer/chunks/mermaid.12345678.js", "package.json",
     ...resolveBuildAssets(repo, "runtime-script").map((asset) => relative(repo, asset.out)),
-  ]) putFile(join(input, entry));
-  putFile(join(input, "dist/src/main/bundle-manifest.json"), JSON.stringify({
+  ]) writeFixtureFile(input, entry, "");
+  writeFixtureFile(input, "dist/src/main/bundle-manifest.json", JSON.stringify({
     schemaVersion: 1, entry: "main.js", files: [{ path: "main.js", bytes: 0 }],
   }));
   mkdirSync(resources, { recursive: true });
@@ -72,9 +68,9 @@ describe("package footprint CLI native target validation", () => {
     expect(missing.stderr).not.toContain("ReferenceError");
 
     // A wrong-platform file must not satisfy the target check.
-    putFile(join(dirname(expectedBinding), "unsupported-x64.node"), "fixture binding");
+    writeFixtureFile(dirname(expectedBinding), "unsupported-x64.node", "fixture binding");
     expect(audit(appAsar).stderr).toContain(`native binding missing: ${expectedBinding}`);
-    putFile(expectedBinding, "fixture binding");
+    writeFixtureFile(dirname(expectedBinding), `${target}.node`, "fixture binding");
     const found = audit(appAsar);
     expect(found.status).toBe(1);
     // Reaching the next resource check proves the requested binding was accepted.
