@@ -32,6 +32,7 @@ import {
 import type { LLMProvider, StreamEvent } from "../../../engine/llm/types.js";
 import { marketplaceProviderPresetSecretKey } from "../../../shared/marketplace-package-assets.js";
 import { unusedNetworkFetch } from "../../../__tests__/support/network-fetch-stubs.js";
+import { createBootHostFixture } from "../../../__tests__/support/host-runtime.js";
 import {
   LlmParentAdjudicator,
   UnavailableParentAdjudicator,
@@ -826,6 +827,7 @@ describe("wireReviewerAndPermissions marketplace preset endpoint binding", () =>
     const permissionManager = new PermissionManager(join(tmpDir, "boot-permissions.json"));
 
     const bootContext = {
+      host: createBootHostFixture(),
       toolRegistry: { setDenyRules: vi.fn() },
       permissionManager,
       settingsService,
@@ -964,6 +966,7 @@ describe("wireReviewerAndPermissions self-hosted direct endpoint binding", () =>
     );
 
     const bootContext = {
+      host: createBootHostFixture(),
       toolRegistry: { setDenyRules: vi.fn() },
       permissionManager,
       settingsService,
