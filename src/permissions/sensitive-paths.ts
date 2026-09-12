@@ -33,7 +33,7 @@
  *     sessions/, hooks/ (relocated to ~/.config/lvis/hooks)
  */
 import { realpathSync } from "node:fs";
-import { resolve as pathResolve, relative as pathRelative } from "node:path";
+import { isAbsolute, resolve as pathResolve, relative as pathRelative } from "node:path";
 import { globMatch } from "../lib/glob-matcher.js";
 
 /**
@@ -44,6 +44,43 @@ import { globMatch } from "../lib/glob-matcher.js";
  * adversarial inputs (deep paths, symlink cycles).
  */
 export const MAX_WALK_UP = 64;
+
+const NO_RUNTIME_SECRET_KEY_PATHS: readonly string[] = Object.freeze([]);
+let runtimeSecretKeyPaths: { configured: string; paths: readonly string[] } | undefined;
+
+/**
+ * The native host's configured external key is secret regardless of its name
+ * or workspace grants. Both the host guard and the OS deny floor consume these
+ * same literal paths. Host startup resolves them before exposing tools; retain
+ * that target if a directory symlink changes later. The host owns this process
+ * environment setting and keeps it unchanged for the encryption lifetime.
+ */
+export function getRuntimeSensitiveKeyPaths(): readonly string[] {
+  const configured = process.env.LVIS_SECRET_KEY_FILE;
+  if (configured === undefined) return NO_RUNTIME_SECRET_KEY_PATHS;
+  if (runtimeSecretKeyPaths?.configured === configured) return runtimeSecretKeyPaths.paths;
+  if (!isAbsolute(configured) || configured.includes("\0")) {
+    throw new Error("LVIS_SECRET_KEY_FILE must be an absolute file path");
+  }
+  // ASRT interprets these characters as patterns, including within a literal
+  // filename. Refuse an unrepresentable key path instead of losing its deny.
+  const assertSandboxLiteral = (path: string): void => {
+    if (/[*?\[\]]/.test(path)) {
+      throw new Error("LVIS_SECRET_KEY_FILE must not contain sandbox glob characters");
+    }
+  };
+  assertSandboxLiteral(configured);
+  let canonical: string;
+  try {
+    canonical = realpathSync.native(configured);
+  } catch {
+    throw new Error("LVIS_SECRET_KEY_FILE could not be resolved safely");
+  }
+  assertSandboxLiteral(canonical);
+  const paths = Object.freeze([...new Set([pathResolve(configured), canonical])]);
+  runtimeSecretKeyPaths = { configured, paths };
+  return paths;
+}
 
 /**
  * Where a {@link SensitiveEntry}'s segments hang off.
@@ -99,6 +136,8 @@ type SensitiveAnchor = "lvis-home" | "home" | "root";
  *     being a row, because the exact directory is only knowable at runtime from
  *     `app.getPath("userData")`. The sandbox floor gets the exact path; the host
  *     guard can only pin the per-platform defaults as static globs.
+ *   - the native host's external key has an operator-selected literal path.
+ *     Both surfaces consume {@link getRuntimeSensitiveKeyPaths} for that path.
  */
 export interface SensitiveEntry {
   /** Which root {@link segments} hangs off — see {@link SensitiveAnchor}. */
@@ -420,6 +459,10 @@ export function policyMatchPaths(filePath: string): readonly string[] {
 export function isSensitivePath(absPath: string): string | null {
   if (!absPath) return null;
   const candidates = policyMatchPaths(absPath);
+  for (const keyPath of getRuntimeSensitiveKeyPaths()) {
+    const normalizedKey = caseFoldForMatch(foldCanonicalPathSeparators(keyPath));
+    if (candidates.includes(normalizedKey)) return "runtime-secret-key";
+  }
   for (const candidate of candidates) {
     for (const pattern of SENSITIVE_PATH_PATTERNS) {
       if (globMatch(candidate, pattern)) {

@@ -10,7 +10,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { lvisHome } from "../shared/lvis-home.js";
 import { llmRouteBaseUrls } from "../shared/llm-vendor-defaults.js";
-import { SENSITIVE_PATH_ENTRIES } from "./sensitive-paths.js";
+import { getRuntimeSensitiveKeyPaths, SENSITIVE_PATH_ENTRIES } from "./sensitive-paths.js";
 
 import type {
   SandboxRuntimeConfig,
@@ -563,6 +563,9 @@ export function getDefaultSensitiveReadDenyPaths(userDataDir?: string): string[]
         }
       }
     }),
+    // Operator-selected external keys can live inside a granted workspace.
+    // Keep the same frozen literal targets as the in-process host guard.
+    ...getRuntimeSensitiveKeyPaths(),
     // ── Electron userData dir (whole dir — deny-by-default for future artefacts) ──
     // Contains plugin OAuth session cookies/tokens, Cookies (SQLite), Local/Session
     // Storage, Network Persistent State, Trust Tokens, lvis-secrets.json.

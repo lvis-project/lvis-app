@@ -22,6 +22,16 @@ replacing the file takes effect after restart. Operators must retain the correct
 key for their encrypted data. A missing configuration returns an unavailable
 provider; an explicitly configured missing or invalid file fails at startup.
 
+The native entrypoint reads the path from `LVIS_SECRET_KEY_FILE`. Its configured
+and resolved paths join the shared sensitive-path authority before tools are
+exposed. The host file tools, shell path checks and OS sandbox read/write deny
+floors protect that file even inside an allowed workspace. The resolved target
+stays protected if a directory symlink changes later. This environment setting
+is fixed for the host lifetime. The configured and resolved paths must not
+contain `*`, `?`, `[` or `]`, which the sandbox treats as glob syntax; an
+unrepresentable path fails instead of silently losing protection. With the
+environment setting absent, the existing desktop deny rules are unchanged.
+
 Each encrypted value uses an authenticated, versioned envelope:
 `lvis-external-key:aes-256-gcm:1` followed by a NUL byte, a random 12-byte nonce,
 a 16-byte authentication tag, and ciphertext. The header is authenticated as
