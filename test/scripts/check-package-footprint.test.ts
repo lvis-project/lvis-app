@@ -4,9 +4,11 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { resolveBuildAssets } from "../../scripts/lib/build-assets.mjs";
 
 const require = createRequire(import.meta.url);
+const { resolveBuildAssets } = require("../../scripts/lib/build-assets.mjs") as {
+  resolveBuildAssets(root: string, category: string): Array<{ out: string }>;
+};
 const node = process.env.LVIS_TEST_NODE_EXEC_PATH ?? process.execPath;
 const roots: string[] = [];
 const repo = process.cwd();
@@ -26,7 +28,7 @@ function fixture(outputDirectory: string, mac: boolean) {
   for (const entry of [
     "dist/src/main/main.js", "dist/src/renderer.js", "dist/src/preload.cjs",
     "dist/src/renderer/chunks/mermaid.12345678.js", "package.json",
-    ...resolveBuildAssets(repo, "runtime-script").map((asset: { out: string }) => relative(repo, asset.out)),
+    ...resolveBuildAssets(repo, "runtime-script").map((asset) => relative(repo, asset.out)),
   ]) putFile(join(input, entry));
   putFile(join(input, "dist/src/main/bundle-manifest.json"), JSON.stringify({
     schemaVersion: 1, entry: "main.js", files: [{ path: "main.js", bytes: 0 }],
