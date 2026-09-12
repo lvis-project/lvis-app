@@ -12,6 +12,7 @@ import { probeHostRuntimeResources } from "./main/host-runtime-probe.js";
 import { runAppShutdownCleanup, runIncompleteBootShutdown, runShutdownHooks } from "./main/app-shutdown.js";
 import { sealManagedChildProcessAdmission } from "./main/managed-child-processes.js";
 import { setAppShutdownStarted } from "./main/app-state.js";
+import { errorMessage } from "./shared/error-message.js";
 import {
   EXEC_FAILURE_EXIT_CODE,
   EXEC_LOCKED_EXIT_CODE,
@@ -143,7 +144,7 @@ async function main(): Promise<number> {
 main().then((code) => {
   process.exit(typeof process.exitCode === "number" && process.exitCode !== 0 ? process.exitCode : code);
 }, (error: unknown) => {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = errorMessage(error);
   process.stderr.write(`headless: ${message}\n`);
   process.exit(message === "host-already-running" ? EXEC_LOCKED_EXIT_CODE : EXEC_FAILURE_EXIT_CODE);
 });
