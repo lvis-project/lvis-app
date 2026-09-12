@@ -3,8 +3,8 @@
  *
  * The renderer and normal conversation model use main-issued image data URLs.
  * This is a distinct boundary from attach.ts's local-file inspection/mime
- * mapping: it accepts no filesystem path and strictly normalizes only the
- * already-created data URL. Subscription transports then share this one
+ * mapping: it accepts no filesystem path and strictly normalizes already-loaded
+ * image bytes and data URLs. Subscription transports then share this one
  * protocol-neutral base64 representation so Codex can stage local images and
  * ACP can emit its standard image blocks without binary in the text envelope.
  */
@@ -197,7 +197,8 @@ function normalizedImageAttachment(
   return Object.freeze({ type: "image", mimeType: expectedFormat.mimeType, data: decoded.data });
 }
 
-function normalizedPromptAttachment(value: unknown): SubscriptionPromptAttachment | null {
+/** Normalize already-loaded image data without reading a path or fetching a URL. */
+export function normalizeSubscriptionPromptAttachment(value: unknown): SubscriptionPromptAttachment | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
   const candidate = value as { type?: unknown; mimeType?: unknown; data?: unknown };
   if (candidate.type !== "image") return null;
@@ -334,7 +335,7 @@ export function normalizeLocalUserContentParts(raw: unknown): UserContentPart[] 
 
 /** Validate an internal attachment again at every process transport boundary. */
 export function isSubscriptionPromptAttachment(value: unknown): value is SubscriptionPromptAttachment {
-  return normalizedPromptAttachment(value) !== null;
+  return normalizeSubscriptionPromptAttachment(value) !== null;
 }
 
 export function subscriptionAttachmentByteLength(attachment: SubscriptionPromptAttachment): number {
@@ -356,7 +357,7 @@ export function assertSubscriptionPromptAttachments(
   let totalBytes = 0;
   const validated: SubscriptionPromptAttachment[] = [];
   for (const attachment of attachments) {
-    const normalized = normalizedPromptAttachment(attachment);
+    const normalized = normalizeSubscriptionPromptAttachment(attachment);
     if (!normalized) {
       throw new SubscriptionAttachmentTransportError("subscription-attachment-not-supported");
     }

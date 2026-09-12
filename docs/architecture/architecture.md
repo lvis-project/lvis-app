@@ -335,8 +335,14 @@ provenance for that result group. A following user or host instruction shares
 that row to preserve role alternation. This translation does not create a user
 turn, dispatch commands, or grant tool output additional authority. Error status
 and attached images are both retained. Request estimates include transmitted
-images and exclude images removed by tool-result compaction. Transports with
-their own request projection retain ownership of their attachment policy.
+images and exclude images removed by tool-result compaction. Subscription
+transports preserve each retained tool image as an indexed native attachment,
+with its tool-call identity and error status in the corresponding history row.
+Later host instructions do not hide those images. The existing native image
+count, byte and MIME bounds remain authoritative; no tool path is reread or
+remote image URL fetched by this projection. Original user images retain their
+existing newest-user-message scope. Subscription request estimates count the
+same retained images sent through the native channel.
 
 ## Memory
 

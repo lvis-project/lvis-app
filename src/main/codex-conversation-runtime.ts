@@ -255,7 +255,7 @@ export interface CodexConversationRuntimeOptions {
 
 export interface CodexConversationTurnInput {
   text: string;
-  /** Strict original user images to stage as App Server localImage inputs. */
+  /** Validated user and retained tool images to stage as localImage inputs. */
   attachments?: readonly SubscriptionPromptAttachment[];
   /** Optional subscription model id. It is never treated as an API-key model. */
   model?: string | null;

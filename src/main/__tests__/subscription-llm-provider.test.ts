@@ -22,6 +22,11 @@ import type {
   SubscriptionTextSession,
 } from "../subscription-runtime-service.js";
 import { SubscriptionRuntimeServiceError } from "../subscription-runtime-service.js";
+import {
+  MAX_SUBSCRIPTION_ATTACHMENT_BYTES,
+  MAX_SUBSCRIPTION_PROMPT_ATTACHMENTS,
+} from "../subscription-attachment-input.js";
+import { MAX_ACP_SUBSCRIPTION_IMAGE_BYTES } from "../acp-subscription-session-client.js";
 
 function params(overrides: Partial<StreamTurnParams> = {}): StreamTurnParams {
   return {
@@ -469,21 +474,156 @@ describe("SubscriptionLlmProvider", () => {
     expect(stop).not.toHaveBeenCalled();
   });
 
-  it("keeps a historic tool-result image as its text placeholder without raw re-egress", () => {
+  it("keeps a tool image associated with its result before a later host instruction", () => {
     const payload = serializeSubscriptionConversationPayload(params({
       messages: [
         { role: "user", content: "Reuse the earlier result." },
         {
           role: "tool_result",
           toolUseId: "tool-1",
+          toolName: "view_image",
           content: "[image loaded]",
           image: { data: "iVBORw0KGgo=", mimeType: "image/png" },
         },
+        { role: "user", content: "Continue after checking the tool result." },
       ],
     }));
-    expect(payload.attachments).toEqual([]);
+    expect(payload.attachments).toEqual([{ type: "image", mimeType: "image/png", data: "iVBORw0KGgo=" }]);
     expect(payload.text).toContain("[image loaded]");
     expect(payload.text).not.toContain("iVBORw0KGgo=");
+    const requestJson = payload.text.match(/<lvis-request-json>\s*([\s\S]*?)\s*<\/lvis-request-json>/)?.[1];
+    expect(JSON.parse(requestJson!).messages.slice(1)).toEqual([
+      {
+        role: "tool_result", toolUseId: "tool-1", toolName: "view_image", content: "[image loaded]", isError: false,
+        image: { type: "image", mimeType: "image/png", attachmentIndex: 0 },
+      },
+      { role: "user", content: "Continue after checking the tool result." },
+    ]);
+  });
+
+  it("orders mixed user and tool images once while retaining tool identities and errors", async () => {
+    const png = "iVBORw0KGgo=";
+    const gif = "R0lGODlh";
+    const { session, streamTurn } = sessionWith([{ type: "message_complete", stopReason: "end_turn" }]);
+    const provider = createSubscriptionLlmProvider({
+      selection: { kind: "subscription", provider: "codex" },
+      service: { openTextSession: vi.fn(async () => session) },
+    });
+    const input = params({ messages: [
+      { role: "user", content: [{ type: "image", image: `data:image/png;base64,${png}` }] },
+      { role: "assistant", content: "Previous answer." },
+      { role: "user", content: [{ type: "image", image: `data:image/gif;base64,${gif}` }] },
+      { role: "assistant", content: "", toolCalls: [
+        { id: "png-call", name: "view_image", input: {} },
+        { id: "failed-call", name: "image_tool", input: {} },
+      ] },
+      { role: "tool_result", toolUseId: "png-call", toolName: "view_image", content: "PNG loaded", image: { data: png, mimeType: "image/png" } },
+      { role: "tool_result", toolUseId: "failed-call", toolName: "image_tool", content: "Partial result", isError: true, image: { data: gif, mimeType: "image/gif" } },
+    ] });
+    const original = structuredClone(input.messages);
+    await collect(provider.streamTurn(input));
+    const text = String(streamTurn.mock.calls[0]?.[0]);
+    const requestJson = text.match(/<lvis-request-json>\s*([\s\S]*?)\s*<\/lvis-request-json>/)?.[1];
+    const messages = JSON.parse(requestJson!).messages;
+    expect(messages[0].content).toBe("[image:image]");
+    expect(messages[2].content).toEqual([{ type: "image", mimeType: "image/gif", attachmentIndex: 0 }]);
+    expect(messages.slice(4)).toEqual([
+      { role: "tool_result", toolUseId: "png-call", toolName: "view_image", content: "PNG loaded", isError: false, image: { type: "image", mimeType: "image/png", attachmentIndex: 1 } },
+      { role: "tool_result", toolUseId: "failed-call", toolName: "image_tool", content: "Partial result", isError: true, image: { type: "image", mimeType: "image/gif", attachmentIndex: 2 } },
+    ]);
+    expect(streamTurn.mock.calls[0]?.[2]).toEqual([
+      { type: "image", mimeType: "image/gif", data: gif },
+      { type: "image", mimeType: "image/png", data: png },
+      { type: "image", mimeType: "image/gif", data: gif },
+    ]);
+    expect(text).not.toContain(png);
+    expect(text).not.toContain(gif);
+    expect(input.messages).toEqual(original);
+  });
+
+  it.each([
+    { data: "https://image.invalid/picture.png", mimeType: "image/png" },
+    { data: "iVBORw0KGgo=", mimeType: "image/jpeg" },
+    { data: "c2VjcmV0", mimeType: "image/png" },
+  ])("rejects malformed tool image data before opening a native session: %j", async (image) => {
+    const openTextSession = vi.fn();
+    const provider = createSubscriptionLlmProvider({
+      selection: { kind: "subscription", provider: "codex" },
+      service: { openTextSession },
+    });
+    const events = await collect(provider.streamTurn(params({
+      messages: [{ role: "tool_result", toolUseId: "tool-1", content: "image result", image }],
+    })));
+    expect(events).toEqual([expect.objectContaining({ type: "error", classification: SUBSCRIPTION_ATTACHMENT_INPUT_REJECTED })]);
+    expect(openTextSession).not.toHaveBeenCalled();
+  });
+
+  it("estimates retained tool images and excludes pixels removed by wire compaction", () => {
+    const provider = createSubscriptionLlmProvider({
+      selection: { kind: "subscription", provider: "codex" },
+      service: { openTextSession: vi.fn() },
+    });
+    const input: ProviderRequestInputProjectionParams = {
+      systemPrompt: "Inspect the retained tool output.", toolSchemas: [],
+      messages: [
+        { role: "tool_result", toolUseId: "old", content: "old image", image: { data: "iVBORw0KGgo=", mimeType: "image/png", width: 4096, height: 4096 }, meta: { compactedAt: "2026-01-01T00:00:00.000Z" } },
+        { role: "tool_result", toolUseId: "recent", content: "recent image", image: { data: "iVBORw0KGgo=", mimeType: "image/png", width: 512, height: 512 } },
+        { role: "user", content: "Continue." },
+      ],
+    };
+    const payload = serializeSubscriptionConversationPayload(params({ ...input, messages: prepareMarkedToolResultsForWire(input.messages) }));
+    expect(payload.attachments).toHaveLength(1);
+    const expectedTokens = estimateTokens(payload.text) + estimateMultimodalTokenOverhead([{ type: "image", width: 512, height: 512 }]);
+    expect(provider.projectRequestInput(input)).toMatchObject({ messageTokens: expectedTokens, totalTokens: expectedTokens });
+  });
+
+  it.each(["codex", "kimi-code"] as const)("declines an exact projection above the %s native image count limit", (providerId) => {
+    const provider = createSubscriptionLlmProvider({
+      selection: { kind: "subscription", provider: providerId },
+      service: { openTextSession: vi.fn() },
+    });
+    expect(provider.projectRequestInput({
+      systemPrompt: "", toolSchemas: [],
+      messages: Array.from({ length: MAX_SUBSCRIPTION_PROMPT_ATTACHMENTS + 1 }, (_, index) => ({
+        role: "tool_result", toolUseId: String(index), content: "image loaded",
+        image: { data: "iVBORw0KGgo=", mimeType: "image/png" },
+      })),
+    })).toBeUndefined();
+  });
+
+  it.each([
+    ["codex", MAX_SUBSCRIPTION_ATTACHMENT_BYTES],
+    ["kimi-code", MAX_ACP_SUBSCRIPTION_IMAGE_BYTES],
+  ] as const)("declines an exact projection above the %s aggregate image byte limit", (providerId, limit) => {
+    const bytes = Buffer.alloc(Math.floor(limit / 2) + 1);
+    Buffer.from("iVBORw0KGgo=", "base64").copy(bytes);
+    const data = bytes.toString("base64");
+    const provider = createSubscriptionLlmProvider({
+      selection: { kind: "subscription", provider: providerId },
+      service: { openTextSession: vi.fn() },
+    });
+    expect(provider.projectRequestInput({
+      systemPrompt: "", toolSchemas: [],
+      messages: [
+        { role: "user", content: [{ type: "image", image: `data:image/png;base64,${data}` }] },
+        { role: "tool_result", toolUseId: "tool-image", content: "image loaded", image: { data, mimeType: "image/png" } },
+      ],
+    })).toBeUndefined();
+  });
+
+  it("rejects tool image bytes above the per-image normalization limit before opening a session", async () => {
+    const openTextSession = vi.fn();
+    const provider = createSubscriptionLlmProvider({
+      selection: { kind: "subscription", provider: "codex" }, service: { openTextSession },
+    });
+    const bytes = Buffer.alloc(MAX_SUBSCRIPTION_ATTACHMENT_BYTES + 1);
+    Buffer.from("iVBORw0KGgo=", "base64").copy(bytes);
+    const events = await collect(provider.streamTurn(params({ messages: [{
+      role: "tool_result", toolUseId: "too-large", content: "image loaded",
+      image: { data: bytes.toString("base64"), mimeType: "image/png" },
+    }] })));
+    expect(events).toEqual([expect.objectContaining({ type: "error", classification: SUBSCRIPTION_ATTACHMENT_INPUT_REJECTED })]);
+    expect(openTextSession).not.toHaveBeenCalled();
   });
 
   it("keeps older image turns as canonical markers instead of exhausting native attachment limits", () => {
