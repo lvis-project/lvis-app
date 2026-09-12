@@ -150,6 +150,10 @@ function isLinuxUnpackedPackage() {
   return basename(appOutDir) === "linux-unpacked" || /^linux-.+-unpacked$/.test(basename(appOutDir));
 }
 
+function isWinUnpackedPackage() {
+  return basename(appOutDir) === "win-unpacked";
+}
+
 function validateMacElectronLocales() {
   const localeResourcesDir = resolve(
     appOutDir,
@@ -440,7 +444,7 @@ if (isMacAppPackage()) {
   assertGraphicsRuntimeFiles(libraryDirectory, "darwin");
 } else if (isLinuxUnpackedPackage()) {
   assertGraphicsRuntimeFiles(appOutDir, "linux");
-} else if (basename(appOutDir) === "win-unpacked") {
+} else if (isWinUnpackedPackage()) {
   assertGraphicsRuntimeFiles(appOutDir, "win32");
 } else {
   fail(`unrecognized graphics runtime package: ${appOutDir}`);
