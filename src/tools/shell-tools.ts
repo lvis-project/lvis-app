@@ -80,6 +80,22 @@ function formatOutput(raw: string, captureTruncated = false): string {
   return text;
 }
 
+interface ShellCompletion {
+  code: number | null;
+  signal: NodeJS.Signals | null;
+}
+
+/** Termination belongs in shell content, which every provider receives. */
+function formatShellCompletion(output: string, empty: boolean, completion: ShellCompletion): string {
+  if (completion.code === 0 && completion.signal === null) return output;
+  const cause = completion.signal !== null
+    ? `terminated by signal ${completion.signal}`
+    : completion.code !== null
+      ? `exited with code ${completion.code}`
+      : "failed with no reported exit code or signal";
+  return empty ? `Shell command ${cause} without output.` : `Shell command ${cause}.\n${output}`;
+}
+
 /** Keep a bounded UTF-8 prefix while continuing to drain both child pipes. */
 function createOutputCollector() {
   // Four bytes cover any UTF-8 code point. The display cap remains in UTF-16
@@ -94,11 +110,12 @@ function createOutputCollector() {
       size += retained;
       if (retained < chunk.length) truncated = true;
     },
-    format(): string {
+    format(completion?: ShellCompletion): string {
       const prefix = buffer.subarray(0, size);
       // An incomplete final code point belongs to the discarded suffix.
       const text = truncated ? new StringDecoder("utf8").write(prefix) : prefix.toString("utf8");
-      return formatOutput(text, truncated);
+      const output = formatOutput(text, truncated);
+      return completion === undefined ? output : formatShellCompletion(output, text.trim().length === 0 && !truncated, completion);
     },
   };
 }
@@ -188,6 +205,7 @@ interface BackgroundShellEntry {
   child: ChildProcess;
   status: BackgroundShellStatus;
   exitCode: number | null;
+  signal: NodeJS.Signals | null;
   output: string;
   outputTruncated: boolean;
   readCursor: number;
@@ -201,6 +219,7 @@ interface BackgroundShellReadResult {
   shellId: string;
   status: BackgroundShellStatus;
   exitCode: number | null;
+  signal: NodeJS.Signals | null;
   /** New output since the previous read (advances the cursor). */
   output: string;
   /** True once total output hit the cap and later bytes were dropped. */
@@ -257,6 +276,7 @@ function createManager(): BackgroundShellManager {
       shellId: entry.shellId,
       status: entry.status,
       exitCode: entry.exitCode,
+      signal: entry.signal,
       output,
       truncated: entry.outputTruncated,
       command: entry.command,
@@ -307,6 +327,7 @@ function createManager(): BackgroundShellManager {
         child,
         status: "running",
         exitCode: null,
+        signal: null,
         output: "",
         outputTruncated: false,
         readCursor: 0,
@@ -327,10 +348,11 @@ function createManager(): BackgroundShellManager {
         if (killProcessGroup) terminate();
         else terminationRequested = true;
       });
-      child.on("close", (code) => {
+      child.on("close", (code, signal: NodeJS.Signals | null = null) => {
+        entry.exitCode = code;
+        entry.signal = signal;
         if (entry.status === "running") {
-          entry.status = "exited";
-          entry.exitCode = code;
+          entry.status = signal === null ? "exited" : "killed";
         }
         notify(entry);
       });
@@ -894,13 +916,15 @@ export async function spawnWithSandbox(
     };
     const lifetime = watchShellLifetime(child, timeoutSeconds, signal, () => abortController.abort());
 
-    const finish = (code: number | null): void => {
+    const finish = (code: number | null, signal: NodeJS.Signals | null = null): void => {
       cleanupAfterTermination();
       lifetime.dispose();
       if (settled) return;
       settled = true;
       // Per-command cleanup (proxy/helper state) after the wrapped command ends.
-      const formatted = lifetime.output(outputCollector.format());
+      const formatted = lifetime.output(outputCollector.format(
+        lifetime.timedOut || lifetime.aborted ? undefined : { code, signal },
+      ));
       if (lifetime.timedOut) {
         resolveResult({
           output: formatTimeoutOutput(formatted, command, timeoutSeconds),
@@ -917,7 +941,7 @@ export async function spawnWithSandbox(
     };
 
     void lifetime.stopped.then(() => finish(child.exitCode));
-    child.once("close", (code) => finish(code));
+    child.once("close", (code, signal) => finish(code, signal));
     child.on("error", (err) => {
       if (settled) return;
       settled = true;
@@ -967,11 +991,13 @@ async function spawnWithTimeout(
 
     const lifetime = watchShellLifetime(child, timeoutSeconds, signal);
 
-    const finish = (code: number | null): void => {
+    const finish = (code: number | null, signal: NodeJS.Signals | null = null): void => {
       lifetime.dispose();
       if (settled) return;
       settled = true;
-      const formatted = lifetime.output(outputCollector.format());
+      const formatted = lifetime.output(outputCollector.format(
+        lifetime.timedOut || lifetime.aborted ? undefined : { code, signal },
+      ));
       if (lifetime.timedOut) {
         resolve({
           output: formatTimeoutOutput(formatted, command, timeoutSeconds),
@@ -988,7 +1014,7 @@ async function spawnWithTimeout(
     };
 
     void lifetime.stopped.then(() => finish(child.exitCode));
-    child.once("close", (code) => finish(code));
+    child.once("close", (code, signal) => finish(code, signal));
     child.on("error", (err) => {
       if (settled) return;
       settled = true;
@@ -1062,6 +1088,7 @@ function present(result: BackgroundShellReadResult): { output: string; isError: 
       command: result.command,
       status: result.status,
       exitCode: result.exitCode,
+      signal: result.signal,
       output: result.output,
       truncated: result.truncated,
     }),
@@ -1091,7 +1118,8 @@ export function createBashOutputTool(
     description:
       "Read output produced since your last check from a background shell started by `bash` " +
       "with run_in_background: true. Returns the new output plus the shell's status " +
-      "(running | exited | killed | failed) and exit code. Set waitMs to wait for new output or completion.",
+      "(running | exited | killed | failed), exit code and observed termination signal. " +
+      "Set waitMs to wait for new output or completion.",
     source: "builtin",
     category: "read",
     isReadOnly: () => true,
@@ -1784,12 +1812,14 @@ async function spawnPowerShellWithSandbox(
     };
     const lifetime = watchShellLifetime(child, timeoutSeconds, signal, () => abortController.abort());
 
-    const finish = (code: number | null): void => {
+    const finish = (code: number | null, signal: NodeJS.Signals | null = null): void => {
       cleanupAfterTermination();
       lifetime.dispose();
       if (settled) return;
       settled = true;
-      const output = lifetime.output(outputCollector.format());
+      const output = lifetime.output(outputCollector.format(
+        lifetime.timedOut || lifetime.aborted ? undefined : { code, signal },
+      ));
       resolveResult({
         output: lifetime.timedOut
           ? `PowerShell command timed out after ${resolveShellTimeoutMs(timeoutSeconds) / 1000} seconds.\n${output}`
@@ -1800,7 +1830,7 @@ async function spawnPowerShellWithSandbox(
     };
 
     void lifetime.stopped.then(() => finish(child.exitCode));
-    child.once("close", (code) => finish(code));
+    child.once("close", (code, signal) => finish(code, signal));
     child.on("error", (err) => {
       if (settled) return;
       settled = true;
@@ -1848,11 +1878,13 @@ async function spawnPowerShell(
 
     const lifetime = watchShellLifetime(child, timeoutSeconds, signal);
 
-    const finish = (code: number | null): void => {
+    const finish = (code: number | null, signal: NodeJS.Signals | null = null): void => {
       lifetime.dispose();
       if (settled) return;
       settled = true;
-      const output = lifetime.output(outputCollector.format());
+      const output = lifetime.output(outputCollector.format(
+        lifetime.timedOut || lifetime.aborted ? undefined : { code, signal },
+      ));
       resolve({
         output: lifetime.timedOut
           ? `PowerShell command timed out after ${resolveShellTimeoutMs(timeoutSeconds) / 1000} seconds.\n${output}`
@@ -1863,7 +1895,7 @@ async function spawnPowerShell(
     };
 
     void lifetime.stopped.then(() => finish(child.exitCode));
-    child.once("close", (code) => finish(code));
+    child.once("close", (code, signal) => finish(code, signal));
     child.on("error", (err) => {
       if (settled) return;
       settled = true;
