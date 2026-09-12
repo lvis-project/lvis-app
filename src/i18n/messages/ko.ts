@@ -13,6 +13,8 @@ export const ko: Record<SeedMessageKey, string> = {
   "common.delete": "삭제",
   "common.retry": "다시 시도",
 
+  "constants.reasoningEffortCustom": "사용자 지정",
+
   // ── Settings → Appearance → Language ──────────────────────────────
   "settings.appearance.language.title": "언어",
   "settings.appearance.language.description":

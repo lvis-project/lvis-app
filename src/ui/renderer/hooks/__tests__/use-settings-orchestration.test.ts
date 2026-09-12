@@ -64,6 +64,43 @@ function makeSettingsWithVendor(vendor: string): AppSettings {
 }
 
 describe("useSettingsOrchestration", () => {
+  it("updates the budget bound on output broadcasts without overwriting form edits or the output cap", async () => {
+    const settings = makeSettings();
+    settings.llm.vendors.openai = {
+      ...settings.llm.vendors.openai!, thinkingBudgetTokens: 14_000, outputTokenLimit: 32_000,
+    };
+    const { api } = makeMockLvisApi({ settings });
+    Object.assign(api, {
+      updateSettings: vi.fn(async () => ({ ok: true })),
+      hasWebApiKey: vi.fn(async () => false),
+      hasMarketplaceApiKey: vi.fn(async () => false),
+    });
+    const { result } = renderHook(() => useSettingsOrchestration(api as unknown as LvisApi, vi.fn()));
+    await waitFor(() => expect(result.current.settingsLoaded).toBe(true));
+    expect(result.current.thinkingBudget).toBe(14_000);
+    await act(async () => result.current.setModel("unsaved-model"));
+    const broadcast = api.onSettingsUpdated.mock.calls[0]![0] as (next: AppSettings) => void;
+    await act(async () => broadcast({
+      ...settings, llm: { ...settings.llm, vendors: { openai: {
+        ...settings.llm.vendors.openai!, outputTokenLimit: 16_000,
+      } } },
+    }));
+    expect(result.current.outputTokenLimit).toBe(16_000);
+    expect(result.current.thinkingBudget).toBe(8_000);
+    expect(result.current.model).toBe("unsaved-model");
+    await act(async () => result.current.save("llm"));
+    const patch = api.updateSettings.mock.calls[0]![0] as { llm: { vendors: { openai: Record<string, unknown> } } };
+    expect(patch.llm.vendors.openai).toMatchObject({ model: "unsaved-model", thinkingBudgetTokens: 8_000 });
+    expect(patch.llm.vendors.openai).not.toHaveProperty("outputTokenLimit");
+    await act(async () => broadcast({
+      ...settings, llm: { ...settings.llm, vendors: { openai: {
+        ...settings.llm.vendors.openai!, outputTokenLimit: 64_000,
+      } } },
+    }));
+    expect(result.current.outputTokenLimit).toBe(64_000);
+    expect(result.current.thinkingBudget).toBe(8_000);
+  });
+
   // (B) Vendor default-selection fix: the hook now initialises vendor to ""
   // (empty string) instead of "claude", preventing a stale "claude" label
   // from flashing in the UI before the settings load effect hydrates the

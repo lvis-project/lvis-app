@@ -577,23 +577,22 @@ describe("model card (status-row model cell)", () => {
   });
 
   it("colours the bulb by level, and draws no fill at all when off", async () => {
-    // Five depths, five different yellows, and OFF is the absence of the
-    // fill layer rather than a sixth colour — an unlit bulb has to be
+    // Each permitted depth has its own yellow, and OFF is the absence of the
+    // fill layer rather than another colour — an unlit bulb has to be
     // unmistakable, and any colour at level 0 reads as another depth.
-    const cases: Array<{ budget: number; enabled: boolean; level: string; fill: string | null }> = [
+    const cases: Array<{ budget: number; outputTokenLimit?: number; enabled: boolean; level: string; fill: string | null }> = [
       { budget: 10_000, enabled: false, level: "0", fill: null },
       { budget: 4_000, enabled: true, level: "1", fill: "var(--reasoning-fill-1)" },
-      { budget: 10_000, enabled: true, level: "2", fill: "var(--reasoning-fill-2)" },
+      { budget: 8_000, enabled: true, level: "2", fill: "var(--reasoning-fill-2)" },
       { budget: 16_000, enabled: true, level: "3", fill: "var(--reasoning-fill-3)" },
-      { budget: 24_000, enabled: true, level: "4", fill: "var(--reasoning-fill-4)" },
-      { budget: 32_000, enabled: true, level: "5", fill: "var(--reasoning-fill-5)" },
+      { budget: 32_000, outputTokenLimit: 64_000, enabled: true, level: "4", fill: "var(--reasoning-fill-4)" },
     ];
     const seen = new Set<string>();
     for (const testCase of cases) {
       getSettings.mockResolvedValue({
         llm: {
           provider: "azure-foundry",
-          vendors: { "azure-foundry": { thinkingBudgetTokens: testCase.budget } },
+          vendors: { "azure-foundry": { thinkingBudgetTokens: testCase.budget, outputTokenLimit: testCase.outputTokenLimit } },
         },
       });
       const { getByTestId, findByTestId, unmount } = renderBar({

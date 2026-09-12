@@ -293,7 +293,20 @@ vendor block's effective `outputTokenLimit` as the request's native output
 ceiling. The canonical resolver in `src/shared/llm-vendor-defaults.ts` supplies
 the default for missing or invalid settings and preserves explicit positive
 integer limits. The default is a host budget, not a discovered per-model
-maximum. Smaller purpose-specific limits stay with the internal/background
+maximum. User-configured thinking budgets apply per API call, including each
+call after a tool result; they introduce no cumulative quota for a user turn.
+They are non-negative integers capped at
+half that effective output ceiling, so the default 32,000 output allows at most
+16,000 thinking tokens. The same resolver normalizes profile loading and settings
+patches. Settings and composer share fixed presets filtered by that ceiling:
+low 4,000, medium 8,000, high 16,000, and xhigh 32,000. The default output exposes
+only low/medium/high; xhigh requires at least 64,000 output. Fresh settings use
+8,000. Valid custom budgets such as 10,000 or 14,000 stay unchanged until an
+explicit preset selection; the UI shows their exact value. If no preset fits,
+the existing custom budget and thinking on/off remain available. Retry uses the
+user ceiling and restores the prior budget afterward. Raw internal generation
+retains its separate protocol contract.
+Smaller purpose-specific limits stay with the internal/background
 `generateText` callers that own them. Managed subscription transports retain
 their own output-control contract. A provider-reported `max_tokens` completion
 uses the existing length-continuation path without a second truncation branch. From

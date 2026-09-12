@@ -18,6 +18,8 @@ export const en = {
   "common.delete": "Delete",
   "common.retry": "Retry",
 
+  "constants.reasoningEffortCustom": "Custom",
+
   // ── Settings → Appearance → Language ──────────────────────────────
   "settings.appearance.language.title": "Language",
   "settings.appearance.language.description":

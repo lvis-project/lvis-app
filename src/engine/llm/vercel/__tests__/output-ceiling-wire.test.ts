@@ -37,15 +37,25 @@ async function collectRequest(
   overrides: { outputTokenLimit?: number; thinkingBudgetTokens?: number; enableThinking?: boolean } = {},
   toolSchemas: ToolSchema[] = [],
 ) {
+  const block = getLlmVendorSettings({ [vendor]: { model, enableThinking: true, thinkingBudgetTokens: 10_000, ...overrides } }, vendor);
+  return collectInternalRequest(vendor, model, block, toolSchemas);
+}
+
+/** Raw internal generation can use protocol capabilities outside user settings. */
+async function collectInternalRequest(
+  vendor: "openai-compatible" | "claude",
+  model: string,
+  params: { outputTokenLimit?: number; thinkingBudgetTokens: number; enableThinking?: boolean },
+  toolSchemas: ToolSchema[] = [],
+) {
   const fetchResponse = vi.fn<typeof fetch>(async () => new Response(responseBody(vendor), {
     headers: { "content-type": "text/event-stream" },
   }));
   const provider = new VercelUnifiedProvider(vendor, "fixture-key", "https://provider.invalid/v1", fetchResponse);
-  const block = getLlmVendorSettings({ [vendor]: { model, enableThinking: true, thinkingBudgetTokens: 10_000, ...overrides } }, vendor);
   const result = await collectRoundStream({
     provider, model, systemPrompt: "Return the result.",
     messages: [{ role: "user", content: "Report the value." }], toolSchemas,
-    llmSettings: { ...block, streamSmoothing: "none" },
+    llmSettings: { enableThinking: true, ...params, streamSmoothing: "none" },
   });
   expect(fetchResponse).toHaveBeenCalledTimes(1);
   const request = fetchResponse.mock.calls[0]![1]!;
@@ -79,10 +89,24 @@ describe("resolved output ceiling on the native wire", () => {
     expect(result).toMatchObject({ kind: "ok", text: "ok" });
   });
 
-  it("leaves response capacity when the requested thinking equals the output ceiling", async () => {
-    const { body } = await collectRequest("claude", "claude-3-7-sonnet-latest", { thinkingBudgetTokens: DEFAULT_LLM_OUTPUT_TOKEN_LIMIT });
+  it.each([16_000, 16_001, 24_000, 32_000])("bounds user thinking %i at half the output ceiling", async (thinkingBudgetTokens) => {
+    const { body } = await collectRequest("claude", "claude-3-7-sonnet-latest", { thinkingBudgetTokens });
     expect(body.max_tokens).toBe(DEFAULT_LLM_OUTPUT_TOKEN_LIMIT);
-    expect(body.thinking).toMatchObject({ budget_tokens: DEFAULT_LLM_OUTPUT_TOKEN_LIMIT - 1 });
+    expect(body.thinking).toMatchObject({ budget_tokens: 16_000 });
+  });
+
+  it("preserves a valid user budget with tools while normalizing an oversized one", async () => {
+    for (const [thinkingBudgetTokens, expected] of [[14_000, 14_000], [32_000, 16_000]]) {
+      const { body } = await collectRequest("claude", "claude-sonnet-4-5", { thinkingBudgetTokens }, TOOL_SCHEMAS);
+      expect(body.max_tokens).toBe(32_000);
+      expect(body.thinking).toEqual({ type: "enabled", budget_tokens: expected });
+    }
+  });
+
+  it.each([[16_000, 8_000], [64_000, 32_000]])("bounds settings after an output change to %i", async (outputTokenLimit, expected) => {
+    const { body } = await collectRequest("openai-compatible", "fixture-model", { outputTokenLimit, thinkingBudgetTokens: 48_000 });
+    expect(body.max_tokens).toBe(outputTokenLimit);
+    expect(body.thinking_budget_tokens).toBe(expected);
   });
 
   it("transmits adaptive effort in the provider's output configuration", async () => {
@@ -104,8 +128,8 @@ describe("resolved output ceiling on the native wire", () => {
     "claude-opus-4-20250514",
     "claude-opus-4-1-20250805",
     "claude-opus-4-5-20251101",
-  ])("keeps an interleaved budget above a small total for %s", async (model) => {
-    const { body, headers, result } = await collectRequest(
+  ])("keeps a raw internal interleaved budget above a small total for %s", async (model) => {
+    const { body, headers, result } = await collectInternalRequest(
       "claude", model, { outputTokenLimit: 1_024, thinkingBudgetTokens: 2_048 }, TOOL_SCHEMAS,
     );
     expect(body.max_tokens).toBe(1_024);
@@ -114,16 +138,16 @@ describe("resolved output ceiling on the native wire", () => {
     expect(result).toMatchObject({ kind: "ok", text: "ok", stopReason: "end_turn" });
   });
 
-  it.each([1, 1_024, 32_000])("preserves the interleaved budget with total %i", async (outputTokenLimit) => {
-    const { body } = await collectRequest(
+  it.each([1, 1_024, 32_000])("preserves a raw internal interleaved budget with total %i", async (outputTokenLimit) => {
+    const { body } = await collectInternalRequest(
       "claude", "claude-sonnet-4-5", { outputTokenLimit, thinkingBudgetTokens: 32_000 }, TOOL_SCHEMAS,
     );
     expect(body.max_tokens).toBe(outputTokenLimit);
     expect(body.thinking).toEqual({ type: "enabled", budget_tokens: 32_000 });
   });
 
-  it("preserves the SDK's lower model limit before projecting an interleaved total", async () => {
-    const { body } = await collectRequest(
+  it("preserves the SDK's lower model limit before projecting a raw interleaved total", async () => {
+    const { body } = await collectInternalRequest(
       "claude", "claude-opus-4-1", { outputTokenLimit: 64_000, thinkingBudgetTokens: 48_000 }, TOOL_SCHEMAS,
     );
     expect(body.max_tokens).toBe(32_000);
@@ -139,8 +163,8 @@ describe("resolved output ceiling on the native wire", () => {
   });
 
   it.each(["claude-haiku-4-5", "claude-3-7-sonnet-latest"])(
-    "keeps ordinary numeric constraints with tools on %s", async (model) => {
-      const { body, headers } = await collectRequest(
+    "keeps ordinary raw numeric constraints with tools on %s", async (model) => {
+      const { body, headers } = await collectInternalRequest(
         "claude", model, { outputTokenLimit: 1_025, thinkingBudgetTokens: 2_048 }, TOOL_SCHEMAS,
       );
       expect(body.max_tokens).toBe(1_025);

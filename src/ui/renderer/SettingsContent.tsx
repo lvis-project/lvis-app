@@ -600,6 +600,7 @@ export function SettingsContent({
               setEnableThinking={s.setEnableThinking}
               thinkingBudget={s.thinkingBudget}
               setThinkingBudget={s.setThinkingBudget}
+              outputTokenLimit={s.outputTokenLimit}
               fallbackChain={s.fallbackChain}
               setFallbackChain={s.setFallbackChain}
               fallbackOpen={s.fallbackOpen}

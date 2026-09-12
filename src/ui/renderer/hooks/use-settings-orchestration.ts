@@ -23,6 +23,7 @@ import {
   getLlmVendorSettings,
   isLLMVendor,
   llmRouteModel,
+  normalizeLlmThinkingBudgetTokens,
   type LLMVendor,
   type LLMVendorSettings,
 } from "../../../shared/llm-vendor-defaults.js";
@@ -61,6 +62,7 @@ export interface SettingsOrchestrationState {
   setEnableThinking: (v: boolean) => void;
   thinkingBudget: number;
   setThinkingBudget: (v: number) => void;
+  outputTokenLimit: number;
   /** The ACTIVE provider's endpoint. A card's endpoint field edits the draft. */
   baseUrl: string;
   // Cross-vendor LLM controls (UI moved out of "Advanced")
@@ -152,7 +154,7 @@ export function useSettingsOrchestration(
   const [hasKey, setHasKey] = useState(false);
   const [autoCompact, setAutoCompact] = useState(true);
   const [enableThinking, setEnableThinking] = useState(true);
-  const [thinkingBudget, setThinkingBudget] = useState(10_000);
+  const [thinkingBudget, setThinkingBudget] = useState(() => getLlmVendorSettings(undefined, DEFAULT_LLM_VENDOR).thinkingBudgetTokens);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [baseUrl, setBaseUrl] = useState("");
   const [vertexProject, setVertexProject] = useState("");
@@ -182,6 +184,14 @@ export function useSettingsOrchestration(
   const hydratedVendorRef = useRef<string | null>(null);
   const hydratedWebProviderRef = useRef<string | null>(null);
   const vendorInfo = getVendorOption(vendor);
+  const outputTokenLimit = getLlmVendorSettings(
+    settingsSnapshot?.llm.vendors, vendor || DEFAULT_LLM_VENDOR,
+  ).outputTokenLimit!;
+  const effectiveThinkingBudget = normalizeLlmThinkingBudgetTokens(thinkingBudget, outputTokenLimit);
+
+  useEffect(() => {
+    setThinkingBudget((current) => normalizeLlmThinkingBudgetTokens(current, outputTokenLimit));
+  }, [outputTokenLimit]);
 
   const activeCredentialProviderId =
     vendor === "openai-compatible" && marketplaceProviderPresetId
@@ -497,7 +507,7 @@ export function useSettingsOrchestration(
           vertexProject: trimmedVertexProject || undefined,
           vertexLocation: trimmedVertexLocation || undefined,
           enableThinking,
-          thinkingBudgetTokens: thinkingBudget,
+          thinkingBudgetTokens: effectiveThinkingBudget,
         };
         const llmPatch: DeepPartial<AppSettings["llm"]> = {
           provider: vendor || undefined,
@@ -713,7 +723,8 @@ export function useSettingsOrchestration(
     hasKey, setHasKey,
     autoCompact, setAutoCompact,
     enableThinking, setEnableThinking,
-    thinkingBudget, setThinkingBudget,
+    thinkingBudget: effectiveThinkingBudget, setThinkingBudget,
+    outputTokenLimit,
     baseUrl,
     streamSmoothing, setStreamSmoothing,
     fallbackChain, setFallbackChain,

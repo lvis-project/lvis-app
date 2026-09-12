@@ -23,9 +23,10 @@ import {
   DropdownMenuTrigger,
 } from "../../../components/ui/dropdown-menu.js";
 import {
-  REASONING_DEPTHS,
+  getReasoningDepths,
   VENDORS,
   budgetToDepthIndex,
+  reasoningBudgetLabel,
   getVendorOption,
   visibleVendorsFor,
   type VendorOption,
@@ -482,6 +483,7 @@ export interface LlmTabProps {
   setEnableThinking: (v: boolean) => void;
   thinkingBudget: number;
   setThinkingBudget: (v: number) => void;
+  outputTokenLimit: number;
   fallbackChain: FallbackEntry[];
   setFallbackChain: (updater: FallbackEntry[] | ((c: FallbackEntry[]) => FallbackEntry[])) => void;
   fallbackOpen: boolean;
@@ -1197,6 +1199,7 @@ export function LlmTab(props: LlmTabProps) {
     setEnableThinking,
     thinkingBudget,
     setThinkingBudget,
+    outputTokenLimit,
     fallbackChain,
     setFallbackChain,
     fallbackOpen,
@@ -1208,6 +1211,7 @@ export function LlmTab(props: LlmTabProps) {
     settingsLoaded = true,
   } = props;
   const { t } = useTranslation();
+  const reasoningDepths = getReasoningDepths(outputTokenLimit);
   const selectedMarketplaceProviderPreset = vendor === "openai-compatible" && marketplaceProviderPresetId
     ? marketplaceProviderPresets.find((preset) => preset.providerId === marketplaceProviderPresetId)
     : undefined;
@@ -3082,26 +3086,29 @@ export function LlmTab(props: LlmTabProps) {
                   </SettingsHelpPopover>
                 </span>
                 <span className="text-xs font-medium tabular-nums">
-                  {REASONING_DEPTHS[budgetToDepthIndex(thinkingBudget)]!.label}
+                  {reasoningBudgetLabel(thinkingBudget, reasoningDepths)}
                   <span className="ml-2 text-muted-foreground">
                     · {t("llmTab.reasoningBudgetTokens", { count: formatTokensExact(thinkingBudget) })}
                   </span>
                 </span>
               </div>
-              <Slider
+              {reasoningDepths.length > 0 && <Slider
                 min={0}
-                max={REASONING_DEPTHS.length - 1}
+                max={reasoningDepths.length - 1}
                 step={1}
-                value={[budgetToDepthIndex(thinkingBudget)]}
+                value={[budgetToDepthIndex(thinkingBudget, reasoningDepths)]}
                 onValueChange={([value]) => {
-                  setThinkingBudget(REASONING_DEPTHS[value ?? 0]!.budget);
+                  setThinkingBudget(reasoningDepths[value ?? 0]!.budget);
                   onImmediateChange?.();
                 }}
                 aria-label={t("llmTab.reasoningEffortAriaLabel")}
-              />
+              />}
               <div className="flex justify-between text-[10px] text-muted-foreground">
-                {REASONING_DEPTHS.map((s) => (
-                  <span key={s.label}>{s.label}</span>
+                {reasoningDepths.map((s) => (
+                  <button key={s.key} type="button" aria-pressed={s.budget === thinkingBudget} onClick={() => {
+                    setThinkingBudget(s.budget);
+                    onImmediateChange?.();
+                  }}>{s.label}</button>
                 ))}
               </div>
             </div>

@@ -406,6 +406,48 @@ export const DEFAULT_LLM_VENDOR: LLMVendor = "openai";
 /** Default total output ceiling for an API-backed chat request. */
 export const DEFAULT_LLM_OUTPUT_TOKEN_LIMIT = 32_000;
 
+const DEFAULT_THINKING_BUDGET_TOKENS = 8_000;
+const THINKING_BUDGET_PRESETS = [
+  { key: "low", budget: 4_000 },
+  { key: "medium", budget: 8_000 },
+  { key: "high", budget: 16_000 },
+  { key: "xhigh", budget: 32_000 },
+] as const;
+
+interface LlmThinkingBudgetRung {
+  readonly key: (typeof THINKING_BUDGET_PRESETS)[number]["key"];
+  readonly budget: number;
+}
+
+function normalizeLlmOutputTokenLimit(value: unknown): number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0
+    ? value
+    : DEFAULT_LLM_OUTPUT_TOKEN_LIMIT;
+}
+
+/** Cap the user's numeric thinking budget at half the per-request output limit. */
+export function getLlmThinkingBudgetLimit(outputTokenLimit?: number): number {
+  return Math.floor(normalizeLlmOutputTokenLimit(outputTokenLimit) / 2);
+}
+
+/** Normalize user input without changing raw internal generation parameters. */
+export function normalizeLlmThinkingBudgetTokens(value: unknown, outputTokenLimit?: number): number {
+  const budget = typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : DEFAULT_THINKING_BUDGET_TOKENS;
+  return Math.min(budget, getLlmThinkingBudgetLimit(outputTokenLimit));
+}
+
+/**
+ * Fixed user presets, filtered by the output ceiling. The default 32k output
+ * exposes low/medium/high at 4k/8k/16k; xhigh requires at least 64k output.
+ * Reading a valid custom budget does not snap it to one of these presets.
+ */
+export function getLlmThinkingBudgetRungs(outputTokenLimit?: number): readonly LlmThinkingBudgetRung[] {
+  const limit = getLlmThinkingBudgetLimit(outputTokenLimit);
+  return THINKING_BUDGET_PRESETS.filter((preset) => preset.budget <= limit);
+}
+
 /** GitHub Copilot's model inference endpoint — used when the vendor block carries no `baseUrl`. */
 export const COPILOT_BASE_URL = "https://models.github.ai/inference";
 
@@ -644,6 +686,7 @@ export interface LLMVendorSettings {
    */
   presetModels?: Record<string, string>;
   enableThinking: boolean;
+  /** Per API call, bounded by the settings resolver; not a cumulative turn quota. */
   thinkingBudgetTokens: number;
 }
 
@@ -783,7 +826,7 @@ function defaultBlock(vendor: LLMVendor): LLMVendorSettings {
     model,
     ...(preset ? { baseUrl: preset.baseUrl } : {}),
     enableThinking: true,
-    thinkingBudgetTokens: 10_000,
+    thinkingBudgetTokens: DEFAULT_THINKING_BUDGET_TOKENS,
     outputTokenLimit: DEFAULT_LLM_OUTPUT_TOKEN_LIMIT,
   };
 }
@@ -853,12 +896,7 @@ export function getLlmVendorSettings(
   // A hand-edited `0`, fraction or negative would otherwise ride the `...stored`
   // spread all the way to the transport, which reads any non-positive value as
   // "no cap" — the setting would look applied and do nothing.
-  const outputTokenLimit =
-    typeof stored?.outputTokenLimit === "number"
-    && Number.isSafeInteger(stored.outputTokenLimit)
-    && stored.outputTokenLimit > 0
-      ? stored.outputTokenLimit
-      : DEFAULT_LLM_OUTPUT_TOKEN_LIMIT;
+  const outputTokenLimit = normalizeLlmOutputTokenLimit(stored?.outputTokenLimit);
   const contextWindow = normalizeLlmContextWindow(stored?.contextWindow);
   const block: LLMVendorSettings = {
     ...defaults,
@@ -868,11 +906,7 @@ export function getLlmVendorSettings(
       typeof stored?.enableThinking === "boolean"
         ? stored.enableThinking
         : defaults.enableThinking,
-    thinkingBudgetTokens:
-      typeof stored?.thinkingBudgetTokens === "number" &&
-      Number.isFinite(stored.thinkingBudgetTokens)
-        ? stored.thinkingBudgetTokens
-        : defaults.thinkingBudgetTokens,
+    thinkingBudgetTokens: normalizeLlmThinkingBudgetTokens(stored?.thinkingBudgetTokens, outputTokenLimit),
   };
   if (presetModels) block.presetModels = presetModels;
   else delete block.presetModels;

@@ -1106,6 +1106,58 @@ describe("SettingsService LLM per-vendor patching", () => {
     await cleanupTmpDir(userDataPath);
   });
 
+  it("bounds legacy profile budgets and persists the normalized value without changing the output cap", async () => {
+    writeFileSync(join(userDataPath, "lvis-settings.json"), JSON.stringify({
+      llm: {
+        provider: "openai",
+        vendors: { openai: { model: "fixture-model", enableThinking: true, thinkingBudgetTokens: 24_000, outputTokenLimit: 32_000 } },
+      },
+    }));
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
+    expect(service.get("llm").vendors.openai).toMatchObject({
+      model: "fixture-model", enableThinking: true, thinkingBudgetTokens: 16_000, outputTokenLimit: 32_000,
+    });
+    await service.patch({ llm: { vendors: { openai: { thinkingBudgetTokens: 14_000 } } } });
+    const reloaded = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
+    expect(reloaded.get("llm").vendors.openai).toMatchObject({ thinkingBudgetTokens: 14_000, outputTokenLimit: 32_000 });
+  });
+
+  it("clamps thinking on patches and output changes while preserving unrelated vendor fields", async () => {
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
+    await service.patch({ llm: { vendors: { "openai-compatible": {
+      model: "fixture-model", baseUrl: "https://provider.example/v1", enableThinking: false,
+      contextWindow: 128_000, outputTokenLimit: 32_000, thinkingBudgetTokens: 32_000,
+    } } } });
+    expect(service.get("llm").vendors["openai-compatible"]?.thinkingBudgetTokens).toBe(16_000);
+    await service.patch({ llm: { vendors: { "openai-compatible": { outputTokenLimit: 16_000 } } } });
+    expect(service.get("llm").vendors["openai-compatible"]).toMatchObject({
+      model: "fixture-model", baseUrl: "https://provider.example/v1", enableThinking: false,
+      contextWindow: 128_000, outputTokenLimit: 16_000, thinkingBudgetTokens: 8_000,
+    });
+    await service.patch({ llm: { vendors: { "openai-compatible": { outputTokenLimit: 64_000 } } } });
+    expect(service.get("llm").vendors["openai-compatible"]?.thinkingBudgetTokens).toBe(8_000);
+    await service.patch({ llm: { vendors: { "openai-compatible": { thinkingBudgetTokens: 48_000 } } } });
+    expect(service.get("llm").vendors["openai-compatible"]?.thinkingBudgetTokens).toBe(32_000);
+    const reloaded = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
+    expect(reloaded.get("llm").vendors["openai-compatible"]).toEqual(service.get("llm").vendors["openai-compatible"]);
+  });
+
+  it("retains an inactive provider customized only by its output cap across pruning and reload", async () => {
+    writeFileSync(join(userDataPath, "lvis-settings.json"), JSON.stringify({
+      llm: { provider: "openai", vendors: { groq: { outputTokenLimit: 64_000 } } },
+    }));
+    const service = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
+    expect(service.get("llm").vendors.groq).toMatchObject({ outputTokenLimit: 64_000, thinkingBudgetTokens: 8_000 });
+    expect(service.get("marketplace").installedProviderIds).toContain("groq");
+    await service.patch({ llm: { provider: "groq" } });
+    await service.patch({ llm: { provider: "openai" } });
+    const reloaded = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
+    expect(reloaded.get("llm").provider).toBe("openai");
+    expect(reloaded.get("llm").vendors.groq).toMatchObject({ outputTokenLimit: 64_000, thinkingBudgetTokens: 8_000 });
+    await reloaded.patch({ llm: { provider: "groq", vendors: { groq: { thinkingBudgetTokens: 40_000 } } } });
+    expect(reloaded.get("llm").vendors.groq).toMatchObject({ outputTokenLimit: 64_000, thinkingBudgetTokens: 32_000 });
+  });
+
   it("round-trips a per-vendor output ceiling through patch", async () => {
     // The ceiling is the only brake on a runaway round, and it is configured
     // rather than assumed — so it has to survive the write path a caller

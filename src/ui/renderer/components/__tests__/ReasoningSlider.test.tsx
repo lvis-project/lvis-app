@@ -1,103 +1,136 @@
 // @vitest-environment jsdom
 import "../../../../../test/renderer/setup.js";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
-import { DEPTH_BUDGET, useReasoningLevel } from "../ReasoningSlider.js";
-import { REASONING_DEPTHS, budgetToDepthIndex } from "../../constants.js";
-import { readRepoFile } from "../../../../__tests__/test-helpers.js";
-import { DEFAULT_LLM_VENDOR } from "../../../../shared/llm-vendor-defaults.js";
+import { act, renderHook, waitFor } from "@testing-library/react";
+import { useReasoningLevel } from "../ReasoningSlider.js";
+import { getReasoningDepths, budgetToDepthIndex } from "../../constants.js";
+import { DEFAULT_LLM_VENDOR, getLlmVendorSettings } from "../../../../shared/llm-vendor-defaults.js";
 
 const getSettings = vi.fn();
 const updateSettings = vi.fn();
+const onSettingsUpdated = vi.fn();
 
 vi.mock("../../api-client.js", () => ({
-  getApi: () => ({ getSettings, updateSettings, onSettingsUpdated: () => () => {} }),
+  getApi: () => ({ getSettings, updateSettings, onSettingsUpdated }),
 }));
+
+function settings(thinkingBudgetTokens = 8_000, outputTokenLimit = 32_000) {
+  return {
+    llm: {
+      provider: DEFAULT_LLM_VENDOR,
+      vendors: { [DEFAULT_LLM_VENDOR]: {
+        ...getLlmVendorSettings(undefined, DEFAULT_LLM_VENDOR), thinkingBudgetTokens, outputTokenLimit,
+      } },
+    },
+  };
+}
 
 describe("ReasoningSlider depth budget", () => {
   beforeEach(() => {
     getSettings.mockReset();
     updateSettings.mockReset();
+    onSettingsUpdated.mockReset();
+    onSettingsUpdated.mockReturnValue(() => {});
     updateSettings.mockResolvedValue({ ok: true });
   });
 
-  it("is the same ladder the settings tab writes, not a second copy", () => {
-    // The composer and the settings tab both persist `thinkingBudgetTokens` on
-    // the same vendor. When each carried its own budgets they disagreed about
-    // what a stored number meant: settings wrote 12,000 for "High" and the
-    // composer showed "Medium", because 12,000 was nearest its own 10,000
-    // rung. One ladder is the fix; this asserts the settings tab still reads
-    // it rather than growing new numbers of its own.
-    expect(DEPTH_BUDGET).toEqual(
-      Object.fromEntries(REASONING_DEPTHS.map((d) => [d.key, d.budget])),
-    );
-    const settingsTab = readRepoFile("src/ui/renderer/tabs/LlmTab.tsx");
-    expect(settingsTab).toContain("REASONING_DEPTHS");
-    expect(settingsTab).toContain("budgetToDepthIndex");
-    expect(settingsTab).not.toMatch(/budget:\s*[\d_]+/u);
-  });
-
-  it("resolves a budget that sits between rungs to the nearest one", () => {
-    // Anything already persisted has to land somewhere -- including the
-    // 12,000 the old settings ladder wrote, and the 2,000 below its bottom.
-    // 12,000 is 2,000 from medium and 4,000 from high, so it lands on medium --
-    // which is what the composer already showed for it. The two surfaces now
-    // agree on that instead of only one of them being right.
-    expect(REASONING_DEPTHS[budgetToDepthIndex(12_000)]!.key).toBe("medium");
-    expect(REASONING_DEPTHS[budgetToDepthIndex(2_000)]!.key).toBe("low");
-    expect(REASONING_DEPTHS[budgetToDepthIndex(999_999)]!.key).toBe("max");
-  });
-
-  it("maps the five depths to their token budgets", () => {
-    expect(DEPTH_BUDGET).toEqual({
-      low: 4_000, medium: 10_000, high: 16_000, xhigh: 24_000, max: 32_000,
-    });
-  });
-
-  it("keeps the ladder ascending, so a higher rung always thinks longer", () => {
-    const budgets = Object.values(DEPTH_BUDGET);
-    expect(budgets).toEqual([...budgets].sort((a, b) => a - b));
+  it("resolves a budget between the current rungs to the nearest label", () => {
+    const depths = getReasoningDepths(32_000);
+    expect(depths[budgetToDepthIndex(11_000, depths)]!.key).toBe("medium");
+    expect(depths[budgetToDepthIndex(2_000, depths)]!.key).toBe("low");
+    expect(depths[budgetToDepthIndex(999_999, depths)]!.key).toBe("high");
   });
 
   it.each([
-    ["low", 1], ["medium", 2], ["high", 3], ["xhigh", 4], ["max", 5],
-  ] as const)("reads a persisted %s budget back as level %i", async (depth, level) => {
-    getSettings.mockResolvedValue({
-      llm: { provider: DEFAULT_LLM_VENDOR, vendors: { [DEFAULT_LLM_VENDOR]: { thinkingBudgetTokens: DEPTH_BUDGET[depth] } } },
-    });
+    [4_000, 1], [8_000, 2], [16_000, 3],
+  ])("reads persisted budget %i back as level %i", async (budget, level) => {
+    getSettings.mockResolvedValue(settings(budget));
     const { result } = renderHook(() => useReasoningLevel({ enabled: true, onToggle: () => {} }));
     await waitFor(() => expect(result.current.level).toBe(level));
+    expect(result.current.levelLabels).toHaveLength(4);
+    expect(result.current.levelLabels.every((label) => label.trim() !== "")).toBe(true);
   });
 
-  it("offers a label for every rung, so no level renders as a blank", () => {
-    getSettings.mockResolvedValue({
-      llm: { provider: DEFAULT_LLM_VENDOR, vendors: { [DEFAULT_LLM_VENDOR]: {} } },
-    });
+  it.each([32_000, 16_000, 64_000])(
+    "persists every distinct offered rung and keeps its level after broadcast with output %i", async (outputTokenLimit) => {
+      let current = settings(10_000, outputTokenLimit);
+      getSettings.mockImplementation(async () => current);
+      updateSettings.mockImplementation(async (patch) => {
+        const block = getLlmVendorSettings({ [DEFAULT_LLM_VENDOR]: {
+          ...current.llm.vendors[DEFAULT_LLM_VENDOR],
+          ...patch.llm.vendors[DEFAULT_LLM_VENDOR],
+        } }, DEFAULT_LLM_VENDOR);
+        current = settings(block.thinkingBudgetTokens, outputTokenLimit);
+        onSettingsUpdated.mock.calls[0]![0](current);
+        return { ok: true };
+      });
+      const { result } = renderHook(() => useReasoningLevel({ enabled: true, onToggle: () => {} }));
+      await act(async () => {});
+      const expected = outputTokenLimit === 32_000 ? [4_000, 8_000, 16_000]
+        : outputTokenLimit === 16_000 ? [4_000, 8_000]
+          : [4_000, 8_000, 16_000, 32_000];
+      expect(result.current.levelLabels).toHaveLength(expected.length + 1);
+      for (const [index, budget] of expected.entries()) {
+        await act(async () => result.current.apply(index + 1));
+        await waitFor(() => expect(result.current.level).toBe(index + 1));
+        expect(updateSettings).toHaveBeenLastCalledWith({
+          llm: { vendors: { [DEFAULT_LLM_VENDOR]: { thinkingBudgetTokens: budget } } },
+        });
+      }
+    },
+  );
+
+  it("uses a changed output limit before persisting a choice", async () => {
+    getSettings.mockResolvedValue(settings(14_000));
     const { result } = renderHook(() => useReasoningLevel({ enabled: true, onToggle: () => {} }));
-    // One label per rung plus the off position the slider starts from.
-    expect(result.current.levelLabels).toHaveLength(Object.keys(DEPTH_BUDGET).length + 1);
-    expect(result.current.levelLabels.filter((l) => l.trim() !== "")).toHaveLength(6);
+    await waitFor(() => expect(result.current.level).toBe(3));
+    getSettings.mockResolvedValue(settings(8_000, 16_000));
+    await act(async () => result.current.apply(3));
+    expect(updateSettings).toHaveBeenLastCalledWith({
+      llm: { vendors: { [DEFAULT_LLM_VENDOR]: { thinkingBudgetTokens: 8_000 } } },
+    });
+    await act(async () => onSettingsUpdated.mock.calls[0]![0](settings(8_000, 16_000)));
+    expect(result.current.level).toBe(2);
   });
 
-  it("persists the budget of the rung the user picked, not the level index", async () => {
-    getSettings.mockResolvedValue({
-      llm: { provider: DEFAULT_LLM_VENDOR, vendors: { [DEFAULT_LLM_VENDOR]: {} } },
-    });
+  it("clamps legacy oversized budgets and out-of-range levels to the upper rung", async () => {
+    getSettings.mockResolvedValue(settings(32_000));
     const { result } = renderHook(() => useReasoningLevel({ enabled: true, onToggle: () => {} }));
-    result.current.apply(5);
-    await waitFor(() => expect(updateSettings).toHaveBeenCalledWith({
-      llm: { vendors: { [DEFAULT_LLM_VENDOR]: { thinkingBudgetTokens: DEPTH_BUDGET.max } } },
-    }));
+    await waitFor(() => expect(result.current.level).toBe(3));
+    await act(async () => result.current.apply(9));
+    expect(updateSettings).toHaveBeenLastCalledWith({
+      llm: { vendors: { [DEFAULT_LLM_VENDOR]: { thinkingBudgetTokens: 16_000 } } },
+    });
   });
 
-  it("clamps a level past the top rung instead of persisting an undefined budget", async () => {
-    getSettings.mockResolvedValue({
-      llm: { provider: DEFAULT_LLM_VENDOR, vendors: { [DEFAULT_LLM_VENDOR]: {} } },
-    });
+  it.each([10_000, 14_000])("preserves custom budget %i on initial read and broadcasts", async (budget) => {
+    getSettings.mockResolvedValue(settings(budget));
     const { result } = renderHook(() => useReasoningLevel({ enabled: true, onToggle: () => {} }));
-    result.current.apply(9);
-    await waitFor(() => expect(updateSettings).toHaveBeenCalledWith({
-      llm: { vendors: { [DEFAULT_LLM_VENDOR]: { thinkingBudgetTokens: DEPTH_BUDGET.max } } },
-    }));
+    await waitFor(() => expect(result.current.custom).toBe(true));
+    expect(result.current.currentLabel).toContain(budget.toLocaleString("en-US"));
+    await act(async () => onSettingsUpdated.mock.calls[0]![0](settings(budget)));
+    expect(result.current.currentLabel).toContain(budget.toLocaleString("en-US"));
+    expect(updateSettings).not.toHaveBeenCalled();
+    await act(async () => result.current.apply(3));
+    expect(updateSettings).toHaveBeenLastCalledWith({
+      llm: { vendors: { [DEFAULT_LLM_VENDOR]: { thinkingBudgetTokens: 16_000 } } },
+    });
+  });
+
+  it("keeps a tiny custom budget when no preset fits and keeps off separate", async () => {
+    getSettings.mockResolvedValue(settings(2, 4));
+    const onToggle = vi.fn();
+    const { result } = renderHook(() => useReasoningLevel({ enabled: true, onToggle }));
+    await waitFor(() => expect(result.current.levelLabels).toHaveLength(2));
+    expect(result.current.currentLabel).toContain("2");
+    await act(async () => result.current.apply(9));
+    expect(updateSettings).not.toHaveBeenCalled();
+    await act(async () => result.current.apply(0));
+    expect(onToggle).toHaveBeenCalledWith(false);
+    expect(updateSettings).not.toHaveBeenCalled();
+    await act(async () => onSettingsUpdated.mock.calls[0]![0](settings(0, 1)));
+    expect(result.current.levelLabels).toHaveLength(2);
+    expect(result.current.level).toBe(1);
+    expect(result.current.currentLabel).toContain("0");
   });
 });

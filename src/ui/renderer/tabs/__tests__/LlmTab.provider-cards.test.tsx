@@ -213,6 +213,9 @@ interface TabProps {
   draft?: ProviderCredentialDraft | null;
   hasKey?: boolean;
   model?: string;
+  enableThinking?: boolean;
+  thinkingBudget?: number;
+  outputTokenLimit?: number;
   marketplaceProviderPresets?: readonly MarketplaceInstalledProviderPreset[];
   marketplaceProviderPresetId?: string;
   fallbackChain?: import("../LlmTab.js").FallbackEntry[];
@@ -233,6 +236,7 @@ function keyDraft(rowId: string, vendorId: string, keyInput: string): ProviderCr
 }
 
 interface TabHooks {
+  setThinkingBudget: Mock<(budget: number) => void>;
   selectApiVendorModel: Mock<(vendorId: string, modelId: string) => void>;
   onSelectMarketplaceProviderPreset: Mock<(preset: MarketplaceInstalledProviderPreset) => void>;
   onClearMarketplaceProviderPreset: Mock<() => void>;
@@ -242,6 +246,7 @@ interface TabHooks {
 
 function makeHooks(): TabHooks {
   return {
+    setThinkingBudget: vi.fn(),
     selectApiVendorModel: vi.fn(),
     onSelectMarketplaceProviderPreset: vi.fn(),
     onClearMarketplaceProviderPreset: vi.fn(),
@@ -267,6 +272,7 @@ function TabHarness({
   const [drafts, setDrafts] = useState<readonly ProviderCredentialDraft[]>(
     props.draft ? [props.draft] : [],
   );
+  const [thinkingBudget, setThinkingBudget] = useState(props.thinkingBudget ?? 10_000);
   return (
     <TooltipProvider>
       <LlmTab
@@ -285,10 +291,14 @@ function TabHarness({
         model={props.model ?? "gpt-5.4"}
         setModel={vi.fn()}
         selectApiVendorModel={hooks.selectApiVendorModel}
-        enableThinking={false}
+        enableThinking={props.enableThinking ?? false}
         setEnableThinking={vi.fn()}
-        thinkingBudget={10_000}
-        setThinkingBudget={vi.fn()}
+        thinkingBudget={thinkingBudget}
+        setThinkingBudget={(budget) => {
+          hooks.setThinkingBudget(budget);
+          setThinkingBudget(budget);
+        }}
+        outputTokenLimit={props.outputTokenLimit ?? 32_000}
         fallbackChain={props.fallbackChain ?? []}
         setFallbackChain={vi.fn()}
         fallbackOpen={props.fallbackOpen ?? false}
@@ -390,6 +400,40 @@ beforeEach(() => {
 });
 
 describe("LlmTab provider cards", () => {
+  it.each([[32_000, 16_000], [16_000, 8_000], [64_000, 32_000]])(
+    "offers a maximum thinking budget of %i output / 2", async (outputTokenLimit, expected) => {
+      const { hooks } = await renderTab(makeApi(), { enableThinking: true, thinkingBudget: 4_000, outputTokenLimit });
+      const slider = within(screen.getByTestId("llm-tab:section-thinking")).getByRole("slider");
+      const maximumIndex = outputTokenLimit === 32_000 ? "2" : outputTokenLimit === 16_000 ? "1" : "3";
+      expect(slider).toHaveAttribute("aria-valuemax", maximumIndex);
+      fireEvent.keyDown(slider, { key: "End" });
+      expect(hooks.setThinkingBudget).toHaveBeenLastCalledWith(expected);
+      expect(hooks.onImmediateChange).toHaveBeenCalled();
+      expect(slider).toHaveAttribute("aria-valuenow", maximumIndex);
+    },
+  );
+
+  it("displays a custom saved budget without snapping it until the user selects a preset", async () => {
+    const { hooks } = await renderTab(makeApi(), { enableThinking: true, thinkingBudget: 14_000, outputTokenLimit: 32_000 });
+    const section = screen.getByTestId("llm-tab:section-thinking");
+    expect(section).toHaveTextContent("14,000");
+    expect(hooks.setThinkingBudget).not.toHaveBeenCalled();
+    const presets = within(section).getAllByRole("button").filter((button) => button.hasAttribute("aria-pressed"));
+    expect(presets).toHaveLength(3);
+    expect(presets.every((button) => button.getAttribute("aria-pressed") === "false")).toBe(true);
+    fireEvent.click(presets[2]!);
+    expect(hooks.setThinkingBudget).toHaveBeenLastCalledWith(16_000);
+    expect(section).toHaveTextContent("16,000");
+  });
+
+  it("shows the existing custom budget without a preset slider when the output ceiling is too small", async () => {
+    const { hooks } = await renderTab(makeApi(), { enableThinking: true, thinkingBudget: 1_000, outputTokenLimit: 2_000 });
+    const section = screen.getByTestId("llm-tab:section-thinking");
+    expect(section).toHaveTextContent("1,000");
+    expect(within(section).queryByRole("slider")).toBeNull();
+    expect(hooks.setThinkingBudget).not.toHaveBeenCalled();
+  });
+
   it("puts Save inside the card being edited, not on the page", async () => {
     await renderTab(makeApi(), { draft: keyDraft("openai", "openai", "sk-typed") });
 

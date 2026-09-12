@@ -47,6 +47,8 @@ import { isToolResultStubContent } from "../../shared/tool-result-stub.js";
 import type { LLMSettings, MarketplaceSettings } from "../../data/settings-store.js";
 import {
   getLlmVendorSettings,
+  getLlmThinkingBudgetLimit,
+  normalizeLlmThinkingBudgetTokens,
   llmRouteBaseUrlSignature,
 } from "../../shared/llm-vendor-defaults.js";
 import {
@@ -1494,7 +1496,10 @@ export function registerChatHandlers(deps: IpcDeps): void {
             [provider]: {
               ...prevBlock,
               enableThinking: opts?.enableThinking ?? true,
-              thinkingBudgetTokens: opts?.thinkingBudgetTokens ?? 20000,
+              thinkingBudgetTokens: normalizeLlmThinkingBudgetTokens(
+                opts?.thinkingBudgetTokens ?? getLlmThinkingBudgetLimit(prevBlock.outputTokenLimit),
+                prevBlock.outputTokenLimit,
+              ),
             },
           },
         },
