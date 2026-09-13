@@ -538,6 +538,19 @@ describe("powershell tool", () => {
   });
 
   describe.skipIf(process.platform !== "win32")("native process resource handling", () => {
+    it("passes the configured proxy route to the plain native shell without provider secrets", async () => {
+      vi.stubEnv("HTTPS_PROXY", "http://proxy.example:8443");
+      vi.stubEnv("NO_PROXY", "localhost,.internal.example");
+      vi.stubEnv("OPENAI_API_KEY", "must-not-inherit");
+      try {
+        const result = await _spawnPowerShellForTest(
+          '[Console]::Write($env:HTTPS_PROXY + "|" + $env:NO_PROXY + "|" + $env:OPENAI_API_KEY)', process.cwd(), 30,
+        );
+        expect(result.metadata?.returncode).toBe(0);
+        expect(result.output).toBe("http://proxy.example:8443|localhost,.internal.example|");
+      } finally { vi.unstubAllEnvs(); }
+    });
+
     it("preserves public cmdlet output and a nonzero exit", async () => {
       const result = await new PowerShellTool().execute({
         command: "Write-Output first; Write-Error second -ErrorAction Continue; exit 7", timeoutSeconds: 30,

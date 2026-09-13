@@ -84,12 +84,16 @@ tree. An interrupted foreground call settles after requesting that termination
 and releasing its output pipe ends, even if a descendant keeps an inherited
 pipe open. Ordinary completion still drains stdout and stderr through closure;
 sandbox cleanup waits for confirmed root termination. Output capture keeps a
-bounded prefix. Child environment filtering stays in `src/tools/safe-env.ts`. Background incremental
-output and structured parser output have separate contracts.
+bounded prefix. Child environment filtering stays in
+[`safe-env.ts`](../../src/tools/safe-env.ts). Plain host shells additionally
+retain the operator's configured proxy and bypass settings. Sandbox children
+keep the generic filtered baseline and receive proxy changes only from their
+wrapper. Background incremental output and structured parser output have
+separate contracts.
 
 The Bash tool resolves the same Bash dialect for foreground, background, and
 sandbox execution through `src/lib/shell-resolver.ts`; discovery probes use the
-same filtered child environment. Background handles belong to a session and
+generic filtered child environment. Background handles belong to a session and
 retain bounded incremental output. `bash_output.waitMs` is an integer from 0 to
 30,000 ms, default 0. Its default `waitFor: "output"` returns on unread/new output
 or completion. Opt-in `waitFor: "completion"` keeps waiting through progress
