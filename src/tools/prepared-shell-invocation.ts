@@ -4,7 +4,7 @@ import { getBashCapabilities, resolveShell, shellEnvForChild, shellPathForHostPa
 import { createSandboxProcessHome, type SandboxProcessHome } from "../permissions/sandbox-process-home.js";
 import type { HostShellExecutionPlan } from "../permissions/host-shell-execution-plan.js";
 import type { ShellExecutionFacts } from "../shared/shell-execution.js";
-import { buildSafeChildEnv, captureSandboxEnvironmentBaseline, FORWARD_ENV_KEYS, overlaySandboxChildEnv } from "./safe-env.js";
+import { buildHostShellChildEnv, buildSafeChildEnv, captureSandboxEnvironmentBaseline, FORWARD_ENV_KEYS, overlaySandboxChildEnv } from "./safe-env.js";
 
 export interface ShellInvocationIdentity {
   readonly command: string;
@@ -36,7 +36,7 @@ export function prepareShellInvocation(identity: ShellInvocationIdentity, signal
   const selected = resolveShell("bash");
   const shell = Object.freeze({ ...selected });
   const wrapperBaseline = captureSandboxEnvironmentBaseline();
-  const safe = shellEnvForChild(shell, buildSafeChildEnv());
+  const safe = shellEnvForChild(shell, identity.plan.mode === "plain" ? buildHostShellChildEnv() : buildSafeChildEnv());
   const hostHome = safe.HOME;
   let home: SandboxProcessHome | undefined;
   try {

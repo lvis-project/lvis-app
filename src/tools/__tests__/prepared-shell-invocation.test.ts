@@ -28,6 +28,46 @@ function fixture(command = "printf '%s\\0' \"$HOME\" \"$TMPDIR\" \"$PWD\" \"$HTT
 }
 
 describe.skipIf(process.platform === "win32")("prepared shell facts and resource ownership", () => {
+  it("delivers captured proxy settings to an actual plain shell without host secrets", () => {
+    const proxies = {
+      HTTP_PROXY: "http://upper.example:8080", http_proxy: "http://lower.example:8081",
+      HTTPS_PROXY: "http://upper.example:8443", https_proxy: "http://lower.example:8444",
+      ALL_PROXY: "socks5h://upper.example:1080", all_proxy: "socks5h://lower.example:1081",
+      NO_PROXY: "localhost,.upper.example", no_proxy: "127.0.0.1,.lower.example",
+    };
+    for (const [key, value] of Object.entries(proxies)) vi.stubEnv(key, value);
+    vi.stubEnv("OPENAI_API_KEY", "must-not-inherit");
+    vi.stubEnv("BASH_ENV", "/nonexistent-shell-startup");
+    vi.stubEnv("NODE_OPTIONS", "--invalid-child-option");
+    const command = `printf '%s\\0' ${Object.keys(proxies).map((key) => `"$${key}"`).join(" ")}`
+      + ' "${OPENAI_API_KEY-unset}" "${BASH_ENV-unset}" "${NODE_OPTIONS-unset}"';
+    const { handle, cwd } = fixture(command, false);
+    vi.stubEnv("HTTPS_PROXY", "http://changed.example:8080");
+    const prepared = preparedShellCommand(handle);
+    const result = spawnSync(prepared.shell.cmd, [...prepared.argv], { cwd, env: { ...prepared.environment }, timeout: 3000, encoding: "utf8" });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout.split("\0")).toEqual([...Object.values(proxies), "unset", "unset", "unset", ""]);
+    expect(preparedShellFacts(handle).environment).toEqual(prepared.environment);
+  });
+
+  it("keeps ambient proxy settings out of sandbox preparation and accepts only a changed wrapper route", () => {
+    for (const key of ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "all_proxy", "no_proxy"]) {
+      vi.stubEnv(key, "http://ambient.example:3128");
+    }
+    const { handle, cwd } = fixture('printf "%s\\0" "${HTTPS_PROXY-unset}" "${https_proxy-unset}" "${NO_PROXY-unset}"');
+    const prepared = preparedShellCommand(handle);
+    expect(prepared.environment).not.toHaveProperty("HTTPS_PROXY");
+    const bootstrap = preparedSandboxBootstrap(handle);
+    expect(bootstrap).not.toContain("ambient.example");
+    const unchanged = spawnSync(prepared.shell.cmd, prepared.shell.shellArgs(bootstrap), { cwd, env: preparedSandboxEnvironment(handle, { ...process.env }), timeout: 3000, encoding: "utf8" });
+    expect(unchanged.status, unchanged.stderr).toBe(0);
+    expect(unchanged.stdout.split("\0")).toEqual(["unset", "unset", "unset", ""]);
+    const wrapped = preparedSandboxEnvironment(handle, { ...process.env, HTTPS_PROXY: "http://localhost:60080", https_proxy: "http://localhost:60080", NO_PROXY: "localhost" });
+    const changed = spawnSync(prepared.shell.cmd, prepared.shell.shellArgs(bootstrap), { cwd, env: wrapped, timeout: 3000, encoding: "utf8" });
+    expect(changed.status, changed.stderr).toBe(0);
+    expect(changed.stdout.split("\0")).toEqual(["http://localhost:60080", "http://localhost:60080", "localhost", ""]);
+  });
+
   it("pins inner facts while preserving a late proxy and certificate overlay", () => {
     vi.stubEnv("TMPDIR", tmpdir());
     const { cwd, handle } = fixture();

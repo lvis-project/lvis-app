@@ -6,7 +6,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { vi } from "vitest";
 
-import { buildSafeChildEnv, buildSandboxedChildEnv } from "../safe-env.js";
+import { buildHostShellChildEnv, buildSafeChildEnv, buildSandboxedChildEnv } from "../safe-env.js";
 
 const SAFE_KEYS = [
   "PATH",
@@ -189,6 +189,60 @@ describe("buildSafeChildEnv — extra merging", () => {
     const envWithEmpty = buildSafeChildEnv({});
     const envWithNoArg = buildSafeChildEnv();
     expect(Object.keys(envWithEmpty)).toEqual(Object.keys(envWithNoArg));
+  });
+});
+
+describe("plain host shell proxy inheritance", () => {
+  const proxySettings = {
+    HTTP_PROXY: "http://proxy.example:8080",
+    HTTPS_PROXY: "http://proxy.example:8443",
+    ALL_PROXY: "socks5h://proxy.example:1080",
+    NO_PROXY: "localhost,127.0.0.1,.internal.example",
+    http_proxy: "http://proxy.example:8080",
+    https_proxy: "http://proxy.example:8443",
+    all_proxy: "socks5h://proxy.example:1080",
+    no_proxy: "localhost,127.0.0.1,.internal.example",
+  };
+
+  beforeEach(() => {
+    for (const [key, value] of Object.entries(proxySettings)) vi.stubEnv(key, value);
+  });
+
+  it("forwards configured proxy settings only to an explicit plain host shell", () => {
+    expect(buildHostShellChildEnv()).toMatchObject(proxySettings);
+    for (const key of Object.keys(proxySettings)) {
+      expect(buildSafeChildEnv()).not.toHaveProperty(key);
+      expect(buildSandboxedChildEnv({ ...process.env })).not.toHaveProperty(key);
+    }
+  });
+
+  it("keeps provider secrets and runtime injection variables out of the child", () => {
+    const forbidden = ["BASH_ENV", "ENV", "NODE_OPTIONS", "LD_PRELOAD", "DYLD_INSERT_LIBRARIES", "FUTURE_PROXY_TOKEN"];
+    for (const key of forbidden) vi.stubEnv(key, "must-not-inherit");
+    const env = buildHostShellChildEnv();
+    for (const key of [...SECRET_KEYS, ...forbidden]) expect(env).not.toHaveProperty(key);
+  });
+
+  it.skipIf(process.platform === "win32")("preserves different casing values without resolving client precedence", () => {
+    vi.stubEnv("https_proxy", "http://lowercase.example:3128");
+    const env = buildHostShellChildEnv();
+    expect(env.HTTPS_PROXY).toBe(proxySettings.HTTPS_PROXY);
+    expect(env.https_proxy).toBe("http://lowercase.example:3128");
+  });
+
+  it("keeps explicit empty values and omits absent values", () => {
+    vi.stubEnv("HTTPS_PROXY", ""); vi.stubEnv("https_proxy", "");
+    vi.stubEnv("ALL_PROXY", undefined); vi.stubEnv("all_proxy", undefined);
+    const env = buildHostShellChildEnv();
+    expect(env.HTTPS_PROXY).toBe(""); expect(env.https_proxy).toBe("");
+    expect(env).not.toHaveProperty("ALL_PROXY"); expect(env).not.toHaveProperty("all_proxy");
+  });
+
+  it("retains explicit extra precedence and returns independent snapshots", () => {
+    const env = buildHostShellChildEnv({ HTTPS_PROXY: "", PATH: "/custom/bin" });
+    expect(env.HTTPS_PROXY).toBe(""); expect(env.PATH).toBe("/custom/bin");
+    env.NO_PROXY = "changed";
+    expect(buildHostShellChildEnv().NO_PROXY).toBe(proxySettings.NO_PROXY);
   });
 });
 

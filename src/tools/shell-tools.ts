@@ -28,7 +28,7 @@ import {
   type ToolExecutionContext,
   type ToolExecutionResult,
 } from "./base.js";
-import { buildSafeChildEnv, buildSandboxedChildEnv } from "./safe-env.js";
+import { buildHostShellChildEnv, buildSafeChildEnv, buildSandboxedChildEnv } from "./safe-env.js";
 import { prepareShellInvocation, matchesPreparedShellInvocation, preparedShellFacts, preparedShellCommand, preparedSandboxBootstrap, preparedSandboxEnvironment, disposePreparedShellInvocation, claimPreparedShellInvocation, transferPreparedShellInvocation, type PreparedShellInvocation } from "./prepared-shell-invocation.js";
 import { POWER_SHELL_AST_PARSER, normalizePowerShellAstSummary, type PowerShellArgument, type PowerShellAstSummary } from "./powershell-ast.js";
 import { resolveShellFilesystemPath } from "../shared/shell-filesystem-path.js";
@@ -1881,7 +1881,7 @@ async function spawnPowerShell(
         detached: process.platform !== "win32",
         cwd,
         stdio: ["ignore", "pipe", "pipe"],
-        env: buildSafeChildEnv(),
+        env: buildHostShellChildEnv(),
         shell: false,
       },
     );

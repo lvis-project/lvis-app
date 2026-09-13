@@ -5,9 +5,10 @@
  * Every caller that shells out (bash tool, external command hooks) MUST go
  * through {@link buildSafeChildEnv} so that secrets stored in the host
  * process env (API keys, auth tokens, etc.) are NEVER visible to the
- * child. Anything not explicitly listed in {@link FORWARD_ENV_KEYS} is
- * stripped — this includes `LVIS_*`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
- * `GOOGLE_*`, `AWS_*`, `GITHUB_TOKEN`, and any future provider secrets.
+ * child. The generic baseline strips anything not explicitly listed in
+ * {@link FORWARD_ENV_KEYS}, including provider keys and internal tokens.
+ * Host-created extras and the scoped shell/sandbox builders below add only
+ * the environment their caller explicitly supplies or opts into forwarding.
  */
 
 /**
@@ -69,6 +70,35 @@ export function buildSafeChildEnv(
   return { ...safe, ...extra };
 }
 
+/** Standard operator-configured proxy settings; preserve each client's casing. */
+const PROXY_ENV_KEYS = [
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "ALL_PROXY",
+  "NO_PROXY",
+  "http_proxy",
+  "https_proxy",
+  "all_proxy",
+  "no_proxy",
+] as const;
+
+/**
+ * Plain host shells retain the operator's configured network route. Keep this
+ * separate from the generic baseline: sandbox children receive only their
+ * wrapper's proxy settings, never an ambient upstream proxy or bypass list.
+ * Explicit host-created extras retain the same last-write precedence.
+ */
+export function buildHostShellChildEnv(
+  extra: Record<string, string> = {},
+): Record<string, string> {
+  const env = buildSafeChildEnv();
+  for (const key of PROXY_ENV_KEYS) {
+    const value = process.env[key];
+    if (value !== undefined) env[key] = value;
+  }
+  return { ...env, ...extra };
+}
+
 /**
  * The exact set of environment variables ASRT is permitted to add or change on
  * the sandboxed child's env. Sourced from the sandbox-runtime egress plumbing
@@ -87,17 +117,10 @@ export function buildSafeChildEnv(
  */
 const ASRT_SANDBOX_ENV_KEYS: ReadonlySet<string> = new Set([
   // Proxy vars (upper + lower case) ASRT points at its localhost egress proxy.
-  "HTTP_PROXY",
-  "HTTPS_PROXY",
-  "ALL_PROXY",
-  "NO_PROXY",
+  ...PROXY_ENV_KEYS,
   "FTP_PROXY",
   "RSYNC_PROXY",
   "GRPC_PROXY",
-  "http_proxy",
-  "https_proxy",
-  "all_proxy",
-  "no_proxy",
   "ftp_proxy",
   "grpc_proxy",
   // Per-tool proxy + proxy-auth vars ASRT sets for specific clients.
