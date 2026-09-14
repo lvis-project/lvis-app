@@ -213,8 +213,8 @@ describe("buildProvider subscription model overrides", () => {
     expect(provider?.subscriptionRuntime).toBe(persisted);
   });
 
-  it.each(["kimi-code", "grok-build"] as const)(
-    "does not apply a model override to the %s ACP runtime",
+  it.each(["kimi-code", "grok-build", "claude-code"] as const)(
+    "does not apply a model override to the %s subscription runtime",
     (runtimeId) => {
       const persisted = {
         kind: "subscription",

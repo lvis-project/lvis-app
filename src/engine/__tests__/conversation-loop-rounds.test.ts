@@ -1300,7 +1300,7 @@ describe("ConversationLoop queryLoop", () => {
     expect(round2.at(-1)).toEqual({ role: "assistant", content: "Part one " });
   });
 
-  it.each(["codex", "kimi-code", "grok-build"] as const)(
+  it.each(["codex", "kimi-code", "grok-build", "claude-code"] as const)(
     "does not stitch a %s subscription max_tokens response without a native prefill protocol",
     async (subscriptionProvider) => {
       const toolRegistry = new ToolRegistry();

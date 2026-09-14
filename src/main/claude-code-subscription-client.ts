@@ -6,9 +6,15 @@
  * version probes, auth status, browser login, logout, and isolation verification.
  */
 import type { ChildProcess, SpawnOptions } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { constants as fsConstants, promises as fs } from "node:fs";
 import { isAbsolute, join, resolve, win32 } from "node:path";
 import { StringDecoder } from "node:string_decoder";
+import { TextDecoder } from "node:util";
+import { JsonLineReader } from "../lib/json-line-reader.js";
+import { isRecord } from "../shared/is-record.js";
+import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
+import { claudeCodePrintArgs, ClaudeCodeStream } from "./claude-code-stream.js";
 import {
   CLAUDE_CODE_SUBSCRIPTION_PROVIDER_ID,
   claudeCodeSubscriptionStatus,
@@ -71,7 +77,19 @@ interface PendingLogin {
 }
 
 interface AuthStatusPayload {
-  loggedIn?: unknown;
+  loggedIn: boolean;
+}
+
+export async function validateClaudeCodeRuntimeDirectories(directories: readonly string[]): Promise<void> {
+  for (const directory of directories) {
+    try {
+      if (!isAbsolute(directory) || CONTROL_CHARACTERS.test(directory)) throw new Error("invalid-directory");
+      const stat = await fs.lstat(directory);
+      if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("invalid-directory");
+    } catch {
+      throw new ClaudeCodeSubscriptionError("claude-code-runtime-unavailable");
+    }
+  }
 }
 
 function configuredStatus(): ClaudeCodeSubscriptionStatus {
@@ -207,6 +225,9 @@ export function sanitizedClaudeCodeEnvironment(
   env.TMPDIR = isolatedTemp;
   // The official CLI stores auth and session transcripts under this directory.
   env.CLAUDE_CONFIG_DIR = isolatedHome;
+  // The host supplies the complete MCP catalog and owns tool discovery.
+  env.ENABLE_TOOL_SEARCH = "false";
+  env.ENABLE_CLAUDEAI_MCP_SERVERS = "false";
   env.NO_COLOR = "1";
   env.TERM = "dumb";
   return env;
@@ -283,6 +304,11 @@ export class ClaudeCodeSubscriptionClient {
   private executablePath: string | null;
   private pendingLogin: PendingLogin | null = null;
   private verifiedVersion: string | null = null;
+  private stopped = false;
+  private epoch = 0;
+  private loginStarting = false;
+  private configuring = false;
+  private readonly commands = new Set<() => void>();
 
   constructor(options: ClaudeCodeSubscriptionClientOptions) {
     this.runtimeHome = options.runtimeHome;
@@ -338,83 +364,133 @@ export class ClaudeCodeSubscriptionClient {
   }
 
   async setExecutable(pickerPath: string): Promise<ClaudeCodeSubscriptionStatus> {
-    const executable = await this.resolveExecutable(pickerPath);
-    this.verifiedVersion = null;
-    this.executablePath = executable;
-    if (this.configStore) await this.configStore.setExecutable(executable);
-    return unverifiedStatus("unknown");
+    if (this.configuring) throw new ClaudeCodeSubscriptionError("claude-code-operation-failed");
+    this.configuring = true;
+    try {
+      const epoch = this.epoch;
+      const executable = await this.resolveExecutable(pickerPath);
+      this.assertCurrent(epoch);
+      if (this.configStore) await this.configStore.setExecutable(executable);
+      this.assertCurrent(epoch);
+      await this.invalidateCommands();
+      this.executablePath = executable;
+      return unverifiedStatus("unknown");
+    } finally { this.configuring = false; }
   }
 
   async clearExecutable(): Promise<ClaudeCodeSubscriptionStatus> {
-    await this.cancelLoginQuietly();
-    this.verifiedVersion = null;
-    this.executablePath = null;
-    if (this.configStore) await this.configStore.clearExecutable();
-    return configuredStatus();
+    if (this.configuring) throw new ClaudeCodeSubscriptionError("claude-code-operation-failed");
+    this.configuring = true;
+    try {
+      const epoch = this.epoch;
+      this.assertCurrent(epoch);
+      if (this.configStore) await this.configStore.clearExecutable();
+      this.assertCurrent(epoch);
+      await this.invalidateCommands();
+      this.executablePath = null;
+      return configuredStatus();
+    } finally { this.configuring = false; }
   }
 
   async verify(): Promise<ClaudeCodeSubscriptionStatus> {
+    const epoch = this.epoch;
     const executable = this.requireExecutable();
+    this.verifiedVersion = null;
     const version = await this.probeVersion(executable);
-    this.verifiedVersion = version;
     const auth = await this.readAuthStatus();
     if (auth.loggedIn !== true) {
+      this.assertCurrent(epoch);
+      this.verifiedVersion = version;
       return claudeCodeSubscriptionStatus("ready", "signed-out", version);
     }
     await this.probePrint(executable);
+    this.assertCurrent(epoch);
+    this.verifiedVersion = version;
     return claudeCodeSubscriptionStatus("ready", "connected", version);
   }
 
   async startBrowserLogin(): Promise<ClaudeCodeSubscriptionStatus> {
     const executable = this.requireExecutable();
-    if (this.pendingLogin) {
+    if (this.pendingLogin || this.loginStarting) {
       throw new ClaudeCodeSubscriptionError("claude-code-login-in-progress");
     }
-    const child = this.spawn(executable, ["auth", "login", "--claudeai"], {
-      cwd: this.workspaceDir,
-      env: sanitizedClaudeCodeEnvironment(this.runtimeHome, process.env, this.platform, this.runtimeTempDir),
-      stdio: ["ignore", "pipe", "pipe"],
-      windowsHide: true,
-    });
-    const timer = setTimeout(() => {
-      void this.cancelLoginQuietly();
-    }, LOGIN_TIMEOUT_MS);
-    this.pendingLogin = { child, timer };
-    child.once("exit", () => {
-      if (this.pendingLogin?.child === child) {
-        clearTimeout(this.pendingLogin.timer);
-        this.pendingLogin = null;
+    const epoch = this.epoch;
+    this.loginStarting = true;
+    try {
+      await this.prepareExecutable(executable, epoch);
+      const child = this.spawn(executable, ["auth", "login"], {
+        cwd: this.workspaceDir,
+        env: sanitizedClaudeCodeEnvironment(this.runtimeHome, process.env, this.platform, this.runtimeTempDir),
+        stdio: ["ignore", "pipe", "pipe"],
+        shell: false,
+        windowsHide: true,
+        detached: this.platform !== "win32",
+      });
+      const timer = setTimeout(() => {
+        void this.cancelLoginQuietly();
+      }, LOGIN_TIMEOUT_MS);
+      this.pendingLogin = { child, timer };
+      timer.unref();
+      child.once("close", () => {
+        if (this.pendingLogin?.child === child) {
+          clearTimeout(this.pendingLogin.timer);
+          this.pendingLogin = null;
+        }
+      });
+      const failLogin = () => { if (this.pendingLogin?.child === child) void this.cancelLoginQuietly(); };
+      child.on("error", failLogin);
+      child.stdout?.on("error", failLogin);
+      child.stderr?.on("error", failLogin);
+      // Drain output without retaining secrets or URLs beyond a short trusted open.
+      this.watchLoginOutput(child);
+      if (!child.stdout || !child.stderr) {
+        await this.cancelLoginQuietly();
+        throw new ClaudeCodeSubscriptionError("claude-code-login-failed");
       }
-    });
-    child.once("error", () => {
-      if (this.pendingLogin?.child === child) {
-        clearTimeout(this.pendingLogin.timer);
-        this.pendingLogin = null;
-      }
-    });
-    // Drain output without retaining secrets or URLs beyond a short trusted open.
-    this.watchLoginOutput(child);
-    return claudeCodeSubscriptionStatus("ready", "pending", this.verifiedVersion, "browser");
+      return claudeCodeSubscriptionStatus("ready", "pending", this.verifiedVersion, "browser");
+    } finally { this.loginStarting = false; }
   }
 
   async cancelLogin(): Promise<ClaudeCodeSubscriptionStatus> {
-    await this.cancelLoginQuietly();
+    await this.invalidateCommands();
     return this.getStatus();
   }
 
   async logout(): Promise<ClaudeCodeSubscriptionStatus> {
     const executable = this.requireExecutable();
-    await this.cancelLoginQuietly();
+    await this.invalidateCommands();
     await this.runCaptured(executable, ["auth", "logout"], PROBE_TIMEOUT_MS);
     this.verifiedVersion = null;
     return claudeCodeSubscriptionStatus("unverified", "signed-out");
   }
 
   async stop(): Promise<void> {
+    this.stopped = true;
+    await this.invalidateCommands();
+  }
+
+  private async invalidateCommands(): Promise<void> {
+    this.epoch += 1;
+    this.verifiedVersion = null;
+    for (const cancel of this.commands) cancel();
     await this.cancelLoginQuietly();
   }
 
+  private assertCurrent(epoch: number): void {
+    if (this.stopped || this.epoch !== epoch) throw new ClaudeCodeSubscriptionError("claude-code-operation-failed");
+  }
+
+  private async prepareExecutable(executable: string, epoch: number): Promise<void> {
+    await validateClaudeCodeRuntimeDirectories([this.runtimeHome, this.workspaceDir, this.runtimeTempDir]);
+    if (await this.resolveExecutable(executable) !== executable) {
+      throw new ClaudeCodeSubscriptionError("claude-code-runtime-invalid-executable");
+    }
+    this.assertCurrent(epoch);
+  }
+
   private requireExecutable(): string {
+    this.assertCurrent(this.epoch);
+    if (this.configuring) throw new ClaudeCodeSubscriptionError("claude-code-operation-failed");
     if (!this.executablePath) {
       throw new ClaudeCodeSubscriptionError("claude-code-runtime-not-configured");
     }
@@ -434,41 +510,46 @@ export class ClaudeCodeSubscriptionClient {
   }
 
   private watchLoginOutput(child: ChildProcess): void {
-    const decoder = new StringDecoder("utf8");
-    let buffer = "";
-    const consume = (chunk: Buffer | string): void => {
-      buffer += typeof chunk === "string" ? chunk : decoder.write(chunk);
-      if (buffer.length > MAX_OUTPUT_BYTES) buffer = buffer.slice(-MAX_OUTPUT_BYTES);
-      const match = buffer.match(/https:\/\/[^\s"']+/i);
-      if (!match || !this.openExternal) return;
-      let url: URL;
-      try {
-        url = new URL(match[0]);
-      } catch {
-        return;
-      }
-      const host = url.hostname.toLowerCase();
-      const trusted = host === "claude.ai"
-        || host.endsWith(".claude.ai")
-        || host === "anthropic.com"
-        || host.endsWith(".anthropic.com")
-        || host === "console.anthropic.com"
-        || host === "platform.claude.com";
-      if (!trusted || url.protocol !== "https:") return;
-      void Promise.resolve(this.openExternal(url.toString())).catch(() => undefined);
-    };
-    child.stdout?.on("data", consume);
-    child.stderr?.on("data", consume);
+    let opened = false;
+    let bytes = 0;
+    for (const stream of [child.stdout, child.stderr]) {
+      const decoder = new StringDecoder("utf8");
+      let buffer = "";
+      stream?.on("data", (chunk: Buffer | string) => {
+        if (this.pendingLogin?.child !== child) return;
+        bytes += Buffer.byteLength(chunk);
+        if (bytes > MAX_OUTPUT_BYTES) { void this.cancelLoginQuietly(); return; }
+        if (opened) return;
+        buffer += typeof chunk === "string" ? chunk : decoder.write(chunk);
+        // Wait for a delimiter: a split URL must never open a partial address.
+        if (!this.openExternal) return;
+        for (const match of buffer.matchAll(/https:\/\/[^\s"'\u001b]+(?=[\s"'\u001b])/gi)) {
+          let url: URL;
+          try { url = new URL(match[0]); } catch { continue; }
+          if (url.protocol !== "https:" || url.username || url.password || url.port
+            || !["claude.ai", "console.anthropic.com", "platform.claude.com"].includes(url.hostname.toLowerCase())) continue;
+          opened = true;
+          void Promise.resolve().then(() => {
+            if (this.pendingLogin?.child === child) return this.openExternal?.(url.toString());
+          }).catch(() => undefined);
+          break;
+        }
+      });
+    }
   }
 
   private async readAuthStatus(): Promise<AuthStatusPayload> {
     const executable = this.requireExecutable();
-    const output = await this.runCaptured(executable, ["auth", "status"], PROBE_TIMEOUT_MS);
+    const output = await this.runCaptured(executable, ["auth", "status"], PROBE_TIMEOUT_MS, { acceptedCodes: [0, 1] });
     try {
-      const parsed: unknown = JSON.parse(output);
-      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-        ? parsed as AuthStatusPayload
-        : {};
+      const parsed: unknown = JSON.parse(output.stdout);
+      if (!isRecord(parsed) || typeof parsed.loggedIn !== "boolean"
+        || output.code !== (parsed.loggedIn ? 0 : 1)) throw new Error("invalid-auth-status");
+      if (parsed.loggedIn && (parsed.authMethod !== "claude.ai" || parsed.apiProvider !== "firstParty"
+        || typeof parsed.subscriptionType !== "string" || !parsed.subscriptionType.trim())) {
+        throw new Error("subscription-auth-required");
+      }
+      return { loggedIn: parsed.loggedIn };
     } catch {
       throw new ClaudeCodeSubscriptionError("claude-code-operation-failed");
     }
@@ -476,100 +557,105 @@ export class ClaudeCodeSubscriptionClient {
 
   private async probeVersion(executable: string): Promise<string> {
     const output = await this.runCaptured(executable, ["--version"], PROBE_TIMEOUT_MS);
-    const version = safeVersion(output);
+    const version = safeVersion(output.stdout);
     if (!version) throw new ClaudeCodeSubscriptionError("claude-code-runtime-unavailable");
     return version;
   }
 
   private async probePrint(executable: string): Promise<void> {
-    // Isolation proof only: one short text turn with every native tool denied.
-    await this.runCaptured(
-      executable,
-      [
-        "-p",
-        "Reply with exactly: LVIS_OK",
-        "--output-format",
-        "text",
-        "--tools",
-        "",
-        "--strict-mcp-config",
-        "--mcp-config",
-        await this.writeEmptyMcpConfig(),
-      ],
-      PROBE_TIMEOUT_MS,
-    );
-  }
-
-  private async writeEmptyMcpConfig(): Promise<string> {
-    const path = join(this.runtimeTempDir, "empty-mcp.json");
-    await fs.mkdir(this.runtimeTempDir, { recursive: true, mode: 0o700 });
-    await writeFileAtomicAtPath(path, `${JSON.stringify({ mcpServers: {} })}\n`);
-    return path;
+    const path = join(this.runtimeTempDir, `verify-${randomUUID()}.json`);
+    await validateClaudeCodeRuntimeDirectories([this.runtimeTempDir]);
+    try {
+      await writeFileAtomicAtPath(path, `${JSON.stringify({ mcpServers: {} })}\n`);
+      const output = await this.runCaptured(executable, claudeCodePrintArgs(path, []),
+        TOOL_TIMEOUT_POLICY.modelStreamIdleCeilingMs, { input: "Reply with exactly: LVIS_OK" });
+      const stream = new ClaudeCodeStream([]);
+      let malformed = false;
+      const reader = new JsonLineReader({
+        maxLineBytes: MAX_OUTPUT_BYTES,
+        onMessage: (event) => { stream.accept(event); },
+        onError: () => { malformed = true; },
+      });
+      reader.write(output.stdout);
+      reader.write("\n");
+      reader.close();
+      if (malformed) throw new Error("invalid-print-stream");
+      stream.assertComplete();
+    } catch {
+      throw new ClaudeCodeSubscriptionError("claude-code-operation-failed");
+    } finally {
+      await fs.rm(path, { force: true });
+    }
   }
 
   private async runCaptured(
     executable: string,
     args: ReadonlyArray<string>,
     timeoutMs: number,
-  ): Promise<string> {
-    return await new Promise<string>((resolvePromise, rejectPromise) => {
+    options: { input?: string; acceptedCodes?: readonly number[] } = {},
+  ): Promise<{ stdout: string; code: number }> {
+    const epoch = this.epoch;
+    await this.prepareExecutable(executable, epoch);
+    return await new Promise((resolvePromise, rejectPromise) => {
       let settled = false;
       let outputBytes = 0;
       let stdout = "";
-      let stderr = "";
-      const stdoutDecoder = new StringDecoder("utf8");
-      const stderrDecoder = new StringDecoder("utf8");
+      const stdoutDecoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
       const child = this.spawn(executable, args, {
         cwd: this.workspaceDir,
         env: sanitizedClaudeCodeEnvironment(this.runtimeHome, process.env, this.platform, this.runtimeTempDir),
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: [options.input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
+        shell: false,
         windowsHide: true,
+        detached: this.platform !== "win32",
       });
-      const timer = setTimeout(() => {
-        finish(() => rejectPromise(new ClaudeCodeSubscriptionError("claude-code-operation-failed")));
-        try {
-          forceKillManagedChildProcess(child, "claude-code-command-timeout");
-        } catch {
-          // Ignore kill races.
-        }
-      }, timeoutMs);
+      const timer = setTimeout(() => cancel(), timeoutMs);
+      timer.unref();
       const finish = (callback: () => void): void => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        this.commands.delete(cancel);
         callback();
       };
+      const cancel = (code: ClaudeCodeSubscriptionErrorCode = "claude-code-operation-failed"): void => {
+        if (settled) return;
+        finish(() => rejectPromise(new ClaudeCodeSubscriptionError(code)));
+        forceKillManagedChildProcess(child, "claude-code-command-cancel");
+      };
+      this.commands.add(cancel);
       const append = (target: "stdout" | "stderr", chunk: Buffer | string): void => {
-        const text = typeof chunk === "string"
-          ? chunk
-          : (target === "stdout" ? stdoutDecoder : stderrDecoder).write(chunk);
-        outputBytes += Buffer.byteLength(text, "utf8");
+        if (settled) return;
+        outputBytes += Buffer.byteLength(chunk);
         if (outputBytes > MAX_OUTPUT_BYTES) {
-          finish(() => rejectPromise(new ClaudeCodeSubscriptionError("claude-code-operation-failed")));
-          try {
-            forceKillManagedChildProcess(child, "claude-code-command-output-cap");
-          } catch {
-            // Ignore kill races.
-          }
+          cancel();
           return;
         }
-        if (target === "stdout") stdout += text;
-        else stderr += text;
+        // Never retain stderr or use it as a replacement protocol response.
+        try {
+          if (target === "stdout") stdout += typeof chunk === "string"
+            ? chunk : stdoutDecoder.decode(chunk, { stream: true });
+        } catch { cancel(); }
       };
       child.stdout?.on("data", (chunk: Buffer | string) => append("stdout", chunk));
       child.stderr?.on("data", (chunk: Buffer | string) => append("stderr", chunk));
-      child.once("error", () => {
-        finish(() => rejectPromise(new ClaudeCodeSubscriptionError("claude-code-runtime-unavailable")));
+      child.on("error", () => cancel("claude-code-runtime-unavailable"));
+      child.stdout?.on("error", () => cancel());
+      child.stderr?.on("error", () => cancel());
+      child.stdin?.on("error", () => cancel());
+      child.once("close", (code, signal) => {
+        if (settled) return;
+        try {
+          stdout += stdoutDecoder.decode();
+          this.assertCurrent(epoch);
+          if (signal || code === null || !(options.acceptedCodes ?? [0]).includes(code)) {
+            throw new Error("invalid-command-result");
+          }
+          finish(() => resolvePromise({ stdout, code }));
+        } catch { cancel(); }
       });
-      child.once("exit", (code) => {
-        stdout += stdoutDecoder.end();
-        stderr += stderrDecoder.end();
-        if (code === 0) {
-          finish(() => resolvePromise(stdout || stderr));
-          return;
-        }
-        finish(() => rejectPromise(new ClaudeCodeSubscriptionError("claude-code-operation-failed")));
-      });
+      if (!child.stdout || !child.stderr || (options.input !== undefined && !child.stdin)) { cancel(); return; }
+      if (options.input !== undefined) child.stdin!.end(options.input, (error?: Error | null) => { if (error) cancel(); });
     });
   }
 }

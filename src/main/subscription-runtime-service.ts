@@ -416,7 +416,6 @@ export interface SubscriptionRuntimeServiceCreateOptions {
   readonly createClaudeCodeConversationRuntime?: (
     options: ConstructorParameters<typeof ClaudeCodeConversationRuntime>[0],
   ) => ClaudeCodeConversationRuntime;
-  readonly openExternal?: SubscriptionOpenExternal;
   readonly audit?: SubscriptionRuntimeAuditSink;
 }
 

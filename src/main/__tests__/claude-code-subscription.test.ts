@@ -86,6 +86,8 @@ describe("claude-code subscription contract", () => {
         PATH: "C:\\Windows\\System32",
         ANTHROPIC_API_KEY: "sk-ant-should-not-leak",
         CLAUDE_CONFIG_DIR: "C:\\Users\\example\\.claude",
+        ENABLE_TOOL_SEARCH: "true",
+        ENABLE_CLAUDEAI_MCP_SERVERS: "true",
         LANG: "en_US.UTF-8",
       },
       "win32",
@@ -93,6 +95,8 @@ describe("claude-code subscription contract", () => {
     );
     expect(env.CLAUDE_CONFIG_DIR).toBe("C:\\isolated\\claude-home");
     expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(env.ENABLE_TOOL_SEARCH).toBe("false");
+    expect(env.ENABLE_CLAUDEAI_MCP_SERVERS).toBe("false");
     expect(env.LANG).toBe("en_US.UTF-8");
     expect(env.TEMP).toBe("C:\\isolated\\claude-tmp");
   });
