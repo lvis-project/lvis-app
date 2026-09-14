@@ -154,7 +154,6 @@ export async function consumeTarArchive(
   let pendingLocalMetadata = false;
   let header: Header | undefined;
   let bodyRemaining = 0;
-  let payloadRemaining = 0;
   let metadata: { buffer: Buffer; offset: number; inputBodyBytes: number; header: Header; block: Buffer } | undefined;
   let emittedMeta: string | undefined;
   const members = new Map<string, { kind: "file" | "directory" | "implicit"; spelling: string }>();
@@ -346,9 +345,9 @@ export async function consumeTarArchive(
       return;
     }
     if (bodyRemaining) {
-      const payload = Math.min(payloadRemaining, TAR_BLOCK_BYTES);
-      if (!isZero(block.subarray(payload))) throw invalid("Archive member padding is nonzero");
-      payloadRemaining -= payload;
+      // The final block's remaining bytes are alignment, not file contents.
+      // The entry decoder emits only the declared size while framing still
+      // consumes complete blocks before admitting the next header.
       bodyRemaining -= TAR_BLOCK_BYTES;
       await writeParser(block);
       if (!bodyRemaining) await settleEntry();
@@ -406,7 +405,6 @@ export async function consumeTarArchive(
     pendingLocalMetadata = false;
     extended = undefined;
     bodyRemaining = Math.ceil(size / TAR_BLOCK_BYTES) * TAR_BLOCK_BYTES;
-    payloadRemaining = size;
     await writeParser(block);
     if (!bodyRemaining) await settleEntry();
   }
