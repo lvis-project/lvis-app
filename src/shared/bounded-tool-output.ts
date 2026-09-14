@@ -2,9 +2,9 @@ export const TOOL_RESULT_READ_DEFAULT_CHARS = 3_000;
 export const TOOL_RESULT_READ_MIN_CHARS = 500;
 export const TOOL_RESULT_READ_MAX_CHARS = 5_000;
 export const TOOL_RESULT_QUERY_MAX_CHARS = 500;
-export const TOOL_RESULT_WIRE_MAX_CHARS = TOOL_RESULT_READ_DEFAULT_CHARS;
+export const TOOL_RESULT_WIRE_MAX_CHARS = 3_000;
 export const TOOL_RESULT_WIRE_PREVIEW_CHARS = 1_600;
-export const TOOL_RESULT_WIRE_PREVIEW_LINES = 80;
+const TOOL_RESULT_WIRE_PREVIEW_LINES = 80;
 
 export interface BoundedTextWindow {
   startOffset: number;

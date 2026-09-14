@@ -869,16 +869,6 @@
     },
     {
       "type": "exports",
-      "file": "src/tools/tool-result-chunk.ts",
-      "name": "TOOL_RESULT_CHUNK_DEFAULT_CHARS"
-    },
-    {
-      "type": "exports",
-      "file": "src/tools/tool-result-chunk.ts",
-      "name": "TOOL_RESULT_CHUNK_MIN_CHARS"
-    },
-    {
-      "type": "exports",
       "file": "src/ui/renderer/components/InputActionBar.tsx",
       "name": "makeBottomActionSendHandler"
     },
