@@ -181,6 +181,7 @@ describe("SubscriptionProvidersController", () => {
       expect(subscriptionRuntimeStatus).toHaveBeenCalledWith("codex");
       expect(subscriptionRuntimeStatus).toHaveBeenCalledWith("kimi-code");
       expect(subscriptionRuntimeStatus).toHaveBeenCalledWith("grok-build");
+      expect(subscriptionRuntimeStatus).toHaveBeenCalledWith("claude-code");
     });
 
     // Asked for on its own, as soon as the provider reports itself connected:
@@ -224,7 +225,9 @@ describe("SubscriptionProvidersController", () => {
     await waitFor(() => expect(subscriptionRuntimeStatus).toHaveBeenCalledWith("codex"));
 
     act(() => emitStatusUpdated?.({ provider: "codex", revision: 1 }));
-    await waitFor(() => expect(subscriptionRuntimeStatus).toHaveBeenCalledTimes(4));
+    // One status read per registered provider on mount, then one more for the
+    // invalidated Codex card.
+    await waitFor(() => expect(subscriptionRuntimeStatus).toHaveBeenCalledTimes(5));
     await waitFor(() => {
       expect(screen.getByTestId("subscription-state:codex")).toHaveTextContent("connected");
     });

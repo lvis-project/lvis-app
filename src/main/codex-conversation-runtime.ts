@@ -3,7 +3,6 @@ import { randomUUID } from "node:crypto";
 import { existsSync, lstatSync, promises as fs } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, isAbsolute, join, resolve, sep, win32 } from "node:path";
-import { StringDecoder } from "node:string_decoder";
 import { getLvisAppVersion } from "../shared/app-version.js";
 import { MAX_SUBSCRIPTION_RUNTIME_MODEL_ID_LENGTH, isSubscriptionToolDescription } from "../shared/subscription-runtime.js";
 import {
@@ -20,7 +19,8 @@ import {
 } from "./subscription-attachment-input.js";
 import { UUID_SOURCE } from "../shared/uuid.js";
 import { isNonNegativeSafeInteger, isPositiveSafeInteger } from "../shared/safe-integer.js";
-import type { PendingJsonRpcRequest } from "../lib/json-rpc-pending-request.js";
+import { JsonLineReader } from "../lib/json-line-reader.js";
+import { JsonRpcPendingRequests } from "../lib/json-rpc-pending-request.js";
 
 const require = createRequire(import.meta.url);
 
@@ -75,9 +75,9 @@ export type CodexAppServerRequestId = string | number;
 /**
  * argv for every `codex app-server` LVIS spawns. The subscription client
  * (`codex-app-server-client.ts`) and the conversation runtime below start the
- * same binary behind the same hardening boundary — `--disable` names the
- * surfaces (plugins, remote control, hooks) the isolated runtime may not
- * grow — so the list exists once: a flag added here reaches both, and the two
+ * same binary behind the same hardening boundary. Native execution and
+ * hosted tools are disabled where the protocol supports it, so the list
+ * exists once: a flag added here reaches both, and the two
  * processes can no longer come up with different boundaries.
  */
 export const CODEX_APP_SERVER_ARGV: readonly string[] = Object.freeze([
@@ -89,15 +89,17 @@ export const CODEX_APP_SERVER_ARGV: readonly string[] = Object.freeze([
   // "A default keychain could not be found".
   "-c",
   'cli_auth_credentials_store="file"',
+  "-c",
+  'web_search="disabled"',
   "--strict-config",
-  "--disable",
-  "plugins",
-  "--disable",
-  "remote_control",
-  "--disable",
-  "remote_plugin",
-  "--disable",
-  "hooks",
+  ...[
+    "plugins", "remote_control", "remote_plugin", "hooks",
+    "apps", "browser_use", "browser_use_external", "browser_use_full_cdp_access",
+    "code_mode", "computer_use", "goals", "image_generation", "multi_agent",
+    "shell_snapshot", "shell_tool", "shell_zsh_fork", "unified_exec",
+    "skill_mcp_dependency_install", "skill_search", "sleep_tool", "tool_suggest",
+    "view_image", "workspace_dependencies",
+  ].flatMap((feature) => ["--disable", feature]),
   "--listen",
   "stdio://",
 ]);
@@ -133,44 +135,35 @@ export function attachCodexStdioTransport(
     code: "codex-runtime-start-failed" | "codex-operation-failed",
     diagnostics: NonNullable<SubscriptionTransportDiagnosticError["providerError"]>,
   ) => void,
-): void {
-  const decoder = new StringDecoder("utf8");
-  let buffer = "";
-  child.stdout.on("data", (chunk: Buffer | string) => {
-    buffer += typeof chunk === "string" ? chunk : decoder.write(chunk);
-    if (Buffer.byteLength(buffer, "utf8") > CODEX_MAX_RPC_LINE_BYTES) {
-      buffer = "";
-      onAbort("codex-operation-failed", subscriptionTransportFailure({ phase: "stdout-frame", kind: "protocol" }));
-      return;
-    }
-    for (;;) {
-      const newline = buffer.indexOf("\n");
-      if (newline < 0) return;
-      const line = buffer.slice(0, newline).trim();
-      buffer = buffer.slice(newline + 1);
-      if (!line) continue;
-      let message: unknown;
-      try {
-        message = JSON.parse(line);
-      } catch {
-        buffer = "";
-        onAbort("codex-operation-failed", subscriptionTransportFailure({ phase: "stdout-parse", kind: "protocol" }));
-        return;
-      }
-      onLine(message);
-    }
+): JsonLineReader {
+  const reader = new JsonLineReader({
+    maxLineBytes: CODEX_MAX_RPC_LINE_BYTES,
+    onMessage: onLine,
+    onError: (failure) => onAbort("codex-operation-failed", subscriptionTransportFailure({
+      phase: failure === "frame-too-large" ? "stdout-frame" : "stdout-parse",
+      kind: "protocol",
+    })),
   });
-  child.stdout.once("error", () => onAbort("codex-operation-failed", subscriptionTransportFailure({ phase: "stdout-read", kind: "process" })));
-  child.stdin.once("error", () => onAbort("codex-operation-failed", subscriptionTransportFailure({ phase: "stdin-write", kind: "process" })));
+  const abort = (
+    code: "codex-runtime-start-failed" | "codex-operation-failed",
+    diagnostics: NonNullable<SubscriptionTransportDiagnosticError["providerError"]>,
+  ): void => {
+    reader.close();
+    onAbort(code, diagnostics);
+  };
+  child.stdout.on("data", (chunk: Buffer | string) => reader.write(chunk));
+  child.stdout.once("error", () => abort("codex-operation-failed", subscriptionTransportFailure({ phase: "stdout-read", kind: "process" })));
+  child.stdin.once("error", () => abort("codex-operation-failed", subscriptionTransportFailure({ phase: "stdin-write", kind: "process" })));
   child.stderr?.on("data", () => {});
-  child.stderr?.once("error", () => onAbort("codex-operation-failed", subscriptionTransportFailure({ phase: "stderr-read", kind: "process" })));
-  child.once("error", () => onAbort("codex-runtime-start-failed", subscriptionTransportFailure({
+  child.stderr?.once("error", () => abort("codex-operation-failed", subscriptionTransportFailure({ phase: "stderr-read", kind: "process" })));
+  child.once("error", () => abort("codex-runtime-start-failed", subscriptionTransportFailure({
     phase: typeof child.pid === "number" && child.pid > 0 ? "process-error" : "process-start",
     kind: "process",
   })));
-  child.once("exit", (exitCode, signal) => onAbort("codex-operation-failed", subscriptionTransportFailure({
+  child.once("exit", (exitCode, signal) => abort("codex-operation-failed", subscriptionTransportFailure({
     phase: "process-exit", kind: "process", exitCode, signal,
   })));
+  return reader;
 }
 
 export type CodexConversationRuntimeErrorCode =
@@ -341,10 +334,6 @@ export interface CodexConversationCallbacks {
   onServerRequest?: (request: CodexConversationServerRequest) => void;
   /** Executes only a known LVIS dynamic tool for the active thread and turn. */
   onDynamicToolCall?: CodexConversationDynamicToolHandler;
-}
-
-interface PendingRequest extends PendingJsonRpcRequest {
-  method: string;
 }
 
 interface ActiveTurn {
@@ -830,8 +819,8 @@ export class CodexConversationRuntime {
   private threadStartPromise: Promise<string> | null = null;
   private threadId: string | null = null;
   private activeTurn: ActiveTurn | null = null;
-  private nextRequestId = 1;
-  private readonly pendingRequests = new Map<number, PendingRequest>();
+  private readonly pendingRequests = new JsonRpcPendingRequests();
+  private transportReader: JsonLineReader | null = null;
 
   constructor(options: CodexConversationRuntimeOptions) {
     this.resolveExecutable = options.resolveExecutable
@@ -922,11 +911,8 @@ export class CodexConversationRuntime {
         environments: NO_NATIVE_ENVIRONMENTS,
         approvalPolicy: "untrusted",
         sandboxPolicy: {
-          type: "workspaceWrite",
-          writableRoots: [workspaceDir],
+          type: "readOnly",
           networkAccess: false,
-          excludeTmpdirEnvVar: true,
-          excludeSlashTmp: true,
         },
       });
       const turnId = this.projectTurnId(result);
@@ -1157,7 +1143,7 @@ export class CodexConversationRuntime {
     }
 
     this.child = child;
-    attachCodexStdioTransport(
+    this.transportReader = attachCodexStdioTransport(
       child,
       (message) => {
         if (this.child === child) this.handleMessage(message, child);
@@ -1216,10 +1202,10 @@ export class CodexConversationRuntime {
         ...(dynamicTools.definitions.length > 0 ? { dynamicTools: dynamicTools.definitions } : {}),
         cwd: this.currentWorkspaceDir(),
         environments: NO_NATIVE_ENVIRONMENTS,
-        // Hide native writable-root instructions without changing the sandbox.
+        // Native tool restrictions do not describe the separate host tool context.
         config: { include_permissions_instructions: false },
         approvalPolicy: "untrusted",
-        sandbox: "workspace-write",
+        sandbox: "read-only",
         ephemeral: true,
       }).then((result) => {
         const root = isCodexJsonRecord(result) ? result : null;
@@ -1295,21 +1281,22 @@ export class CodexConversationRuntime {
     if (!child?.stdin || !child.stdin.writable) {
       return Promise.reject(new CodexConversationRuntimeError("codex-operation-failed"));
     }
-    const id = this.nextRequestId++;
+    const id = this.pendingRequests.nextRequestId;
     const payload = { id, method, ...(params === undefined ? {} : { params }) };
     if (!this.isWithinRpcLimit(payload)) {
       return Promise.reject(new CodexConversationRuntimeError("codex-operation-failed"));
     }
-    return new Promise<unknown>((resolveRequest, rejectRequest) => {
-      const timer = setTimeout(() => {
-        if (!this.pendingRequests.has(id)) return;
-        this.abortTransport(new CodexConversationRuntimeError("codex-operation-failed",
-          subscriptionTransportFailure({ phase: "rpc-timeout", kind: "timeout" })), child);
-      }, CODEX_RPC_REQUEST_TIMEOUT_MS);
-      timer.unref?.();
-      this.pendingRequests.set(id, { method, resolve: resolveRequest, reject: rejectRequest, timer });
-      this.writeMessage(payload, child);
+    const error = new CodexConversationRuntimeError("codex-operation-failed",
+      subscriptionTransportFailure({ phase: "rpc-timeout", kind: "timeout" }));
+    const pending = this.pendingRequests.begin({
+      method,
+      timeoutMs: CODEX_RPC_REQUEST_TIMEOUT_MS,
+      unrefTimer: true,
+      timeoutError: () => error,
+      onTimeout: () => this.abortTransport(error, child),
     });
+    this.writeMessage(payload, child);
+    return pending.promise;
   }
 
   private notify(method: string, params?: CodexJsonRecord): void {
@@ -1348,15 +1335,18 @@ export class CodexConversationRuntime {
         subscriptionTransportFailure({ phase: "stdout-parse", kind: "protocol" })), child);
       return;
     }
+    if (Object.prototype.hasOwnProperty.call(message, "method") && typeof message.method !== "string") {
+      this.abortTransport(new CodexConversationRuntimeError("codex-operation-failed",
+        subscriptionTransportFailure({ phase: "stdout-parse", kind: "protocol" })), child);
+      return;
+    }
     if (isCodexAppServerRequestId(message.id) && typeof message.method === "string") {
       this.handleServerRequest(message.id, message.method, message.params, child);
       return;
     }
     if (typeof message.id === "number" && Number.isInteger(message.id)) {
-      const pending = this.pendingRequests.get(message.id);
+      const pending = this.pendingRequests.take(message.id);
       if (!pending) return;
-      this.pendingRequests.delete(message.id);
-      clearTimeout(pending.timer);
       if (message.error !== undefined) {
         pending.reject(new CodexConversationRuntimeError(
           "codex-operation-failed",
@@ -1628,7 +1618,7 @@ export class CodexConversationRuntime {
     const child = this.child;
     if (!child) return;
     this.writeMessage({
-      id: this.nextRequestId++,
+      id: this.pendingRequests.allocateId(),
       method: "turn/interrupt",
       params: { threadId: active.threadId, turnId },
     }, child);
@@ -1773,6 +1763,8 @@ export class CodexConversationRuntime {
   private closeTransport(error: CodexConversationRuntimeError, expectedChild?: ChildProcess | null): void {
     if (expectedChild && this.child !== expectedChild) return;
     this.child = null;
+    this.transportReader?.close();
+    this.transportReader = null;
     this.startPromise = null;
     this.threadStartPromise = null;
     this.threadId = null;
@@ -1780,11 +1772,7 @@ export class CodexConversationRuntime {
     this.pendingThreadDynamicTools = null;
     const active = this.activeTurn;
     if (active) this.rejectActiveTurn(active, error);
-    for (const [id, pending] of this.pendingRequests) {
-      this.pendingRequests.delete(id);
-      clearTimeout(pending.timer);
-      pending.reject(error);
-    }
+    this.pendingRequests.rejectAll(error);
   }
 
   private asRuntimeError(

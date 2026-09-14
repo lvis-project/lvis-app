@@ -641,6 +641,32 @@ describe("AcpSubscriptionSessionClient", () => {
     expect(agent.kill).toHaveBeenCalledWith("SIGKILL");
   });
 
+  it.each([
+    ["empty", ""],
+    ["oversized", "x".repeat(257)],
+    ["non-string", 7],
+  ])("rejects a %s method-bearing envelope before it can consume a pending response", async (_label, method) => {
+    const { client, agent } = createHarness("kimi-code", {
+      handler: (request, current) => {
+        if (request.method !== "initialize" || typeof request.id !== "number") return;
+        current.stdout.write(`${JSON.stringify({
+          jsonrpc: "2.0",
+          id: request.id,
+          method,
+          result: {
+            protocolVersion: 1,
+            authMethods: [{ id: "login" }],
+          },
+        })}\n`);
+      },
+    });
+
+    await expect(client.start()).rejects.toMatchObject({ code: "acp-session-invalid-response" });
+    expect(agent.requests).toHaveLength(1);
+    expect(agent.requests[0]).toMatchObject({ id: 1, method: "initialize" });
+    expect(agent.kill).toHaveBeenCalledWith("SIGKILL");
+  });
+
   it("fails closed for a session update whose opaque session id does not match", async () => {
     const { client, agent } = createHarness();
     await client.start();

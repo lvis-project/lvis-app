@@ -185,6 +185,27 @@ describe("isCodexAppServerRequestId", () => {
 });
 
 describe("CodexConversationRuntime", () => {
+  it("rejects a non-string method envelope before it can consume a pending response", async () => {
+    const harness = createHarness((message, current) => {
+      if (message.method !== "initialize") return;
+      current.child.stdout.write(`${JSON.stringify({
+        id: requestId(message),
+        method: 7,
+        result: {},
+      })}\n`);
+      reply(current.child, requestId(message), {});
+      return true;
+    });
+
+    await expect(harness.runtime.startTurn({ text: "Do not accept a malformed response." })).rejects.toMatchObject({
+      code: "codex-runtime-start-failed",
+      providerError: {
+        transport: { phase: "stdout-parse", kind: "protocol" },
+      },
+    });
+    expect(harness.child.kill).toHaveBeenCalledWith("SIGKILL");
+  });
+
   it("distinguishes a running process error from a start failure after initialization", async () => {
     vi.spyOn(managedChildProcesses, "forceKillManagedChildProcess").mockImplementation(() => undefined);
     const harness = createHarness((message, current) => {
@@ -486,6 +507,8 @@ describe("CodexConversationRuntime", () => {
       "app-server",
       "-c",
       'cli_auth_credentials_store="file"',
+      "-c",
+      'web_search="disabled"',
       "--strict-config",
       "--disable",
       "plugins",
@@ -495,6 +518,13 @@ describe("CodexConversationRuntime", () => {
       "remote_plugin",
       "--disable",
       "hooks",
+      ...[
+        "apps", "browser_use", "browser_use_external", "browser_use_full_cdp_access",
+        "code_mode", "computer_use", "goals", "image_generation", "multi_agent",
+        "shell_snapshot", "shell_tool", "shell_zsh_fork", "unified_exec",
+        "skill_mcp_dependency_install", "skill_search", "sleep_tool", "tool_suggest",
+        "view_image", "workspace_dependencies",
+      ].flatMap((feature) => ["--disable", feature]),
       "--listen",
       "stdio://",
     ]);
@@ -509,7 +539,7 @@ describe("CodexConversationRuntime", () => {
       environments: [],
       config: { include_permissions_instructions: false },
       approvalPolicy: "untrusted",
-      sandbox: "workspace-write",
+      sandbox: "read-only",
       ephemeral: true,
     });
     expect(turnStart?.params).toMatchObject({
@@ -519,15 +549,13 @@ describe("CodexConversationRuntime", () => {
       cwd: harness.workspaceDir,
       environments: [],
       sandboxPolicy: {
-        type: "workspaceWrite",
-        writableRoots: [harness.workspaceDir],
+        type: "readOnly",
         networkAccess: false,
-        excludeTmpdirEnvVar: true,
-        excludeSlashTmp: true,
       },
       input: [{ type: "text", text: "Say hello" }],
     });
-    expect(JSON.stringify({ threadStart, turnStart })).not.toContain("read-only");
+    expect(JSON.stringify({ threadStart, turnStart })).not.toContain("workspace-write");
+    expect(JSON.stringify({ threadStart, turnStart })).not.toContain("writableRoots");
     expect(JSON.stringify({ threadStart, turnStart })).not.toContain("danger-full-access");
   });
 

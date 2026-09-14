@@ -35,7 +35,7 @@ describe("createProvider lazy adapter (PR #705)", () => {
     const provider = createProvider({ vendor: "openai", apiKey: "k" });
 
     expect(provider.vendor).toBe("openai");
-    expect(provider.constructor.name).toBe("LazyVercelProvider");
+    expect(provider.constructor.name).toBe("OpenAiProvider");
     expect(ctor).not.toHaveBeenCalled();
   });
 

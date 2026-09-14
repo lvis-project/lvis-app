@@ -22,7 +22,7 @@ import {
   readSubscriptionToolMcpServerConfig,
 } from "../subscription-tool-mcp-server.js";
 import { SubscriptionToolBridge } from "../subscription-tool-bridge.js";
-import type { FeatureNamespaceHandle } from "../storage/feature-namespace.js";
+import { createSubscriptionRuntimeNamespace as namespace } from "../../__tests__/support/subscription-runtime-namespace.js";
 
 const CODEX_CONNECTED: CodexSubscriptionStatus = {
   runtime: "ready",
@@ -65,14 +65,6 @@ const HOST_TOOL: ToolSchema = {
   },
 };
 
-function namespace(): FeatureNamespaceHandle {
-  return {
-    dir: "C:\\isolated\\subscription-runtimes",
-    childDir: vi.fn(async (name: string) => `C:\\isolated\\subscription-runtimes\\${name}`),
-    readJson: vi.fn(async (_name: string, fallback: unknown) => fallback),
-    writeJson: vi.fn(async () => undefined),
-  } as unknown as FeatureNamespaceHandle;
-}
 
 function fakeCodexClient(): CodexAppServerClient {
   return {

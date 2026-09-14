@@ -165,6 +165,24 @@ afterEach(async () => {
 });
 
 describe("CodexAppServerClient", () => {
+  it("rejects a non-string method envelope before it can consume a pending response", async () => {
+    let harness: Harness;
+    harness = createHarness((request) => {
+      if (request.method === "initialize") {
+        harness.server.stdout.write(`${JSON.stringify({
+          id: request.id,
+          method: 7,
+          result: { serverInfo: { name: "must-not-initialize" } },
+        })}\n`);
+        return standardInitialize(request);
+      }
+      throw new Error(`Unexpected JSON-RPC request: ${String(request.method)}`);
+    });
+
+    await expect(harness.client.getStatus()).rejects.toMatchObject({ code: "codex-runtime-start-failed" });
+    expect(harness.server.killed).toBe(true);
+  });
+
   it("projects account status without exposing account email or auth data", async () => {
     vi.stubEnv("OpenAI_Api_Key", "should-not-reach-codex");
     vi.stubEnv("CoDeX_AcCeSs_ToKeN", "should-not-reach-codex");

@@ -429,6 +429,33 @@ remote image URL fetched by this projection. Original user images retain their
 existing newest-user-message scope. Subscription request estimates count the
 same retained images sent through the native channel.
 
+## Provider Adapters
+
+The engine exchanges `GenericMessage`, `StreamTurnParams`, and `StreamEvent`
+with providers. The common OpenAI provider module connects API-key requests
+and Codex subscription requests to this contract. It owns the model-visible
+request projection; transport adapters retain their wire formats, credentials,
+and native session state. Subscription credentials never become API keys, and
+an unavailable connection never silently selects another authentication route.
+
+API requests retain the existing SDK transport and configured reasoning/output
+controls. Subscription requests retain their active native profile and governed
+tool handoff. A numeric API thinking budget does not override a native reasoning
+profile. In both cases LVIS owns the conversation loop, tool execution, approval,
+memory, and broadcasts to attached surfaces.
+
+Child-process adapters share `JsonLineReader` for UTF-8 JSONL framing and
+`JsonRpcPendingRequests` for request identity, pending promises, and timer
+cleanup. Framing limits apply to individual lines, including fragmented lines;
+receiving several valid lines in one OS chunk does not make them oversized.
+The reader stops after a framing error or owner closure. Each adapter supplies
+its existing timeout and error policy, rejects unsupported native host requests,
+and owns process shutdown. Native thread, turn, and session state remain in the
+protocol adapter rather than in the shared RPC registry.
+
+The [provider integration design](openai-provider-integration.md) describes
+the connection boundaries and extension points.
+
 ## Memory
 
 Memory is host-owned and project-aware. User preferences, long-term memories,
