@@ -1,12 +1,12 @@
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, realpathSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildHostShellExecutionPlan } from "../../permissions/host-shell-execution-plan.js";
 import * as resolver from "../../lib/shell-resolver.js";
 import * as homeOwner from "../../permissions/sandbox-process-home.js";
-import { claimPreparedShellInvocation, disposePreparedShellInvocation, matchesPreparedShellInvocation, prepareShellInvocation, preparedSandboxBootstrap, preparedSandboxEnvironment, preparedShellCommand, preparedShellFacts, transferPreparedShellInvocation, type PreparedShellInvocation } from "../prepared-shell-invocation.js";
+import { bindPreparedShellExecutableReadPaths, preparedShellExecutableReadPaths, claimPreparedShellInvocation, disposePreparedShellInvocation, matchesPreparedShellInvocation, prepareShellInvocation, preparedSandboxBootstrap, preparedSandboxEnvironment, preparedShellCommand, preparedShellFacts, transferPreparedShellInvocation, type PreparedShellInvocation } from "../prepared-shell-invocation.js";
 
 const roots: string[] = [];
 const handles: PreparedShellInvocation[] = [];
@@ -28,6 +28,28 @@ function fixture(command = "printf '%s\\0' \"$HOME\" \"$TMPDIR\" \"$PWD\" \"$HTT
 }
 
 describe.skipIf(process.platform === "win32")("prepared shell facts and resource ownership", () => {
+  it("binds executable reads once before claim without granting search directories", () => {
+    const bin = realpathSync.native(mkdtempSync(join(tmpdir(), "shell-prepared-bin-")));
+    roots.push(bin);
+    const executable = join(bin, "fixture_cli");
+    writeFileSync(executable, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    vi.stubEnv("PATH", `${bin}:/usr/bin:/bin`);
+    const { handle } = fixture("fixture_cli");
+    expect(() => preparedShellExecutableReadPaths(handle)).toThrow(/not bound/);
+    bindPreparedShellExecutableReadPaths(handle);
+    const paths = preparedShellExecutableReadPaths(handle);
+    expect(paths).toContain(executable);
+    expect(paths).not.toContain(bin);
+    expect(Object.isFrozen(paths)).toBe(true);
+    vi.stubEnv("PATH", "/different-path");
+    rmSync(executable);
+    bindPreparedShellExecutableReadPaths(handle);
+    expect(preparedShellExecutableReadPaths(handle)).toBe(paths);
+    const release = claimPreparedShellInvocation(handle);
+    expect(() => bindPreparedShellExecutableReadPaths(handle)).toThrow(/before claim/);
+    release();
+  });
+
   it("delivers captured proxy settings to an actual plain shell without host secrets", () => {
     const proxies = {
       HTTP_PROXY: "http://upper.example:8080", http_proxy: "http://lower.example:8081",

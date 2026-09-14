@@ -27,9 +27,10 @@ import {
   vi,
 } from "vitest";
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { shellQuote } from "../../lib/shell-resolver.js";
 
 vi.mock("node:os", async (importOriginal) => {
   const original = await importOriginal<typeof import("node:os")>();
@@ -65,6 +66,7 @@ import { asrtCanInitialize } from "./test-helpers.js";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 import { spawnWithSandbox } from "../../tools/shell-tools.js";
 import { prepareSandboxFixture } from "../../tools/__tests__/support/prepared-shell.js";
+import { preparedShellExecutableReadPaths } from "../../tools/prepared-shell-invocation.js";
 // ASRT-contract guards: the real vendored matcher + parent-proxy resolver, so
 // the host-side fixes are proven against ASRT's ACTUAL semantics (not a
 // re-implementation that could drift from the package).
@@ -191,6 +193,40 @@ describe("asrt-sandbox — gate ON wraps a real command under the OS sandbox", (
       await cleanupTmpDir(writeDir);
     }
   });
+
+  it.runIf(process.platform === "darwin" || process.platform === "linux")(
+    "finds an admitted executable beneath the denied home without exposing its siblings",
+    async (context) => {
+      if (!(await asrtCanInitialize())) return context.skip();
+      const root = realpathSync(mkdtempSync(join(tmpdir(), "asrt-executable-")));
+      const cwd = join(root, "workspace");
+      const bin = join(root, "runtime", "bin");
+      const executable = join(bin, "fixture_cli");
+      const sibling = join(bin, "private-data");
+      mkdirSync(cwd); mkdirSync(bin, { recursive: true });
+      writeFileSync(executable, "#!/bin/sh\nprintf 'executable-visible\\n'\n", { mode: 0o755 });
+      writeFileSync(sibling, "sibling-must-stay-private");
+      try {
+        await initializeAsrtSandbox({ allowedDomains: [], strictAllowlist: true });
+        vi.stubEnv("HOME", root);
+        vi.stubEnv("PATH", `${bin}:/usr/bin:/bin`);
+        const command = `command -v fixture_cli && fixture_cli; /bin/cat ${shellQuote(sibling)}; printf changed > ${shellQuote(executable)}`;
+        const prepared = prepareSandboxFixture(command, cwd);
+        expect(preparedShellExecutableReadPaths(prepared)).toContain(executable);
+        expect(preparedShellExecutableReadPaths(prepared)).not.toContain(bin);
+        const result = await spawnWithSandbox(command, cwd, [cwd], 15, prepared);
+        expect(result.output).toContain(executable);
+        expect(result.output).toContain("executable-visible");
+        expect(result.output).not.toContain("sibling-must-stay-private");
+        expect(result.isError).toBe(true);
+        expect(result.metadata.sandboxed).toBe(true);
+        expect(readFileSync(executable, "utf8")).toBe("#!/bin/sh\nprintf 'executable-visible\\n'\n");
+      } finally {
+        vi.unstubAllEnvs();
+        await cleanupTmpDir(root);
+      }
+    },
+  );
 
   it.runIf(process.platform === "darwin" || process.platform === "linux")(
     "runs git with a disposable HOME instead of probing the denied real .gitconfig",

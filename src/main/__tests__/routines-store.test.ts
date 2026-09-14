@@ -522,9 +522,9 @@ describe("RoutinesStore v2 — advanceInterval far-past (no loop)", () => {
         schedule: { at: farPastIso, repeat: { kind: "interval", intervalMs: 3_600_000 } },
         notificationTitle: "far-past-interval",
       });
-      const start = Date.now();
+      const start = performance.now();
       const updated = await store.markFired(r.id);
-      const elapsed = Date.now() - start;
+      const elapsed = performance.now() - start;
       // Should complete in well under 1 second (arithmetic skip, not iterative loop)
       expect(elapsed).toBeLessThan(1000);
       // newAt must be after the far-past timestamp we started with

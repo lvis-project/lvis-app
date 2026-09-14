@@ -13,6 +13,7 @@ export interface ShellCommandEvent {
   argv: readonly (string | undefined)[];
   cwd: string | null;
   environment: Readonly<Record<string, string | undefined>>;
+  exportedEnvironment: Readonly<Record<string, string | undefined>>;
   builtin: boolean;
   functionCall: boolean;
   recursiveFunction: boolean;
@@ -20,6 +21,7 @@ export interface ShellCommandEvent {
   pipeline?: readonly ShellStatement[];
   fromPipe: boolean;
   activeFunctions: readonly string[];
+  definedFunctions: readonly string[];
   dialect: "bash" | "posix";
   testExpression?: ShellTestExpression;
   inspectNested(text: string, dialect: "bash" | "posix"): void;
@@ -319,7 +321,9 @@ export function inspectShellExecution(command: string, cwd: string, facts: Shell
     inspector.command({
       original: node, node: resolvedNode, effective, argv, cwd: commandState.cwd,
       environment: Object.freeze(Object.fromEntries(commandState.variables)), builtin: shellBuiltin,
+      exportedEnvironment: Object.freeze(Object.fromEntries([...commandState.variables].filter(([name]) => commandState.exported.has(name) && !commandState.arrays.has(name)))),
       functionCall: !!functionBody, recursiveFunction: !!functionBody && state.activeFunctions.includes(head), backquote: state.backquote, pipeline: state.pipeline, fromPipe: state.fromPipe, activeFunctions: state.activeFunctions,
+      definedFunctions: Object.freeze([...state.functions.keys()]),
       dialect: state.dialect,
       ...(testAnalysis?.ok ? { testExpression: testAnalysis.expression } : {}),
       inspectNested(text, dialect) {

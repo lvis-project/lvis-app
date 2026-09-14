@@ -30,7 +30,7 @@ import {
   type ToolExecutionResult,
 } from "./base.js";
 import { buildHostShellChildEnv, buildSafeChildEnv, buildSandboxedChildEnv } from "./safe-env.js";
-import { prepareShellInvocation, matchesPreparedShellInvocation, preparedShellFacts, preparedShellCommand, preparedSandboxBootstrap, preparedSandboxEnvironment, disposePreparedShellInvocation, claimPreparedShellInvocation, transferPreparedShellInvocation, type PreparedShellInvocation } from "./prepared-shell-invocation.js";
+import { prepareShellInvocation, matchesPreparedShellInvocation, preparedShellFacts, preparedShellCommand, bindPreparedShellExecutableReadPaths, preparedShellExecutableReadPaths, preparedSandboxBootstrap, preparedSandboxEnvironment, disposePreparedShellInvocation, claimPreparedShellInvocation, transferPreparedShellInvocation, type PreparedShellInvocation } from "./prepared-shell-invocation.js";
 import { POWER_SHELL_AST_PARSER, normalizePowerShellAstSummary, type PowerShellArgument, type PowerShellAstSummary } from "./powershell-ast.js";
 import { resolveShellFilesystemPath } from "../shared/shell-filesystem-path.js";
 import { findResolvedShellPathViolation, type ShellPathPolicyViolation } from "./shell-path-policy.js";
@@ -667,6 +667,9 @@ export class BashTool extends ZodTool<typeof BashToolInputSchema> {
       };
     }
     if (hostShellPlan.mode === "asrt") {
+      // The executor binds before approval. Direct tool callers bind after the
+      // same path check; an existing binding never consults ambient state again.
+      bindPreparedShellExecutableReadPaths(prepared);
       // Write-jail = canonicalized union of the owner plugin sandbox root
       // (when plugin-owned) and the in-scope allowed directories
       // (cwd ∪ user-authorized extras). cwd stays readable but is no
@@ -868,7 +871,7 @@ export async function spawnWithSandbox(
   // tree (cwd + write paths). Omitting denyRead when HOME is unset avoids
   // denying nothing-meaningful; the write paths are always re-allowed for read.
   const sandboxWritePaths = [...writePaths, homePath];
-  const allowRead = [resolvedCwd, ...sandboxWritePaths];
+  const allowRead = [resolvedCwd, ...sandboxWritePaths, ...preparedShellExecutableReadPaths(prepared)];
   const denyRead = [
     ...getDefaultSensitiveReadDenyPaths(),
     ...(home !== undefined && home !== "" ? [home] : []),
