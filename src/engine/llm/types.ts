@@ -275,7 +275,7 @@ export function serializeMessageForEstimation(message: GenericMessage): string {
         // Only the three fields the wire mappers emit. A persisted call also
         // carries host-side registry origin, which no request ever sends, and
         // counting it here would inflate every caller's cost estimate.
-        toolCalls: (message.toolCalls ?? []).map(({ id, name, input }) => ({ id, name, input })),
+        toolCalls: (message.toolCalls ?? []).map(projectToolCallForWire),
       });
     case "tool_result":
       return JSON.stringify({
@@ -314,6 +314,11 @@ export interface ToolCallBlock {
    * answered with an error instead of being executed.
    */
   invalidInput?: InvalidToolCallInput;
+}
+
+/** The request surface excludes persisted registry origin and host validation metadata. */
+export function projectToolCallForWire(call: ToolCallBlock): Pick<ToolCallBlock, "id" | "name" | "input"> {
+  return { id: call.id, name: call.name, input: call.input };
 }
 
 /**

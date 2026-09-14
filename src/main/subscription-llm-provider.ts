@@ -14,7 +14,8 @@ import type {
   ToolSchema,
   StreamTurnParams,
 } from "../engine/llm/types.js";
-import { userContentText } from "../engine/llm/types.js";
+import { projectToolCallForWire, userContentText } from "../engine/llm/types.js";
+import { createOpenAiProvider, type OpenAiProvider } from "../engine/llm/openai/provider.js";
 import { prepareMarkedToolResultsForWire } from "../engine/wire-serialize.js";
 import { classifyProviderError, type ErrorCategory } from "../engine/llm/error-classifier.js";
 import {
@@ -362,12 +363,8 @@ function serializedMessage(
       return {
         role: message.role,
         content: message.content,
-        // Name the three wire fields instead of forwarding the block: a
-        // persisted call also carries host-side registry origin (source,
-        // category, plugin/MCP owner) that describes OUR runtime and has no
-        // place in a provider request.
         ...(message.toolCalls?.length
-          ? { toolCalls: message.toolCalls.map(({ id, name, input }) => ({ id, name, input })) }
+          ? { toolCalls: message.toolCalls.map(projectToolCallForWire) }
           : {}),
       };
     case "tool_result": {
@@ -677,6 +674,13 @@ export class SubscriptionLlmProvider implements LLMProvider {
 
 export function createSubscriptionLlmProvider(
   options: SubscriptionLlmProviderOptions,
-): SubscriptionLlmProvider {
-  return new SubscriptionLlmProvider(options);
+): SubscriptionLlmProvider | OpenAiProvider {
+  const transport = new SubscriptionLlmProvider(options);
+  return transport.subscriptionRuntime.provider === "codex"
+    ? createOpenAiProvider({
+        kind: "codex-subscription",
+        selection: { ...transport.subscriptionRuntime, provider: "codex" },
+        transport,
+      })
+    : transport;
 }

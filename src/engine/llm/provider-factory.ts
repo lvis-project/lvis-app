@@ -1,9 +1,6 @@
 /**
- * Provider Factory — always routes through VercelUnifiedProvider.
- *
- * Vercel AI SDK migration P4 (see docs/references/vercel-migration-baseline.md):
- * the per-vendor legacy providers and the feature flag have been removed.
- * `VercelUnifiedProvider` is the sole path for all supported vendors.
+ * API provider factory. OpenAI shares request policy with its subscription
+ * connection; every API connection retains the same lazy SDK wire transport.
  *
  * The Vercel adapter pulls in 5 `@ai-sdk/*` packages plus `ai` — together the
  * single largest dead weight on main-process cold start when reviewer mode
@@ -19,6 +16,7 @@ import type {
   StreamTurnParams,
 } from "./types.js";
 import { COPILOT_BASE_URL } from "../../shared/llm-vendor-defaults.js";
+import { createOpenAiProvider } from "./openai/provider.js";
 
 let adapterModuleP: Promise<typeof import("./vercel/adapter.js")> | null = null;
 function loadAdapterModule(): Promise<typeof import("./vercel/adapter.js")> {
@@ -74,7 +72,10 @@ class LazyVercelProvider implements LLMProvider {
 }
 
 export function createProvider(config: ProviderConfig): LLMProvider {
-  return new LazyVercelProvider(config);
+  const transport = new LazyVercelProvider(config);
+  return config.vendor === "openai"
+    ? createOpenAiProvider({ kind: "api-key", transport })
+    : transport;
 }
 
 export function secretKeyFor(vendor: LLMVendor): string {

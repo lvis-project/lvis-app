@@ -1,6 +1,6 @@
 /**
- * Vercel AI SDK unified adapter. Single LLM provider since P4 migration
- * (2026-04-xx) — replaces per-vendor claude/openai/gemini implementations.
+ * Vercel AI SDK wire adapter for API-backed providers. The OpenAI factory
+ * applies its shared request policy before invoking this transport.
  *
  * Bundles the GenericMessage↔ModelMessage mapper, fullStream→StreamEvent
  * mapper, and AI-SDK-error→ClassifiedError mapper in this module: all three
@@ -33,6 +33,7 @@ import type {
   ThinkingBlock,
   ToolSchema,
 } from "../types.js";
+import { projectToolCallForWire } from "../types.js";
 import {
   isOpenAICompatibleVendor,
   isSelfHostedVllmVendor,
@@ -982,23 +983,24 @@ export function genericToModelMessages(
 
       if (msg.toolCalls) {
         for (const tc of msg.toolCalls) {
+          const call = projectToolCallForWire(tc);
           // A non-object `input` must never reach the wire. Providers whose
           // chat template iterates the argument object reject the ENTIRE
           // request when one historical call carries a string, so a single
           // malformed call from any earlier round would keep failing every
           // round after it. Coercing here also repairs sessions already
           // persisted with a string.
-          const wireInput = isPlainToolCallInput(tc.input) ? tc.input : {};
-          if (wireInput !== tc.input && !loggedNonObjectToolInput) {
+          const wireInput = isPlainToolCallInput(call.input) ? call.input : {};
+          if (wireInput !== call.input && !loggedNonObjectToolInput) {
             loggedNonObjectToolInput = true;
             messageMapperLog.warn(
-              `tool-call input was not an object (${typeof tc.input}) — sent as {}`,
+              `tool-call input was not an object (${typeof call.input}) — sent as {}`,
             );
           }
           parts.push({
             type: "tool-call",
-            toolCallId: tc.id,
-            toolName: tc.name,
+            toolCallId: call.id,
+            toolName: call.name,
             input: wireInput,
           });
         }
