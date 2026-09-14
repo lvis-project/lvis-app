@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { MAX_TOOL_RESULT_ARTIFACT_BYTES, MemoryManager } from "../memory-manager.js";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
+import { TOOL_RESULT_WIRE_MAX_CHARS } from "../../shared/bounded-tool-output.js";
 
 const SESSION_ID = "3138f9c6-89f0-4645-85ea-2c205f9523f4";
 const TRUNCATED = {
@@ -83,7 +84,11 @@ describe("MemoryManager file-backed tool_result artifacts", () => {
     const jsonl = readFileSync(join(dir, "sessions", `${SESSION_ID}.jsonl`), "utf-8");
     expect(jsonl).toContain("[tool_result truncated by host");
     expect(jsonl).toContain("read_tool_result_chunk");
-    expect(jsonl).not.toContain(raw.slice(0, 120));
+    const saved = JSON.parse(jsonl) as { content: string };
+    expect(saved.content).toContain("row 0:");
+    expect(saved.content).toContain("row 149:");
+    expect(saved.content.length).toBeLessThanOrEqual(TOOL_RESULT_WIRE_MAX_CHARS);
+    expect(saved.content).not.toContain(raw);
 
     const entries = readdirSync(artifactDir()).sort();
     expect(entries.filter((entry) => entry.endsWith(".txt"))).toHaveLength(1);
@@ -148,7 +153,10 @@ describe("MemoryManager file-backed tool_result artifacts", () => {
 
     const jsonl = readFileSync(join(dir, "sessions", `${SESSION_ID}.jsonl`), "utf-8");
     expect(jsonl).toContain("[tool_result truncated by host");
-    expect(jsonl).not.toContain("prefix collision");
+    const saved = JSON.parse(jsonl) as { content: string };
+    expect(saved.content).toContain("prefix collision");
+    expect(saved.content).not.toContain(raw);
+    expect(saved.content.length).toBeLessThanOrEqual(TOOL_RESULT_WIRE_MAX_CHARS);
     expect(mm.loadToolResultArtifact(SESSION_ID, "toolu_artifact_1")?.content).toBe(raw);
   });
 
@@ -208,7 +216,7 @@ describe("MemoryManager file-backed tool_result artifacts", () => {
     expect(mm.loadToolResultArtifact(SESSION_ID, opaqueId)?.content).toBe(raw);
   });
 
-  it("preserves compacted stub precedence while retaining its artifact", async () => {
+  it("preserves bounded recovery details for compacted oversized results", async () => {
     const raw = "compacted artifact result\n".repeat(160);
     await mm.saveSession(SESSION_ID, [{
       ...artifactMessage(raw),
@@ -220,7 +228,7 @@ describe("MemoryManager file-backed tool_result artifacts", () => {
 
     expect(mm.loadSession(SESSION_ID)?.[0]).toMatchObject({
       role: "tool_result",
-      content: expect.stringContaining("[tool_result stripped"),
+      content: expect.stringContaining("[tool_result truncated by host"),
     });
 
     const loaded = mm.loadSession(SESSION_ID);
@@ -228,8 +236,8 @@ describe("MemoryManager file-backed tool_result artifacts", () => {
     await mm.saveSession(SESSION_ID, loaded!);
 
     const resaved = mm.loadSession(SESSION_ID)?.[0] as { content?: string } | undefined;
-    expect(resaved?.content).toContain("[tool_result stripped");
-    expect(resaved?.content).not.toContain("[tool_result truncated by host");
+    expect(resaved?.content).toContain("[tool_result truncated by host");
+    expect(resaved?.content).toContain("compacted artifact result");
     expect(mm.loadToolResultArtifact(SESSION_ID, "toolu_artifact_1")?.content).toBe(raw);
   });
 

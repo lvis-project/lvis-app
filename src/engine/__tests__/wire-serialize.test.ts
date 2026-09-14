@@ -17,7 +17,7 @@ describe("prepareMarkedToolResultsForWire", () => {
     expect(out).toBe(messages); // reference-equal — no allocation
   });
 
-  it("replaces marked tool_result content with stub but leaves meta + ids intact", () => {
+  it("replaces marked tool_result content and excludes host metadata from the request", () => {
     const verbatim = "raw output 200 chars".repeat(50);
     const messages: GenericMessage[] = [
       { role: "user", content: "hi" },
@@ -43,10 +43,7 @@ describe("prepareMarkedToolResultsForWire", () => {
       expect(wireToolResult.content).toContain(`origLen=${verbatim.length}`);
       expect(wireToolResult.toolUseId).toBe("t1");
       expect(wireToolResult.toolName).toBe("search");
-      // meta.compactedAt 은 그대로 carry
-      expect(wireToolResult.meta?.compactedAt).toBe("2026-05-08T00:00:00.000Z");
-      // meta.serializedStub flag 가 set 됨 (idempotency guard)
-      expect(wireToolResult.meta?.serializedStub).toBe(true);
+      expect(wireToolResult.meta).toBeUndefined();
     }
 
     // 입력 array 의 verbatim message 는 mutate 되지 않음 (memory 보존)
@@ -59,7 +56,7 @@ describe("prepareMarkedToolResultsForWire", () => {
     }
   });
 
-  it("preserves messages without compactedAt meta verbatim", () => {
+  it("preserves content while excluding host-only tool_result metadata", () => {
     const messages: GenericMessage[] = [
       { role: "user", content: "hi" },
       {
@@ -78,10 +75,18 @@ describe("prepareMarkedToolResultsForWire", () => {
       },
     ];
     const out = prepareMarkedToolResultsForWire(messages);
-    expect(out).toBe(messages); // reference-equal
+    expect(out).not.toBe(messages);
+    expect(out[1]).toBe(messages[1]);
+    expect(out[2]).toEqual({
+      role: "tool_result",
+      toolUseId: "t2",
+      toolName: "edit",
+      content: "another verbatim — no compactedAt",
+    });
+    expect(messages[2]?.meta).toEqual({ lock: true });
   });
 
-  it("idempotent — meta.serializedStub=true prevents double-stubbing", () => {
+  it("keeps an existing serialized stub while excluding its host metadata", () => {
     const messages: GenericMessage[] = [
       {
         role: "tool_result",
@@ -92,8 +97,10 @@ describe("prepareMarkedToolResultsForWire", () => {
       },
     ];
     const out = prepareMarkedToolResultsForWire(messages);
-    // already stub (meta flag) — reference-equal, no transformation
-    expect(out).toBe(messages);
+    expect(out).not.toBe(messages);
+    expect(out[0]).not.toBe(messages[0]);
+    expect(out[0]?.meta).toBeUndefined();
+    expect(out[0]?.content).toBe("[tool_result stripped: tool=search, origLen=12345]");
   });
 
   it("false-positive guard — tool output starting with stub prefix still converted when serializedStub not set", () => {
@@ -115,7 +122,7 @@ describe("prepareMarkedToolResultsForWire", () => {
     if (wireMsg.role === "tool_result") {
       // content 가 새 stub 으로 교체됨 (origLen 이 trickContent.length 기반)
       expect(wireMsg.content).toContain(`origLen=${trickContent.length}`);
-      expect(wireMsg.meta?.serializedStub).toBe(true);
+      expect(wireMsg.meta).toBeUndefined();
     }
   });
 

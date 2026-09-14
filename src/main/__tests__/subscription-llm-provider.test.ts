@@ -25,6 +25,7 @@ import { SubscriptionRuntimeServiceError } from "../subscription-runtime-service
 import {
   MAX_SUBSCRIPTION_ATTACHMENT_BYTES,
   MAX_SUBSCRIPTION_PROMPT_ATTACHMENTS,
+  type SubscriptionPromptAttachment,
 } from "../subscription-attachment-input.js";
 import { MAX_ACP_SUBSCRIPTION_IMAGE_BYTES } from "../acp-subscription-session-client.js";
 
@@ -62,7 +63,7 @@ function sessionWith(events: StreamEvent[]): {
   stop: ReturnType<typeof vi.fn>;
 } {
   const stop = vi.fn(async () => undefined);
-  const streamTurn = vi.fn((_: string) => ({
+  const streamTurn = vi.fn((_: string, _abortSignal?: AbortSignal, _attachments?: readonly SubscriptionPromptAttachment[]) => ({
     async *[Symbol.asyncIterator](): AsyncIterator<StreamEvent> {
       for (const event of events) yield event;
     },
@@ -577,38 +578,116 @@ describe("SubscriptionLlmProvider", () => {
     expect(provider.projectRequestInput(input)).toMatchObject({ messageTokens: expectedTokens, totalTokens: expectedTokens });
   });
 
-  it.each(["codex", "kimi-code"] as const)("declines an exact projection above the %s native image count limit", (providerId) => {
+  it("projects a bounded truncated result without host display metadata", () => {
     const provider = createSubscriptionLlmProvider({
-      selection: { kind: "subscription", provider: providerId },
+      selection: { kind: "subscription", provider: "codex" },
       service: { openTextSession: vi.fn() },
     });
-    expect(provider.projectRequestInput({
+    const title = "z".repeat(10_000);
+    const uiPayload = { serverId: "server-1", resourceUri: "ui://large-output", title };
+    const input: ProviderRequestInputProjectionParams = {
       systemPrompt: "", toolSchemas: [],
-      messages: Array.from({ length: MAX_SUBSCRIPTION_PROMPT_ATTACHMENTS + 1 }, (_, index) => ({
-        role: "tool_result", toolUseId: String(index), content: "image loaded",
+      messages: [{
+        role: "tool_result",
+        toolUseId: "large-result",
+        toolName: "large_output",
+        isError: true,
+        content: "\u0001".repeat(10_000),
+        meta: {
+          truncated: {
+            originalLines: 1,
+            originalTokens: 2_501,
+            originalBytes: 10_000,
+            trimmedAt: "2026-01-01T00:00:00.000Z",
+          },
+          toolDisplay: { uiPayload },
+        },
+      }],
+    };
+
+    const once = prepareMarkedToolResultsForWire(input.messages);
+    const twice = prepareMarkedToolResultsForWire(once);
+    const payload = serializeSubscriptionConversationPayload(params({ ...input, messages: twice }));
+    const projection = provider.projectRequestInput(input);
+
+    expect(twice).toBe(once);
+    expect(twice[0]).toMatchObject({
+      role: "tool_result",
+      toolUseId: "large-result",
+      toolName: "large_output",
+      isError: true,
+    });
+    expect(twice[0]?.meta).toBeUndefined();
+    expect(payload.text).toContain("read_tool_result_chunk");
+    expect(payload.text).not.toContain(title);
+    expect(input.messages[0]?.meta?.toolDisplay?.uiPayload).toEqual(uiPayload);
+    expect(projection).toMatchObject({ messageTokens: estimateTokens(payload.text) });
+  });
+
+  it.each(["codex", "kimi-code"] as const)("continues with bounded images and an explicit delivery error above the %s count limit", async (providerId) => {
+    const { session, streamTurn } = sessionWith([{ type: "message_complete", stopReason: "end_turn" }]);
+    const provider = createSubscriptionLlmProvider({
+      selection: { kind: "subscription", provider: providerId },
+      service: { openTextSession: vi.fn(async () => session) },
+    });
+    const messages = Array.from({ length: MAX_SUBSCRIPTION_PROMPT_ATTACHMENTS + 1 }, (_, index) => ({
+        role: "tool_result" as const, toolUseId: String(index), content: "image loaded",
         image: { data: "iVBORw0KGgo=", mimeType: "image/png" },
-      })),
-    })).toBeUndefined();
+      }));
+    expect(provider.projectRequestInput({ systemPrompt: "", toolSchemas: [], messages })).toBeDefined();
+    expect(await collect(provider.streamTurn(params({ messages })))).toEqual([{ type: "message_complete", stopReason: "end_turn" }]);
+    expect(streamTurn.mock.calls[0]?.[2]).toHaveLength(5);
+    const request = streamTurn.mock.calls[0]![0];
+    const envelope = JSON.parse(request.match(/<lvis-request-json>\s*([\s\S]*?)\s*<\/lvis-request-json>/)![1]!);
+    expect(envelope.messages[5]).toMatchObject({ toolUseId: "5", isError: true, content: expect.stringContaining("This image was not sent") });
+    expect(envelope.messages[5]).not.toHaveProperty("image");
+    expect(messages[5]).toHaveProperty("image");
   });
 
   it.each([
     ["codex", MAX_SUBSCRIPTION_ATTACHMENT_BYTES],
     ["kimi-code", MAX_ACP_SUBSCRIPTION_IMAGE_BYTES],
-  ] as const)("declines an exact projection above the %s aggregate image byte limit", (providerId, limit) => {
+  ] as const)("reports tool image delivery failure above the %s aggregate byte limit without aborting", async (providerId, limit) => {
     const bytes = Buffer.alloc(Math.floor(limit / 2) + 1);
     Buffer.from("iVBORw0KGgo=", "base64").copy(bytes);
     const data = bytes.toString("base64");
+    const { session, streamTurn } = sessionWith([{ type: "message_complete", stopReason: "end_turn" }]);
     const provider = createSubscriptionLlmProvider({
       selection: { kind: "subscription", provider: providerId },
-      service: { openTextSession: vi.fn() },
+      service: { openTextSession: vi.fn(async () => session) },
     });
-    expect(provider.projectRequestInput({
-      systemPrompt: "", toolSchemas: [],
-      messages: [
+    const request = params({ messages: [
         { role: "user", content: [{ type: "image", image: `data:image/png;base64,${data}` }] },
         { role: "tool_result", toolUseId: "tool-image", content: "image loaded", image: { data, mimeType: "image/png" } },
-      ],
-    })).toBeUndefined();
+      ] });
+    expect(provider.projectRequestInput({ systemPrompt: "", toolSchemas: [], messages: request.messages })).toBeDefined();
+    expect(await collect(provider.streamTurn(request))).toEqual([{ type: "message_complete", stopReason: "end_turn" }]);
+    expect(streamTurn.mock.calls[0]?.[2]).toHaveLength(1);
+    expect(streamTurn.mock.calls[0]?.[0]).toContain("Image delivery failed");
+  });
+
+  it("dispatches a sixth sequential image and projects only the five images actually sent", async () => {
+    const { session, streamTurn } = sessionWith([{ type: "message_complete", stopReason: "end_turn" }]);
+    const provider = createSubscriptionLlmProvider({
+      selection: { kind: "subscription", provider: "codex" },
+      service: { openTextSession: vi.fn(async () => session) },
+    });
+    const messages: StreamTurnParams["messages"] = [{ role: "user", content: "Read the images sequentially." }];
+    for (let index = 0; index < 6; index++) {
+      messages.push({ role: "assistant", content: "Read the next image." });
+      messages.push({ role: "tool_result", toolUseId: `image-${index}`, content: "image loaded", image: {
+        data: "iVBORw0KGgo=", mimeType: "image/png", width: 512, height: 512,
+      } });
+    }
+    const before = structuredClone(messages);
+    const projection = provider.projectRequestInput({ systemPrompt: "", toolSchemas: [], messages });
+    expect(await collect(provider.streamTurn(params({ systemPrompt: "", messages })))).toEqual([{ type: "message_complete", stopReason: "end_turn" }]);
+    expect(streamTurn.mock.calls[0]?.[2]).toHaveLength(5);
+    const request = streamTurn.mock.calls[0]![0];
+    expect(request).toContain("Earlier image omitted");
+    expect(request).not.toContain("Image delivery failed");
+    expect(projection?.totalTokens).toBe(estimateTokens(request) + 5 * estimateMultimodalTokenOverhead([{ type: "image", width: 512, height: 512 }]));
+    expect(messages).toEqual(before);
   });
 
   it("rejects tool image bytes above the per-image normalization limit before opening a session", async () => {

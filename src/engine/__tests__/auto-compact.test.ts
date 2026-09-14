@@ -19,7 +19,8 @@ import {
 import { prepareMarkedToolResultsForWire } from "../wire-serialize.js";
 import { estimateUserMessageTokens } from "../../shared/multimodal-token-estimate.js";
 import { isToolResultStubContent } from "../../shared/tool-result-stub.js";
-import type { GenericMessage } from "../llm/types.js";
+import { MAX_TOOL_RESULT_TOKENS } from "../../shared/tool-result-trim.js";
+import { serializeMessageForEstimation, type GenericMessage } from "../llm/types.js";
 
 function makeToolUseId(i: number): string {
   return `toolu_${String(i).padStart(3, "0")}`;
@@ -504,7 +505,7 @@ describe("estimateMessagesTokens — provider-wire shape", () => {
     }
   });
 
-  it("counts host-truncated tool_results as chunk-reference stubs", () => {
+  it("counts host-truncated tool_results from the exact bounded wire projection", () => {
     const verbatim = "x".repeat(20_000);
     const msg: GenericMessage = {
       role: "tool_result",
@@ -529,8 +530,12 @@ describe("estimateMessagesTokens — provider-wire shape", () => {
       isError: false,
     }));
     const wireEstimate = estimateMessagesTokens([msg]);
+    const [projected] = prepareMarkedToolResultsForWire([msg]);
+    const projectedEstimate = estimateTokens(serializeMessageForEstimation(projected));
 
-    expect(wireEstimate).toBeLessThan(rawEquivalent / 10);
+    expect(wireEstimate).toBe(projectedEstimate);
+    expect(wireEstimate).toBeLessThanOrEqual(MAX_TOOL_RESULT_TOKENS);
+    expect(wireEstimate).toBeLessThan(rawEquivalent);
     expect(msg.content).toBe(verbatim);
   });
 

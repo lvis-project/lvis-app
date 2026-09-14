@@ -227,12 +227,11 @@ function serializeMessageForWireEstimate(message: GenericMessage, vendor?: LLMVe
     return serializeMessageForEstimation(message);
   }
 
-  const content =
-    message.meta?.compactedAt !== undefined
-      ? buildToolResultStrippedStub(message.toolName, message.meta.truncated?.originalBytes ?? message.content.length)
-      : message.meta?.truncated !== undefined
-        ? buildToolResultTruncatedStub(message.toolUseId, message.toolName, message.meta.truncated)
-        : message.content;
+  const content = message.meta?.truncated !== undefined
+    ? buildToolResultTruncatedStub(message.toolUseId, message.toolName, message.meta.truncated, message.content)
+    : message.meta?.compactedAt !== undefined
+      ? buildToolResultStrippedStub(message.toolName, message.content.length)
+      : message.content;
 
   return serializeMessageForEstimation({
     ...message,

@@ -1,13 +1,21 @@
 import { createDynamicTool, type Tool } from "./base.js";
 import type { GenericMessage } from "../engine/llm/types.js";
 import { errorMessage } from "../shared/error-message.js";
+import {
+  containsUnpairedSurrogate,
+  isUnicodeBoundary,
+  readBoundedTextWindow,
+  TOOL_RESULT_QUERY_MAX_CHARS,
+  TOOL_RESULT_READ_DEFAULT_CHARS,
+  TOOL_RESULT_READ_MAX_CHARS,
+  TOOL_RESULT_READ_MIN_CHARS,
+} from "../shared/bounded-tool-output.js";
+import { estimateTokens } from "../shared/token-estimate.js";
+import { MAX_TOOL_RESULT_TOKENS } from "../shared/tool-result-trim.js";
+import { isValidToolUseId, MAX_TOOL_USE_ID_UTF8_BYTES } from "../shared/tool-use-id.js";
 
 export const READ_TOOL_RESULT_CHUNK_TOOL = "read_tool_result_chunk";
 export const TOOL_RESULT_CHUNK_READER_METADATA_KEY = "toolResultChunkReader";
-
-export const TOOL_RESULT_CHUNK_DEFAULT_CHARS = 3_000;
-export const TOOL_RESULT_CHUNK_MIN_CHARS = 500;
-export const TOOL_RESULT_CHUNK_MAX_CHARS = 5_000;
 
 export interface ReadableToolResult {
   toolUseId: string;
@@ -27,11 +35,10 @@ function parseBoundedInteger(
   label: string,
 ): number {
   if (raw === undefined) return defaultValue;
-  const n = Number(raw);
-  if (!Number.isFinite(n) || n < min || n > max) {
+  if (typeof raw !== "number" || !Number.isSafeInteger(raw) || raw < min || raw > max) {
     throw new Error(`${label} must be an integer between ${min} and ${max}`);
   }
-  return Math.floor(n);
+  return raw;
 }
 
 function countLines(text: string): number {
@@ -59,9 +66,11 @@ export function createReadToolResultChunkTool(): Tool {
   return createDynamicTool({
     name: READ_TOOL_RESULT_CHUNK_TOOL,
     description:
-      "Reads a bounded chunk from a previous oversized tool_result in the current chat session. " +
-      "Use only when a prior tool result says it was truncated by the host and includes a toolUseId. " +
-      "Pass that toolUseId, then increase chunkIndex while hasMore=true. This works for builtin, plugin, and MCP tool results across LLM providers.",
+      "Reads bounded text from a previous oversized tool_result in the current chat session. " +
+      "Pass its toolUseId and an absolute offset, or add a literal query to find the first match at or after that offset. " +
+      `Continue from nextOffset when it is not null. maxChars defaults to ${TOOL_RESULT_READ_DEFAULT_CHARS}` +
+      ` and accepts ${TOOL_RESULT_READ_MIN_CHARS}..${TOOL_RESULT_READ_MAX_CHARS}.` +
+      " This works for builtin, plugin, and MCP tool results across LLM providers.",
     source: "builtin",
     category: "read",
     isReadOnly: () => true,
@@ -72,19 +81,27 @@ export function createReadToolResultChunkTool(): Tool {
         toolUseId: {
           type: "string",
           minLength: 1,
-          maxLength: 160,
-          description: "The toolUseId shown in the host-truncated tool_result stub.",
+          maxLength: MAX_TOOL_USE_ID_UTF8_BYTES,
+          description: `The toolUseId shown in the host-truncated tool_result stub, up to ${MAX_TOOL_USE_ID_UTF8_BYTES} UTF-8 bytes.`,
         },
-        chunkIndex: {
+        offset: {
           type: "integer",
           minimum: 0,
-          description: "0-based chunk index. Start with 0, then increment while hasMore is true.",
+          default: 0,
+          description: "Absolute UTF-16 offset. Default 0. Must not split a Unicode surrogate pair.",
         },
         maxChars: {
           type: "integer",
-          minimum: TOOL_RESULT_CHUNK_MIN_CHARS,
-          maximum: TOOL_RESULT_CHUNK_MAX_CHARS,
-          description: `Maximum characters to return in this chunk. Default ${TOOL_RESULT_CHUNK_DEFAULT_CHARS}.`,
+          minimum: TOOL_RESULT_READ_MIN_CHARS,
+          maximum: TOOL_RESULT_READ_MAX_CHARS,
+          default: TOOL_RESULT_READ_DEFAULT_CHARS,
+          description: `Maximum characters to return. Default ${TOOL_RESULT_READ_DEFAULT_CHARS}.`,
+        },
+        query: {
+          type: "string",
+          minLength: 1,
+          maxLength: TOOL_RESULT_QUERY_MAX_CHARS,
+          description: "Optional literal text to find at or after offset. Regular expressions are not supported.",
         },
       },
       additionalProperties: false,
@@ -93,20 +110,27 @@ export function createReadToolResultChunkTool(): Tool {
       const input = rawInput && typeof rawInput === "object" && !Array.isArray(rawInput)
         ? rawInput as Record<string, unknown>
         : {};
-      const toolUseId = typeof input.toolUseId === "string" ? input.toolUseId.trim() : "";
-      if (!toolUseId) {
-        return unavailable("toolUseId is required");
+      const allowedKeys = new Set(["toolUseId", "offset", "maxChars", "query"]);
+      const unknownKey = Object.keys(input).find((key) => !allowedKeys.has(key));
+      if (unknownKey) {
+        return unavailable(`unknown argument: ${unknownKey}`);
       }
+      if (!isValidToolUseId(input.toolUseId)) {
+        return unavailable(
+          `toolUseId must be non-empty, contain no control characters, and use at most ${MAX_TOOL_USE_ID_UTF8_BYTES} UTF-8 bytes`,
+        );
+      }
+      const toolUseId = input.toolUseId;
 
-      let chunkIndex: number;
+      let offset: number;
       let maxChars: number;
       try {
-        chunkIndex = parseBoundedInteger(input.chunkIndex, 0, 0, Number.MAX_SAFE_INTEGER, "chunkIndex");
+        offset = parseBoundedInteger(input.offset, 0, 0, Number.MAX_SAFE_INTEGER, "offset");
         maxChars = parseBoundedInteger(
           input.maxChars,
-          TOOL_RESULT_CHUNK_DEFAULT_CHARS,
-          TOOL_RESULT_CHUNK_MIN_CHARS,
-          TOOL_RESULT_CHUNK_MAX_CHARS,
+          TOOL_RESULT_READ_DEFAULT_CHARS,
+          TOOL_RESULT_READ_MIN_CHARS,
+          TOOL_RESULT_READ_MAX_CHARS,
           "maxChars",
         );
       } catch (err) {
@@ -132,27 +156,74 @@ export function createReadToolResultChunkTool(): Tool {
         return unavailable("verbatim tool result is no longer available; the session likely reloaded from disk");
       }
 
-      const chunkCount = Math.max(1, Math.ceil(result.content.length / maxChars));
-      if (chunkIndex >= chunkCount) {
-        return unavailable(`chunkIndex out of range; expected 0..${chunkCount - 1}`);
+      if (offset > result.content.length) {
+        return unavailable(`offset out of range; expected 0..${result.content.length}`);
       }
-      const start = chunkIndex * maxChars;
-      const end = Math.min(result.content.length, start + maxChars);
-      const chunk = result.content.slice(start, end);
+      if (!isUnicodeBoundary(result.content, offset)) {
+        return unavailable("offset must not split a Unicode surrogate pair");
+      }
+      const query = input.query;
+      if (query !== undefined && (
+        typeof query !== "string" ||
+        query.length === 0 ||
+        query.length > TOOL_RESULT_QUERY_MAX_CHARS ||
+        containsUnpairedSurrogate(query)
+      )) {
+        return unavailable(`query must be a non-empty Unicode string of at most ${TOOL_RESULT_QUERY_MAX_CHARS} characters`);
+      }
+
+      const matchOffset = typeof query === "string" ? result.content.indexOf(query, offset) : null;
+      if (typeof query === "string" && matchOffset === -1) {
+        return {
+          output: JSON.stringify({
+            toolUseId,
+            toolName: result.toolName ?? null,
+            query,
+            found: false,
+            offset,
+            matchOffset: null,
+            startOffset: null,
+            endOffset: null,
+            nextOffset: null,
+            nextOffsetMeaning: "no literal match at or after offset",
+            hasMore: false,
+            totalChars: result.content.length,
+            chunk: "",
+          }),
+          isError: false,
+        };
+      }
+
+      const startOffset = matchOffset === null ? offset : matchOffset;
+      let window = readBoundedTextWindow(result.content, startOffset, maxChars);
+      let payloadLimited = false;
+      const buildPayload = () => ({
+        toolUseId,
+        toolName: result.toolName ?? null,
+        ...(typeof query === "string" ? { query, found: true, matchOffset } : {}),
+        offset,
+        requestedMaxChars: maxChars,
+        startOffset: window.startOffset,
+        endOffset: window.endOffset,
+        nextOffset: window.nextOffset,
+        nextOffsetMeaning: "continue after the returned context",
+        hasMore: window.hasMore,
+        totalChars: result.content.length,
+        originalBytes: result.meta?.truncated?.originalBytes ?? result.content.length,
+        originalLines: result.meta?.truncated?.originalLines ?? countLines(result.content),
+        payloadLimited,
+        chunk: window.text,
+      });
+      while (estimateTokens(JSON.stringify(buildPayload())) > MAX_TOOL_RESULT_TOKENS && window.text.length > 1) {
+        payloadLimited = true;
+        window = readBoundedTextWindow(
+          result.content,
+          startOffset,
+          Math.max(1, Math.floor(window.text.length * 0.8)),
+        );
+      }
       return {
-        output: JSON.stringify({
-          toolUseId,
-          toolName: result.toolName ?? null,
-          chunkIndex,
-          chunkCount,
-          maxChars,
-          startChar: start,
-          endChar: end,
-          hasMore: end < result.content.length,
-          originalBytes: result.meta?.truncated?.originalBytes ?? result.content.length,
-          originalLines: result.meta?.truncated?.originalLines ?? countLines(result.content),
-          chunk,
-        }),
+        output: JSON.stringify(buildPayload()),
         isError: false,
       };
     },

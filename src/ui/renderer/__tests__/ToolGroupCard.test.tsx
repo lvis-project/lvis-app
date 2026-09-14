@@ -416,7 +416,7 @@ describe("ToolGroupCard", () => {
   });
 
   it("single tool with host-truncated stub + sessionId → renders CompactedToolResult", () => {
-    const stubResult = "[tool_result truncated by host (Issue #902): tool=long_output_query, toolUseId=tu-truncated, originalLines=180, originalTokens=9000, originalBytes=45000. Call read_tool_result_chunk with toolUseId=\"tu-truncated\" and chunkIndex=0.]";
+    const stubResult = "[tool_result truncated by host: tool=long_output_query, toolUseId=tu-truncated, originalLines=180, originalTokens=9000, originalChars=45000, originalBytes=45000. Call read_tool_result_chunk with toolUseId=\"tu-truncated\" and offset=0.]";
     vi.stubGlobal("lvisApi", {
       chatGetVerbatimToolResult: vi.fn(() => new Promise(() => {})),
     });

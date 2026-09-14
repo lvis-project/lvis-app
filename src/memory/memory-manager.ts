@@ -3250,6 +3250,7 @@ export class MemoryManager implements PromptMemorySource {
       let artifactUnavailable = normalizeArtifactUnavailable(meta.artifactUnavailable);
       const hasStubPrefix = isToolResultStubContent(message.content);
       const isSerializedStub = hasStubPrefix && (meta.serializedStub === true || !truncated);
+      let previewContent = isSerializedStub ? null : message.content;
 
       if (truncated) {
         const paths = this.toolResultArtifactPaths(sessionId, message.toolUseId);
@@ -3265,6 +3266,7 @@ export class MemoryManager implements PromptMemorySource {
           }
         } else if (!artifactUnavailable) {
           keepArtifactKeys.add(paths.key);
+          previewContent = this.loadToolResultArtifact(sessionId, message.toolUseId)?.content ?? null;
         }
       } else if (isSerializedStub) {
         const paths = this.toolResultArtifactPaths(sessionId, message.toolUseId);
@@ -3275,7 +3277,12 @@ export class MemoryManager implements PromptMemorySource {
           if (compactedAt === undefined) {
             return {
               ...base,
-              content: buildToolResultTruncatedStub(message.toolUseId, message.toolName as string | undefined, artifact.truncated),
+              content: buildToolResultTruncatedStub(
+                message.toolUseId,
+                message.toolName as string | undefined,
+                artifact.truncated,
+                artifact.content,
+              ),
               meta: {
                 ...meta,
                 truncated: artifact.truncated,
@@ -3289,18 +3296,18 @@ export class MemoryManager implements PromptMemorySource {
 
       if (!truncated && compactedAt === undefined) return base;
 
-      const content =
-        compactedAt !== undefined
-          ? buildToolResultStrippedStub(
-              typeof message.toolName === "string" ? message.toolName : undefined,
-              truncated?.originalBytes ?? message.content.length,
-            )
-          : buildToolResultTruncatedStub(
+      const content = truncated
+        ? buildToolResultTruncatedStub(
               message.toolUseId,
               typeof message.toolName === "string" ? message.toolName : undefined,
-              truncated!,
+              truncated,
+              previewContent,
               artifactUnavailable ? { artifactUnavailable } : undefined,
-            );
+            )
+        : buildToolResultStrippedStub(
+            typeof message.toolName === "string" ? message.toolName : undefined,
+            message.content.length,
+          );
       return {
         ...base,
         content,

@@ -408,6 +408,13 @@ function isConnectedAndReady(status: {
   return status.runtime === "ready" && status.connection === "connected";
 }
 
+/** The same native prompt budget governs capabilities and request construction. */
+export function getSubscriptionImageAttachmentLimits(runtimeId: SubscriptionRuntimeId) {
+  return runtimeId === "codex"
+    ? DEFAULT_SUBSCRIPTION_IMAGE_ATTACHMENT_LIMITS
+    : ACP_SUBSCRIPTION_IMAGE_ATTACHMENT_LIMITS;
+}
+
 /** Every non-credential capability is exposed only after the host transport proof. */
 function verifiedRuntimeCapabilities(
   runtimeId: SubscriptionRuntimeId,
@@ -417,14 +424,9 @@ function verifiedRuntimeCapabilities(
   if (!verified) {
     return DEFAULT_SUBSCRIPTION_RUNTIME_CAPABILITIES;
   }
-  const imageAttachmentLimits = runtimeId === "codex"
-    ? DEFAULT_SUBSCRIPTION_IMAGE_ATTACHMENT_LIMITS
-    // ACP runtimes use the standard image content block only after the
-    // provider negotiated that capability during initialize. Keep the shared
-    // ACP transport limits independent of the individual provider name.
-    : supportsImages
-      ? ACP_SUBSCRIPTION_IMAGE_ATTACHMENT_LIMITS
-      : null;
+  const imageAttachmentLimits = runtimeId === "codex" || supportsImages
+    ? getSubscriptionImageAttachmentLimits(runtimeId)
+    : null;
   return Object.freeze({
     chat: true,
     // Codex has a documented localImage turn input. ACP runtimes must instead

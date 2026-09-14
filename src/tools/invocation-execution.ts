@@ -18,10 +18,8 @@ import {
   isA2AAgentCausalContext,
   type A2AAgentCausalContext,
 } from "../engine/a2a-agent-message-envelope.js";
-import {
-  TOOL_RESULT_CHUNK_MAX_CHARS,
-  TOOL_RESULT_CHUNK_READER_METADATA_KEY,
-} from "./tool-result-chunk.js";
+import { TOOL_RESULT_READ_MAX_CHARS } from "../shared/bounded-tool-output.js";
+import { TOOL_RESULT_CHUNK_READER_METADATA_KEY } from "./tool-result-chunk.js";
 import { t } from "../i18n/index.js";
 import { createLogger } from "../lib/logger.js";
 import { resolvePluginWritableRoot } from "../plugins/plugin-storage-layout.js";
@@ -78,9 +76,9 @@ const log = createLogger("executor");
 type AuditToolCall = (...args: Parameters<AuditWriter["auditToolCall"]>) => Promise<void>;
 
 function boundInterruptionDetail(detail: string): string {
-  if (detail.length <= TOOL_RESULT_CHUNK_MAX_CHARS) return detail;
+  if (detail.length <= TOOL_RESULT_READ_MAX_CHARS) return detail;
   const suffix = "\n[Settled detail truncated]";
-  return detail.slice(0, TOOL_RESULT_CHUNK_MAX_CHARS - suffix.length) + suffix;
+  return detail.slice(0, TOOL_RESULT_READ_MAX_CHARS - suffix.length) + suffix;
 }
 
 interface SettledToolDetail {

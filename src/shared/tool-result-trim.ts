@@ -1,5 +1,5 @@
 /**
- * Tool-result generic size cap (Issue #902) — measurement only.
+ * Tool-result generic size cap — measurement only.
  *
  * Returns `truncated` info when a single tool_result content exceeds the
  * cap; otherwise returns the input unchanged. Used by
@@ -8,19 +8,11 @@
  * `wire-serialize.prepareMarkedToolResultsForWire`, while session saves use
  * `MemoryManager.saveSession` to write a short JSONL stub plus a
  * file-backed artifact. In-memory content stays raw verbatim for UI,
- * inspection, and chunk reads.
- *
- * Background: the user-visible repro (Issue #900) was a single
- * `index_documents` response at 438KB (~110K tokens) + an `index_scan`
- * at 75KB which together pushed the next-turn input to 271K — over the
- * 200K TPM ceiling of gpt-5.4-nano. The plugin-side fix is tracked in
- * `lvis-plugin-local-indexer#131` (per-result pagination), but the host
- * must defend itself too: any future plugin or builtin can hit the same
- * trap, and the user's whole conversation should not be broken by one
- * misbehaving tool.
+ * inspection, offset reads, and literal search. Provider serialization
+ * includes only a bounded head/tail preview and recovery instructions.
  */
 
-import { estimateTokens } from "../engine/auto-compact.js";
+import { estimateTokens } from "./token-estimate.js";
 
 /**
  * Single tool_result above this line count is capped. 100 lines comfortably

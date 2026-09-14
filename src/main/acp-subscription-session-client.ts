@@ -24,7 +24,6 @@ import {
   type AcpSubscriptionProviderId,
 } from "../shared/acp-subscription.js";
 import { getLvisAppVersion } from "../shared/app-version.js";
-import { MAX_COMPOSER_ATTACHMENT_COUNT } from "../shared/composer-image-input.js";
 import type { SubscriptionImageAttachmentLimits } from "../shared/subscription-runtime.js";
 import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
 import {
@@ -53,7 +52,7 @@ import type { PendingJsonRpcRequest } from "../lib/json-rpc-pending-request.js";
 
 const MAX_RPC_LINE_BYTES = 1_000_000;
 /** Native image cap that always fits the ACP JSONL transport with room for text. */
-export const MAX_ACP_SUBSCRIPTION_IMAGE_ATTACHMENTS = MAX_COMPOSER_ATTACHMENT_COUNT;
+export const MAX_ACP_SUBSCRIPTION_IMAGE_ATTACHMENTS = 5;
 export const MAX_ACP_SUBSCRIPTION_IMAGE_BYTES = 256 * 1024;
 export const MAX_ACP_SUBSCRIPTION_IMAGE_TOTAL_BYTES = MAX_ACP_SUBSCRIPTION_IMAGE_BYTES;
 /** Conservative serialized LVIS history budget when a native ACP image is present. */

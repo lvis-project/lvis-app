@@ -9,11 +9,11 @@ import { HookRunner } from "../../hooks/hook-runner.js";
 import { t } from "../../i18n/index.js";
 import { PermissionManager } from "../../permissions/permission-manager.js";
 import { initPiiRedactionPolicy } from "../../shared/dlp.js";
+import { TOOL_RESULT_READ_MAX_CHARS } from "../../shared/bounded-tool-output.js";
 import { TOOL_TIMEOUT_POLICY } from "../../shared/tool-timeout-policy.js";
 import { createDynamicTool, type Tool, type ToolExecutionResult, type ToolSource } from "../base.js";
 import { ToolExecutor, type ToolExecutorCallbacks } from "../executor.js";
 import { ToolRegistry } from "../registry.js";
-import { TOOL_RESULT_CHUNK_MAX_CHARS } from "../tool-result-chunk.js";
 import { userPermissionContext } from "./tool-context-fixture.js";
 
 function deferred<T>() {
@@ -234,13 +234,13 @@ describe.each(INTERRUPTIONS)("builtin cancellation settlement after %s", (reason
   it.each(["result", "error"] as const)("bounds oversized settled %s details", async (kind) => {
     const invocation = await startInvocation();
     await invocation.interrupt(reason);
-    const detail = 'cleanup="incomplete"; ' + "x".repeat(TOOL_RESULT_CHUNK_MAX_CHARS * 2);
+    const detail = 'cleanup="incomplete"; ' + "x".repeat(TOOL_RESULT_READ_MAX_CHARS * 2);
     if (kind === "result") invocation.task.resolve({ output: detail, isError: true });
     else invocation.task.reject(new Error(detail));
     const [result] = await invocation.execution;
     const prefix = `${interruptionText(reason)}\n\n[Tool ${kind} after interruption]\n`;
     expect(result.content.startsWith(prefix)).toBe(true);
-    expect(result.content.length - prefix.length).toBe(TOOL_RESULT_CHUNK_MAX_CHARS);
+    expect(result.content.length - prefix.length).toBe(TOOL_RESULT_READ_MAX_CHARS);
     expect(result.content.endsWith("[Settled detail truncated]")).toBe(true);
     expect(invocation.terminalAudits()[0].output?.length).toBeLessThanOrEqual(1024);
   });
@@ -276,7 +276,7 @@ describe.each(INTERRUPTIONS)("builtin cancellation settlement after %s", (reason
     const postFeedback = "follow up with feedback.user@example.com";
     const invocation = await startInvocation({ postFeedback });
     await invocation.interrupt(reason);
-    const credential = "testcredential".repeat(TOOL_RESULT_CHUNK_MAX_CHARS);
+    const credential = "testcredential".repeat(TOOL_RESULT_READ_MAX_CHARS);
     const detail = `cleanup="incomplete"; {"api_key":"${credential}"}`;
     if (kind === "result") invocation.task.resolve({ output: detail, isError: true });
     else invocation.task.reject(new Error(detail));

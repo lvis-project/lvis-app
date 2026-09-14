@@ -25,16 +25,17 @@ import { rejectedToolNameFromError } from "../engine/llm/rejected-tool-schema.js
 import {
   normalizeSubscriptionUsageTelemetry,
   type SubscriptionChatRuntimeSelection,
+  type SubscriptionImageAttachmentLimits,
 } from "../shared/subscription-runtime.js";
 import { estimateMultimodalTokenOverhead } from "../shared/multimodal-token-estimate.js";
 import { estimateTokens } from "../shared/token-estimate.js";
 import { isRecord } from "../shared/is-record.js";
 import {
-  ACP_SUBSCRIPTION_IMAGE_ATTACHMENT_LIMITS,
   MAX_ACP_SUBSCRIPTION_TEXT_WITH_IMAGES_BYTES,
 } from "./acp-subscription-session-client.js";
 import {
   getSubscriptionRuntimeService,
+  getSubscriptionImageAttachmentLimits,
   SubscriptionRuntimeServiceError,
   type GetSubscriptionRuntimeServiceOptions,
   type SubscriptionOpenExternal,
@@ -43,12 +44,14 @@ import {
 } from "./subscription-runtime-service.js";
 import {
   assertSubscriptionPromptAttachments,
+  DEFAULT_SUBSCRIPTION_IMAGE_ATTACHMENT_LIMITS,
   normalizeSubscriptionImageAttachment,
   normalizeSubscriptionPromptAttachment,
   SubscriptionAttachmentTransportError,
   type SubscriptionPromptAttachment,
 } from "./subscription-attachment-input.js";
 import { SubscriptionToolBridge } from "./subscription-tool-bridge.js";
+import { projectSubscriptionImageHistory } from "./subscription-image-history.js";
 
 const MAX_SERIALIZED_INPUT_BYTES = 700 * 1024;
 const MAX_ACP_SERIALIZED_INPUT_BYTES = 512 * 1024;
@@ -388,6 +391,8 @@ export interface SerializedSubscriptionConversation {
   readonly text: string;
   /** Strict image payloads in the same order as envelope attachment indexes. */
   readonly attachments: readonly SubscriptionPromptAttachment[];
+  /** Estimated pixels for the exact image selection sent with this envelope. */
+  readonly imageTokens: number;
 }
 
 /**
@@ -398,9 +403,19 @@ export interface SerializedSubscriptionConversation {
  */
 function buildSubscriptionConversationPayload(
   params: StreamTurnParams,
+  imageLimits: SubscriptionImageAttachmentLimits,
 ): SerializedSubscriptionConversation {
+  let messages: GenericMessage[];
+  try {
+    messages = projectSubscriptionImageHistory(params.messages, imageLimits);
+  } catch (error) {
+    if (error instanceof SubscriptionAttachmentTransportError && error.code === "subscription-attachment-not-supported") {
+      throw new SubscriptionAttachmentInputRejectedError();
+    }
+    throw error;
+  }
   const attachments: SubscriptionPromptAttachment[] = [];
-  const latestUserMessageIndex = params.messages.reduce(
+  const latestUserMessageIndex = messages.reduce(
     (latest, message, index) => message.role === "user" ? index : latest,
     -1,
   );
@@ -408,7 +423,7 @@ function buildSubscriptionConversationPayload(
   try {
     requestJson = JSON.stringify({
       systemPrompt: params.systemPrompt,
-      messages: params.messages.map((message, index) => serializedMessage(
+      messages: messages.map((message, index) => serializedMessage(
         message,
         attachments,
         index === latestUserMessageIndex,
@@ -433,14 +448,19 @@ function buildSubscriptionConversationPayload(
     requestJson,
     "</lvis-request-json>",
   ].join("\n\n");
-  return Object.freeze({ text, attachments: Object.freeze(attachments) });
+  return Object.freeze({
+    text,
+    attachments: assertSubscriptionPromptAttachments(attachments, imageLimits),
+    imageTokens: estimateNativeImageTokens(messages),
+  });
 }
 
 export function serializeSubscriptionConversationPayload(
   params: StreamTurnParams,
   maxBytes = MAX_SERIALIZED_INPUT_BYTES,
+  imageLimits = DEFAULT_SUBSCRIPTION_IMAGE_ATTACHMENT_LIMITS,
 ): SerializedSubscriptionConversation {
-  const payload = buildSubscriptionConversationPayload(params);
+  const payload = buildSubscriptionConversationPayload(params, imageLimits);
   if (Buffer.byteLength(payload.text, "utf8") > maxBytes) {
     throw new SubscriptionInputTooLargeError();
   }
@@ -544,18 +564,14 @@ export class SubscriptionLlmProvider implements LLMProvider {
         ...(input.thinkingBudgetTokens === undefined
           ? {}
           : { thinkingBudgetTokens: input.thinkingBudgetTokens }),
-      });
-      assertSubscriptionPromptAttachments(
-        payload.attachments,
-        this.subscriptionRuntime.provider === "codex" ? undefined : ACP_SUBSCRIPTION_IMAGE_ATTACHMENT_LIMITS,
-      );
+      }, getSubscriptionImageAttachmentLimits(this.subscriptionRuntime.provider));
       const toolSchemaTokens = estimateSubscriptionToolSidecarTokens(
         this.subscriptionRuntime,
         input.toolSchemas,
       );
       if (toolSchemaTokens === undefined) return undefined;
       const messageTokens =
-        estimateTokens(payload.text) + estimateNativeImageTokens(wireMessages);
+        estimateTokens(payload.text) + payload.imageTokens;
       return {
         // Subscription transports embed the system prompt in their controlled
         // envelope, so this component intentionally represents the complete
@@ -578,6 +594,7 @@ export class SubscriptionLlmProvider implements LLMProvider {
       const serialized = serializeSubscriptionConversationPayload(
         params,
         this.subscriptionRuntime.provider === "codex" ? MAX_SERIALIZED_INPUT_BYTES : MAX_ACP_SERIALIZED_INPUT_BYTES,
+        getSubscriptionImageAttachmentLimits(this.subscriptionRuntime.provider),
       );
       // Native ACP image blocks share the same JSONL frame as this envelope.
       // Leave a conservative buffer so a valid 256KiB image cannot be

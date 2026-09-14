@@ -593,33 +593,65 @@ describe("CodexConversationRuntime", () => {
     expect(existsSync(join(projectDir, "blue.png"))).toBe(true);
   });
 
-  it("rejects combined user and tool image counts above the native limit before spawning", async () => {
+  it("rejects unprojected native image counts above the limit before spawning", async () => {
     const harness = createHarness();
-    const payload = serializeSubscriptionConversationPayload({
-      model: "default", systemPrompt: "Inspect the loaded images.",
-      messages: [
-        { role: "user", content: Array.from({ length: MAX_SUBSCRIPTION_PROMPT_ATTACHMENTS }, () => ({ type: "image", image: "data:image/png;base64,iVBORw0KGgo=" })) },
-        { role: "tool_result", toolUseId: "tool-image", content: "image loaded", image: { data: "iVBORw0KGgo=", mimeType: "image/png" } },
-      ],
-    });
-    await expect(harness.runtime.startTurn(payload)).rejects.toMatchObject({ code: "subscription-attachment-too-large" });
+    await expect(harness.runtime.startTurn({
+      text: "Inspect the loaded images.",
+      attachments: Array.from({ length: MAX_SUBSCRIPTION_PROMPT_ATTACHMENTS + 1 }, () => ({
+        type: "image" as const, mimeType: "image/png" as const, data: "iVBORw0KGgo=",
+      })),
+    })).rejects.toMatchObject({ code: "subscription-attachment-too-large" });
     expect(harness.spawnCalls).toHaveLength(0);
   });
 
-  it("rejects combined user and tool image bytes above the native limit before staging", async () => {
+  it("rejects unprojected native image bytes above the limit before staging", async () => {
     const harness = createHarness();
     const bytes = Buffer.alloc(Math.floor(MAX_SUBSCRIPTION_ATTACHMENT_BYTES / 2) + 1);
     Buffer.from("iVBORw0KGgo=", "base64").copy(bytes);
     const data = bytes.toString("base64");
+    await expect(harness.runtime.startTurn({
+      text: "Inspect the loaded images.",
+      attachments: Array.from({ length: 2 }, () => ({ type: "image" as const, mimeType: "image/png" as const, data })),
+    })).rejects.toMatchObject({ code: "subscription-attachment-too-large" });
+    expect(harness.spawnCalls).toHaveLength(0);
+  });
+
+  it.each(["count", "bytes"] as const)("stages a projected request with a recoverable tool image %s overflow", async (limit) => {
+    const bytes = limit === "bytes"
+      ? Buffer.alloc(Math.floor(MAX_SUBSCRIPTION_ATTACHMENT_BYTES / 2) + 1)
+      : Buffer.from("iVBORw0KGgo=", "base64");
+    Buffer.from("iVBORw0KGgo=", "base64").copy(bytes);
+    const data = bytes.toString("base64");
+    const userImageCount = limit === "count" ? MAX_SUBSCRIPTION_PROMPT_ATTACHMENTS : 1;
+    const stagedPaths: string[] = [];
+    const harness = createHarness((message, current) => {
+      if (message.method === "initialize") reply(current.child, requestId(message), {});
+      if (message.method === "thread/start") reply(current.child, requestId(message), { thread: { id: "thread-1" } });
+      if (message.method !== "turn/start") return;
+      const input = (message.params as { input: Array<{ type: string; text?: string; path?: string }> }).input;
+      const images = input.filter((part) => part.type === "localImage");
+      expect(images).toHaveLength(userImageCount);
+      stagedPaths.push(...images.map((part) => part.path!));
+      const text = input.find((part) => part.type === "text")!.text!;
+      const requestJson = text.match(/<lvis-request-json>\s*([\s\S]*?)\s*<\/lvis-request-json>/)![1];
+      const result = JSON.parse(requestJson!).messages.find((row: { role: string }) => row.role === "tool_result");
+      expect(result).toMatchObject({ toolUseId: "tool-image", isError: true });
+      expect(result.image).toBeUndefined();
+      expect(result.content).toContain("Image delivery failed");
+      expect(result.content).toContain("image loaded");
+      reply(current.child, requestId(message), { turn: { id: "turn-1", status: "inProgress" } });
+      notify(current.child, "turn/completed", { threadId: "thread-1", turn: { id: "turn-1", status: "completed" } });
+    });
     const payload = serializeSubscriptionConversationPayload({
       model: "default", systemPrompt: "Inspect the loaded images.",
       messages: [
-        { role: "user", content: [{ type: "image", image: `data:image/png;base64,${data}` }] },
+        { role: "user", content: Array.from({ length: userImageCount }, () => ({ type: "image", image: `data:image/png;base64,${data}` })) },
         { role: "tool_result", toolUseId: "tool-image", content: "image loaded", image: { data, mimeType: "image/png" } },
       ],
     });
-    await expect(harness.runtime.startTurn(payload)).rejects.toMatchObject({ code: "subscription-attachment-too-large" });
-    expect(harness.spawnCalls).toHaveLength(0);
+    await expect(harness.runtime.startTurn(payload)).resolves.toMatchObject({ status: "completed" });
+    expect(harness.spawnCalls).toHaveLength(1);
+    await vi.waitFor(() => expect(stagedPaths.every((path) => !existsSync(path))).toBe(true));
   });
 
   it("removes a staged localImage when turn/start fails", async () => {
