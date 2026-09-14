@@ -30,6 +30,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { shellQuote } from "../../lib/shell-resolver.js";
 
 vi.mock("node:os", async (importOriginal) => {
   const original = await importOriginal<typeof import("node:os")>();
@@ -209,8 +210,7 @@ describe("asrt-sandbox — gate ON wraps a real command under the OS sandbox", (
         await initializeAsrtSandbox({ allowedDomains: [], strictAllowlist: true });
         vi.stubEnv("HOME", root);
         vi.stubEnv("PATH", `${bin}:/usr/bin:/bin`);
-        const quote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
-        const command = `command -v fixture_cli && fixture_cli; /bin/cat ${quote(sibling)}; printf changed > ${quote(executable)}`;
+        const command = `command -v fixture_cli && fixture_cli; /bin/cat ${shellQuote(sibling)}; printf changed > ${shellQuote(executable)}`;
         const prepared = prepareSandboxFixture(command, cwd);
         expect(preparedShellExecutableReadPaths(prepared)).toContain(executable);
         expect(preparedShellExecutableReadPaths(prepared)).not.toContain(bin);

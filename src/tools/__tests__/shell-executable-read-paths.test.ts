@@ -2,6 +2,7 @@ import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, w
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { shellQuote as quote } from "../../lib/shell-resolver.js";
 
 import { inspectShellExecution, type ShellExecutionFacts } from "../../shared/shell-execution.js";
 import { collectShellExecutableReadPaths } from "../shell-executable-read-paths.js";
@@ -10,8 +11,6 @@ const roots: string[] = [];
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
-
-function quote(value: string): string { return `'${value.replace(/'/g, `'\\''`)}'`; }
 
 function fixture() {
   const root = realpathSync.native(mkdtempSync(join(tmpdir(), "shell-executable-paths-")));
