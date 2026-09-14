@@ -388,6 +388,15 @@ changing `maxChars` never changes the requested position. Returned boundaries do
 not split Unicode surrogate pairs. Search misses return `found: false` and no
 next offset; after a match, `nextOffset` continues after the returned context.
 
+`web_fetch` retains at most 2 MiB of response body bytes in a fixed buffer and
+cancels body reads when the tool caller aborts. It extracts readable text only
+from declared HTML; other response text keeps its whitespace and markup.
+Complete bounded text enters the same history and chunk-recovery path above,
+without a producer-side preview cut. If JSON escaping expands the serialized
+result beyond `MAX_TOOL_RESULT_ARTIFACT_BYTES`, the tool returns an explicit
+size error instead of an unrecoverable partial success. Per-hop network and
+approval checks still apply before reading each response.
+
 Foreground shell history and session records retain the bounded display prefix
 and a trusted capture reference. The persisted preview ceiling is 16,384 UTF-16
 characters, which preserves the 12,000-character shell display plus completion
