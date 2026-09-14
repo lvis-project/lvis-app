@@ -31,6 +31,8 @@
       "entry": [
         // Standalone Node command emitted by build:main and invoked by the native launcher.
         "src/headless.ts",
+        // Executed as a separate managed child, not imported into the host loop.
+        "src/tools/image-preparation-child.ts",
         "scripts/smoke-live-model.mjs",
         "scripts/smoke-live-app.mjs",
         // Loaded by the installer packager through build.beforePack.

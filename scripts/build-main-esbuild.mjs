@@ -17,7 +17,7 @@ import {
   createMainBundleManifest,
   formatMainBundleBudget,
 } from "./lib/main-bundle-budget.mjs";
-import { assertHeadlessBundleBoundary } from "./lib/headless-bundle-boundary.mjs";
+import { assertHeadlessBundleBoundary, HEADLESS_CHILD_ENTRY_POINTS } from "./lib/headless-bundle-boundary.mjs";
 import { readBuildSourceIdentity } from "./lib/build-source-identity.mjs";
 import { MAIN_BUNDLE_EXTERNALS } from "./lib/main-bundle-externals.mjs";
 
@@ -36,6 +36,7 @@ const buildOptions = {
   entryPoints: {
     main: resolve(repoRoot, "src", "main.ts"),
     headless: resolve(repoRoot, "src", "headless.ts"),
+    ...Object.fromEntries(Object.entries(HEADLESS_CHILD_ENTRY_POINTS).map(([name, path]) => [name, resolve(repoRoot, path)])),
     "subscription-grok-tool-policy-hook": resolve(repoRoot, "src", "main", "subscription-grok-tool-policy-hook.ts"),
     "subscription-tool-mcp-server": resolve(repoRoot, "src", "main", "subscription-tool-mcp-server.ts"),
     // The entry of a confined plugin child process. It is its OWN entry point
@@ -116,7 +117,7 @@ if (watchMode) {
     }
   }
 
-  const headlessManifest = assertHeadlessBundleBoundary(result.metafile);
+  const headlessManifest = assertHeadlessBundleBoundary(result.metafile, "src/headless.ts", Object.values(HEADLESS_CHILD_ENTRY_POINTS));
   headlessManifest.source = readBuildSourceIdentity(repoRoot);
   if (JSON.stringify(sourceBeforeBuild) !== JSON.stringify(headlessManifest.source)) {
     throw new Error("Build source identity changed while the main bundle was emitted");

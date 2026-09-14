@@ -54,6 +54,11 @@ images; a valid tool result cannot silently terminate the conversation because
 older images consumed the request budget. Authored image input must fit as a
 whole, and malformed image payloads still fail at the boundary.
 
+The [image preparation contract](image-preparation.md) owns local image
+decoding, bounded source reads and derived visual copies. `view_image` accepts
+smaller output budgets for delivery-error recovery while the active transport
+retains ownership of request projection and attachment limits.
+
 ## Process Boundaries
 
 Host service bootstrap accepts `BootHost` (`src/boot/host-runtime.ts`) for

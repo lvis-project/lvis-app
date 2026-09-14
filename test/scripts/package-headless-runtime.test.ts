@@ -34,6 +34,8 @@ function fixture({ headless = true } = {}) {
   writeFixtureFile(input, foreignBinding, "foreign native binding");
   if (headless) {
     writeFixtureFile(input, "dist/src/main/headless.js", "process.stdout.write('headless entry');\n");
+    writeFixtureFile(input, "dist/src/main/image-preparation-child.js", "process.stdout.write('decoder entry');\n");
+    writeFixtureFile(input, "node_modules/@img/sharp-linux-x64/lib/runtime.node", "decoder binding");
     chmodSync(join(input, "dist/src/main/headless.js"), 0o755);
   }
   const packed = runNode([require.resolve("@electron/asar/bin/asar.js"), "pack", input, archive, "--unpack", "*.node"]);
@@ -68,6 +70,8 @@ describe("native packaged payload extraction", () => {
     expect(result.error).toBeUndefined();
     expect(result.status, result.stderr).toBe(0);
     expect(readFileSync(join(app, "dist/src/main/headless.js"), "utf8")).toContain("headless entry");
+    expect(readFileSync(join(app, "dist/src/main/image-preparation-child.js"), "utf8")).toContain("decoder entry");
+    expect(readFileSync(join(app, "node_modules/@img/sharp-linux-x64/lib/runtime.node"), "utf8")).toBe("decoder binding");
     expect(readFileSync(join(app, selectedBinding), "utf8")).toBe("replacement native binding with different bytes");
     expect(readFileSync(join(app, "runtime-assets/added.txt"), "utf8")).toBe("post-pack asset");
     expect(existsSync(join(app, foreignBinding))).toBe(false);

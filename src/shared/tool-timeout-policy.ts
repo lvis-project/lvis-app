@@ -97,6 +97,8 @@ export const TOOL_TIMEOUT_POLICY = {
   shellDefaultMs: 120_000,
   shellCeilingGraceMs: 10_000,
   globalCeilingMs: 120_000,
+  // Includes admission, source reading and decoder process lifetime.
+  imagePreparationMs: 30_000,
   pluginImportMs: 10_000,
   pluginFactoryMs: 10_000,
   pluginStartupDefaultMs: 10_000,

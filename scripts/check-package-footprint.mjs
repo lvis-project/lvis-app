@@ -14,6 +14,7 @@ import { basename, dirname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { gunzipSync } from "node:zlib";
+import { assertImageRuntimeFiles } from "./lib/image-runtime-files.cjs";
 
 const { assertGraphicsRuntimeFiles } = createRequire(import.meta.url)(
   "./lib/graphics-runtime-files.cjs",
@@ -457,6 +458,9 @@ assertSandboxRuntimeFiles(
   resolve(resourcesDir, "app.asar.unpacked/node_modules/@anthropic-ai/sandbox-runtime/vendor"),
   isMacAppPackage() ? "darwin" : isLinuxUnpackedPackage() ? "linux" : "win32",
 );
+
+const [imagePlatform, imageArch] = resolveBetterSqlitePrebuildTarget().split("-");
+assertImageRuntimeFiles(resolve(unpackedDir, "node_modules"), imagePlatform, imageArch);
 
 process.stdout.write(
   [

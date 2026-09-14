@@ -1,14 +1,24 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from "vitest";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 import {
   existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  truncateSync,
   writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+
+import { buildImagePreparationEntry, imageFixturePath } from "../../__tests__/support/image-preparation-runtime.js";
+import { IMAGE_PREPARATION_POLICY } from "../../shared/image-preparation-policy.js";
+
+const imageRuntime = vi.hoisted(() => ({ directory: "" }));
+vi.mock("../../main/main-paths.js", async (original) => ({
+  ...await original<typeof import("../../main/main-paths.js")>(),
+  get mainDir() { return imageRuntime.directory; },
+}));
 
 import { ToolRegistry } from "../registry.js";
 import {
@@ -54,44 +64,46 @@ afterEach(async () => {
 });
 
 describe("view_image tool", () => {
-  const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
-  const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0]);
-  const GIF = Buffer.from([0x47, 0x49, 0x46, 0x38, 0x39, 0x61]);
-  const WEBP = Buffer.from([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50]);
+  beforeAll(async () => { imageRuntime.directory = await buildImagePreparationEntry("file-image-runtime"); });
+  afterAll(async () => { await cleanupTmpDir(imageRuntime.directory); });
 
-  it("loads a PNG and returns a base64 image with the sniffed mime + placeholder text", async () => {
-    writeFileSync(join(workDir, "shot.png"), PNG);
-    const res = await new ViewImageTool().execute({ path: "shot.png" }, ctx());
-    expect(res.isError).toBe(false);
-    expect(res.image?.mimeType).toBe("image/png");
-    expect(res.image?.data).toBe(PNG.toString("base64"));
-    expect(res.image?.bytes).toBe(PNG.length);
-    expect(parse(res.output).loaded).toBe(true);
+  it.each(["png", "jpeg", "gif", "webp"])("decodes a valid %s file and returns a bounded visual copy", async (format) => {
+    const bytes = readFileSync(imageFixturePath(`grid.${format}`));
+    writeFileSync(join(workDir, "image.data"), bytes);
+    const res = await new ViewImageTool().execute({ path: "image.data", maxDimension: 4 }, ctx());
+    expect(res.isError, res.output).toBe(false);
+    expect(res.image).toMatchObject({ mimeType: "image/png", width: 4, height: 2 });
+    expect(Buffer.from(res.image!.data, "base64").length).toBe(res.image?.bytes);
+    expect(parse(res.output)).toMatchObject({ loaded: true, originalFormat: format, originalWidth: 8, originalHeight: 4, resized: true });
+    expect(readFileSync(join(workDir, "image.data"))).toEqual(bytes);
   });
 
-  it.each([
-    ["jpeg", JPEG, "image/jpeg"],
-    ["gif", GIF, "image/gif"],
-    ["webp", WEBP, "image/webp"],
-  ])("detects %s by magic bytes", async (name, bytes, mime) => {
-    writeFileSync(join(workDir, `f.${name}`), bytes);
-    const res = await new ViewImageTool().execute({ path: `f.${name}` }, ctx());
-    expect(res.isError).toBe(false);
-    expect(res.image?.mimeType).toBe(mime);
-  });
-
-  it("rejects a non-image by magic-byte sniff (ignores a lying .png extension)", async () => {
-    writeFileSync(join(workDir, "fake.png"), "not an image", "utf8");
+  it("rejects a truncated header that used to pass as an image", async () => {
+    writeFileSync(join(workDir, "fake.png"), readFileSync(imageFixturePath("grid.png")).subarray(0, 12));
     const res = await new ViewImageTool().execute({ path: "fake.png" }, ctx());
     expect(res.isError).toBe(true);
     expect(res.image).toBeUndefined();
+    expect(res.output).toContain("invalid-image");
   });
 
-  it("rejects an image over the 5 MB limit before reading it into context", async () => {
-    writeFileSync(join(workDir, "big.png"), Buffer.concat([PNG, Buffer.alloc(5 * 1024 * 1024)]));
-    const res = await new ViewImageTool().execute({ path: "big.png" }, ctx());
+  it("reports unsupported input separately from size recovery, including oversized files", async () => {
+    writeFileSync(join(workDir, "unsupported.ppm"), "P6\n8 4\n255\n");
+    truncateSync(join(workDir, "unsupported.ppm"), IMAGE_PREPARATION_POLICY.maxInputBytes + 1);
+    const res = await new ViewImageTool().execute({ path: "unsupported.ppm" }, ctx());
     expect(res.isError).toBe(true);
-    expect(res.output).toContain("5 MB");
+    expect(res.output).toContain("unsupported-image");
+    expect(res.output).toContain("PNG, JPEG, GIF and WebP");
+    expect(res.output).toContain("Convert");
+    expect(res.image).toBeUndefined();
+  });
+
+  it("limits original file reads independently of the output byte budget", async () => {
+    writeFileSync(join(workDir, "big.png"), readFileSync(imageFixturePath("grid.png")));
+    truncateSync(join(workDir, "big.png"), IMAGE_PREPARATION_POLICY.maxInputBytes + 1);
+    const res = await new ViewImageTool().execute({ path: "big.png", maxBytes: 128 }, ctx());
+    expect(res.isError).toBe(true);
+    expect(res.output).toContain("image-input-limit");
+    expect(res.output).toContain("derived output");
     expect(res.image).toBeUndefined();
   });
 
