@@ -847,7 +847,7 @@ export interface ConfinedPluginChild {
  *    {@link PLUGIN_ENVELOPE_GRANTS} DOES widen the floor, deliberately, for the
  *    one plugin whose row names it.
  *
- * On Windows ASRT 0.0.73 supports no per-exec allow grants at all — passing any
+ * On Windows ASRT 0.0.75 supports no per-exec allow grants at all — passing any
  * makes `wrapWorkerCommand` throw — so the wrap carries the deny floor alone
  * (`grantMode: "deny-only"`) and reachability is an ACL question. §4's Windows
  * residual stands unchanged and is not softened here: srt-win confines
@@ -890,7 +890,7 @@ export async function spawnConfinedPluginChild(
     // Every root the wrap is about to grant is created first, `0o700` — the
     // same thing `worker-spawn.ts` does for the control-socket dir it grants.
     // An allow path that does not exist at wrap time is SILENTLY SKIPPED rather
-    // than refused: ASRT 0.0.73's Linux backend drops a non-existent write path
+    // than refused: ASRT 0.0.75's Linux backend drops a non-existent write path
     // and a non-existent read allow path from the bwrap argv with a debug line
     // and no error, and macOS's lexical rule admits the path but the kernel
     // still has no directory to open. Neither reports anything, so without this

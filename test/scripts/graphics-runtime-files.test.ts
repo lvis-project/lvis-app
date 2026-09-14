@@ -16,9 +16,9 @@ const { assertGraphicsRuntimeFiles } = require("../../scripts/lib/graphics-runti
 
 const roots: string[] = [];
 const RUNTIME_FILES = {
-  linux: ["libEGL.so", "libGLESv2.so", "libvk_swiftshader.so", "libvulkan.so.1", "vk_swiftshader_icd.json"],
-  darwin: ["libEGL.dylib", "libGLESv2.dylib", "libvk_swiftshader.dylib", "vk_swiftshader_icd.json"],
-  win32: ["libEGL.dll", "libGLESv2.dll", "vk_swiftshader.dll", "vulkan-1.dll", "vk_swiftshader_icd.json", "dxcompiler.dll", "dxil.dll"],
+  linux: ["libvk_swiftshader.so", "libvulkan.so.1", "vk_swiftshader_icd.json"],
+  darwin: ["libvk_swiftshader.dylib", "vk_swiftshader_icd.json"],
+  win32: ["vk_swiftshader.dll", "vulkan-1.dll", "vk_swiftshader_icd.json", "dxcompiler.dll", "dxil.dll"],
 };
 
 function putFile(path: string, content: string | Buffer = "runtime asset") {
@@ -35,6 +35,9 @@ function createPackage(platform: keyof typeof RUNTIME_FILES) {
     ? join(contents, "Frameworks", "Electron Framework.framework", "Versions", "A", "Libraries")
     : root;
   const modules = join(resources, "app.asar.unpacked", "node_modules");
+  if (platform !== "win32") {
+    putFile(join(modules, "@anthropic-ai/sandbox-runtime/vendor/java-proxy-agent/srt-proxy-agent.jar"));
+  }
   const uv = Buffer.from("executable");
   const uvName = platform === "win32" ? "uv.exe" : "uv";
   putFile(join(resources, "uv", `${platform}-x64`, `${uvName}.gz`), gzipSync(uv));
@@ -58,6 +61,7 @@ function createPackage(platform: keyof typeof RUNTIME_FILES) {
   for (const file of RUNTIME_FILES[platform]) putFile(join(libraryDirectory, file), file);
   return {
     libraryDirectory,
+    vendorDirectory: join(modules, "@anthropic-ai", "sandbox-runtime", "vendor"),
     context: {
       appOutDir: root,
       electronPlatformName: platform,
@@ -89,9 +93,21 @@ describe("packaged graphics runtime", () => {
     expect(() => assertGraphicsRuntimeFiles(libraryDirectory, platform)).toThrow(missing);
   });
 
+  it.each(["linux", "darwin"] as const)("requires the physical %s JVM proxy agent", async (platform) => {
+    const { context, vendorDirectory } = createPackage(platform);
+    const jar = join(vendorDirectory, "java-proxy-agent", "srt-proxy-agent.jar");
+    rmSync(jar);
+    await expect(afterPack(context)).rejects.toThrow("packaged JVM proxy agent missing or invalid");
+    putFile(jar, "");
+    await expect(afterPack(context)).rejects.toThrow("packaged JVM proxy agent missing or invalid");
+    rmSync(jar);
+    mkdirSync(jar);
+    await expect(afterPack(context)).rejects.toThrow("packaged JVM proxy agent missing or invalid");
+  });
+
   it("rejects empty files and directories in place of runtime libraries", () => {
     const { libraryDirectory } = createPackage("linux");
-    const library = join(libraryDirectory, "libEGL.so");
+    const library = join(libraryDirectory, "libvk_swiftshader.so");
     writeFileSync(library, "");
     expect(() => assertGraphicsRuntimeFiles(libraryDirectory, "linux")).toThrow(library);
     rmSync(library);

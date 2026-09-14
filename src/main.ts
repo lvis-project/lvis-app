@@ -486,8 +486,8 @@ async function main() {
   const initialSettings = services.settingsService.getAll();
   reconcileOsIntegrationOnBoot(initialSettings);
   // Detect a hidden (tray-only) auto-launch so the first window show is
-  // suppressed. macOS reports `wasOpenedAsHidden`; Windows uses the `--hidden`
-  // launch arg the login item carries.
+  // suppressed. Login launches use the persisted minimized preference on
+  // macOS; Windows uses the --hidden launch argument.
   const launchedHidden = readStartupLaunchState().wasOpenedAsHidden;
 
   // 실 UI 로드 — 이 시점부터 렌더러의 IPC 호출이 항상 handler와 매칭됨

@@ -1,25 +1,20 @@
 const { statSync } = require("node:fs");
 const { join } = require("node:path");
 
-// These libraries support the selected rendering mode and its native fallback
-// paths. A default software-rendering preference does not make them optional.
+// The rendering engine includes its EGL/GLES implementation in the executable.
+// These separate libraries still support its native software-rendering paths
+// and remain required regardless of the selected hardware-acceleration mode.
 const GRAPHICS_RUNTIME_FILES = {
   linux: [
-    "libEGL.so",
-    "libGLESv2.so",
     "libvk_swiftshader.so",
     "libvulkan.so.1",
     "vk_swiftshader_icd.json",
   ],
   darwin: [
-    "libEGL.dylib",
-    "libGLESv2.dylib",
     "libvk_swiftshader.dylib",
     "vk_swiftshader_icd.json",
   ],
   win32: [
-    "libEGL.dll",
-    "libGLESv2.dll",
     "vk_swiftshader.dll",
     "vulkan-1.dll",
     "vk_swiftshader_icd.json",
