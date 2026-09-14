@@ -4,12 +4,15 @@ import { existsSync, mkdirSync, mkdtempSync, promises as fs, readFileSync, utime
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
+import sharp from "sharp";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { makeRecordedSpawn } from "../../__tests__/test-helpers.js";
+import { buildImagePreparationEntry } from "../../__tests__/support/image-preparation-runtime.js";
 import {
   CodexConversationRuntime,
   attachCodexStdioTransport,
   CODEX_MAX_RPC_LINE_BYTES,
+  CODEX_RPC_REQUEST_TIMEOUT_MS,
   isCodexAppServerRequestId,
   sanitizedCodexConversationEnvironment,
   type CodexConversationRuntimeOptions,
@@ -24,6 +27,16 @@ import type { CodexAppServerClient } from "../codex-app-server-client.js";
 import { collectRoundStream } from "../../engine/turn/stream-collector.js";
 import type { ProviderTransportDiagnostics } from "../../engine/llm/provider-error-diagnostics.js";
 import * as managedChildProcesses from "../managed-child-processes.js";
+import { ConversationLoop } from "../../engine/conversation-loop.js";
+import { makeConversationLoopDeps } from "../../engine/__tests__/conversation-loop-test-helpers.js";
+import { createTracer, type TraceEntry } from "../../observability/conversation-trace.js";
+import type { LLMProvider } from "../../engine/llm/types.js";
+
+const imageRuntime = vi.hoisted(() => ({ directory: undefined as string | undefined }));
+vi.mock("../main-paths.js", async (original) => {
+  const paths = await original<typeof import("../main-paths.js")>();
+  return { ...paths, get mainDir() { return imageRuntime.directory ?? paths.mainDir; } };
+});
 
 type Spawn = NonNullable<CodexConversationRuntimeOptions["spawn"]>;
 type JsonRecord = Record<string, unknown>;
@@ -152,6 +165,10 @@ afterEach(async () => {
     harness.child.stderr.destroy();
     await cleanupTmpDir(harness.runtimeRoot);
   }
+  if (imageRuntime.directory) {
+    await cleanupTmpDir(imageRuntime.directory);
+    imageRuntime.directory = undefined;
+  }
   vi.restoreAllMocks();
 });
 
@@ -181,6 +198,100 @@ describe("isCodexAppServerRequestId", () => {
     expect(isCodexAppServerRequestId(null)).toBe(false);
     expect(isCodexAppServerRequestId(undefined)).toBe(false);
     expect(isCodexAppServerRequestId({ id: "req-1" })).toBe(false);
+  });
+});
+
+describe("native RPC timeout context", () => {
+  it.each(["initialize", "account/read", "thread/start", "turn/start"] as const)(
+    "retains the actual unacknowledged %s operation and closes its transport",
+    async (operation) => {
+      vi.useFakeTimers();
+      try {
+        const harness = createHarness((message, current) => {
+          if (message.method === operation) return;
+          if (message.method === "initialize") reply(current.child, requestId(message), {});
+          if (message.method === "thread/start") reply(current.child, requestId(message), { thread: { id: "thread-1" } });
+        });
+        const pending = (operation === "account/read"
+          ? harness.runtime.verifyIsolation()
+          : harness.runtime.startTurn({ text: "private request" })
+        ).catch((error: unknown) => error);
+        await vi.waitFor(() => expect(methodMessages(harness, operation)).toHaveLength(1));
+        await vi.advanceTimersByTimeAsync(CODEX_RPC_REQUEST_TIMEOUT_MS);
+        const failure = await pending;
+        expect(failure).toMatchObject({ providerError: {
+          transport: { phase: "rpc-timeout", kind: "timeout", operation },
+        } });
+        expect(JSON.stringify(failure)).not.toMatch(/private|requestId|params/);
+        expect(harness.child.kill).toHaveBeenCalledWith("SIGKILL");
+        expect(harness.runtime.isTurnActive()).toBe(false);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it("does not apply the RPC response deadline to an acknowledged running turn", async () => {
+    vi.useFakeTimers();
+    try {
+      const harness = createHarness((message, current) => {
+        if (message.method === "initialize") reply(current.child, requestId(message), {});
+        if (message.method === "thread/start") reply(current.child, requestId(message), { thread: { id: "thread-1" } });
+        if (message.method === "turn/start") reply(current.child, requestId(message), { turn: { id: "turn-1", status: "inProgress" } });
+      });
+      const settled = vi.fn();
+      const pending = harness.runtime.startTurn({ text: "continue normally" }).then((result) => { settled(); return result; });
+      await vi.waitFor(() => expect(methodMessages(harness, "turn/start")).toHaveLength(1));
+      await vi.advanceTimersByTimeAsync(CODEX_RPC_REQUEST_TIMEOUT_MS * 2);
+      expect(settled).not.toHaveBeenCalled();
+      expect(harness.child.kill).not.toHaveBeenCalled();
+      notify(harness.child, "turn/completed", { threadId: "thread-1", turn: { id: "turn-1", status: "completed" } });
+      await expect(pending).resolves.toMatchObject({ status: "completed", turnId: "turn-1" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("writes an actual missing RPC response through the provider and collector to the error trace", async () => {
+    vi.useFakeTimers();
+    const verification = createHarness((message, current) => {
+      if (message.method === "initialize") reply(current.child, requestId(message), {});
+      if (message.method === "account/read") reply(current.child, requestId(message), { account: { type: "chatgpt" } });
+    });
+    const harness = createHarness((message, current) => {
+      if (message.method === "initialize") reply(current.child, requestId(message), {});
+      if (message.method === "thread/start") reply(current.child, requestId(message), { thread: { id: "thread-1" } });
+    });
+    const { service, audit } = await createServiceForRuntimes(harness, [verification.runtime, harness.runtime]);
+    try {
+      const provider = createSubscriptionLlmProvider({ selection: { kind: "subscription", provider: "codex" }, service });
+      const deps = makeConversationLoopDeps();
+      const getSetting = deps.settingsService.get;
+      vi.spyOn(deps.settingsService, "get").mockImplementation((key) => key === "llm"
+        ? { ...getSetting("llm"), activeChatRuntime: provider.subscriptionRuntime }
+        : getSetting(key));
+      const loop = new ConversationLoop(deps);
+      (loop as { provider: LLMProvider | null }).provider = provider;
+      const tracer = createTracer("rpc-timeout", { enabled: true, traceDir: join(harness.runtimeRoot, "traces") });
+      loop.setTracer(tracer);
+      const pending = loop.runTurn("private-user-input", undefined, undefined, { inputOrigin: "user-keyboard" });
+      await vi.waitFor(() => expect(methodMessages(harness, "turn/start")).toHaveLength(1));
+      await vi.advanceTimersByTimeAsync(CODEX_RPC_REQUEST_TIMEOUT_MS);
+      await expect(pending).resolves.toMatchObject({ stopReason: "stream-error" });
+      const raw = readFileSync(tracer.filePath!, "utf8");
+      const entries = raw.trim().split("\n").map((line) => JSON.parse(line) as TraceEntry);
+      expect(entries.find((entry) => entry.step === "LLM_STREAM_ERROR")?.meta).toMatchObject({
+        classification: "unknown", providerError: {
+          transport: { phase: "rpc-timeout", kind: "timeout", operation: "turn/start" },
+        },
+      });
+      expect(raw).not.toContain("private-user-input");
+      expect(audit).toHaveBeenCalledExactlyOnceWith({ provider: "codex", outcome: "session-failed" });
+      expect(harness.child.kill).toHaveBeenCalledWith("SIGKILL");
+    } finally {
+      await service.stop();
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -673,10 +784,12 @@ describe("CodexConversationRuntime", () => {
   });
 
   it("frames governed image results with original user pixels in order and cleans staged files", async () => {
+    imageRuntime.directory = await buildImagePreparationEntry("codex-conversation-image-runtime");
     const red = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==";
     const blue = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYPj/HwADAgH/5ncLrgAAAABJRU5ErkJggg==";
     const green = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNg+M/wHwAEAQH/cetH5QAAAABJRU5ErkJggg==";
     const stagedPaths: string[] = [];
+    const stagedImages: Buffer[] = [];
     const harness = createHarness((message, current) => {
       if (message.method === "initialize") reply(current.child, requestId(message), {});
       if (message.method === "thread/start") reply(current.child, requestId(message), { thread: { id: "thread-1" } });
@@ -685,14 +798,14 @@ describe("CodexConversationRuntime", () => {
       const inputImages = turnParams.input.filter((part) => part.type === "localImage");
       expect(inputImages).toHaveLength(3);
       stagedPaths.push(...inputImages.map((part) => part.path!));
-      expect(stagedPaths.map((path) => readFileSync(path))).toEqual([green, red, blue].map((data) => Buffer.from(data, "base64")));
+      stagedImages.push(...stagedPaths.map((path) => readFileSync(path)));
       const text = turnParams.input.find((part) => part.type === "text")?.text ?? "";
       const requestJson = text.match(/<lvis-request-json>\s*([\s\S]*?)\s*<\/lvis-request-json>/)?.[1];
       const rows = JSON.parse(requestJson!).messages;
       expect(rows.filter((row: { role: string }) => row.role === "tool_result").map((row: { toolUseId: string; image: { attachmentIndex: number } }) => [row.toolUseId, row.image.attachmentIndex])).toEqual([
         ["red-call", 1], ["blue-call", 2],
       ]);
-      for (const data of [red, blue, green]) expect(JSON.stringify(message)).not.toContain(data);
+      for (const data of [red, blue, green, redResult.image!.data, blueResult.image!.data]) expect(JSON.stringify(message)).not.toContain(data);
       expect(turnParams.cwd).toBe(current.workspaceDir);
       expect(turnParams.environments).toEqual([]);
       expect(turnParams.sandboxPolicy.networkAccess).toBe(false);
@@ -707,9 +820,10 @@ describe("CodexConversationRuntime", () => {
     const context = { cwd: projectDir, extraAllowedDirectories: [], metadata: {} };
     const redResult = await tool.execute({ path: "red.png" }, context);
     const blueResult = await tool.execute({ path: "blue.png" }, context);
-    expect(redResult.isError || blueResult.isError).toBe(false);
-    expect(redResult.image?.data).toBe(red);
-    expect(blueResult.image?.data).toBe(blue);
+    expect(redResult.isError, redResult.output).toBeFalsy();
+    expect(blueResult.isError, blueResult.output).toBeFalsy();
+    expect(redResult.image).toMatchObject({ mimeType: "image/png", width: 1, height: 1 });
+    expect(blueResult.image).toMatchObject({ mimeType: "image/png", width: 1, height: 1 });
     const denied = await tool.execute({ path: "../outside.png" }, context);
     expect(denied.isError).toBe(true);
     expect(denied.image).toBeUndefined();
@@ -726,9 +840,19 @@ describe("CodexConversationRuntime", () => {
       ],
     });
     await expect(harness.runtime.startTurn(payload)).resolves.toMatchObject({ status: "completed" });
+    // User bytes remain untouched; governed images may be re-encoded, so their
+    // contract is the decoded pixels and attachment order, not PNG compression.
+    expect(stagedImages[0]).toEqual(Buffer.from(green, "base64"));
+    const stagedPixels = [];
+    for (const image of stagedImages) {
+      const decoded = await sharp(image, { failOn: "warning" }).raw().toBuffer({ resolveWithObject: true });
+      expect(decoded.info).toMatchObject({ width: 1, height: 1, channels: 4 });
+      stagedPixels.push([...decoded.data]);
+    }
+    expect(stagedPixels).toEqual([[0, 255, 0, 255], [255, 0, 0, 255], [0, 0, 255, 255]]);
     await vi.waitFor(() => expect(stagedPaths.every((path) => !existsSync(path))).toBe(true));
-    expect(existsSync(join(projectDir, "red.png"))).toBe(true);
-    expect(existsSync(join(projectDir, "blue.png"))).toBe(true);
+    expect(readFileSync(join(projectDir, "red.png"))).toEqual(Buffer.from(red, "base64"));
+    expect(readFileSync(join(projectDir, "blue.png"))).toEqual(Buffer.from(blue, "base64"));
   });
 
   it("rejects unprojected native image counts above the limit before spawning", async () => {

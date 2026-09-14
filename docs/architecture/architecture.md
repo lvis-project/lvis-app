@@ -54,6 +54,11 @@ images; a valid tool result cannot silently terminate the conversation because
 older images consumed the request budget. Authored image input must fit as a
 whole, and malformed image payloads still fail at the boundary.
 
+The [image preparation contract](image-preparation.md) owns local image
+decoding, bounded source reads and derived visual copies. `view_image` accepts
+smaller output budgets for delivery-error recovery while the active transport
+retains ownership of request projection and attachment limits.
+
 ## Process Boundaries
 
 Host service bootstrap accepts `BootHost` (`src/boot/host-runtime.ts`) for
@@ -388,6 +393,15 @@ changing `maxChars` never changes the requested position. Returned boundaries do
 not split Unicode surrogate pairs. Search misses return `found: false` and no
 next offset; after a match, `nextOffset` continues after the returned context.
 
+`web_fetch` retains at most 2 MiB of response body bytes in a fixed buffer and
+cancels body reads when the tool caller aborts. It extracts readable text only
+from declared HTML; other response text keeps its whitespace and markup.
+Complete bounded text enters the same history and chunk-recovery path above,
+without a producer-side preview cut. If JSON escaping expands the serialized
+result beyond `MAX_TOOL_RESULT_ARTIFACT_BYTES`, the tool returns an explicit
+size error instead of an unrecoverable partial success. Per-hop network and
+approval checks still apply before reading each response.
+
 Foreground shell history and session records retain the bounded display prefix
 and a trusted capture reference. The persisted preview ceiling is 16,384 UTF-16
 characters, which preserves the 12,000-character shell display plus completion
@@ -467,6 +481,16 @@ The reader stops after a framing error or owner closure. Each adapter supplies
 its existing timeout and error policy, rejects unsupported native host requests,
 and owns process shutdown. Native thread, turn, and session state remain in the
 protocol adapter rather than in the shared RPC registry.
+
+Transport failure diagnostics may retain the pending request's host-issued
+`operation`, validated against the closed `PROVIDER_RPC_OPERATIONS` catalogue.
+Only its finite ASCII labels are accepted; request parameters, paths, prompt
+text, credentials, and remote operation fields are excluded. This metadata
+passes unchanged through the subscription provider and stream collector to the
+error trace without selecting retries or changing deadlines. Where the protocol
+separates turn-start acknowledgement from terminal notification, the RPC timer
+ends at acknowledgement. An RPC whose response completes the prompt retains
+the adapter's existing prompt deadline and cancellation grace instead.
 
 The [provider integration design](openai-provider-integration.md) describes
 the connection boundaries and extension points.

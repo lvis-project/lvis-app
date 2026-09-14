@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { afterEach, describe, expect, it } from "vitest";
+import { writeImageRuntimePackage } from "../../src/__tests__/support/image-runtime-package.js";
 
 const require = createRequire(import.meta.url);
 const afterPack = require("../../scripts/electron-after-pack.cjs") as (
@@ -58,6 +59,7 @@ function createPackage(platform: keyof typeof RUNTIME_FILES) {
     putFile(join(modules, "node-pty", "prebuilds", `${platform}-x64`, file));
   }
   putFile(join(modules, "better-sqlite3", "prebuilds", `${platform}-x64.node`));
+  writeImageRuntimePackage(modules, platform);
   for (const file of RUNTIME_FILES[platform]) putFile(join(libraryDirectory, file), file);
   return {
     libraryDirectory,

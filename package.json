@@ -143,6 +143,7 @@
     "pino": "^10",
     "pino-pretty": "^13",
     "proper-lockfile": "^4.1.2",
+    "sharp": "0.35.4",
     "sonic-boom": "^5.0.0",
     "tar": "7.5.21",
     "undici": "^8.1.0",
@@ -259,7 +260,9 @@
       "node_modules/@anthropic-ai/sandbox-runtime/vendor/**",
       "node_modules/@openai/codex*/**",
       "node_modules/node-pty/**",
-      "node_modules/better-sqlite3/**"
+      "node_modules/better-sqlite3/**",
+      "node_modules/sharp/**",
+      "node_modules/@img/**"
     ],
     "directories": {
       "output": "release"

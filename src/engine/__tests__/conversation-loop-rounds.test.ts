@@ -11,6 +11,7 @@ import type { GenericMessage, LLMProvider, StreamEvent, StreamTurnParams,
 import { ToolRegistry } from "../../tools/registry.js";
 import { createDynamicTool } from "../../tools/base.js";
 import { createReadToolResultChunkTool } from "../../tools/tool-result-chunk.js";
+import { createWebFetchTool } from "../../tools/web-fetch.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
 import { MAX_AGENT_SPAWNS_PER_ROUND } from "../../shared/subagent-policy.js";
 import { MemoryManager } from "../../memory/memory-manager.js";
@@ -1040,14 +1041,18 @@ describe("ConversationLoop queryLoop", () => {
     expect(JSON.stringify(assistantWithTools!.toolCalls)).not.toContain(truncated);
   });
 
-  it("lets the model read host-truncated tool_result chunks through the builtin chunk tool", async () => {
+  it.each(["long_tool", "web_fetch"])("lets the model recover a %s result through the builtin chunk tool", async (toolName) => {
     const toolRegistry = new ToolRegistry();
-    const longContent = Array.from(
-      { length: 160 },
+    const body = Array.from(
+      { length: toolName === "web_fetch" ? 1_000 : 160 },
       (_, i) => `row-${i.toString().padStart(3, "0")}: ${"x".repeat(20)}`,
     ).join("\n");
+    const url = "https://93.184.216.34/document";
+    const input = toolName === "web_fetch" ? { url } : {};
+    const offset = toolName === "web_fetch" ? 6_000 : 0;
+    const longContent = toolName === "web_fetch" ? JSON.stringify({ url, content: body, truncated: false }) : body;
     toolRegistry.register(
-      createDynamicTool({
+      toolName === "web_fetch" ? createWebFetchTool(vi.fn(async () => new Response(body)) as unknown as typeof fetch) : createDynamicTool({
         name: "long_tool",
         description: "returns a long result",
         source: "builtin",
@@ -1061,7 +1066,7 @@ describe("ConversationLoop queryLoop", () => {
 
     const provider = new FakeProvider([
       [
-        { type: "tool_call", id: "long-1", name: "long_tool", input: {} },
+        { type: "tool_call", id: "long-1", name: toolName, input },
         { type: "message_complete", stopReason: "tool_use" },
       ],
       [
@@ -1069,7 +1074,7 @@ describe("ConversationLoop queryLoop", () => {
           type: "tool_call",
           id: "chunk-1",
           name: "read_tool_result_chunk",
-          input: { toolUseId: "long-1", offset: 0, maxChars: 500 },
+          input: { toolUseId: "long-1", offset, maxChars: 500 },
         },
         { type: "message_complete", stopReason: "tool_use" },
       ],
@@ -1115,13 +1120,13 @@ describe("ConversationLoop queryLoop", () => {
     const parsed = JSON.parse(chunkResult!.content) as Record<string, unknown>;
     expect(parsed).toMatchObject({
       toolUseId: "long-1",
-      toolName: "long_tool",
-      offset: 0,
-      startOffset: 0,
-      endOffset: 500,
-      nextOffset: 500,
+      toolName,
+      offset,
+      startOffset: offset,
+      endOffset: offset + 500,
+      nextOffset: offset + 500,
       hasMore: true,
-      chunk: longContent.slice(0, 500),
+      chunk: longContent.slice(offset, offset + 500),
     });
   });
 

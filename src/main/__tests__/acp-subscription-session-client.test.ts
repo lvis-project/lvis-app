@@ -721,14 +721,50 @@ describe("AcpSubscriptionSessionClient", () => {
     );
   });
 
-  it("times out a missing initialization response and force-kills the managed process", async () => {
-    const { client, agent } = createHarness("kimi-code", {
-      requestTimeoutMs: 5,
-      handler: () => {},
-    });
+  it.each(["initialize", "authenticate", "session/new"])(
+    "retains the missing %s startup response and force-kills the managed process",
+    async (operation) => {
+      const respondNormally = standardHandler("kimi-code");
+      const { client, agent } = createHarness("kimi-code", {
+        requestTimeoutMs: 5,
+        handler: (request, current) => {
+          if (request.method !== operation) respondNormally(request, current);
+        },
+      });
 
-    await expect(client.start()).rejects.toMatchObject({ code: "acp-session-request-timeout" });
-    expect(agent.kill).toHaveBeenCalledWith("SIGKILL");
+      await expect(client.start()).rejects.toMatchObject({
+        code: "acp-session-request-timeout",
+        providerError: { transport: { phase: "rpc-timeout", kind: "timeout", operation } },
+      });
+      expect(agent.kill).toHaveBeenCalledWith("SIGKILL");
+    },
+  );
+
+  it("preserves the prompt operation through timeout cancellation and its existing grace period", async () => {
+    vi.useFakeTimers();
+    const respondNormally = standardHandler("kimi-code");
+    const { client, agent } = createHarness("kimi-code", {
+      promptTimeoutMs: 50, abortGraceMs: 20,
+      handler: (request, current) => {
+        if (request.method !== "session/cancel") respondNormally(request, current);
+      },
+    });
+    try {
+      const prompt = await client.startPrompt({ text: "private-user-input" });
+      const failure = prompt.events[Symbol.asyncIterator]().next().catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(50);
+      expect(await failure).toMatchObject({
+        code: "acp-session-prompt-timeout",
+        providerError: { transport: { phase: "rpc-timeout", kind: "timeout", operation: "session/prompt" } },
+      });
+      expect(agent.requests.filter((request) => request.method === "session/cancel")).toHaveLength(1);
+      expect(agent.kill).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(20);
+      expect(agent.kill).toHaveBeenCalledWith("SIGKILL");
+      expect(JSON.stringify(await failure)).not.toContain("private-user-input");
+    } finally {
+      vi.useRealTimers();
+    }
   });
   it("does not send session/prompt when cancellation wins during ACP startup", async () => {
     let initializeRequest: RpcMessage | undefined;

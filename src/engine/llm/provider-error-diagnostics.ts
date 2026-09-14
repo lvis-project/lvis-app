@@ -10,6 +10,21 @@ export interface ProviderRateLimitDiagnostics {
   retryAfterSeconds?: number;
 }
 
+/** Closed host-issued RPC labels; payload strings cannot add diagnostic operations. */
+export const PROVIDER_RPC_OPERATIONS = Object.freeze([
+  "initialize",
+  "authenticate",
+  "account/read",
+  "windowsSandbox/readiness",
+  "thread/start",
+  "turn/start",
+  "turn/interrupt",
+  "session/new",
+  "session/prompt",
+] as const);
+
+export type ProviderRpcOperation = typeof PROVIDER_RPC_OPERATIONS[number];
+
 /** Diagnostic facts only: these fields do not select retries or recovery. */
 export interface ProviderTransportDiagnostics {
   phase: "process-start" | "process-error" | "stdout-parse" | "stdout-frame" | "stdout-read"
@@ -17,6 +32,8 @@ export interface ProviderTransportDiagnostics {
     | "rpc-timeout" | "rpc-response" | "turn-completion" | "native-request";
   kind: "process" | "protocol" | "network" | "timeout" | "authentication"
     | "rate-limit" | "server" | "model" | "unknown";
+  /** The host's pending RPC method, never a method echoed by a remote payload. */
+  operation?: ProviderRpcOperation;
   statusCode?: number;
   exitCode?: number | null;
   signal?: string | null;

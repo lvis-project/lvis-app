@@ -32,3 +32,18 @@ test("rejects a desktop dependency introduced by emitted shared chunks", () => {
   input.outputs["dist/chunks/core.js"].imports.push({ path: "electron-updater", external: true });
   assert.throws(() => assertHeadlessBundleBoundary(input), /headless-desktop-dependency/);
 });
+
+test("inventories the separate decoder entry and its external dependency", () => {
+  const input = graph();
+  input.inputs["src/tools/image-preparation-child.ts"] = { imports: [{ path: "sharp", external: true }] };
+  input.outputs["dist/image-preparation-child.js"] = { entryPoint: "src/tools/image-preparation-child.ts", bytes: 40, imports: [{ path: "sharp", external: true }] };
+  const result = assertHeadlessBundleBoundary(input, "src/headless.ts", ["src/tools/image-preparation-child.ts"]);
+  assert.ok(result.files.some((file) => file.path === "image-preparation-child.js"));
+  assert.ok(result.externals.includes("sharp"));
+  input.inputs["src/tools/image-preparation-child.ts"].imports.push({ path: "electron", external: true });
+  assert.throws(() => assertHeadlessBundleBoundary(input, "src/headless.ts", ["src/tools/image-preparation-child.ts"]), /headless-desktop-dependency/);
+});
+
+test("rejects a missing owned child entry instead of omitting it from the artifact", () => {
+  assert.throws(() => assertHeadlessBundleBoundary(graph(), "src/headless.ts", ["src/tools/image-preparation-child.ts"]), /headless-child-entry-missing/);
+});
