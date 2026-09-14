@@ -44,6 +44,9 @@ import {
   type ToolExecutionResult,
 } from "./base.js";
 import { sleep } from "../shared/abortable-deadline.js";
+import { prepareImageFile } from "./image-preparation.js";
+import { ImagePreparationOptionsSchema } from "../shared/image-preparation-policy.js";
+import { errorMessage } from "../shared/error-message.js";
 import { RENAME_FILE_LOCK_CODES, transientFsLockDelayMs } from "../lib/transient-fs-lock-retry.js";
 
 type ToolErrorResult = ToolExecutionResult & { isError: true };
@@ -231,35 +234,10 @@ export class ReadFileTool extends FileTool<typeof ReadFileInputSchema> {
   }
 }
 
-/** Per-image byte ceiling — Anthropic rejects images larger than 5 MB. */
-const VIEW_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
-
-/**
- * Sniff a supported raster image type by magic bytes (the Anthropic-accepted
- * set). Returns the IANA media type or null when the bytes are not one of them —
- * we never trust the file extension for a payload the model will see.
- */
-function detectImageMime(buf: Buffer): string | null {
-  if (buf.length >= 4 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) {
-    return "image/png";
-  }
-  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) {
-    return "image/jpeg";
-  }
-  if (buf.length >= 4 && buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x38) {
-    return "image/gif";
-  }
-  if (
-    buf.length >= 12 &&
-    buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 &&
-    buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50
-  ) {
-    return "image/webp";
-  }
-  return null;
-}
-
-export const ViewImageInputSchema = FilePathSchema;
+export const ViewImageInputSchema = FilePathSchema.extend({
+  maxBytes: ImagePreparationOptionsSchema.shape.maxBytes.describe("Maximum derived image bytes. Lower this when the active transport reports a smaller image budget; it does not raise the source file read limit."),
+  maxDimension: ImagePreparationOptionsSchema.shape.maxDimension.describe("Maximum output width and height in pixels, preserving aspect ratio. Lower this to request a smaller image."),
+});
 
 /**
  * `view_image` — load a local image file into the model's context so it can see
@@ -270,10 +248,12 @@ export const ViewImageInputSchema = FilePathSchema;
  */
 export class ViewImageTool extends FileTool<typeof ViewImageInputSchema> {
   readonly name = "view_image";
+  override readonly awaitCancellationSettlement = true as const;
   readonly description =
-    "Load a local image file (png, jpeg, gif, or webp, max 5 MB) into your context so you can see " +
-    "it. Give the file path; the image is returned to you visually. Use this when you need to look " +
-    "at a screenshot, diagram, or picture on disk.";
+    "Read and validate a local PNG, JPEG, GIF or WebP image and return a resized visual copy. " +
+    "The source is unchanged. The first frame is shown with orientation corrected. " +
+    "Optional maxBytes and maxDimension request a smaller result after a transport size error. " +
+    "Other formats must first be converted with an available image conversion tool.";
   readonly inputSchema = ViewImageInputSchema;
   override readonly category: ToolCategory = "read";
 
@@ -289,28 +269,20 @@ export class ViewImageTool extends FileTool<typeof ViewImageInputSchema> {
     const blocked = this.ensureAllowed(target, ctx, "read");
     if (blocked) return blocked;
 
-    const fileStat = await statFile(target);
-    if (!fileStat.ok) return fileStat.error;
-    if (!fileStat.value.isFile()) {
-      return toolError(`view_image requires a regular file: ${target}`);
+    try {
+      const prepared = await prepareImageFile(target, {
+        cwd: ctx.cwd, extraAllowedDirectories: [...ctx.extraAllowedDirectories],
+        blockReadsOutsideWorkingDirectories: ctx.blockReadsOutsideWorkingDirectories === true,
+      }, { maxBytes: input.maxBytes, maxDimension: input.maxDimension }, ctx.abortSignal);
+      const { data, ...details } = prepared;
+      return {
+        output: JSON.stringify({ path: target, ...details, loaded: true }),
+        isError: false,
+        image: { data, mimeType: prepared.mimeType, bytes: prepared.bytes, width: prepared.width, height: prepared.height },
+      };
+    } catch (error) {
+      return toolError(`view_image: ${errorMessage(error)}`);
     }
-    if (fileStat.value.size > VIEW_IMAGE_MAX_BYTES) {
-      return toolError(
-        `view_image: image is ${fileStat.value.size} bytes, over the ${VIEW_IMAGE_MAX_BYTES}-byte (5 MB) limit: ${target}`,
-      );
-    }
-
-    const buf = await readFile(target);
-    const mimeType = detectImageMime(buf);
-    if (mimeType === null) {
-      return toolError(`view_image: not a supported image (png, jpeg, gif, webp): ${target}`);
-    }
-
-    return {
-      output: JSON.stringify({ path: target, mimeType, bytes: buf.length, loaded: true }),
-      isError: false,
-      image: { data: buf.toString("base64"), mimeType, bytes: buf.length },
-    };
   }
 }
 

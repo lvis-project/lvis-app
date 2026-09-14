@@ -1,5 +1,10 @@
 import { dirname, posix } from "node:path";
 
+/** Separately executed child entries that belong to the server artifact. */
+export const HEADLESS_CHILD_ENTRY_POINTS = Object.freeze({
+  "image-preparation-child": "src/tools/image-preparation-child.ts",
+});
+
 function assertServerDependency(owner, dependency) {
   if (dependency === "electron" || dependency.startsWith("electron/") || dependency === "electron-updater" || dependency.startsWith("@sentry/electron")) {
     throw new Error(`headless-desktop-dependency: ${owner} -> ${dependency}`);
@@ -7,11 +12,16 @@ function assertServerDependency(owner, dependency) {
 }
 
 /** Reject desktop dependencies in both source and emitted lazy-import closures. */
-export function assertHeadlessBundleBoundary(metafile, entryPoint = "src/headless.ts") {
+export function assertHeadlessBundleBoundary(metafile, entryPoint = "src/headless.ts", childEntryPoints = []) {
   const entry = Object.keys(metafile.inputs).find((name) => name === entryPoint || name.endsWith(`/${entryPoint}`));
   if (!entry) throw new Error(`headless-entry-missing: ${entryPoint}`);
   const visited = new Set();
-  const pending = [entry];
+  const childEntries = childEntryPoints.map((path) => {
+    const input = Object.keys(metafile.inputs).find((name) => name === path || name.endsWith(`/${path}`));
+    if (!input) throw new Error(`headless-child-entry-missing: ${path}`);
+    return input;
+  });
+  const pending = [entry, ...childEntries];
   while (pending.length > 0) {
     const current = pending.pop();
     if (visited.has(current)) continue;
@@ -30,7 +40,12 @@ export function assertHeadlessBundleBoundary(metafile, entryPoint = "src/headles
   const outputs = new Map(outputEntries);
   const outputVisited = new Set();
   const external = new Set();
-  const outputPending = [outputEntry[0]];
+  const childOutputs = childEntries.map((child) => {
+    const output = outputEntries.find(([, value]) => value.entryPoint === child);
+    if (!output) throw new Error(`headless-child-output-missing: ${child}`);
+    return output[0];
+  });
+  const outputPending = [outputEntry[0], ...childOutputs];
   while (outputPending.length > 0) {
     const current = outputPending.pop();
     if (outputVisited.has(current)) continue;

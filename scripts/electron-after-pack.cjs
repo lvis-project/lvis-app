@@ -5,6 +5,7 @@ const { join } = require("node:path");
 const { gunzipSync } = require("node:zlib");
 const { assertGraphicsRuntimeFiles } = require("./lib/graphics-runtime-files.cjs");
 const { assertSandboxRuntimeFiles } = require("./lib/sandbox-runtime-files.cjs");
+const { assertImageRuntimeFiles } = require("./lib/image-runtime-files.cjs");
 
 // electron-builder's `context.arch` is the numeric Arch enum (1=x64, 3=arm64).
 // Native packages name their per-target artifacts by platform+arch (node-pty:
@@ -385,6 +386,7 @@ module.exports = async function afterPack(context) {
   assertSandboxVendorBinaries(context);
   assertNodePtyBinary(context);
   assertBetterSqlite3Binary(context);
+  assertImageRuntimeFiles(join(electronResourcesDir(context), "app.asar.unpacked", "node_modules"), context.electronPlatformName, ARCH_DIR_BY_ENUM[context.arch]);
 
   let libraryDirectory = context.appOutDir;
   if (context.electronPlatformName === "darwin") {

@@ -16,6 +16,8 @@ export const MAIN_BUNDLE_EXTERNALS = [
   // would break the prebuild `.node` resolution the same way better-sqlite3
   // / ASRT would — keep it external so it ships as a real node_modules entry.
   "node-pty",
+  // The decoder resolves its native addon and codec libraries from real packages.
+  "sharp",
   "@sentry/electron",
   "fsevents",
   // Pino transports spawn worker_threads via thread-stream and resolve the
