@@ -8,7 +8,7 @@
  */
 import { isNonNegativeSafeInteger, isPositiveSafeInteger } from "./safe-integer.js";
 
-const SUBSCRIPTION_RUNTIME_IDS = ["codex", "kimi-code", "grok-build"] as const;
+const SUBSCRIPTION_RUNTIME_IDS = ["codex", "kimi-code", "grok-build", "claude-code"] as const;
 
 export type SubscriptionRuntimeId = (typeof SUBSCRIPTION_RUNTIME_IDS)[number];
 /** Shared cap for model ids carried by subscription runtime contracts. */
@@ -196,7 +196,7 @@ export function isSubscriptionRuntimeStatusUpdatedEvent(
     && payload.revision > 0;
 }
 
-type SubscriptionRuntimeTransport = "codex-app-server" | "acp";
+type SubscriptionRuntimeTransport = "codex-app-server" | "acp" | "claude-cli";
 
 export type SubscriptionLoginMethod = "browser" | "device-code";
 
@@ -341,6 +341,15 @@ export const SUBSCRIPTION_RUNTIME_DESCRIPTORS: readonly SubscriptionRuntimeDescr
     transport: "acp",
     requiresExecutable: true,
     loginMethods: ["device-code"],
+    supportsManagedLogout: true,
+    supportsModelSelection: false,
+  },
+  {
+    id: "claude-code",
+    label: "Claude Code",
+    transport: "claude-cli",
+    requiresExecutable: true,
+    loginMethods: ["browser"],
     supportsManagedLogout: true,
     supportsModelSelection: false,
   },
