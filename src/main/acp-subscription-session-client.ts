@@ -766,16 +766,20 @@ export class AcpSubscriptionSessionClient {
       this.abortTransport(new AcpSubscriptionSessionError("acp-session-invalid-response"));
       return;
     }
-    const method = boundedString(message.method, MAX_RPC_METHOD_LENGTH);
-    if (method && message.id !== undefined) {
-      if (!isRpcId(message.id)) {
+    if (Object.prototype.hasOwnProperty.call(message, "method")) {
+      const method = boundedString(message.method, MAX_RPC_METHOD_LENGTH);
+      if (!method) {
         this.abortTransport(new AcpSubscriptionSessionError("acp-session-invalid-response"));
         return;
       }
-      this.handleHostRequest(message.id, method);
-      return;
-    }
-    if (method) {
+      if (message.id !== undefined) {
+        if (!isRpcId(message.id)) {
+          this.abortTransport(new AcpSubscriptionSessionError("acp-session-invalid-response"));
+          return;
+        }
+        this.handleHostRequest(message.id, method);
+        return;
+      }
       this.handleNotification(method, message.params);
       return;
     }

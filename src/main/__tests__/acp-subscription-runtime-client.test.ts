@@ -205,7 +205,10 @@ describe("AcpSubscriptionRuntimeClient security boundary", () => {
     }
   });
 
-  it("fails closed when a numeric reverse-request ID collides with the pending auth request", async () => {
+  it.each([
+    { label: "reverse request", method: "session/request_permission", sendsDenial: true },
+    { label: "non-string method envelope", method: 7, sendsDenial: false },
+  ])("fails closed when a numeric $label ID collides with the pending auth request", async ({ method, sendsDenial }) => {
     const runtimeRoot = mkdtempSync(join(TEST_RUNTIME_PARENT, "lvis-acp-auth-reverse-request-"));
     const runtimeHome = join(runtimeRoot, "home");
     const workspaceDir = join(runtimeRoot, "workspace");
@@ -231,7 +234,7 @@ describe("AcpSubscriptionRuntimeClient security boundary", () => {
           probeChild.stdout.write(`${JSON.stringify({
             jsonrpc: "2.0",
             id: message.id,
-            method: "session/request_permission",
+            method,
             params: {},
           })}\n`);
         }
@@ -263,11 +266,15 @@ describe("AcpSubscriptionRuntimeClient security boundary", () => {
 
     try {
       await expect(client.verify()).rejects.toMatchObject({ code: "acp-operation-failed" });
-      expect(probeWrites).toContainEqual(expect.objectContaining({
-        jsonrpc: "2.0",
-        id: 1,
-        error: { code: -32601, message: "Unsupported request" },
-      }));
+      const denials = probeWrites.filter((message) => Object.prototype.hasOwnProperty.call(message, "error"));
+      expect(denials).toHaveLength(sendsDenial ? 1 : 0);
+      if (sendsDenial) {
+        expect(denials).toContainEqual(expect.objectContaining({
+          jsonrpc: "2.0",
+          id: 1,
+          error: { code: -32601, message: "Unsupported request" },
+        }));
+      }
       expect(probeWrites).not.toContainEqual(expect.objectContaining({ method: "authenticate" }));
       expect(probeChild.kill).toHaveBeenCalledWith("SIGKILL");
     } finally {

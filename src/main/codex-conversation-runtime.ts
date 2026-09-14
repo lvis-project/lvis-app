@@ -1336,6 +1336,11 @@ export class CodexConversationRuntime {
         subscriptionTransportFailure({ phase: "stdout-parse", kind: "protocol" })), child);
       return;
     }
+    if (Object.prototype.hasOwnProperty.call(message, "method") && typeof message.method !== "string") {
+      this.abortTransport(new CodexConversationRuntimeError("codex-operation-failed",
+        subscriptionTransportFailure({ phase: "stdout-parse", kind: "protocol" })), child);
+      return;
+    }
     if (isCodexAppServerRequestId(message.id) && typeof message.method === "string") {
       this.handleServerRequest(message.id, message.method, message.params, child);
       return;

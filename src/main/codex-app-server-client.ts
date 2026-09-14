@@ -480,6 +480,10 @@ export class CodexAppServerClient {
       this.abortTransport(new CodexAppServerError("codex-operation-failed"), child);
       return;
     }
+    if (Object.prototype.hasOwnProperty.call(message, "method") && typeof message.method !== "string") {
+      this.abortTransport(new CodexAppServerError("codex-operation-failed"), child);
+      return;
+    }
     if (isCodexAppServerRequestId(message.id) && typeof message.method === "string") {
       // This integration never enables external-token auth or experimental host
       // tools. Decline unexpected server requests rather than inventing a

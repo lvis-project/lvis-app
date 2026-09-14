@@ -482,6 +482,10 @@ class AcpAuthProbe {
       this.close(new AcpSubscriptionRuntimeError("acp-operation-failed"));
       return;
     }
+    if (Object.prototype.hasOwnProperty.call(message, "method") && typeof message.method !== "string") {
+      this.close(new AcpSubscriptionRuntimeError("acp-operation-failed"));
+      return;
+    }
     // An ACP runtime must not call arbitrary host capabilities during an auth
     // probe. A reverse request can use the same numeric ID as an outgoing
     // request, so classify requests before responses, decline it and fail

@@ -185,6 +185,27 @@ describe("isCodexAppServerRequestId", () => {
 });
 
 describe("CodexConversationRuntime", () => {
+  it("rejects a non-string method envelope before it can consume a pending response", async () => {
+    const harness = createHarness((message, current) => {
+      if (message.method !== "initialize") return;
+      current.child.stdout.write(`${JSON.stringify({
+        id: requestId(message),
+        method: 7,
+        result: {},
+      })}\n`);
+      reply(current.child, requestId(message), {});
+      return true;
+    });
+
+    await expect(harness.runtime.startTurn({ text: "Do not accept a malformed response." })).rejects.toMatchObject({
+      code: "codex-runtime-start-failed",
+      providerError: {
+        transport: { phase: "stdout-parse", kind: "protocol" },
+      },
+    });
+    expect(harness.child.kill).toHaveBeenCalledWith("SIGKILL");
+  });
+
   it("distinguishes a running process error from a start failure after initialization", async () => {
     vi.spyOn(managedChildProcesses, "forceKillManagedChildProcess").mockImplementation(() => undefined);
     const harness = createHarness((message, current) => {
