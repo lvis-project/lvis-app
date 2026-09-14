@@ -66,7 +66,11 @@ import {
   openFeatureNamespace,
   type FeatureNamespaceHandle,
 } from "./storage/feature-namespace.js";
-import { projectedSubscriptionTransportDiagnosticsFromError } from "./subscription-transport-error-diagnostics.js";
+import {
+  projectedSubscriptionTransportDiagnosticsFromError,
+  subscriptionTransportFailure,
+  type SubscriptionTransportDiagnosticError,
+} from "./subscription-transport-error-diagnostics.js";
 import {
   DEFAULT_SUBSCRIPTION_IMAGE_ATTACHMENT_LIMITS,
   SubscriptionAttachmentTransportError,
@@ -348,7 +352,10 @@ export type SubscriptionRuntimeAuditSink = (
 ) => void | Promise<void>;
 
 export class SubscriptionRuntimeServiceError extends Error {
-  constructor(readonly code: SubscriptionRuntimeErrorCode) {
+  constructor(
+    readonly code: SubscriptionRuntimeErrorCode,
+    readonly providerError?: SubscriptionTransportDiagnosticError["providerError"],
+  ) {
     super(code);
     this.name = "SubscriptionRuntimeServiceError";
   }
@@ -757,7 +764,8 @@ class CodexSubscriptionTextSession implements SubscriptionTextSession {
       // starts a fresh remote turn containing the LVIS tool_result.
       setImmediate(() => {
         if (unsafeRequest) {
-          queue.fail(new SubscriptionRuntimeServiceError("subscription-operation-failed"));
+          queue.fail(new SubscriptionRuntimeServiceError("subscription-operation-failed",
+            subscriptionTransportFailure({ phase: "native-request", kind: "protocol" })));
           return;
         }
         if (aborted || this.stopped) return;
@@ -789,7 +797,8 @@ class CodexSubscriptionTextSession implements SubscriptionTextSession {
           // callback. Native and future reverse RPC remain deny-only.
           if (request.kind === "dynamic-tool") return;
           unsafeRequest = true;
-          queue.fail(new SubscriptionRuntimeServiceError("subscription-operation-failed"));
+          queue.fail(new SubscriptionRuntimeServiceError("subscription-operation-failed",
+            subscriptionTransportFailure({ phase: "native-request", kind: "protocol" })));
           this.onUnsafeRequest(request.kind);
           this.runtime.stop();
         },
@@ -804,7 +813,8 @@ class CodexSubscriptionTextSession implements SubscriptionTextSession {
         }
         if (toolBoundary) {
           if (unsafeRequest) {
-            queue.fail(new SubscriptionRuntimeServiceError("subscription-operation-failed"));
+            queue.fail(new SubscriptionRuntimeServiceError("subscription-operation-failed",
+              subscriptionTransportFailure({ phase: "native-request", kind: "protocol" })));
             return;
           }
           completed = true;

@@ -24,6 +24,7 @@ import {
 } from "../../observability/conversation-trace.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
+import { subscriptionTransportFailure } from "../../main/subscription-transport-error-diagnostics.js";
 
 class FakeProvider implements LLMProvider {
   readonly vendor = "openai" as const;
@@ -82,6 +83,29 @@ function makeLoop(provider: LLMProvider) {
 }
 
 describe("ConversationTracer — §4.5 11-step", () => {
+  it("writes transport exit facts to the error trace without copying user input", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "lvis-transport-trace-"));
+    try {
+      const diagnostics = subscriptionTransportFailure({ phase: "process-exit", kind: "process", exitCode: null, signal: "SIGKILL" });
+      const provider = new FakeProvider([[{
+        type: "error", error: "Subscription runtime could not complete. Verify the connected runtime and try again.",
+        classification: "subscription-chat-unavailable", providerError: diagnostics,
+      }]]);
+      const loop = makeLoop(provider);
+      const tracer = createTracer("transport-error", { enabled: true, traceDir: dir });
+      loop.setTracer(tracer);
+      await loop.runTurn("private-user-input", undefined, undefined, { inputOrigin: "user-keyboard" });
+      const raw = readFileSync(tracer.filePath!, "utf8");
+      const entries: TraceEntry[] = raw.trim().split("\n").map((line) => JSON.parse(line) as TraceEntry);
+      expect(entries.find((entry) => entry.step === "LLM_STREAM_ERROR")?.meta).toMatchObject({
+        classification: "unknown", providerError: diagnostics,
+      });
+      expect(raw).not.toContain("private-user-input");
+    } finally {
+      await cleanupTmpDir(dir);
+    }
+  });
+
   it("emits all 11 canonical steps across a tool-use turn", async () => {
     const provider = new FakeProvider([
       [

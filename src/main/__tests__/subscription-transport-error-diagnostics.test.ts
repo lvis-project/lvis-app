@@ -1,7 +1,50 @@
 import { describe, expect, it } from "vitest";
-import { projectSubscriptionTransportErrorDiagnostics } from "../subscription-transport-error-diagnostics.js";
+import {
+  projectSubscriptionTransportErrorDiagnostics,
+  projectedSubscriptionTransportDiagnosticsFromError,
+  subscriptionTransportFailure,
+} from "../subscription-transport-error-diagnostics.js";
 
 describe("subscription transport error diagnostics", () => {
+  it.each([
+    [401, "authentication"], [429, "rate-limit"], [504, "timeout"], [503, "server"], [400, "unknown"],
+  ])("retains only diagnostic status %i as %s without changing retry signals", (statusCode, kind) => {
+    const projected = projectSubscriptionTransportErrorDiagnostics({
+      error: { statusCode, message: "account=secret prompt=private", path: "/private/file" },
+    }, "turn-completion");
+    expect(projected).toEqual({
+      origin: "unknown", classification: "unknown", messagePreview: "subscription runtime transport failure",
+      transport: { phase: "turn-completion", kind, statusCode },
+    });
+    expect(projected).not.toHaveProperty("statusCode");
+    expect(projected).not.toHaveProperty("isRetryable");
+    expect(projectedSubscriptionTransportDiagnosticsFromError({ providerError: projected })).toEqual(projected);
+    expect(JSON.stringify(projected)).not.toMatch(/secret|private/);
+  });
+
+  it("retains an unknown response phase without copying its unrecognised fields", () => {
+    expect(projectSubscriptionTransportErrorDiagnostics({
+      message: "private failure", code: "sensitive-custom-code", data: { token: "secret" },
+    }, "rpc-response")).toEqual(subscriptionTransportFailure({ phase: "rpc-response", kind: "unknown" }));
+  });
+
+  it.each([
+    { phase: "private-stage" }, { kind: "secret" }, { statusCode: 200 },
+    { exitCode: Number.NaN }, { exitCode: "secret" }, { signal: "SIGSECRET" },
+  ])("rejects invalid transport fields on a later local boundary: %j", (invalid) => {
+    const providerError = subscriptionTransportFailure({ phase: "process-exit", kind: "process", exitCode: null, signal: "SIGKILL" });
+    expect(projectedSubscriptionTransportDiagnosticsFromError({
+      providerError: { ...providerError, transport: { ...providerError.transport, ...invalid } },
+    })).toBeUndefined();
+  });
+
+  it("rebuilds process facts without forwarding extra fields", () => {
+    const providerError = subscriptionTransportFailure({ phase: "process-exit", kind: "process", exitCode: 1, signal: null });
+    expect(projectedSubscriptionTransportDiagnosticsFromError({
+      providerError: { ...providerError, token: "secret", transport: { ...providerError.transport, stderr: "secret" } },
+    })).toEqual(providerError);
+  });
+
   it("projects a declared schema rejection without retaining remote text", () => {
     const rawDetail = "Invalid schema for function 'read_project_file': internal host=https://private.example token=secret";
 

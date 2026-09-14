@@ -52,6 +52,7 @@ import {
 } from "./subscription-attachment-input.js";
 import { SubscriptionToolBridge } from "./subscription-tool-bridge.js";
 import { projectSubscriptionImageHistory } from "./subscription-image-history.js";
+import { projectedSubscriptionTransportDiagnosticsFromError } from "./subscription-transport-error-diagnostics.js";
 
 const MAX_SERIALIZED_INPUT_BYTES = 700 * 1024;
 const MAX_ACP_SERIALIZED_INPUT_BYTES = 512 * 1024;
@@ -243,6 +244,15 @@ function subscriptionFailure(
   }
 
   const event = isErrorStreamEvent(failure) ? failure : undefined;
+  const transportDiagnostics = projectedSubscriptionTransportDiagnosticsFromError(failure);
+  if (transportDiagnostics?.transport) {
+    return {
+      type: "error",
+      error: SUBSCRIPTION_CHAT_UNAVAILABLE,
+      classification: "subscription-chat-unavailable",
+      providerError: transportDiagnostics,
+    };
+  }
   const raw = event?.providerError?.messagePreview ?? event?.error ?? failure;
   const extractedDiagnostics = extractProviderErrorDiagnostics(raw);
   const diagnostics = event?.providerError
