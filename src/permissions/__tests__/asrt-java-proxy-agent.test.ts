@@ -37,6 +37,7 @@ describe("JVM proxy agent resource", () => {
     cpSync(getVendoredJavaProxyAgentJarPath(), physical);
     const selected = getJavaProxyAgentJarPath(physical);
     expect(selected).toBe(physical);
+    if (selected === null) throw new Error("Physical JVM agent was not resolved");
     const options = buildJavaToolOptions({ agentJarPath: selected, inherited: "-Xmx128m" });
     expect(options).toContain(`-javaagent:${physical}`);
     expect(options).toContain("-Xmx128m");
