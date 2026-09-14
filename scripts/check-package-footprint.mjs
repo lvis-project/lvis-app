@@ -18,6 +18,9 @@ import { gunzipSync } from "node:zlib";
 const { assertGraphicsRuntimeFiles } = createRequire(import.meta.url)(
   "./lib/graphics-runtime-files.cjs",
 );
+const { assertSandboxRuntimeFiles } = createRequire(import.meta.url)(
+  "./lib/sandbox-runtime-files.cjs",
+);
 import { resolveBuildAssets } from "./lib/build-assets.mjs";
 import {
   findUnexpectedMainBundleRootScripts,
@@ -449,6 +452,11 @@ if (isMacAppPackage()) {
 } else {
   fail(`unrecognized graphics runtime package: ${appOutDir}`);
 }
+
+assertSandboxRuntimeFiles(
+  resolve(resourcesDir, "app.asar.unpacked/node_modules/@anthropic-ai/sandbox-runtime/vendor"),
+  isMacAppPackage() ? "darwin" : isLinuxUnpackedPackage() ? "linux" : "win32",
+);
 
 process.stdout.write(
   [

@@ -71,7 +71,7 @@ type VerifyWindowsWfpEgressFn = (opts?: {
   readonly srtWin?: SrtWinSpawn;
 }) => Promise<unknown>;
 
-// ASRT 0.0.73: the install is ASYNC (installWindowsSandboxAsync) and takes an
+// ASRT 0.0.75: the install is ASYNC (installWindowsSandboxAsync) and takes an
 // explicit srt-win spawn descriptor. Keeping it async is what unfreezes the main
 // process during the modal UAC wait (issue #1608 class).
 type InstallWindowsSandboxAsyncFn = (opts: {
@@ -338,7 +338,7 @@ export async function resolveAsrtWindowsReady(
   if (isAsrtWindowsReady(userState, wfpState)) return true;
   if (userState !== "ready" || wfpState !== "cannot-read") return false;
 
-  // ASRT 0.0.73 reports `cannot-read` when BFE enumeration is admin-gated.
+  // ASRT 0.0.75 reports `cannot-read` when BFE enumeration is admin-gated.
   // The non-elevated readiness proof is behavioral WFP egress verification.
   try {
     await verifyWindowsWfpEgress({
@@ -376,7 +376,7 @@ export async function readAsrtWindowsStatus(): Promise<SandboxWindowsStatusInfo>
   }
 
   const { mod, srtWin } = await loadSrtWin();
-  // ASRT 0.0.73: ONE `srt-win status` spawn returns BOTH the sandbox-user and
+  // ASRT 0.0.75: ONE `srt-win status` spawn returns BOTH the sandbox-user and
   // WFP state (checkWindowsSandboxStatusAsync), non-blocking — replaces the two
   // separate synchronous user + wfp probes.
   const { user, wfp } = await mod.checkWindowsSandboxStatusAsync({ srtWin });
@@ -408,7 +408,7 @@ export async function installAsrtWindowsSandbox(
   const { installWindowsSandboxAsync, verifyWindowsWfpEgress } =
     dependencies.loadRuntime ? await dependencies.loadRuntime() : mod;
 
-  // ASRT 0.0.73: the install is ASYNC — the modal UAC prompt is still shown, but
+  // ASRT 0.0.75: the install is ASYNC — the modal UAC prompt is still shown, but
   // the main-process event loop stays live (spinners/timers keep running) rather
   // than freezing for the full consent wait (issue #1608 class). The srt-win
   // descriptor is explicit (no implicit vendored fallback since 0.0.67).
@@ -431,7 +431,7 @@ export async function installAsrtWindowsSandbox(
         );
       }
       if (error.code === "install_ambient_failed") {
-        // ASRT 0.0.73 exit 17: the WFP filters and the sandbox user may both be
+        // ASRT 0.0.75 exit 17: the WFP filters and the sandbox user may both be
         // in place, but the ambient write-deny stamps on the stock
         // world-writable system directories did not land. Treating that as a
         // generic failure would be dishonest in the dangerous direction — the

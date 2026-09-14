@@ -13,7 +13,7 @@ import {
   resolveAsrtWindowsReady,
 } from "../asrt-windows-support.js";
 
-// ASRT 0.0.73: readAsrtWindowsStatus reads BOTH the sandbox-user and WFP state
+// ASRT 0.0.75: readAsrtWindowsStatus reads BOTH the sandbox-user and WFP state
 // from a SINGLE `srt-win status` spawn (checkWindowsSandboxStatusAsync). Override
 // only that one export; everything else (resolveSrtWin, WindowsSandboxError, …)
 // stays real so the DI-based install tests are unaffected.
@@ -390,7 +390,7 @@ describe("asrt-windows-support adapter", () => {
   });
 
   it("surfaces an install_timeout WindowsSandboxError distinctly (UAC left open)", async () => {
-    // ASRT 0.0.73 installWindowsSandboxAsync throws WindowsSandboxError with code
+    // ASRT 0.0.75 installWindowsSandboxAsync throws WindowsSandboxError with code
     // 'install_timeout' when the self-elevating subprocess is killed by the 120s
     // spawn timeout with the UAC consent dialog still open. The adapter must
     // surface that distinctly (not as a generic failure), and must NOT run the
@@ -477,7 +477,7 @@ describe("asrt-windows-support adapter", () => {
     expect(source).not.toContain("'--allow-write'");
   });
 
-  it("reads user + WFP from the single checkWindowsSandboxStatusAsync spawn (ASRT 0.0.73)", async () => {
+  it("reads user + WFP from the single checkWindowsSandboxStatusAsync spawn (ASRT 0.0.75)", async () => {
     const ORIGINAL_PLATFORM = process.platform;
     Object.defineProperty(process, "platform", { value: "win32", configurable: true });
     checkWindowsSandboxStatusAsyncMock.mockResolvedValue({
@@ -517,7 +517,7 @@ describe("asrt-windows-support adapter", () => {
     }
   });
 
-  it("normalizes the ASRT 0.0.73 ready sandbox-user shape", () => {
+  it("normalizes the ASRT 0.0.75 ready sandbox-user shape", () => {
     expect(
       normalizeAsrtWindowsUserState({
         provisioned: true,

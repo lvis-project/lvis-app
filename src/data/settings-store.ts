@@ -597,8 +597,8 @@ export interface SystemSettings {
   launchAtStartup?: boolean;
   /**
    * When launching at startup, start hidden (tray only) instead of showing
-   * the main window. macOS: `openAsHidden`; Windows: a `--hidden` launch arg
-   * the boot path reads. Default `false`. Only meaningful when
+   * the main window. The host applies this preference to macOS login launches;
+   * Windows uses a --hidden launch argument. Default `false`. Only meaningful when
    * `launchAtStartup` is `true`.
    */
   launchMinimized?: boolean;

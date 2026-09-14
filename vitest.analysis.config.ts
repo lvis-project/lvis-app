@@ -41,6 +41,9 @@ const rendererTestGlobs = [
 export default defineConfig({
   test: {
     globalSetup: ["./vitest.globalSetup.ts"],
+    // Boot integration fixtures assert calls recorded by their beforeAll setup.
+    // Individual suites own mock cleanup between cases.
+    clearMocks: false,
     testTimeout: 45000,
     hookTimeout: 45000,
     // Cap concurrent workers. Default = CPU count, which on 8-10 core macs
