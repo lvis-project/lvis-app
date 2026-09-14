@@ -1,17 +1,27 @@
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import {
-  chmodSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync,
-  renameSync, rmSync, symlinkSync, truncateSync, unlinkSync, writeFileSync, writeSync,
+  chmodSync, constants, existsSync, fstatSync, linkSync, lstatSync, mkdirSync, mkdtempSync,
+  openSync, readFileSync, readdirSync, readSync, renameSync, rmSync, symlinkSync, truncateSync,
+  unlinkSync, writeFileSync, writeSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ToolOutputArtifactStore } from "../tool-output-artifact-store.js";
 import {
   MAX_SESSION_TOOL_OUTPUT_BYTES, MAX_TOOL_OUTPUT_PENDING_BYTES, MAX_TOOL_RESULT_ARTIFACT_BYTES,
   type ToolOutputArtifactInfo, type ToolOutputCapture,
 } from "../../shared/tool-output-artifact.js";
+
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return {
+    ...actual, openSync: vi.fn(actual.openSync), fstatSync: vi.fn(actual.fstatSync),
+    lstatSync: vi.fn(actual.lstatSync), readSync: vi.fn(actual.readSync),
+  };
+});
+const actualFs = await vi.importActual<typeof import("node:fs")>("node:fs");
 
 const SESSION_ID = "6eb01b95-755a-454a-9e53-59b203a41f70";
 const OTHER_SESSION_ID = "85823eab-06aa-4e97-8774-3639c05d6b26";
@@ -20,6 +30,10 @@ let sessions: string;
 let store: ToolOutputArtifactStore;
 
 beforeEach(() => {
+  vi.mocked(openSync).mockImplementation(actualFs.openSync);
+  vi.mocked(fstatSync).mockImplementation(actualFs.fstatSync);
+  vi.mocked(lstatSync).mockImplementation(actualFs.lstatSync);
+  vi.mocked(readSync).mockImplementation(actualFs.readSync);
   root = mkdtempSync(join(tmpdir(), "tool-output-store-"));
   sessions = join(root, "sessions");
   mkdirSync(sessions, { mode: 0o700 });
@@ -227,9 +241,25 @@ describe("session tool output artifacts", () => {
   });
 
   it("rejects invalid session/tool identities before any file creation", () => {
-    for (const id of ["../outside", "", "session", `${SESSION_ID}/child`]) expect(() => store.start(id, "tool")).toThrow();
-    for (const id of ["", "bad\nidentity", "x".repeat(257)]) expect(() => store.start(SESSION_ID, id)).toThrow();
+    const beforeAdmission = vi.fn();
+    for (const id of ["../outside", "", "session", `${SESSION_ID}/child`]) expect(() => store.start(id, "tool", beforeAdmission)).toThrow();
+    for (const id of ["", "bad\nidentity", "x".repeat(257)]) expect(() => store.start(SESSION_ID, id, beforeAdmission)).toThrow();
+    expect(beforeAdmission).not.toHaveBeenCalled();
     expect(readdirSync(sessions)).toEqual([]);
+  });
+
+  it.each(["EACCES", "EISDIR"])("observes output when admission preparation fails with %s", async (code) => {
+    const beforeAdmission = vi.fn(() => { throw Object.assign(new Error("preparation failed"), { code }); });
+    const capture = store.start(SESSION_ID, "preparation", beforeAdmission);
+    expect(beforeAdmission).toHaveBeenCalledOnce();
+    expect(readdirSync(sessions)).toEqual([]);
+    capture.append(Buffer.from("α😀"));
+    await capture.waitForDrain();
+    expect(await capture.finish()).toMatchObject({
+      status: "unavailable", reason: "write-failed", capturedBytes: 0, observedBytes: 6,
+    });
+    const admitted = Array.from({ length: 4 }, (_, index) => store.start(SESSION_ID, `after-preparation-${index}`));
+    expect((await Promise.all(admitted.map((entry) => entry.finish()))).every((info) => info.status === "complete")).toBe(true);
   });
 
   it("binds metadata to the exact session, tool and capture reference", async () => {
@@ -370,11 +400,74 @@ describe("session tool output artifacts", () => {
     expect(lstatSync(data).isSymbolicLink()).toBe(true);
   });
 
-  it.skipIf(process.platform === "win32")("rejects FIFO payloads without opening a blocking reader", async () => {
+  it.each([".bin", ".json"])("validates an opened %s descriptor before inspecting its path", async (suffix) => {
     const info = await saved("original");
-    const data = onlyFile(".bin");
+    const path = onlyFile(suffix);
+    const events: string[] = [];
+    let openedFd = -1;
+    let openedFlags: string | number = "";
+    vi.mocked(openSync).mockImplementation((...args) => {
+      const fd = actualFs.openSync(...args);
+      if (args[0] === path) {
+        openedFd = fd;
+        openedFlags = args[1];
+        events.push("open");
+      }
+      return fd;
+    });
+    vi.mocked(fstatSync).mockImplementation((...args) => {
+      if (args[0] === openedFd) events.push("fstat");
+      return actualFs.fstatSync(...args);
+    });
+    vi.mocked(lstatSync).mockImplementation((...args) => {
+      if (args[0] === path) events.push("lstat");
+      return actualFs.lstatSync(...args);
+    });
+    expect(store.read(SESSION_ID, "tool-output", info)).toBe("original");
+    expect(events.slice(0, 3)).toEqual(["open", "fstat", "lstat"]);
+    expect(openedFlags).toBe(constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
+    expect(() => actualFs.fstatSync(openedFd)).toThrow();
+  });
+
+  it.each([
+    [".bin", "open"], [".json", "open"], [".bin", "read"], [".json", "read"],
+  ])("rejects a %s path replaced after descriptor %s and closes the descriptor", async (suffix, phase) => {
+    const info = await saved("original");
+    const path = onlyFile(suffix!);
+    const original = readFileSync(path);
+    let openedFd = -1;
+    let replaced = false;
+    const replace = () => {
+      if (replaced) return;
+      replaced = true;
+      renameSync(path, `${path}.moved`);
+      writeFileSync(path, original, { mode: 0o600 });
+    };
+    vi.mocked(openSync).mockImplementation((...args) => {
+      const fd = actualFs.openSync(...args);
+      if (args[0] === path) {
+        openedFd = fd;
+        if (phase === "open") replace();
+      }
+      return fd;
+    });
+    vi.mocked(readSync).mockImplementation((...args) => {
+      const bytesRead = actualFs.readSync(...args);
+      if (args[0] === openedFd && phase === "read") replace();
+      return bytesRead;
+    });
+    expect(store.read(SESSION_ID, "tool-output", info)).toBeNull();
+    expect(replaced).toBe(true);
+    expect(readFileSync(path)).toEqual(original);
+    expect(() => actualFs.fstatSync(openedFd)).toThrow();
+  });
+
+  it.skipIf(process.platform === "win32").each([".bin", ".json"])("rejects a FIFO %s without blocking or removing it", async (suffix) => {
+    const info = await saved("original");
+    const data = onlyFile(suffix);
     unlinkSync(data);
     expect(spawnSync("mkfifo", [data]).status).toBe(0);
+    expect(store.validateReference(SESSION_ID, "tool-output", info)).toBe(false);
     expect(store.read(SESSION_ID, "tool-output", info)).toBeNull();
     store.prune(SESSION_ID, new Set());
     expect(lstatSync(data).isFIFO()).toBe(true);

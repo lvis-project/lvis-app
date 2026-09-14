@@ -100,13 +100,12 @@ function removeOwnedTemporary(owned: OwnedPath | undefined, directories: readonl
 }
 
 function readOwnedFile(path: string, maxBytes: number): Buffer {
-  const initial = lstatSync(path);
-  if (!safeFile(initial) || initial.size > maxBytes) throw new Error("tool-output-file-invalid");
-  // Nonblocking open also covers a FIFO swapped in after the path inspection.
+  // Validate the opened descriptor, never a path checked before open. Refuse
+  // symlinks and avoid blocking on a FIFO before fstat can reject its type.
   const fd = openSync(path, constants.O_RDONLY | NO_FOLLOW | NON_BLOCKING);
   try {
     const before = fstatSync(fd);
-    if (!safeFile(before) || before.size > maxBytes || !sameFile(before, initial) || !sameFile(before, lstatSync(path))) {
+    if (!safeFile(before) || before.size > maxBytes || !sameFile(before, lstatSync(path))) {
       throw new Error("tool-output-file-invalid");
     }
     const bytes = Buffer.alloc(before.size);
@@ -362,7 +361,7 @@ export class ToolOutputArtifactStore {
     return directories;
   }
 
-  start(sessionId: string, toolUseId: string): ToolOutputCapture {
+  start(sessionId: string, toolUseId: string, beforeAdmission?: () => void): ToolOutputCapture {
     if (!isValidSessionId(sessionId)) throw new TypeError("tool-output-session-id-invalid");
     if (!isValidToolUseId(toolUseId)) throw new TypeError("tool-output-tool-use-id-invalid");
     const captureId = createDlpSafeUuid();
@@ -371,6 +370,7 @@ export class ToolOutputArtifactStore {
     let release = () => {};
     let reason: CaptureReason | undefined;
     try {
+      beforeAdmission?.();
       directories = this.directories(sessionId, true);
       const directory = directories.at(-1)!;
       const key = directory.realPath!;
