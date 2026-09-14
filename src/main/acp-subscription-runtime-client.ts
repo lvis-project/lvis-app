@@ -24,7 +24,8 @@ import {
   grokBuildGovernedAgentDefinitionPath,
 } from "./acp-subscription-runtime-config.js";
 import { isRecord } from "../shared/is-record.js";
-import type { PendingJsonRpcRequest } from "../lib/json-rpc-pending-request.js";
+import { JsonLineReader } from "../lib/json-line-reader.js";
+import { JsonRpcPendingRequests } from "../lib/json-rpc-pending-request.js";
 
 const PROBE_TIMEOUT_MS = 10_000;
 const ACP_REQUEST_TIMEOUT_MS = 15_000;
@@ -383,17 +384,20 @@ function spawnAcpSubscriptionRuntime(
 }
 
 class AcpAuthProbe {
-  private readonly pending = new Map<number, PendingJsonRpcRequest>();
-  private nextId = 1;
-  private decoder = new StringDecoder("utf8");
-  private buffer = "";
+  private readonly pending = new JsonRpcPendingRequests();
+  private readonly reader: JsonLineReader;
   private closed = false;
 
   constructor(private readonly child: ChildProcess) {
     if (!child.stdin || !child.stdout) {
       throw new AcpSubscriptionRuntimeError("acp-operation-failed");
     }
-    child.stdout.on("data", (chunk: Buffer | string) => this.consume(chunk));
+    this.reader = new JsonLineReader({
+      maxLineBytes: MAX_RPC_LINE_BYTES,
+      onMessage: (message) => this.handleMessage(message),
+      onError: () => this.close(new AcpSubscriptionRuntimeError("acp-operation-failed")),
+    });
+    child.stdout.on("data", (chunk: Buffer | string) => this.reader.write(chunk));
     child.stdout.once("error", () => this.close(new AcpSubscriptionRuntimeError("acp-operation-failed")));
     child.stdin.once("error", () => this.close(new AcpSubscriptionRuntimeError("acp-operation-failed")));
     // Drain but never retain or log diagnostic output. Provider CLIs can print
@@ -452,47 +456,25 @@ class AcpAuthProbe {
     if (this.closed || !this.child.stdin?.writable) {
       return Promise.reject(new AcpSubscriptionRuntimeError("acp-operation-failed"));
     }
-    const id = this.nextId++;
+    const id = this.pending.nextRequestId;
     const payload = JSON.stringify({ jsonrpc: "2.0", id, method, params });
     if (Buffer.byteLength(payload, "utf8") > MAX_RPC_LINE_BYTES) {
       return Promise.reject(new AcpSubscriptionRuntimeError("acp-operation-failed"));
     }
-    return new Promise<unknown>((resolveRequest, rejectRequest) => {
-      const timer = setTimeout(() => {
-        this.close(new AcpSubscriptionRuntimeError("acp-operation-failed"));
-      }, ACP_REQUEST_TIMEOUT_MS);
-      timer.unref?.();
-      this.pending.set(id, { resolve: resolveRequest, reject: rejectRequest, timer });
-      try {
-        this.child.stdin?.write(`${payload}\n`);
-      } catch {
-        this.close(new AcpSubscriptionRuntimeError("acp-operation-failed"));
-      }
+    const error = new AcpSubscriptionRuntimeError("acp-operation-failed");
+    const pending = this.pending.begin({
+      method,
+      timeoutMs: ACP_REQUEST_TIMEOUT_MS,
+      unrefTimer: true,
+      timeoutError: () => error,
+      onTimeout: () => this.close(error),
     });
-  }
-
-  private consume(chunk: Buffer | string): void {
-    if (this.closed) return;
-    this.buffer += typeof chunk === "string" ? chunk : this.decoder.write(chunk);
-    if (Buffer.byteLength(this.buffer, "utf8") > MAX_RPC_LINE_BYTES) {
+    try {
+      this.child.stdin?.write(`${payload}\n`);
+    } catch {
       this.close(new AcpSubscriptionRuntimeError("acp-operation-failed"));
-      return;
     }
-    for (;;) {
-      const newline = this.buffer.indexOf("\n");
-      if (newline < 0) return;
-      const line = this.buffer.slice(0, newline).trim();
-      this.buffer = this.buffer.slice(newline + 1);
-      if (!line) continue;
-      let message: unknown;
-      try {
-        message = JSON.parse(line) as unknown;
-      } catch {
-        this.close(new AcpSubscriptionRuntimeError("acp-operation-failed"));
-        return;
-      }
-      this.handleMessage(message);
-    }
+    return pending.promise;
   }
 
   private handleMessage(message: unknown): void {
@@ -500,21 +482,10 @@ class AcpAuthProbe {
       this.close(new AcpSubscriptionRuntimeError("acp-operation-failed"));
       return;
     }
-    if (typeof message.id === "number" && Number.isInteger(message.id)) {
-      const request = this.pending.get(message.id);
-      if (!request) return;
-      this.pending.delete(message.id);
-      clearTimeout(request.timer);
-      if (message.error !== undefined) {
-        request.reject(new AcpRpcError(isAuthenticationError(message.error)));
-      } else {
-        request.resolve(message.result);
-      }
-      return;
-    }
     // An ACP runtime must not call arbitrary host capabilities during an auth
-    // probe. Decline a request and fail closed rather than inventing a tool
-    // bridge before the approval/audit integration exists.
+    // probe. A reverse request can use the same numeric ID as an outgoing
+    // request, so classify requests before responses, decline it and fail
+    // closed rather than consuming a pending reply.
     if (message.id !== undefined && typeof message.method === "string") {
       try {
         this.child.stdin?.write(`${JSON.stringify({
@@ -526,18 +497,25 @@ class AcpAuthProbe {
         // The generic failure below remains the only observable result.
       }
       this.close(new AcpSubscriptionRuntimeError("acp-operation-failed"));
+      return;
+    }
+    if (typeof message.id === "number" && Number.isInteger(message.id)) {
+      const request = this.pending.take(message.id);
+      if (!request) return;
+      if (message.error !== undefined) {
+        request.reject(new AcpRpcError(isAuthenticationError(message.error)));
+      } else {
+        request.resolve(message.result);
+      }
+      return;
     }
   }
 
   private close(error: Error): void {
     if (this.closed) return;
     this.closed = true;
-    this.buffer = "";
-    for (const [id, request] of this.pending) {
-      this.pending.delete(id);
-      clearTimeout(request.timer);
-      request.reject(error);
-    }
+    this.reader.close();
+    this.pending.rejectAll(error);
   }
 }
 

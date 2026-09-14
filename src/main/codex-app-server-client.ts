@@ -25,7 +25,8 @@ import {
   type CodexJsonRecord,
   type CodexSpawnAppServer,
 } from "./codex-conversation-runtime.js";
-import type { PendingJsonRpcRequest } from "../lib/json-rpc-pending-request.js";
+import { JsonLineReader } from "../lib/json-line-reader.js";
+import { JsonRpcPendingRequests } from "../lib/json-rpc-pending-request.js";
 
 const MAX_MODEL_COUNT = 100;
 const MAX_PLAN_TYPE_LENGTH = 80;
@@ -119,8 +120,8 @@ export class CodexAppServerClient {
   private readonly runtimeTempDir: string;
   private child: ChildProcess | null = null;
   private startPromise: Promise<void> | null = null;
-  private nextRequestId = 1;
-  private readonly pendingRequests = new Map<number, PendingJsonRpcRequest>();
+  private readonly pendingRequests = new JsonRpcPendingRequests();
+  private transportReader: JsonLineReader | null = null;
   private accountStatus: CodexSubscriptionStatus = blankStatus("ready");
   private pendingLogin: PendingLogin | null = null;
   private completedLoginError: CodexAppServerErrorCode | null = null;
@@ -371,7 +372,7 @@ export class CodexAppServerClient {
     }
 
     this.child = child;
-    attachCodexStdioTransport(
+    this.transportReader = attachCodexStdioTransport(
       child,
       (message) => {
         if (this.child === child) this.handleMessage(message, child);
@@ -434,7 +435,7 @@ export class CodexAppServerClient {
       return Promise.reject(new CodexAppServerError("codex-operation-failed"));
     }
     const stdin = child.stdin;
-    const id = this.nextRequestId++;
+    const id = this.pendingRequests.nextRequestId;
     const payload = JSON.stringify({
       id,
       method,
@@ -443,18 +444,20 @@ export class CodexAppServerClient {
     if (Buffer.byteLength(payload, "utf8") > CODEX_MAX_RPC_LINE_BYTES) {
       return Promise.reject(new CodexAppServerError("codex-operation-failed"));
     }
-    return new Promise<unknown>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        if (!this.pendingRequests.has(id)) return;
-        this.abortTransport(new CodexAppServerError("codex-operation-failed"), child);
-      }, CODEX_RPC_REQUEST_TIMEOUT_MS);
-      this.pendingRequests.set(id, { resolve, reject, timer });
-      try {
-        stdin.write(`${payload}\n`);
-      } catch {
-        this.abortTransport(new CodexAppServerError("codex-operation-failed"), child);
-      }
+    const error = new CodexAppServerError("codex-operation-failed");
+    const pending = this.pendingRequests.begin({
+      method,
+      timeoutMs: CODEX_RPC_REQUEST_TIMEOUT_MS,
+      unrefTimer: false,
+      timeoutError: () => error,
+      onTimeout: () => this.abortTransport(error, child),
     });
+    try {
+      stdin.write(`${payload}\n`);
+    } catch {
+      this.abortTransport(new CodexAppServerError("codex-operation-failed"), child);
+    }
+    return pending.promise;
   }
 
   private notify(method: string, params?: CodexJsonRecord): void {
@@ -485,10 +488,8 @@ export class CodexAppServerClient {
       return;
     }
     if (typeof message.id === "number" && Number.isInteger(message.id)) {
-      const pending = this.pendingRequests.get(message.id);
+      const pending = this.pendingRequests.take(message.id);
       if (!pending) return;
-      this.pendingRequests.delete(message.id);
-      clearTimeout(pending.timer);
       if (message.error !== undefined) {
         pending.reject(new CodexAppServerError("codex-operation-failed"));
       } else {
@@ -561,14 +562,12 @@ export class CodexAppServerClient {
   ): void {
     if (expectedChild && this.child !== expectedChild) return;
     this.child = null;
+    this.transportReader?.close();
+    this.transportReader = null;
     this.startPromise = null;
     this.pendingLogin = null;
     this.accountStatus = blankStatus("ready");
     this.completedLoginError = null;
-    for (const [id, pending] of this.pendingRequests) {
-      this.pendingRequests.delete(id);
-      clearTimeout(pending.timer);
-      pending.reject(error);
-    }
+    this.pendingRequests.rejectAll(error);
   }
 }

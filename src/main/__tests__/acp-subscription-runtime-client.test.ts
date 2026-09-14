@@ -205,6 +205,83 @@ describe("AcpSubscriptionRuntimeClient security boundary", () => {
     }
   });
 
+  it("fails closed when a numeric reverse-request ID collides with the pending auth request", async () => {
+    const runtimeRoot = mkdtempSync(join(TEST_RUNTIME_PARENT, "lvis-acp-auth-reverse-request-"));
+    const runtimeHome = join(runtimeRoot, "home");
+    const workspaceDir = join(runtimeRoot, "workspace");
+    const runtimeTempDir = join(runtimeRoot, "temporary");
+    mkdirSync(runtimeHome);
+    mkdirSync(workspaceDir);
+    mkdirSync(runtimeTempDir);
+    const versionChild = new FakeRuntimeProcess();
+    const probeChild = new FakeRuntimeProcess();
+    const probeWrites: Array<Record<string, unknown>> = [];
+    let probeInput = "";
+    probeChild.stdin.on("data", (chunk: Buffer | string) => {
+      probeInput += String(chunk);
+      for (;;) {
+        const newline = probeInput.indexOf("\n");
+        if (newline < 0) return;
+        const line = probeInput.slice(0, newline).trim();
+        probeInput = probeInput.slice(newline + 1);
+        if (!line) continue;
+        const message = JSON.parse(line) as Record<string, unknown>;
+        probeWrites.push(message);
+        if (message.method === "initialize" && typeof message.id === "number") {
+          probeChild.stdout.write(`${JSON.stringify({
+            jsonrpc: "2.0",
+            id: message.id,
+            method: "session/request_permission",
+            params: {},
+          })}\n`);
+        }
+      }
+    });
+    const spawnCalls: Array<{ command: string; args: ReadonlyArray<string>; options: SpawnOptions }> = [];
+    const spawn: Spawn = (command, args, options) => {
+      spawnCalls.push({ command, args, options });
+      if (spawnCalls.length === 1) {
+        queueMicrotask(() => {
+          versionChild.stdout.write("kimi 1.2.3\n");
+          versionChild.emit("close", 0);
+        });
+        return versionChild as unknown as ChildProcess;
+      }
+      return probeChild as unknown as ChildProcess;
+    };
+    const client = new AcpSubscriptionRuntimeClient({
+      provider: "kimi-code",
+      runtimeHome,
+      workspaceDir,
+      runtimeTempDir,
+      executablePath: "C:\\approved\\kimi-code.exe",
+      resolveExecutable: async () => "C:\\approved\\kimi-code.exe",
+      spawn,
+      platform: "win32",
+      clientVersion: "test-version",
+    });
+
+    try {
+      await expect(client.verify()).rejects.toMatchObject({ code: "acp-operation-failed" });
+      expect(probeWrites).toContainEqual(expect.objectContaining({
+        jsonrpc: "2.0",
+        id: 1,
+        error: { code: -32601, message: "Unsupported request" },
+      }));
+      expect(probeWrites).not.toContainEqual(expect.objectContaining({ method: "authenticate" }));
+      expect(probeChild.kill).toHaveBeenCalledWith("SIGKILL");
+    } finally {
+      await client.stop();
+      versionChild.stdin.destroy();
+      versionChild.stdout.destroy();
+      versionChild.stderr.destroy();
+      probeChild.stdin.destroy();
+      probeChild.stdout.destroy();
+      probeChild.stderr.destroy();
+      await cleanupTmpDir(runtimeRoot);
+    }
+  });
+
   it("performs the fixed Grok cached-token ACP verification handshake", async () => {
     const runtimeRoot = mkdtempSync(join(TEST_RUNTIME_PARENT, "lvis-grok-acp-auth-probe-"));
     const runtimeHome = join(runtimeRoot, "home");

@@ -15,7 +15,6 @@
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { promises as fs } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
-import { StringDecoder } from "node:string_decoder";
 import type { StreamEvent } from "../engine/llm/types.js";
 import {
   acpSubscriptionPromptCapabilitiesFromInitialize,
@@ -48,7 +47,8 @@ import {
   type SubscriptionPromptAttachment,
 } from "./subscription-attachment-input.js";
 import { isRecord } from "../shared/is-record.js";
-import type { PendingJsonRpcRequest } from "../lib/json-rpc-pending-request.js";
+import { JsonLineReader } from "../lib/json-line-reader.js";
+import { JsonRpcPendingRequests } from "../lib/json-rpc-pending-request.js";
 
 const MAX_RPC_LINE_BYTES = 1_000_000;
 /** Native image cap that always fits the ACP JSONL transport with room for text. */
@@ -243,10 +243,6 @@ export interface AcpSubscriptionPromptHandle {
   cancel(): Promise<void>;
 }
 
-interface PendingRequest extends PendingJsonRpcRequest {
-  readonly method: string;
-}
-
 interface StartedPrompt {
   requestId: number;
   readonly queue: AsyncEventQueue<StreamEvent>;
@@ -422,10 +418,8 @@ export class AcpSubscriptionSessionClient {
   private child: ChildProcess | null = null;
   private startPromise: Promise<void> | null = null;
   private sessionId: string | null = null;
-  private nextRequestId = 1;
-  private readonly pending = new Map<number, PendingRequest>();
-  private stdoutDecoder = new StringDecoder("utf8");
-  private stdoutBuffer = "";
+  private readonly pending = new JsonRpcPendingRequests();
+  private stdoutReader: JsonLineReader | null = null;
   private promptCapabilities: AcpSubscriptionPromptCapabilities = DEFAULT_ACP_SUBSCRIPTION_PROMPT_CAPABILITIES;
   private activePrompt: StartedPrompt | null = null;
   private stopped = false;
@@ -586,8 +580,6 @@ export class AcpSubscriptionSessionClient {
     }
 
     this.child = child;
-    this.stdoutDecoder = new StringDecoder("utf8");
-    this.stdoutBuffer = "";
     this.attachTransport(child);
 
     const initialize = await this.request("initialize", {
@@ -648,7 +640,7 @@ export class AcpSubscriptionSessionClient {
     try {
       serialized = JSON.stringify({
         jsonrpc: "2.0",
-        id: this.nextRequestId,
+        id: this.pending.nextRequestId,
         method: "session/prompt",
         params: { sessionId, prompt },
       });
@@ -681,11 +673,18 @@ export class AcpSubscriptionSessionClient {
 
   private attachTransport(child: ChildProcess): void {
     const abort = (code: AcpSubscriptionSessionErrorCode): void => {
+      reader.close();
       this.abortTransport(new AcpSubscriptionSessionError(code), child);
     };
-    child.stdout?.on("data", (chunk: Buffer | string) => {
-      if (this.child === child) this.consumeStdout(chunk);
+    const reader = new JsonLineReader({
+      maxLineBytes: MAX_RPC_LINE_BYTES,
+      onMessage: (message) => {
+        if (this.child === child) this.handleMessage(message);
+      },
+      onError: () => abort("acp-session-invalid-response"),
     });
+    this.stdoutReader = reader;
+    child.stdout?.on("data", (chunk: Buffer | string) => reader.write(chunk));
     child.stdout?.once("error", () => abort("acp-session-transport-closed"));
     child.stdin?.once("error", () => abort("acp-session-transport-closed"));
     // Drain but never retain or log third-party stderr: it can contain OAuth
@@ -706,27 +705,22 @@ export class AcpSubscriptionSessionClient {
     timeoutMs: number,
     onTimeout?: () => void,
   ): { id: number; promise: Promise<unknown> } {
-    const id = this.nextRequestId++;
-    let resolveRequest: (value: unknown) => void = () => {};
-    let rejectRequest: (error: Error) => void = () => {};
-    const promise = new Promise<unknown>((resolvePending, rejectPending) => {
-      resolveRequest = resolvePending;
-      rejectRequest = rejectPending;
+    const timeoutError = new AcpSubscriptionSessionError(
+      method === "session/prompt" ? "acp-session-prompt-timeout" : "acp-session-request-timeout",
+    );
+    const pending = this.pending.begin({
+      method,
+      timeoutMs,
+      unrefTimer: true,
+      timeoutError: () => timeoutError,
+      onTimeout: () => {
+        onTimeout?.();
+        if (method !== "session/prompt") {
+          this.abortTransport(new AcpSubscriptionSessionError("acp-session-request-timeout"));
+        }
+      },
     });
-    const timer = setTimeout(() => {
-      const pending = this.pending.get(id);
-      if (!pending) return;
-      this.pending.delete(id);
-      pending.reject(new AcpSubscriptionSessionError(
-        method === "session/prompt" ? "acp-session-prompt-timeout" : "acp-session-request-timeout",
-      ));
-      onTimeout?.();
-      if (method !== "session/prompt") {
-        this.abortTransport(new AcpSubscriptionSessionError("acp-session-request-timeout"));
-      }
-    }, timeoutMs);
-    timer.unref?.();
-    this.pending.set(id, { method, resolve: resolveRequest, reject: rejectRequest, timer });
+    const { id, promise } = pending;
     try {
       this.write({ jsonrpc: "2.0", id, method, params });
     } catch (error) {
@@ -767,31 +761,6 @@ export class AcpSubscriptionSessionClient {
     child.stdin.write(`${line}\n`);
   }
 
-  private consumeStdout(chunk: Buffer | string): void {
-    if (!this.child) return;
-    this.stdoutBuffer += typeof chunk === "string" ? chunk : this.stdoutDecoder.write(chunk);
-    if (Buffer.byteLength(this.stdoutBuffer, "utf8") > MAX_RPC_LINE_BYTES) {
-      this.abortTransport(new AcpSubscriptionSessionError("acp-session-invalid-response"));
-      return;
-    }
-    for (;;) {
-      const newline = this.stdoutBuffer.indexOf("\n");
-      if (newline < 0) return;
-      const line = this.stdoutBuffer.slice(0, newline).trim();
-      this.stdoutBuffer = this.stdoutBuffer.slice(newline + 1);
-      if (!line) continue;
-      let message: unknown;
-      try {
-        message = JSON.parse(line) as unknown;
-      } catch {
-        this.abortTransport(new AcpSubscriptionSessionError("acp-session-invalid-response"));
-        return;
-      }
-      this.handleMessage(message);
-      if (!this.child) return;
-    }
-  }
-
   private handleMessage(message: unknown): void {
     if (!isRecord(message)) {
       this.abortTransport(new AcpSubscriptionSessionError("acp-session-invalid-response"));
@@ -811,10 +780,8 @@ export class AcpSubscriptionSessionClient {
       return;
     }
     if (typeof message.id === "number" && Number.isInteger(message.id)) {
-      const pending = this.pending.get(message.id);
+      const pending = this.pending.take(message.id);
       if (!pending) return;
-      this.pending.delete(message.id);
-      clearTimeout(pending.timer);
       if (message.error !== undefined) {
         const providerError = pending.method === "session/prompt"
           ? projectSubscriptionTransportErrorDiagnostics(message.error)
@@ -1021,9 +988,10 @@ export class AcpSubscriptionSessionClient {
     const child = this.child;
     if (expectedChild && child !== expectedChild) return;
     this.child = null;
+    this.stdoutReader?.close();
+    this.stdoutReader = null;
     this.sessionId = null;
     this.startPromise = null;
-    this.stdoutBuffer = "";
     this.promptCapabilities = DEFAULT_ACP_SUBSCRIPTION_PROMPT_CAPABILITIES;
     const active = this.activePrompt;
     this.activePrompt = null;
@@ -1032,11 +1000,7 @@ export class AcpSubscriptionSessionClient {
       active.queue.fail(error);
       active.reject(error);
     }
-    for (const [id, pending] of this.pending) {
-      this.pending.delete(id);
-      clearTimeout(pending.timer);
-      pending.reject(error);
-    }
+    this.pending.rejectAll(error);
     if (child) forceKillManagedChildProcess(child, "acp subscription session transport closed");
   }
 }
