@@ -39,8 +39,10 @@ import {
 import { forceKillManagedChildProcess, spawnManaged } from "./managed-child-processes.js";
 import {
   projectSubscriptionTransportErrorDiagnostics,
+  subscriptionTransportFailure,
   type SubscriptionTransportDiagnosticError,
 } from "./subscription-transport-error-diagnostics.js";
+import type { ProviderRpcOperation } from "../engine/llm/provider-error-diagnostics.js";
 import {
   assertSubscriptionPromptAttachments,
   SubscriptionAttachmentTransportError,
@@ -495,8 +497,8 @@ export class AcpSubscriptionSessionClient {
       "session/prompt",
       { sessionId, prompt },
       this.promptTimeoutMs,
-      () => {
-        void this.cancelPrompt(active, new AcpSubscriptionSessionError("acp-session-prompt-timeout"));
+      (error) => {
+        void this.cancelPrompt(active, error);
       },
     );
     active.requestId = request.id;
@@ -695,18 +697,19 @@ export class AcpSubscriptionSessionClient {
     child.once("exit", () => abort("acp-session-transport-closed"));
   }
 
-  private request(method: string, params: Record<string, unknown>): Promise<unknown> {
+  private request(method: ProviderRpcOperation, params: Record<string, unknown>): Promise<unknown> {
     return this.sendRequest(method, params, this.requestTimeoutMs).promise;
   }
 
   private sendRequest(
-    method: string,
+    method: ProviderRpcOperation,
     params: Record<string, unknown>,
     timeoutMs: number,
-    onTimeout?: () => void,
+    onTimeout?: (error: AcpSubscriptionSessionError) => void,
   ): { id: number; promise: Promise<unknown> } {
     const timeoutError = new AcpSubscriptionSessionError(
       method === "session/prompt" ? "acp-session-prompt-timeout" : "acp-session-request-timeout",
+      subscriptionTransportFailure({ phase: "rpc-timeout", kind: "timeout", operation: method }),
     );
     const pending = this.pending.begin({
       method,
@@ -714,9 +717,9 @@ export class AcpSubscriptionSessionClient {
       unrefTimer: true,
       timeoutError: () => timeoutError,
       onTimeout: () => {
-        onTimeout?.();
+        onTimeout?.(timeoutError);
         if (method !== "session/prompt") {
-          this.abortTransport(new AcpSubscriptionSessionError("acp-session-request-timeout"));
+          this.abortTransport(timeoutError);
         }
       },
     });

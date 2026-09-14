@@ -10,6 +10,7 @@ import {
   CodexConversationRuntime,
   attachCodexStdioTransport,
   CODEX_MAX_RPC_LINE_BYTES,
+  CODEX_RPC_REQUEST_TIMEOUT_MS,
   isCodexAppServerRequestId,
   sanitizedCodexConversationEnvironment,
   type CodexConversationRuntimeOptions,
@@ -24,6 +25,10 @@ import type { CodexAppServerClient } from "../codex-app-server-client.js";
 import { collectRoundStream } from "../../engine/turn/stream-collector.js";
 import type { ProviderTransportDiagnostics } from "../../engine/llm/provider-error-diagnostics.js";
 import * as managedChildProcesses from "../managed-child-processes.js";
+import { ConversationLoop } from "../../engine/conversation-loop.js";
+import { makeConversationLoopDeps } from "../../engine/__tests__/conversation-loop-test-helpers.js";
+import { createTracer, type TraceEntry } from "../../observability/conversation-trace.js";
+import type { LLMProvider } from "../../engine/llm/types.js";
 
 type Spawn = NonNullable<CodexConversationRuntimeOptions["spawn"]>;
 type JsonRecord = Record<string, unknown>;
@@ -181,6 +186,100 @@ describe("isCodexAppServerRequestId", () => {
     expect(isCodexAppServerRequestId(null)).toBe(false);
     expect(isCodexAppServerRequestId(undefined)).toBe(false);
     expect(isCodexAppServerRequestId({ id: "req-1" })).toBe(false);
+  });
+});
+
+describe("native RPC timeout context", () => {
+  it.each(["initialize", "account/read", "thread/start", "turn/start"] as const)(
+    "retains the actual unacknowledged %s operation and closes its transport",
+    async (operation) => {
+      vi.useFakeTimers();
+      try {
+        const harness = createHarness((message, current) => {
+          if (message.method === operation) return;
+          if (message.method === "initialize") reply(current.child, requestId(message), {});
+          if (message.method === "thread/start") reply(current.child, requestId(message), { thread: { id: "thread-1" } });
+        });
+        const pending = (operation === "account/read"
+          ? harness.runtime.verifyIsolation()
+          : harness.runtime.startTurn({ text: "private request" })
+        ).catch((error: unknown) => error);
+        await vi.waitFor(() => expect(methodMessages(harness, operation)).toHaveLength(1));
+        await vi.advanceTimersByTimeAsync(CODEX_RPC_REQUEST_TIMEOUT_MS);
+        const failure = await pending;
+        expect(failure).toMatchObject({ providerError: {
+          transport: { phase: "rpc-timeout", kind: "timeout", operation },
+        } });
+        expect(JSON.stringify(failure)).not.toMatch(/private|requestId|params/);
+        expect(harness.child.kill).toHaveBeenCalledWith("SIGKILL");
+        expect(harness.runtime.isTurnActive()).toBe(false);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it("does not apply the RPC response deadline to an acknowledged running turn", async () => {
+    vi.useFakeTimers();
+    try {
+      const harness = createHarness((message, current) => {
+        if (message.method === "initialize") reply(current.child, requestId(message), {});
+        if (message.method === "thread/start") reply(current.child, requestId(message), { thread: { id: "thread-1" } });
+        if (message.method === "turn/start") reply(current.child, requestId(message), { turn: { id: "turn-1", status: "inProgress" } });
+      });
+      const settled = vi.fn();
+      const pending = harness.runtime.startTurn({ text: "continue normally" }).then((result) => { settled(); return result; });
+      await vi.waitFor(() => expect(methodMessages(harness, "turn/start")).toHaveLength(1));
+      await vi.advanceTimersByTimeAsync(CODEX_RPC_REQUEST_TIMEOUT_MS * 2);
+      expect(settled).not.toHaveBeenCalled();
+      expect(harness.child.kill).not.toHaveBeenCalled();
+      notify(harness.child, "turn/completed", { threadId: "thread-1", turn: { id: "turn-1", status: "completed" } });
+      await expect(pending).resolves.toMatchObject({ status: "completed", turnId: "turn-1" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("writes an actual missing RPC response through the provider and collector to the error trace", async () => {
+    vi.useFakeTimers();
+    const verification = createHarness((message, current) => {
+      if (message.method === "initialize") reply(current.child, requestId(message), {});
+      if (message.method === "account/read") reply(current.child, requestId(message), { account: { type: "chatgpt" } });
+    });
+    const harness = createHarness((message, current) => {
+      if (message.method === "initialize") reply(current.child, requestId(message), {});
+      if (message.method === "thread/start") reply(current.child, requestId(message), { thread: { id: "thread-1" } });
+    });
+    const { service, audit } = await createServiceForRuntimes(harness, [verification.runtime, harness.runtime]);
+    try {
+      const provider = createSubscriptionLlmProvider({ selection: { kind: "subscription", provider: "codex" }, service });
+      const deps = makeConversationLoopDeps();
+      const getSetting = deps.settingsService.get;
+      vi.spyOn(deps.settingsService, "get").mockImplementation((key) => key === "llm"
+        ? { ...getSetting("llm"), activeChatRuntime: provider.subscriptionRuntime }
+        : getSetting(key));
+      const loop = new ConversationLoop(deps);
+      (loop as { provider: LLMProvider | null }).provider = provider;
+      const tracer = createTracer("rpc-timeout", { enabled: true, traceDir: join(harness.runtimeRoot, "traces") });
+      loop.setTracer(tracer);
+      const pending = loop.runTurn("private-user-input", undefined, undefined, { inputOrigin: "user-keyboard" });
+      await vi.waitFor(() => expect(methodMessages(harness, "turn/start")).toHaveLength(1));
+      await vi.advanceTimersByTimeAsync(CODEX_RPC_REQUEST_TIMEOUT_MS);
+      await expect(pending).resolves.toMatchObject({ stopReason: "stream-error" });
+      const raw = readFileSync(tracer.filePath!, "utf8");
+      const entries = raw.trim().split("\n").map((line) => JSON.parse(line) as TraceEntry);
+      expect(entries.find((entry) => entry.step === "LLM_STREAM_ERROR")?.meta).toMatchObject({
+        classification: "unknown", providerError: {
+          transport: { phase: "rpc-timeout", kind: "timeout", operation: "turn/start" },
+        },
+      });
+      expect(raw).not.toContain("private-user-input");
+      expect(audit).toHaveBeenCalledExactlyOnceWith({ provider: "codex", outcome: "session-failed" });
+      expect(harness.child.kill).toHaveBeenCalledWith("SIGKILL");
+    } finally {
+      await service.stop();
+      vi.useRealTimers();
+    }
   });
 });
 

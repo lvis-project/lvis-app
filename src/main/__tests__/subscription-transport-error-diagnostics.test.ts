@@ -6,6 +6,31 @@ import {
 } from "../subscription-transport-error-diagnostics.js";
 
 describe("subscription transport error diagnostics", () => {
+  it("preserves a host RPC operation through repeated safe projection", () => {
+    const projected = subscriptionTransportFailure({
+      phase: "rpc-timeout", kind: "timeout", operation: "turn/start",
+    });
+    expect(projected.transport).toEqual({ phase: "rpc-timeout", kind: "timeout", operation: "turn/start" });
+    expect(projected).not.toHaveProperty("isRetryable");
+    expect(projectedSubscriptionTransportDiagnosticsFromError({ providerError: projected })).toEqual(projected);
+  });
+
+  it.each([
+    "", "private-token", "/private/file", "turn/start\nsecret", "turn/시작", "x".repeat(65),
+    null, 1, { method: "turn/start" },
+  ])("rejects an undeclared RPC operation at the projection boundary: %j", (operation) => {
+    const providerError = subscriptionTransportFailure({ phase: "rpc-timeout", kind: "timeout" });
+    expect(projectedSubscriptionTransportDiagnosticsFromError({
+      providerError: { ...providerError, transport: { ...providerError.transport, operation } },
+    })).toBeUndefined();
+  });
+
+  it("never takes the operation from a remote error payload", () => {
+    expect(projectSubscriptionTransportErrorDiagnostics({
+      operation: "turn/start", method: "account/read", params: { token: "secret" },
+    }, "rpc-response")).toEqual(subscriptionTransportFailure({ phase: "rpc-response", kind: "unknown" }));
+  });
+
   it.each([
     [401, "authentication"], [429, "rate-limit"], [504, "timeout"], [503, "server"], [400, "unknown"],
   ])("retains only diagnostic status %i as %s without changing retry signals", (statusCode, kind) => {
