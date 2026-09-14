@@ -13,20 +13,12 @@ import {
   sanitizedClaudeCodeEnvironment,
 } from "../claude-code-subscription-client.js";
 import { claudeCodeMcpToolNames } from "../claude-code-conversation-runtime.js";
-import type { FeatureNamespaceHandle } from "../storage/feature-namespace.js";
+import { createSubscriptionRuntimeNamespace as namespace } from "../../__tests__/support/subscription-runtime-namespace.js";
 import { SubscriptionRuntimeService } from "../subscription-runtime-service.js";
 import type { CodexAppServerClient } from "../codex-app-server-client.js";
 import type { AcpSubscriptionRuntimeRegistry } from "../subscription-runtime-service.js";
 import type { ClaudeCodeSubscriptionClient } from "../claude-code-subscription-client.js";
 
-function namespace(): FeatureNamespaceHandle {
-  return {
-    dir: "C:\\isolated\\subscription-runtimes",
-    childDir: vi.fn(async (name: string) => `C:\\isolated\\subscription-runtimes\\${name}`),
-    readJson: vi.fn(async (_name: string, fallback: unknown) => fallback),
-    writeJson: vi.fn(async () => undefined),
-  } as unknown as FeatureNamespaceHandle;
-}
 
 function fakeCodexClient(): CodexAppServerClient {
   return {
