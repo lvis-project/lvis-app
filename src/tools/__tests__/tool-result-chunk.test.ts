@@ -14,6 +14,7 @@ import {
   type ReadableToolResult,
 } from "../tool-result-chunk.js";
 import type { ToolExecutionContext } from "../base.js";
+import type { ToolOutputArtifactInfo } from "../../shared/tool-output-artifact.js";
 
 function ctx(reader?: (toolUseId: string) => ReadableToolResult | null): ToolExecutionContext {
   return {
@@ -39,7 +40,108 @@ function truncatedResult(content: string): ReadableToolResult {
   };
 }
 
+function capturedResult(content: string, status: ToolOutputArtifactInfo["status"]): ReadableToolResult {
+  const capturedBytes = Buffer.byteLength(content, "utf8");
+  return {
+    toolUseId: "toolu_123",
+    toolName: "bash",
+    content,
+    outputArtifact: {
+      version: 1,
+      captureId: "capture-1",
+      status,
+      capturedBytes,
+      observedBytes: status === "complete" ? capturedBytes : capturedBytes + 1_000,
+      capturedChars: content.length,
+    },
+  };
+}
+
 describe("read_tool_result_chunk", () => {
+  it.each(["complete", "partial"] as const)("reads %s capture without legacy truncation metadata", async (status) => {
+    const source = capturedResult("retained 😀 tail", status);
+    const result = await createReadToolResultChunkTool().execute(
+      { toolUseId: source.toolUseId }, ctx(() => source),
+    );
+    expect(result.isError).toBe(false);
+    const payload = JSON.parse(result.output);
+    expect(payload).toMatchObject({
+      captureStatus: status,
+      sourceComplete: status === "complete",
+      capturedBytes: source.outputArtifact!.capturedBytes,
+      observedBytes: source.outputArtifact!.observedBytes,
+      hasMore: false,
+      nextOffset: null,
+      hasMoreMeaning: "content remaining in the retained range, not source completeness",
+      chunk: source.content,
+    });
+    expect(payload.originalBytes).toBeUndefined();
+    expect(payload.originalLines).toBeUndefined();
+  });
+
+  it("keeps partial capture status on a search miss", async () => {
+    const source = capturedResult("retained prefix", "partial");
+    const result = await createReadToolResultChunkTool().execute(
+      { toolUseId: source.toolUseId, query: "discarded tail" }, ctx(() => source),
+    );
+    expect(result.isError).toBe(false);
+    expect(JSON.parse(result.output)).toMatchObject({
+      captureStatus: "partial", sourceComplete: false, found: false,
+      capturedBytes: source.outputArtifact!.capturedBytes,
+      observedBytes: source.outputArtifact!.observedBytes,
+      hasMore: false,
+      hasMoreMeaning: "matching content remaining in the retained range, not source completeness",
+    });
+  });
+
+  it.each([
+    { status: "unavailable", artifactReadUnavailable: false },
+    { status: "complete", artifactReadUnavailable: true },
+    { status: "partial", artifactReadUnavailable: true },
+  ] as const)("reports an explicit recovery error for $status capture when readUnavailable=$artifactReadUnavailable", async (entry) => {
+    const source = { ...capturedResult("display preview", entry.status), artifactReadUnavailable: entry.artifactReadUnavailable };
+    const result = await createReadToolResultChunkTool().execute(
+      { toolUseId: source.toolUseId }, ctx(() => source),
+    );
+    expect(result.isError).toBe(true);
+    expect(JSON.parse(result.output)).toMatchObject({
+      captureStatus: entry.status,
+      sourceComplete: entry.status === "complete",
+      artifactReadUnavailable: entry.artifactReadUnavailable,
+      capturedBytes: source.outputArtifact!.capturedBytes,
+      observedBytes: source.outputArtifact!.observedBytes,
+      error: expect.stringContaining("unavailable for recovery"),
+    });
+    expect(result.output).not.toContain("display preview");
+  });
+
+  it("reads verified capture content even when it resembles a serialized stub", async () => {
+    const source = capturedResult("[tool_result truncated by host: literal command output]", "complete");
+    source.meta = { serializedStub: true };
+    const result = await createReadToolResultChunkTool().execute(
+      { toolUseId: source.toolUseId }, ctx(() => source),
+    );
+    expect(result.isError).toBe(false);
+    expect(JSON.parse(result.output).chunk).toBe(source.content);
+  });
+
+  it("rejects an unreadable capture even when no valid descriptor remains", async () => {
+    const result = await createReadToolResultChunkTool().execute(
+      { toolUseId: "toolu_123" },
+      ctx(() => ({ toolUseId: "toolu_123", content: "display preview", artifactReadUnavailable: true })),
+    );
+    expect(result.isError).toBe(true);
+    expect(JSON.parse(result.output)).toMatchObject({
+      error: "captured tool output is unavailable for recovery",
+      artifactReadUnavailable: true,
+      captureStatus: null,
+      sourceComplete: null,
+      capturedBytes: null,
+      observedBytes: null,
+    });
+    expect(result.output).not.toContain("display preview");
+  });
+
   it("uses absolute offsets when the requested size changes", async () => {
     const content = "abcdefghijklmnopqrstuvwxyz".repeat(100);
     const tool = createReadToolResultChunkTool();

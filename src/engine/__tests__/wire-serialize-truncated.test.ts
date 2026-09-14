@@ -6,6 +6,7 @@ import { serializeMessageForEstimation } from "../llm/types.js";
 import { TOOL_RESULT_WIRE_MAX_CHARS } from "../../shared/bounded-tool-output.js";
 import { estimateTokens } from "../../shared/token-estimate.js";
 import { MAX_TOOL_RESULT_TOKENS, trimOversizedToolResult } from "../../shared/tool-result-trim.js";
+import type { ToolOutputArtifactInfo } from "../../shared/tool-output-artifact.js";
 
 function makeToolResult(opts: {
   toolUseId: string;
@@ -14,11 +15,15 @@ function makeToolResult(opts: {
   truncated?: NonNullable<NonNullable<GenericMessage["meta"]>["truncated"]>;
   compactedAt?: string;
   serializedStub?: boolean;
+  outputArtifact?: ToolOutputArtifactInfo;
+  artifactUnavailable?: NonNullable<GenericMessage["meta"]>["artifactUnavailable"];
 }): GenericMessage {
   const meta = {
     ...(opts.truncated && { truncated: opts.truncated }),
     ...(opts.compactedAt && { compactedAt: opts.compactedAt }),
     ...(opts.serializedStub && { serializedStub: opts.serializedStub }),
+    ...(opts.outputArtifact && { outputArtifact: opts.outputArtifact }),
+    ...(opts.artifactUnavailable && { artifactUnavailable: opts.artifactUnavailable }),
   };
   return {
     role: "tool_result",
@@ -30,6 +35,37 @@ function makeToolResult(opts: {
 }
 
 describe("prepareMarkedToolResultsForWire truncated output", () => {
+  it.each(["complete", "partial", "unavailable"] as const)("projects %s capture status without a size marker", (status) => {
+    const msg = makeToolResult({
+      toolUseId: "t-capture", toolName: "bash", content: "short display prefix",
+      outputArtifact: {
+        version: 1, captureId: "capture-1", status,
+        capturedBytes: status === "unavailable" ? 0 : 500,
+        observedBytes: status === "complete" ? 500 : 900, capturedChars: status === "unavailable" ? 0 : 500,
+      },
+    });
+    const result = prepareMarkedToolResultsForWire([msg])[0] as Extract<GenericMessage, { role: "tool_result" }>;
+    expect(result.content).toContain(`captureStatus=${status}`);
+    expect(result.content).toContain(`observedBytes=${status === "complete" ? 500 : 900}`);
+    expect(result.content).toContain("Preview of displayed output");
+    expect(result.content.includes("read_tool_result_chunk")).toBe(status !== "unavailable");
+    expect(result.meta).toBeUndefined();
+    expect(result.content.length).toBeLessThanOrEqual(TOOL_RESULT_WIRE_MAX_CHARS);
+    expect(msg.content).toBe("short display prefix");
+    if (status !== "complete") expect(result.content).not.toContain("The verbatim result remains available");
+  });
+
+  it("preserves an unavailable ordinary artifact warning on the wire", () => {
+    const msg = makeToolResult({
+      toolUseId: "t-unavailable", toolName: "large_output", content: "prefix",
+      truncated: { originalLines: 101, originalTokens: 5_000, originalBytes: 6_000_000, trimmedAt: "2026-05-18T00:00:00.000Z" },
+      artifactUnavailable: { reason: "artifact-too-large", maxBytes: 5_000_000 },
+    });
+    const result = prepareMarkedToolResultsForWire([msg])[0] as Extract<GenericMessage, { role: "tool_result" }>;
+    expect(result.content).toContain("artifact storage cap");
+    expect(result.content).not.toContain("read_tool_result_chunk");
+  });
+
   it("passes through messages with no markers (reference equality)", () => {
     const messages: GenericMessage[] = [
       { role: "user", content: "hi" },

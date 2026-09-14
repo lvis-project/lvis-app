@@ -13,6 +13,7 @@ import {
 import { estimateTokens } from "../shared/token-estimate.js";
 import { MAX_TOOL_RESULT_TOKENS } from "../shared/tool-result-trim.js";
 import { isValidToolUseId, MAX_TOOL_USE_ID_UTF8_BYTES } from "../shared/tool-use-id.js";
+import type { ToolOutputArtifactInfo } from "../shared/tool-output-artifact.js";
 
 export const READ_TOOL_RESULT_CHUNK_TOOL = "read_tool_result_chunk";
 export const TOOL_RESULT_CHUNK_READER_METADATA_KEY = "toolResultChunkReader";
@@ -23,6 +24,8 @@ export interface ReadableToolResult {
   content: string;
   isError?: boolean;
   meta?: GenericMessage["meta"];
+  outputArtifact?: ToolOutputArtifactInfo;
+  artifactReadUnavailable?: boolean;
 }
 
 export type ToolResultChunkReader = (toolUseId: string) => ReadableToolResult | null;
@@ -55,9 +58,9 @@ function getReader(metadata: Record<string, unknown>): ToolResultChunkReader | n
   return typeof candidate === "function" ? candidate as ToolResultChunkReader : null;
 }
 
-function unavailable(message: string): { output: string; isError: true } {
+function unavailable(message: string, details?: Record<string, unknown>): { output: string; isError: true } {
   return {
-    output: JSON.stringify({ error: message }),
+    output: JSON.stringify({ error: message, ...details }),
     isError: true,
   };
 }
@@ -66,7 +69,7 @@ export function createReadToolResultChunkTool(): Tool {
   return createDynamicTool({
     name: READ_TOOL_RESULT_CHUNK_TOOL,
     description:
-      "Reads bounded text from a previous oversized tool_result in the current chat session. " +
+      "Reads bounded text from a previous oversized tool_result or captured shell output in the current chat session. " +
       "Pass its toolUseId and an absolute offset, or add a literal query to find the first match at or after that offset. " +
       `Continue from nextOffset when it is not null. maxChars defaults to ${TOOL_RESULT_READ_DEFAULT_CHARS}` +
       ` and accepts ${TOOL_RESULT_READ_MIN_CHARS}..${TOOL_RESULT_READ_MAX_CHARS}.` +
@@ -145,10 +148,26 @@ export function createReadToolResultChunkTool(): Tool {
       if (!result) {
         return unavailable("toolUseId was not found in the current in-memory session");
       }
-      if (result.meta?.truncated === undefined && result.meta?.compactedAt === undefined) {
+      const capture = result.outputArtifact;
+      const captureDetails = {
+        captureStatus: capture?.status ?? null,
+        sourceComplete: capture ? capture.status === "complete" : null,
+        capturedBytes: capture?.capturedBytes ?? null,
+        observedBytes: capture?.observedBytes ?? null,
+        ...(capture?.reason ? { captureReason: capture.reason } : {}),
+      };
+      if (capture?.status === "unavailable" || result.artifactReadUnavailable) {
+        return unavailable("captured tool output is unavailable for recovery", {
+          toolUseId,
+          ...captureDetails,
+          artifactReadUnavailable: result.artifactReadUnavailable === true,
+        });
+      }
+      if (!capture && result.meta?.truncated === undefined && result.meta?.compactedAt === undefined) {
         return unavailable("tool result is not host-truncated or compacted");
       }
       if (
+        !capture &&
         result.meta?.serializedStub === true &&
         (result.content.startsWith("[tool_result stripped:") ||
           result.content.startsWith("[tool_result truncated by host"))
@@ -187,6 +206,8 @@ export function createReadToolResultChunkTool(): Tool {
             nextOffset: null,
             nextOffsetMeaning: "no literal match at or after offset",
             hasMore: false,
+            hasMoreMeaning: "matching content remaining in the retained range, not source completeness",
+            ...captureDetails,
             totalChars: result.content.length,
             chunk: "",
           }),
@@ -208,9 +229,13 @@ export function createReadToolResultChunkTool(): Tool {
         nextOffset: window.nextOffset,
         nextOffsetMeaning: "continue after the returned context",
         hasMore: window.hasMore,
+        hasMoreMeaning: "content remaining in the retained range, not source completeness",
+        ...captureDetails,
         totalChars: result.content.length,
-        originalBytes: result.meta?.truncated?.originalBytes ?? result.content.length,
-        originalLines: result.meta?.truncated?.originalLines ?? countLines(result.content),
+        ...(!capture ? {
+          originalBytes: result.meta?.truncated?.originalBytes ?? result.content.length,
+          originalLines: result.meta?.truncated?.originalLines ?? countLines(result.content),
+        } : {}),
         payloadLimited,
         chunk: window.text,
       });

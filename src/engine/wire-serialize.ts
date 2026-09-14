@@ -5,6 +5,8 @@
 
 import type { GenericMessage } from "./llm/types.js";
 import { buildToolResultStrippedStub, buildToolResultTruncatedStub } from "../shared/tool-result-stub.js";
+import type { ToolOutputArtifactInfo } from "../shared/tool-output-artifact.js";
+import type { ToolResultArtifactUnavailableInfo } from "../shared/tool-result-stub.js";
 
 /**
  * Stub form for tool_result messages marked by Issue #902's generic size
@@ -30,10 +32,12 @@ import { buildToolResultStrippedStub, buildToolResultTruncatedStub } from "../sh
 function buildToolResultTruncatedStubForWire(
   toolUseId: string,
   toolName: string | undefined,
-  info: NonNullable<NonNullable<GenericMessage["meta"]>["truncated"]>,
+  info: NonNullable<GenericMessage["meta"]>["truncated"],
   content: string,
+  outputArtifact?: ToolOutputArtifactInfo,
+  artifactUnavailable?: ToolResultArtifactUnavailableInfo,
 ): string {
-  return buildToolResultTruncatedStub(toolUseId, toolName, info, content);
+  return buildToolResultTruncatedStub(toolUseId, toolName, info, content, { outputArtifact, artifactUnavailable });
 }
 
 
@@ -59,12 +63,14 @@ export function prepareMarkedToolResultsForWire(messages: GenericMessage[]): Gen
       continue;
     }
 
-    const marked = msg.meta.compactedAt !== undefined || msg.meta.truncated !== undefined;
+    const marked = msg.meta.compactedAt !== undefined || msg.meta.truncated !== undefined || msg.meta.outputArtifact !== undefined;
     if (marked && msg.meta.serializedStub !== true) {
       // Oversized results keep their bounded preview and retrieval path even
       // after later compaction. Other stale results use the shorter stripped form.
-      const compactedResultText = msg.meta.truncated !== undefined
-        ? buildToolResultTruncatedStubForWire(msg.toolUseId, msg.toolName, msg.meta.truncated, msg.content)
+      const compactedResultText = msg.meta.truncated !== undefined || msg.meta.outputArtifact !== undefined
+        ? buildToolResultTruncatedStubForWire(
+          msg.toolUseId, msg.toolName, msg.meta.truncated, msg.content, msg.meta.outputArtifact, msg.meta.artifactUnavailable,
+        )
         : buildToolResultStrippedStub(msg.toolName, msg.content.length);
       out.push({
         role: "tool_result",
