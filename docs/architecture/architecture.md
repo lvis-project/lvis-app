@@ -327,6 +327,18 @@ explicit preset selection; the UI shows their exact value. If no preset fits,
 the existing custom budget and thinking on/off remain available. Retry uses the
 user ceiling and restores the prior budget afterward. Raw internal generation
 retains its separate protocol contract.
+
+Oversized text tool results remain verbatim in live memory and the renderer,
+and within the artifact storage cap they remain in file-backed session
+artifacts. Provider requests receive a bounded head/tail preview with the
+original size and `toolUseId`. The builtin
+`read_tool_result_chunk` tool reads from an absolute UTF-16 `offset`, returns an
+exact `nextOffset`, and can find a literal `query` at or after that offset. Its
+shared size contract defaults to 3,000 characters and accepts 500 through 5,000;
+changing `maxChars` never changes the requested position. Returned boundaries do
+not split Unicode surrogate pairs. Search misses return `found: false` and no
+next offset; after a match, `nextOffset` continues after the returned context.
+
 Smaller purpose-specific limits stay with the internal/background
 `generateText` callers that own them. Managed subscription transports retain
 their own output-control contract. A provider-reported `max_tokens` completion

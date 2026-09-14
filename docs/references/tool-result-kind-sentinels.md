@@ -17,10 +17,21 @@ This page owns tool result sentinel kinds used by execution, transcript renderin
 
 ## Implementation Anchors
 
-- `src/tools/`
-- `src/engine/`
-- `src/permissions/`
-- `src/observability/`
+- `src/shared/bounded-tool-output.ts` owns the read sizes and bounded preview.
+- `src/shared/tool-result-stub.ts` builds the provider and persistence wrapper.
+- `src/engine/wire-serialize.ts` replaces only the provider-bound copy.
+- `src/tools/tool-result-chunk.ts` provides offset reads and literal search.
+
+An oversized text result keeps its original content in live memory and, within
+the artifact storage cap, in its file-backed artifact. The serialized wrapper
+includes bounded head and tail content, original size, error status on the
+enclosing result, and recovery instructions. `read_tool_result_chunk` accepts
+`toolUseId`, an optional absolute UTF-16 `offset`, optional `maxChars`, and an
+optional literal `query`. The response uses `startOffset`, `endOffset`, and
+`nextOffset`; it never derives position from the requested size. Search failure
+is a successful read with `found: false` and `nextOffset: null`. Search success
+starts the returned context at the match, and its `nextOffset` continues after
+that context.
 
 ## Update Checklist
 
