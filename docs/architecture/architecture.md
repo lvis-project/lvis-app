@@ -118,7 +118,8 @@ and an opaque capture ID. Reads validate ownership, metadata, and content hashes
 symlink traversal is rejected. Transcript saves retain capture references from
 current messages and checkpoints and remove only verified, unreferenced captures.
 In-flight captures remain reserved; published captures remain pinned until a
-transcript save commits their reference or their invocation abandons ownership.
+session or checkpoint save commits their reference or their invocation abandons
+ownership.
 The executor abandons undelivered results and the turn releases captures absent
 from its final history. New capture admission sweeps verified orphan artifacts
 against persisted session/checkpoint references, including after restart.

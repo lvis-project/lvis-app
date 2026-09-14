@@ -4,7 +4,7 @@ import { ToolExecutor } from "../executor.js";
 import { ToolRegistry } from "../registry.js";
 import { PermissionManager } from "../../permissions/permission-manager.js";
 import { createDynamicTool } from "../base.js";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -236,6 +236,36 @@ describe.skipIf(process.platform === "win32")("foreground shell artifact recover
     expect(loadSession).not.toHaveBeenCalled();
     expect(loadGenericArtifact).not.toHaveBeenCalled();
     recovered.abandon?.();
+  });
+
+  it("commits checkpoint-only captures so deleting the checkpoint releases their quota", async () => {
+    const { dir, memoryManager } = setup();
+    const messages: GenericMessage[] = [];
+    for (let index = 0; index < 4; index++) {
+      const toolUseId = "checkpoint-only-" + index;
+      const capture = memoryManager.startToolOutputCapture(SESSION, toolUseId);
+      for (let remaining = 5_000_000; remaining > 0;) {
+        const size = Math.min(65_536, remaining);
+        if (!capture.append(Buffer.alloc(size, 120))) await capture.waitForDrain();
+        remaining -= size;
+      }
+      const outputArtifact = await capture.finish();
+      expect(outputArtifact.status).toBe("complete");
+      messages.push({ role: "tool_result", toolUseId, content: "checkpoint preview", meta: { outputArtifact } });
+    }
+    await memoryManager.saveCheckpointSnapshot(SESSION, 1, messages);
+    await memoryManager.saveSession(SESSION, []);
+    const firstInfo = messages[0].meta!.outputArtifact!;
+    expect(memoryManager.loadToolOutputArtifact(SESSION, "checkpoint-only-0", firstInfo) !== null).toBe(true);
+    // Rewind removes the durable checkpoint while this host process remains live.
+    unlinkSync(join(dir, "sessions", ".checkpoints", SESSION, "1.jsonl"));
+    const next = memoryManager.startToolOutputCapture(SESSION, "after-checkpoint-delete");
+    next.append(Buffer.from("new output"));
+    const result = await next.finish();
+    expect(result.status).toBe("complete");
+    expect(memoryManager.loadToolOutputArtifact(SESSION, "checkpoint-only-0", firstInfo) === null).toBe(true);
+    expect(readdirSync(join(dir, "sessions", SESSION, "tool-output")).filter((entry) => entry.endsWith(".bin"))).toHaveLength(1);
+    next.abandon?.();
   });
 
   it("does not reserve disk artifacts for a small result", async () => {

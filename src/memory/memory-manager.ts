@@ -2362,6 +2362,10 @@ export class MemoryManager implements PromptMemorySource {
       const prepared = this.prepareSessionMessagesForDisk(sessionId, messages);
       const lines = prepared.messages.map((m) => JSON.stringify(m)).join("\n") + "\n";
       writeFileSync(targetPath, lines, "utf-8");
+      // A checkpoint is a durable owner too; release the unpublished pin only
+      // after its write succeeds, so removing the checkpoint can reclaim quota.
+      const unpublished = this.unpublishedOutputCaptures.get(sessionId);
+      for (const id of prepared.keepCaptureIds) unpublished?.delete(id);
     });
   }
 
