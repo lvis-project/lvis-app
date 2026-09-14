@@ -2,6 +2,7 @@ import { createDynamicTool, type Tool } from "./base.js";
 import { fetchPublicHttpResponse } from "../core/network-guard.js";
 import { t } from "../i18n/index.js";
 import { MAX_TOOL_RESULT_ARTIFACT_BYTES } from "../shared/tool-output-artifact.js";
+import { errorMessage } from "../shared/error-message.js";
 
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 
@@ -235,7 +236,7 @@ export function createWebFetchTool(singleHopFetch: typeof fetch): Tool {
           output: JSON.stringify({
             url,
             error: t("be_tools.webFetchError"),
-            details: error instanceof Error ? error.message : String(error),
+            details: errorMessage(error),
           }),
           isError: true,
         };
