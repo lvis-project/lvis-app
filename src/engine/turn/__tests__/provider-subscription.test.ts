@@ -87,13 +87,15 @@ function buildSubscriptionDeps(
   };
 }
 
-it.each([401, 503])("keeps diagnostic HTTP status %i out of retry decisions", async (statusCode) => {
+it.each([
+  { phase: "turn-completion", kind: "authentication", statusCode: 401 },
+  { phase: "turn-completion", kind: "server", statusCode: 503 },
+  { phase: "rpc-timeout", kind: "timeout", operation: "turn/start" },
+] as const)("keeps transport diagnostics out of retry decisions: %j", async (transport) => {
   vi.useFakeTimers();
   try {
     const selection = { kind: "subscription", provider: "codex" } as const;
-    const providerError = subscriptionTransportFailure({
-      phase: "turn-completion", kind: statusCode === 401 ? "authentication" : "server", statusCode,
-    });
+    const providerError = subscriptionTransportFailure(transport);
     const streamTurn = vi.fn(async function* (): AsyncIterable<StreamEvent> {
       yield { type: "error", error: SAFE_SUBSCRIPTION_FAILURE, classification: "subscription-chat-unavailable", providerError };
     });
@@ -107,6 +109,22 @@ it.each([401, 503])("keeps diagnostic HTTP status %i out of retry decisions", as
   } finally {
     vi.useRealTimers();
   }
+});
+
+it("does not retry an RPC timeout after model output has reached the host", async () => {
+  const selection = { kind: "subscription", provider: "codex" } as const;
+  const providerError = subscriptionTransportFailure({
+    phase: "rpc-timeout", kind: "timeout", operation: "turn/start",
+  });
+  const streamTurn = vi.fn(async function* (): AsyncIterable<StreamEvent> {
+    yield { type: "text_delta", text: "partial output" };
+    yield { type: "error", error: SAFE_SUBSCRIPTION_FAILURE, classification: "subscription-chat-unavailable", providerError };
+  });
+  const { deps, getSecret } = buildRetryDeps(selection, { vendor: "openai", subscriptionRuntime: selection, streamTurn });
+  const result = await collectSubscriptionRound(buildProvider(deps)!);
+  expect(streamTurn).toHaveBeenCalledExactlyOnceWith(expect.anything());
+  expect(getSecret).not.toHaveBeenCalled();
+  expect(result).toMatchObject({ kind: "stream_error", classification: "unknown", providerError });
 });
 
 describe("buildProvider subscription model overrides", () => {

@@ -21,6 +21,7 @@ import { UUID_SOURCE } from "../shared/uuid.js";
 import { isNonNegativeSafeInteger, isPositiveSafeInteger } from "../shared/safe-integer.js";
 import { JsonLineReader } from "../lib/json-line-reader.js";
 import { JsonRpcPendingRequests } from "../lib/json-rpc-pending-request.js";
+import type { ProviderRpcOperation } from "../engine/llm/provider-error-diagnostics.js";
 
 const require = createRequire(import.meta.url);
 
@@ -1276,7 +1277,7 @@ export class CodexConversationRuntime {
     await this.request("turn/interrupt", { threadId: active.threadId, turnId });
   }
 
-  private request(method: string, params?: CodexJsonRecord): Promise<unknown> {
+  private request(method: ProviderRpcOperation, params?: CodexJsonRecord): Promise<unknown> {
     const child = this.child;
     if (!child?.stdin || !child.stdin.writable) {
       return Promise.reject(new CodexConversationRuntimeError("codex-operation-failed"));
@@ -1287,7 +1288,7 @@ export class CodexConversationRuntime {
       return Promise.reject(new CodexConversationRuntimeError("codex-operation-failed"));
     }
     const error = new CodexConversationRuntimeError("codex-operation-failed",
-      subscriptionTransportFailure({ phase: "rpc-timeout", kind: "timeout" }));
+      subscriptionTransportFailure({ phase: "rpc-timeout", kind: "timeout", operation: method }));
     const pending = this.pendingRequests.begin({
       method,
       timeoutMs: CODEX_RPC_REQUEST_TIMEOUT_MS,

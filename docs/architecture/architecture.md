@@ -468,6 +468,16 @@ its existing timeout and error policy, rejects unsupported native host requests,
 and owns process shutdown. Native thread, turn, and session state remain in the
 protocol adapter rather than in the shared RPC registry.
 
+Transport failure diagnostics may retain the pending request's host-issued
+`operation`, validated against the closed `PROVIDER_RPC_OPERATIONS` catalogue.
+Only its finite ASCII labels are accepted; request parameters, paths, prompt
+text, credentials, and remote operation fields are excluded. This metadata
+passes unchanged through the subscription provider and stream collector to the
+error trace without selecting retries or changing deadlines. Where the protocol
+separates turn-start acknowledgement from terminal notification, the RPC timer
+ends at acknowledgement. An RPC whose response completes the prompt retains
+the adapter's existing prompt deadline and cancellation grace instead.
+
 The [provider integration design](openai-provider-integration.md) describes
 the connection boundaries and extension points.
 

@@ -9,10 +9,12 @@
  * recoveries. The result is suitable for `StreamEvent.providerError`.
  */
 import { constants } from "node:os";
-import type {
-  ProviderErrorDiagnostics,
-  ProviderRateLimitDiagnostics,
-  ProviderTransportDiagnostics,
+import {
+  PROVIDER_RPC_OPERATIONS,
+  type ProviderErrorDiagnostics,
+  type ProviderRateLimitDiagnostics,
+  type ProviderRpcOperation,
+  type ProviderTransportDiagnostics,
 } from "../engine/llm/provider-error-diagnostics.js";
 import { isRecord } from "../shared/is-record.js";
 
@@ -30,9 +32,10 @@ const TRANSPORT_KINDS: readonly ProviderTransportDiagnostics["kind"][] = [
 /** Copy only closed labels and bounded process facts; never copy runtime text. */
 function normalizeTransportDiagnostics(value: unknown): ProviderTransportDiagnostics | undefined {
   if (!isRecord(value)) return undefined;
-  const { phase, kind, statusCode, exitCode, signal } = value;
+  const { phase, kind, operation, statusCode, exitCode, signal } = value;
   if (!TRANSPORT_PHASES.some((candidate) => candidate === phase)
     || !TRANSPORT_KINDS.some((candidate) => candidate === kind)) return undefined;
+  if (operation !== undefined && !PROVIDER_RPC_OPERATIONS.some((candidate) => candidate === operation)) return undefined;
   if (statusCode !== undefined && safeStatusCode(statusCode) === undefined) return undefined;
   if (exitCode !== undefined && exitCode !== null && (typeof exitCode !== "number"
     || !Number.isInteger(exitCode) || exitCode < -2_147_483_648 || exitCode > 4_294_967_295)) return undefined;
@@ -41,6 +44,7 @@ function normalizeTransportDiagnostics(value: unknown): ProviderTransportDiagnos
   return {
     phase: phase as ProviderTransportDiagnostics["phase"],
     kind: kind as ProviderTransportDiagnostics["kind"],
+    ...(operation === undefined ? {} : { operation: operation as ProviderRpcOperation }),
     ...(statusCode === undefined ? {} : { statusCode: statusCode as number }),
     ...(exitCode === undefined ? {} : { exitCode: exitCode as number | null }),
     ...(signal === undefined ? {} : { signal: signal as string | null }),
