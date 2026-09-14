@@ -1,3 +1,4 @@
+import { normalizeToolOutputArtifactInfo } from "../shared/tool-output-artifact.js";
 
 
 
@@ -606,6 +607,14 @@ export class ConversationLoop {
         m.role === "tool_result" && m.toolUseId === toolUseId,
       );
     if (!match) return null;
+    if (match.meta?.outputArtifactUnavailable) return { ...match, content: "", artifactReadUnavailable: true };
+    if (match.meta?.outputArtifact !== undefined) {
+      const outputArtifact = normalizeToolOutputArtifactInfo(match.meta.outputArtifact);
+      const content = outputArtifact
+        ? this.deps.memoryManager.loadToolOutputArtifact(this.sessionId, toolUseId, outputArtifact)
+        : null;
+      return { ...match, content: content ?? "", ...(outputArtifact ? { outputArtifact } : {}), artifactReadUnavailable: content === null };
+    }
     if (isToolResultStubContent(match.content)) {
       const artifact = match.meta?.artifactUnavailable
         ? null

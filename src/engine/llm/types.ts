@@ -29,6 +29,10 @@ export { isLLMVendor } from "../../shared/llm-vendor-defaults.js";
  * boundary markers, etc.). All fields optional so existing callers remain unaffected.
  */
 export interface MessageMeta {
+  /** Host-owned foreground output reference; never a caller-supplied path. */
+  outputArtifact?: import("../../shared/tool-output-artifact.js").ToolOutputArtifactInfo;
+  /** Missing or invalid stored capture reference; no source recovery claim. */
+  outputArtifactUnavailable?: true;
   /**
    * User-visible text for this message. The stored `content` may include
    * routing/provenance wrappers that are prompt-bearing but must not be

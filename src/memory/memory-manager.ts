@@ -1,6 +1,12 @@
+import { readBoundedTextWindow } from "../shared/bounded-tool-output.js";
+import { ToolOutputArtifactStore } from "./tool-output-artifact-store.js";
+import { MAX_TOOL_RESULT_ARTIFACT_BYTES, MAX_TOOL_OUTPUT_PREVIEW_CHARS, normalizeToolOutputArtifactInfo, type ToolOutputCapture, type ToolOutputArtifactInfo } from "../shared/tool-output-artifact.js";
+export { MAX_TOOL_RESULT_ARTIFACT_BYTES } from "../shared/tool-output-artifact.js";
+import { isValidSessionId } from "../shared/session-id.js";
+export { isValidSessionId } from "../shared/session-id.js";
 
 
-import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, readdirSync, writeFileSync, unlinkSync, rmSync, renameSync, watch, type FSWatcher } from "node:fs";
+import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, writeFileSync, unlinkSync, rmSync, renameSync, watch, type FSWatcher } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { join, resolve, basename } from "node:path";
 import { withFileLock } from "../lib/with-file-lock.js";
@@ -38,13 +44,15 @@ import {
 import { SessionSearchIndex, type IndexedSessionInput } from "./session-search-index.js";
 import { isRecord } from "../shared/is-record.js";
 import { escapeRegExp } from "../shared/escape-reg-exp.js";
-import { dlpSafeCandidate, SESSION_ID_NAMESPACE_KINDS } from "../shared/dlp-safe-id.js";
+import { dlpSafeCandidate } from "../shared/dlp-safe-id.js";
 import { UUID_PATTERN } from "../shared/uuid.js";
 import { SHA256_HEX, sha256Hex } from "../lib/hex-digest-equal.js";
 import { parseJsonlLines } from "../audit/jsonl-reader.js";
 const log = createLogger("memory");
+// Auxiliary managers can share the same host-owned session directory.
+const unpublishedCapturesByDirectory = new Map<string, Map<string, Set<string>>>();
 
-export const MAX_TOOL_RESULT_ARTIFACT_BYTES = 5_000_000;
+
 
 interface FileSnapshot {
   content: string;
@@ -722,35 +730,6 @@ const MAX_A2A_WIRE_ID_CHARS = 256;
 const ACTIVE_SESSION_STATE_FILE = ".active-session.json";
 
 /**
- * The one shape a session id has, everywhere it is minted, persisted or read
- * back: a lowercase UUID-shaped core, optionally namespaced as
- * `<kind>-<tag>-` where `kind` is one of {@link SESSION_ID_NAMESPACE_KINDS}
- * (built from that list, so the rule cannot drift from the minting code) and
- * `tag` is `[a-z0-9]+`. Every producer draws through `createDlpSafeUuid` /
- * `createNamespacedSessionId`, so this is a description of what exists, not a
- * looser bound around it. The shape is what makes an id safe as a filename
- * component; it also bounds the id, which is why no separate length cap is
- * needed. Earlier there were four validators (this one accepted any
- * `[A-Za-z0-9_-]+`, the A2A task store capped at 256, the rationale stores
- * checked length or control characters only) and a 257-character id passed
- * some of them.
- */
-const SESSION_ID_CORE = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
-const SESSION_ID_REGEX = new RegExp(
-  `^(?:(?:${SESSION_ID_NAMESPACE_KINDS.join("|")})-[a-z0-9]+-)?${SESSION_ID_CORE}$`,
-);
-
-/**
- * Returns true when `id` is a valid session ID safe to use as a filename component.
- * Single source of truth for session ID validation across all call sites.
- * Exported so the sub-agent resume entry point (SubAgentRunner.resume) can
- * fail-closed on an unsafe `resumeId` BEFORE calling loadSessionMetadata (which
- * throws on an invalid id) — reusing the SOT rather than re-deriving the regex.
- */
-export function isValidSessionId(id: unknown): id is string {
-  return typeof id === "string" && SESSION_ID_REGEX.test(id);
-}
-/**
  * What a sub-agent's persisted `originSessionId` may name: the conversation
  * that spawned it, or the work-board item a host-orchestrated run belongs to.
  * Readers that need a *conversation* keep guarding with `isValidSessionId`;
@@ -1364,6 +1343,9 @@ export class MemoryManager implements PromptMemorySource {
   private readonly lvisDir: string;
   private readonly memoryDir: string;
   private readonly sessionsDir: string;
+  private readonly toolOutputArtifacts: ToolOutputArtifactStore;
+  /** Completed captures awaiting their first durable transcript reference. */
+  private readonly unpublishedOutputCaptures: Map<string, Set<string>>;
   private readonly defaultWorkspaceRoot: string | undefined;
   /** FTS5 cross-session search index (#1500) — one per MemoryManager instance,
    *  keyed by this.lvisDir (never a global singleton; mirrors sessionsDir). */
@@ -1412,12 +1394,16 @@ export class MemoryManager implements PromptMemorySource {
     this.lvisDir = resolve(options?.lvisDir ?? lvisHome());
     this.memoryDir = join(this.lvisDir, "memories");
     this.sessionsDir = join(this.lvisDir, "sessions");
+    this.toolOutputArtifacts = new ToolOutputArtifactStore(this.sessionsDir);
     this.defaultWorkspaceRoot = normalizeMetadataString(
       options?.defaultWorkspaceRoot,
       MAX_PROJECT_ROOT_CHARS,
     );
     this.searchIndex = new SessionSearchIndex(this.lvisDir);
     this.ensureStructure();
+    const captureOwnerKey = realpathSync(this.sessionsDir);
+    this.unpublishedOutputCaptures = unpublishedCapturesByDirectory.get(captureOwnerKey) ?? new Map();
+    unpublishedCapturesByDirectory.set(captureOwnerKey, this.unpublishedOutputCaptures);
   }
 
   private projectRootGeneration(key: string): number {
@@ -2163,6 +2149,7 @@ export class MemoryManager implements PromptMemorySource {
       const lines = prepared.messages.map((m) => JSON.stringify(m)).join("\n") + "\n";
       writeFileSync(targetPath, lines, "utf-8");
       this.cleanupToolResultArtifacts(sessionId, prepared.keepArtifactKeys);
+      this.cleanupToolOutputArtifacts(sessionId, prepared.keepCaptureIds);
     });
     this.indexSessionForSearch(sessionId, messages);
   }
@@ -2392,7 +2379,7 @@ export class MemoryManager implements PromptMemorySource {
         log.warn({ sessionId, compactNum }, "skipping malformed checkpoint snapshot line");
       }
     }
-    return messages;
+    return messages.map((message) => this.normalizeStoredOutputCapture(sessionId, message));
   }
 
   /** Load a persisted session. */
@@ -2411,7 +2398,7 @@ export class MemoryManager implements PromptMemorySource {
     }
     return stampLegacyRowIds(
       sessionId,
-      this.recoverLatestCheckpointUserIfMissing(sessionId, messages),
+      this.recoverLatestCheckpointUserIfMissing(sessionId, messages).map((message) => this.normalizeStoredOutputCapture(sessionId, message)),
     );
   }
 
@@ -2474,15 +2461,59 @@ export class MemoryManager implements PromptMemorySource {
     }
   }
 
+  startToolOutputCapture(sessionId: string, toolUseId: string): ToolOutputCapture {
+    if (!isValidSessionId(sessionId)) throw new TypeError("tool-output-session-id-invalid");
+    this.cleanupToolOutputArtifacts(sessionId, this.loadPersistedOutputCaptureIds(sessionId));
+    const capture = this.toolOutputArtifacts.start(sessionId, toolUseId);
+    // Pin before finish can publish or release its disk reservation. Waiting
+    // for finish first leaves a microtask gap in which another save can prune it.
+    let pending = this.unpublishedOutputCaptures.get(sessionId);
+    if (!pending) this.unpublishedOutputCaptures.set(sessionId, pending = new Set());
+    pending.add(capture.captureId);
+    return {
+      captureId: capture.captureId,
+      abandon: () => { pending.delete(capture.captureId); },
+      append: (chunk) => capture.append(chunk),
+      waitForDrain: () => capture.waitForDrain(),
+      finish: async (interrupted) => {
+        const info = await capture.finish(interrupted);
+        if (info.status === "unavailable") pending.delete(capture.captureId);
+        return info;
+      },
+    };
+  }
+
+  private normalizeStoredOutputCapture(sessionId: string, message: unknown): unknown {
+    if (!isToolResultRecord(message) || !isRecord(message.meta)) return message;
+    if (message.meta.outputArtifact === undefined && message.meta.outputArtifactUnavailable !== true) return message;
+    const outputArtifact = normalizeToolOutputArtifactInfo(message.meta.outputArtifact);
+    if (outputArtifact && this.toolOutputArtifacts.validateReference(sessionId, message.toolUseId, outputArtifact)) {
+      const { outputArtifactUnavailable: _unavailable, serializedStub: _stub, truncated: _truncated, ...meta } = message.meta;
+      return { ...message, content: readBoundedTextWindow(message.content, 0, MAX_TOOL_OUTPUT_PREVIEW_CHARS).text, meta: { ...meta, outputArtifact } };
+    }
+    const { outputArtifact: _invalid, serializedStub: _stub, truncated: _truncated, ...meta } = message.meta;
+    return {
+      ...message,
+      content: readBoundedTextWindow(message.content, 0, MAX_TOOL_OUTPUT_PREVIEW_CHARS).text,
+      meta: { ...meta, outputArtifactUnavailable: true },
+    };
+  }
+
+  loadToolOutputArtifact(sessionId: string, toolUseId: string, info: ToolOutputArtifactInfo): string | null {
+    return this.toolOutputArtifacts.read(sessionId, toolUseId, info);
+  }
+
   rehydrateToolResultArtifacts(sessionId: string, messages: unknown[]): unknown[] {
     if (!isValidSessionId(sessionId)) return messages;
 	    let changed = false;
-	    const hydrated = messages.map((message) => {
+	    const hydrated = messages.map((rawMessage) => {
+          const message = this.normalizeStoredOutputCapture(sessionId, rawMessage);
+          if (message !== rawMessage) changed = true;
 	      if (!isToolResultRecord(message) || !isToolResultStubContent(message.content)) {
 	        return message;
 	      }
 	      const meta = isRecord(message.meta) ? message.meta : {};
-	      if (normalizeArtifactUnavailable(meta.artifactUnavailable)) return message;
+	      if (meta.outputArtifact !== undefined || normalizeArtifactUnavailable(meta.artifactUnavailable)) return message;
 	      const artifact = this.loadToolResultArtifact(sessionId, message.toolUseId);
 	      if (!artifact) return message;
 	      const { serializedStub: _serializedStub, ...restMeta } = meta;
@@ -3226,9 +3257,12 @@ export class MemoryManager implements PromptMemorySource {
   private prepareSessionMessagesForDisk(sessionId: string, messages: unknown[]): {
     messages: unknown[];
     keepArtifactKeys: Set<string>;
+    keepCaptureIds: Set<string>;
   } {
     const keepArtifactKeys = new Set<string>();
-    const prepared = messages.map((message) => {
+    const keepCaptureIds = new Set<string>();
+    const prepared = messages.map((rawMessage) => {
+      const message = this.normalizeStoredOutputCapture(sessionId, rawMessage);
       if (!isToolResultRecord(message)) return message;
 
       // A view_image tool_result carries a large base64 image on its sibling
@@ -3245,6 +3279,20 @@ export class MemoryManager implements PromptMemorySource {
           : message;
 
       const meta = isRecord(message.meta) ? message.meta : {};
+      const outputArtifact = normalizeToolOutputArtifactInfo(meta.outputArtifact);
+      if (meta.outputArtifactUnavailable === true) return base;
+      if (outputArtifact) {
+        // Persist the canonical bounded preview plus validated host reference.
+        // Provider recovery stubs are projections, never the stored preview.
+        keepCaptureIds.add(outputArtifact.captureId);
+        const { serializedStub: _stub, truncated: _truncated, ...captureMeta } = meta;
+        return {
+          ...base,
+          content: readBoundedTextWindow(message.content, 0, MAX_TOOL_OUTPUT_PREVIEW_CHARS).text,
+          meta: { ...captureMeta, outputArtifact },
+        };
+      }
+
       let truncated = normalizeTruncatedInfo(meta.truncated);
       const compactedAt = typeof meta.compactedAt === "string" ? meta.compactedAt : undefined;
       let artifactUnavailable = normalizeArtifactUnavailable(meta.artifactUnavailable);
@@ -3320,7 +3368,40 @@ export class MemoryManager implements PromptMemorySource {
       };
     });
 
-    return { messages: prepared, keepArtifactKeys };
+    return { messages: prepared, keepArtifactKeys, keepCaptureIds };
+  }
+
+  private loadPersistedOutputCaptureIds(sessionId: string): Set<string> {
+    const ids = new Set<string>();
+    const raw = readUtf8FileIfPresent(join(this.sessionsDir, sessionId + ".jsonl"));
+    for (const line of raw?.split("\n") ?? []) {
+      try {
+        const message: unknown = JSON.parse(line);
+        if (!isToolResultRecord(message) || !isRecord(message.meta)) continue;
+        const info = normalizeToolOutputArtifactInfo(message.meta.outputArtifact);
+        if (info) ids.add(info.captureId);
+      } catch { /* Only parsed capture metadata can retain an owned artifact. */ }
+    }
+    return ids;
+  }
+
+  private cleanupToolOutputArtifacts(sessionId: string, keepCaptureIds: Set<string>): void {
+    const unpublished = this.unpublishedOutputCaptures.get(sessionId);
+    for (const id of keepCaptureIds) unpublished?.delete(id);
+    for (const id of unpublished ?? []) keepCaptureIds.add(id);
+    for (const entry of readdirIfPresent(join(this.checkpointsDir, sessionId))) {
+      if (!entry.endsWith(".jsonl")) continue;
+      const raw = readUtf8FileIfPresent(join(this.checkpointsDir, sessionId, entry));
+      for (const line of raw?.split("\n") ?? []) {
+        try {
+          const message: unknown = JSON.parse(line);
+          if (!isToolResultRecord(message) || !isRecord(message.meta)) continue;
+          const info = normalizeToolOutputArtifactInfo(message.meta.outputArtifact);
+          if (info) keepCaptureIds.add(info.captureId);
+        } catch { /* A malformed checkpoint row cannot grant artifact ownership. */ }
+      }
+    }
+    this.toolOutputArtifacts.prune(sessionId, keepCaptureIds);
   }
 
   private cleanupToolResultArtifacts(sessionId: string, keepArtifactKeys: Set<string>): void {

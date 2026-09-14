@@ -1,3 +1,4 @@
+import type { ToolOutputArtifactInfo, ToolOutputCapture } from "../shared/tool-output-artifact.js";
 import type { ApprovalDecision } from "../permissions/approval-gate.js";
 import { randomUUID } from "node:crypto";
 import type { PermissionCheckResult } from "../permissions/permission-manager.js";
@@ -153,6 +154,7 @@ export interface ExecutionStageContext {
   spawnDepth: number | undefined;
   a2aCausalContext: A2AAgentCausalContext | undefined;
   toolResultChunkReader: ExecuteOptions["toolResultChunkReader"];
+  toolOutputCaptureFactory?: ExecuteOptions["toolOutputCaptureFactory"];
   executionCwd: string;
   parentEffectLedger: EffectLedger | undefined;
   effectLedger: EffectLedger;
@@ -198,6 +200,7 @@ export async function executeAuthorizedToolInvocation(
     spawnDepth,
     a2aCausalContext,
     toolResultChunkReader,
+    toolOutputCaptureFactory,
     executionCwd,
     parentEffectLedger,
     effectLedger,
@@ -405,6 +408,9 @@ export async function executeAuthorizedToolInvocation(
   let uiPayload: import("../mcp/types.js").McpUiPayload | undefined;
   let rawResult: unknown;
   let image: ToolResultImage | undefined;
+  let outputArtifact: ToolOutputArtifactInfo | undefined;
+  let ownedOutputCapture: ToolOutputCapture | undefined;
+  let outputArtifactDelivered = false;
   let terminationReason:
     | "ok"
     | "ceiling"
@@ -640,6 +646,21 @@ export async function executeAuthorizedToolInvocation(
     return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs });
   }
 
+  const captureOutput = source === "builtin" && hostShellExecutionPlan && toolOutputCaptureFactory
+    ? () => {
+        const capture = toolOutputCaptureFactory(toolUse.id);
+        ownedOutputCapture = capture;
+        return {
+          captureId: capture.captureId,
+          append: (chunk: Uint8Array) => capture.append(chunk),
+          waitForDrain: () => capture.waitForDrain(),
+          finish: async (interrupted?: boolean) => {
+            outputArtifact = await capture.finish(interrupted);
+            return outputArtifact;
+          },
+        };
+      }
+    : undefined;
   const executionContext: ToolExecutionContext = {
     cwd: executionCwd,
     extraAllowedDirectories: [...new Set(invocationRuntimeAllowedDirectories)],
@@ -669,6 +690,7 @@ export async function executeAuthorizedToolInvocation(
       // 를 ToolGroupCard 옆에 join 할 때 키로 사용. agent_spawn 이 emit 하는
       // 라이프사이클 이벤트에 함께 실어 보냄.
       toolUseId: toolUse.id,
+      ...(captureOutput ? { toolOutputCaptureFactory: captureOutput } : {}),
       trustOrigin: invocationPermissionContext.trustOrigin,
       ...(toolResultChunkReader
         ? { [TOOL_RESULT_CHUNK_READER_METADATA_KEY]: toolResultChunkReader }
@@ -986,6 +1008,9 @@ export async function executeAuthorizedToolInvocation(
     // terminal result too; it cannot release before its final audit persists.
     holdOperationLeaseForFinalBoundary = true;
   }
+  } catch (error) {
+    ownedOutputCapture?.abandon?.();
+    throw error;
   } finally {
     if (!holdOperationLeaseForFinalBoundary) {
       completePluginAuthFailure(
@@ -1101,7 +1126,8 @@ export async function executeAuthorizedToolInvocation(
         callbacks?.onToolEnd?.(toolUse.name, displayContent, true, meta, undefined, durationMs);
       }
       completePluginAuthFailure(new Error(content));
-      return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content, is_error: true, durationMs });
+      outputArtifactDelivered = outputArtifact !== undefined;
+      return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content, is_error: true, durationMs, ...(outputArtifact ? { outputArtifact } : {}) });
     } catch (error) {
       completePluginAuthFailure(error);
       if (operationExecutionDomain && resolvedPluginOperation) {
@@ -1109,6 +1135,7 @@ export async function executeAuthorizedToolInvocation(
       }
       throw error;
     } finally {
+      if (!outputArtifactDelivered) ownedOutputCapture?.abandon?.();
       releaseOperationLeaseAfterFinalBoundary();
     }
   }
@@ -1269,6 +1296,7 @@ export async function executeAuthorizedToolInvocation(
     completePluginAuthFailure(new Error(content));
   }
 
+  outputArtifactDelivered = outputArtifact !== undefined;
   return withHostShellExecutionPlan({
     tool_use_id: toolUse.id,
     content,
@@ -1276,6 +1304,7 @@ export async function executeAuthorizedToolInvocation(
     ...(uiPayload && { uiPayload }),
     ...(rawResult !== undefined && { rawResult }),
     ...(image && { image }),
+    ...(outputArtifact ? { outputArtifact } : {}),
     durationMs,
   });
   } catch (error) {
@@ -1293,6 +1322,7 @@ export async function executeAuthorizedToolInvocation(
     }
     throw error;
   } finally {
+    if (!outputArtifactDelivered) ownedOutputCapture?.abandon?.();
     releaseOperationLeaseAfterFinalBoundary();
   }
 }

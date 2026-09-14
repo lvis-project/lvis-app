@@ -58,6 +58,13 @@ function capturedResult(content: string, status: ToolOutputArtifactInfo["status"
 }
 
 describe("read_tool_result_chunk", () => {
+  it.each([undefined, "missing"])("bounds an untrusted stored tool name for query %s", async (query) => {
+    const result = await createReadToolResultChunkTool().execute({ toolUseId: "toolu_123", ...(query ? { query } : {}) }, ctx(() => ({ ...truncatedResult("x".repeat(600)), toolName: "x".repeat(20_000) })));
+    expect(result.isError).toBe(false);
+    expect(JSON.parse(result.output).toolName).toBeNull();
+    expect(estimateTokens(result.output)).toBeLessThanOrEqual(MAX_TOOL_RESULT_TOKENS);
+  });
+
   it.each(["complete", "partial"] as const)("reads %s capture without legacy truncation metadata", async (status) => {
     const source = capturedResult("retained 😀 tail", status);
     const result = await createReadToolResultChunkTool().execute(

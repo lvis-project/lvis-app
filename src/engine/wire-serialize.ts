@@ -36,8 +36,9 @@ function buildToolResultTruncatedStubForWire(
   content: string,
   outputArtifact?: ToolOutputArtifactInfo,
   artifactUnavailable?: ToolResultArtifactUnavailableInfo,
+  outputArtifactUnavailable?: boolean,
 ): string {
-  return buildToolResultTruncatedStub(toolUseId, toolName, info, content, { outputArtifact, artifactUnavailable });
+  return buildToolResultTruncatedStub(toolUseId, toolName, info, content, { outputArtifact, artifactUnavailable, outputArtifactUnavailable });
 }
 
 
@@ -63,13 +64,13 @@ export function prepareMarkedToolResultsForWire(messages: GenericMessage[]): Gen
       continue;
     }
 
-    const marked = msg.meta.compactedAt !== undefined || msg.meta.truncated !== undefined || msg.meta.outputArtifact !== undefined;
+    const marked = msg.meta.compactedAt !== undefined || msg.meta.truncated !== undefined || (msg.meta.outputArtifact !== undefined || msg.meta.outputArtifactUnavailable === true);
     if (marked && msg.meta.serializedStub !== true) {
       // Oversized results keep their bounded preview and retrieval path even
       // after later compaction. Other stale results use the shorter stripped form.
-      const compactedResultText = msg.meta.truncated !== undefined || msg.meta.outputArtifact !== undefined
+      const compactedResultText = msg.meta.truncated !== undefined || (msg.meta.outputArtifact !== undefined || msg.meta.outputArtifactUnavailable === true)
         ? buildToolResultTruncatedStubForWire(
-          msg.toolUseId, msg.toolName, msg.meta.truncated, msg.content, msg.meta.outputArtifact, msg.meta.artifactUnavailable,
+          msg.toolUseId, msg.toolName, msg.meta.truncated, msg.content, msg.meta.outputArtifact, msg.meta.artifactUnavailable, msg.meta.outputArtifactUnavailable,
         )
         : buildToolResultStrippedStub(msg.toolName, msg.content.length);
       out.push({

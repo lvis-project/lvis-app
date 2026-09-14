@@ -178,7 +178,7 @@ class ArtifactCapture implements ToolOutputCapture {
   private owned: OwnedPath | undefined;
 
   constructor(
-    private readonly captureId: string,
+    readonly captureId: string,
     private readonly sessionId: string,
     private readonly toolUseId: string,
     private readonly directories: readonly OwnedPath[],
@@ -398,6 +398,28 @@ export class ToolOutputArtifactStore {
     } catch { reason = "write-failed"; }
     return new ArtifactCapture(captureId, sessionId, toolUseId, directories, paths, release,
       this._writeForTest ?? writeChunk, this._beforePublishForTest, reason);
+  }
+
+  /** Validate persisted ownership without reading or hashing the output payload. */
+  validateReference(sessionId: string, toolUseId: string, info: ToolOutputArtifactInfo): boolean {
+    const expected = normalizeToolOutputArtifactInfo(info);
+    if (!isValidSessionId(sessionId) || !isValidToolUseId(toolUseId) || !expected) return false;
+    // An unavailable reference intentionally has no backing file to recover.
+    if (expected.status === "unavailable") return true;
+    try {
+      const directories = this.directories(sessionId, false);
+      const paths = pathsFor(directories.at(-1)!.path, toolUseId, expected.captureId);
+      const metadata = JSON.parse(readOwnedFile(paths.metadata, MAX_METADATA_BYTES).toString("utf8")) as Record<string, unknown>;
+      const stored = normalizeToolOutputArtifactInfo(metadata.info);
+      if (Object.keys(metadata).some((key) => !["sessionId", "toolUseId", "info"].includes(key))
+        || metadata.sessionId !== sessionId || metadata.toolUseId !== toolUseId
+        || !stored || JSON.stringify(stored) !== JSON.stringify(expected)) return false;
+      const data = lstatSync(paths.data);
+      if (!safeFile(data) || data.size !== expected.capturedBytes || data.size > MAX_TOOL_RESULT_ARTIFACT_BYTES) return false;
+      verifyDirectories(directories);
+      const current = lstatSync(paths.data);
+      return safeFile(current) && sameFile(current, data) && current.size === expected.capturedBytes;
+    } catch { return false; }
   }
 
   read(sessionId: string, toolUseId: string, info: ToolOutputArtifactInfo): string | null {

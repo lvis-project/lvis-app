@@ -1,3 +1,4 @@
+import type { ToolOutputCapture } from "../../shared/tool-output-artifact.js";
 /**
  * queryLoop — the vendor-abstracted agentic round loop, extracted
  * from conversation-loop.ts as a free function over `self: LoopContext`. All
@@ -429,6 +430,7 @@ export async function queryLoop(
       subAgentSource: GuidanceInjectionSource | undefined;
     };
     let pendingGuidanceDelivery: PendingGuidanceDelivery | null = null;
+    const ownedOutputCaptures: ToolOutputCapture[] = [];
 
     const rollbackPendingGuidance = (): void => {
       const delivery = pendingGuidanceDelivery;
@@ -1798,6 +1800,11 @@ export async function queryLoop(
           // hanging until their internal timeout.
           abortSignal,
           toolResultChunkReader: (toolUseId) => self.readToolResultForChunk(toolUseId),
+          toolOutputCaptureFactory: (toolUseId) => {
+            const capture = self.deps.memoryManager.startToolOutputCapture(bounds?.sessionIdOverride ?? self.sessionId, toolUseId);
+            ownedOutputCaptures.push(capture);
+            return capture;
+          },
           executionCwd: self.getSessionExecutionCwd(),
           permissionContext: {
             headless: self.deps.headless,
@@ -2207,6 +2214,10 @@ export async function queryLoop(
     return withServingIdentity({ text: t("be_conversationLoop.toolRoundLimitExceeded"), toolCalls: allToolCalls, usage: turnUsage, stopReason: "round-cap" });
     } finally {
       rollbackPendingGuidance();
+      const referenced = new Set(self.history.getMessages().map((message) => message.meta?.outputArtifact?.captureId));
+      for (const capture of ownedOutputCaptures) {
+        if (!referenced.has(capture.captureId)) capture.abandon?.();
+      }
     }
   }
 
@@ -2317,9 +2328,10 @@ function toolResultMeta(
         ...(review.reason ? { reason: review.reason } : {}),
       }
     : undefined;
-  if (!toolDisplay && !permissionReview) return undefined;
+  if (!toolDisplay && !permissionReview && !result.outputArtifact) return undefined;
   return {
     ...(toolDisplay ? { toolDisplay } : {}),
+    ...(result.outputArtifact ? { outputArtifact: result.outputArtifact } : {}),
     ...(permissionReview ? { permissionReview } : {}),
   };
 }

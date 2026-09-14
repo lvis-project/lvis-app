@@ -8,16 +8,21 @@ import type { ToolOutputArtifactInfo } from "../tool-output-artifact.js";
 function outputArtifact(status: ToolOutputArtifactInfo["status"]): ToolOutputArtifactInfo {
   return {
     version: 1,
-    captureId: "capture-1",
+    captureId: "3138f9c6-89f0-4645-85ea-2c205f9523f4",
     status,
     capturedBytes: status === "unavailable" ? 0 : 15_000,
     observedBytes: status === "complete" ? 15_000 : 30_000,
     capturedChars: status === "unavailable" ? 0 : 14_000,
+    ...(status !== "unavailable" ? { sha256: "a".repeat(64) } : {}),
     ...(status === "partial" ? { reason: "artifact-limit" as const } : {}),
+    ...(status === "unavailable" ? { reason: "session-limit" as const } : {}),
   };
 }
 
 describe("captured tool result stubs", () => {
+  it("rejects an unaddressable stored tool identifier before projection", () => {
+    expect(() => buildToolResultTruncatedStub("x".repeat(20_000), "bash", undefined, "preview", { outputArtifactUnavailable: true })).toThrow("tool use ID is invalid");
+  });
   it("labels displayed content separately from complete captured bytes", () => {
     const result = buildToolResultTruncatedStub("toolu_capture", "bash", undefined, "display prefix", {
       outputArtifact: outputArtifact("complete"),

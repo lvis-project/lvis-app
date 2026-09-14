@@ -100,7 +100,9 @@ Each foreground capture artifact is limited to 5,000,000 bytes. Retained capture
 plus active reservations are limited to 20,000,000 bytes per session. Capture
 reserves the full artifact allowance before it starts and releases unused
 reservation when it settles; retained files count after reload, so concurrent
-captures cannot overbook the session.
+captures within the host process cannot overbook the session. Separate processes
+concurrently writing the same session are outside this ownership contract.
+Small outputs remain in the existing preview without reserving an artifact.
 
 Pending disk buffers are bounded at 262,144 bytes (256 KiB). Backpressure pauses
 both child streams until the queue drains. A single excessive chunk, quota
@@ -113,7 +115,14 @@ exit code, signal, timeout, cancellation, or process cleanup result.
 
 The host derives private artifact locations from validated session/tool identity
 and an opaque capture ID. Reads validate ownership, metadata, and content hashes;
-symlink traversal is rejected, and cleanup removes only owned temporary files.
+symlink traversal is rejected. Transcript saves retain capture references from
+current messages and checkpoints and remove only verified, unreferenced captures.
+In-flight captures remain reserved; published captures remain pinned until a
+transcript save commits their reference or their invocation abandons ownership.
+The executor abandons undelivered results and the turn releases captures absent
+from its final history. New capture admission sweeps verified orphan artifacts
+against persisted session/checkpoint references, including after restart.
+Unverifiable orphan payloads remain charged to the quota instead of being deleted.
 Artifacts preserve whitespace and CRLF even though the display formatter
 normalizes them. Recovery decodes the stored bytes as UTF-8 text and omits an
 incomplete trailing code point from a partial capture.
@@ -364,10 +373,17 @@ not split Unicode surrogate pairs. Search misses return `found: false` and no
 next offset; after a match, `nextOffset` continues after the returned context.
 
 Foreground shell history and session records retain the bounded display prefix
-and a trusted capture reference. Generic artifact serialization must not replace
+and a trusted capture reference. The persisted preview ceiling is 16,384 UTF-16
+characters, which preserves the 12,000-character shell display plus completion
+annotations; the smaller provider head/tail budget applies only to projection. Generic artifact serialization must not replace
 the captured bytes with that prefix. Recovery first resolves the current
 history's `toolUseId`, then validates the matching capture. Session reload keeps
-the reference without eagerly loading the artifact. Chunk reads and literal
+a bounded preview and validates reference metadata and file ownership without
+eagerly loading the artifact. Missing or invalid references are explicitly
+unavailable. Provider recovery stubs are projections rather than persisted
+preview content. Forking a checkpoint into a different session marks these
+session-owned captures unavailable; it does not copy their original files.
+Chunk reads and literal
 search use the same UTF-16 offset contract and report capture completeness;
 reaching the end of retained partial content never means the complete command
 output was recovered. Only host execution bookkeeping can attach trusted capture

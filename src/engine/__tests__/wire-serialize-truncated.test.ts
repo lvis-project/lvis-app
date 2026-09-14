@@ -39,7 +39,9 @@ describe("prepareMarkedToolResultsForWire truncated output", () => {
     const msg = makeToolResult({
       toolUseId: "t-capture", toolName: "bash", content: "short display prefix",
       outputArtifact: {
-        version: 1, captureId: "capture-1", status,
+        version: 1, captureId: "3138f9c6-89f0-4645-85ea-2c205f9523f4", status,
+        ...(status !== "unavailable" ? { sha256: "a".repeat(64) } : {}),
+        ...(status !== "complete" ? { reason: "session-limit" as const } : {}),
         capturedBytes: status === "unavailable" ? 0 : 500,
         observedBytes: status === "complete" ? 500 : 900, capturedChars: status === "unavailable" ? 0 : 500,
       },

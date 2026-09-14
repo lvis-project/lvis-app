@@ -47,6 +47,7 @@ export interface ToolUseBlock {
 }
 
 export interface ToolResult {
+  outputArtifact?: import("../shared/tool-output-artifact.js").ToolOutputArtifactInfo;
   tool_use_id: string;
   content: string;
   is_error?: boolean;
@@ -136,6 +137,7 @@ export interface ExecuteOptions {
   a2aCausalContext?: A2AAgentCausalContext;
   abortSignal?: AbortSignal;
   toolResultChunkReader?: ToolResultChunkReader;
+  toolOutputCaptureFactory?: import("../shared/tool-output-artifact.js").ToolOutputCaptureFactory;
   permissionContext?: ToolPermissionContext;
   executionCwd?: string;
   /** Host-only lifecycle for an exact governed auth Tool; never plugin data. */

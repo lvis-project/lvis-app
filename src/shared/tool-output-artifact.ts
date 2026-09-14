@@ -1,5 +1,7 @@
 import { UUID_PATTERN } from "./uuid.js";
 
+/** Room for the 12,000-character shell preview and bounded completion annotations. */
+export const MAX_TOOL_OUTPUT_PREVIEW_CHARS = 16_384;
 export const MAX_TOOL_RESULT_ARTIFACT_BYTES = 5_000_000;
 export const MAX_SESSION_TOOL_OUTPUT_BYTES = 20_000_000;
 export const MAX_TOOL_OUTPUT_PENDING_BYTES = 262_144;
@@ -16,6 +18,10 @@ export interface ToolOutputArtifactInfo {
 }
 
 export interface ToolOutputCapture {
+  /** Available before publication so the session owner can pin the reference. */
+  readonly captureId: string;
+  /** Session owner releases an output which will not enter durable history. */
+  abandon?(): void;
   /** False asks the caller to pause both streams until waitForDrain settles. */
   append(chunk: Uint8Array): boolean;
   waitForDrain(): Promise<void>;

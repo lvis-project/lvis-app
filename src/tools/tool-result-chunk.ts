@@ -65,6 +65,13 @@ function unavailable(message: string, details?: Record<string, unknown>): { outp
   };
 }
 
+function boundedResponse(payload: Record<string, unknown>) {
+  const output = JSON.stringify(payload);
+  return estimateTokens(output) <= MAX_TOOL_RESULT_TOKENS
+    ? { output, isError: false }
+    : unavailable("tool result response metadata exceeds the bounded payload budget");
+}
+
 export function createReadToolResultChunkTool(): Tool {
   return createDynamicTool({
     name: READ_TOOL_RESULT_CHUNK_TOOL,
@@ -148,6 +155,8 @@ export function createReadToolResultChunkTool(): Tool {
       if (!result) {
         return unavailable("toolUseId was not found in the current in-memory session");
       }
+      const toolName = typeof result.toolName === "string" && /^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(result.toolName)
+        ? result.toolName : null;
       const capture = result.outputArtifact;
       const captureDetails = {
         captureStatus: capture?.status ?? null,
@@ -193,26 +202,23 @@ export function createReadToolResultChunkTool(): Tool {
 
       const matchOffset = typeof query === "string" ? result.content.indexOf(query, offset) : null;
       if (typeof query === "string" && matchOffset === -1) {
-        return {
-          output: JSON.stringify({
-            toolUseId,
-            toolName: result.toolName ?? null,
-            query,
-            found: false,
-            offset,
-            matchOffset: null,
-            startOffset: null,
-            endOffset: null,
-            nextOffset: null,
-            nextOffsetMeaning: "no literal match at or after offset",
-            hasMore: false,
-            hasMoreMeaning: "matching content remaining in the retained range, not source completeness",
-            ...captureDetails,
-            totalChars: result.content.length,
-            chunk: "",
-          }),
-          isError: false,
-        };
+        return boundedResponse({
+          toolUseId,
+          toolName,
+          query,
+          found: false,
+          offset,
+          matchOffset: null,
+          startOffset: null,
+          endOffset: null,
+          nextOffset: null,
+          nextOffsetMeaning: "no literal match at or after offset",
+          hasMore: false,
+          hasMoreMeaning: "matching content remaining in the retained range, not source completeness",
+          ...captureDetails,
+          totalChars: result.content.length,
+          chunk: "",
+        });
       }
 
       const startOffset = matchOffset === null ? offset : matchOffset;
@@ -220,7 +226,7 @@ export function createReadToolResultChunkTool(): Tool {
       let payloadLimited = false;
       const buildPayload = () => ({
         toolUseId,
-        toolName: result.toolName ?? null,
+        toolName,
         ...(typeof query === "string" ? { query, found: true, matchOffset } : {}),
         offset,
         requestedMaxChars: maxChars,
@@ -247,10 +253,7 @@ export function createReadToolResultChunkTool(): Tool {
           Math.max(1, Math.floor(window.text.length * 0.8)),
         );
       }
-      return {
-        output: JSON.stringify(buildPayload()),
-        isError: false,
-      };
+      return boundedResponse(buildPayload());
     },
   });
 }

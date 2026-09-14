@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ToolOutputArtifactStore } from "../tool-output-artifact-store.js";
 import {
   MAX_SESSION_TOOL_OUTPUT_BYTES, MAX_TOOL_OUTPUT_PENDING_BYTES, MAX_TOOL_RESULT_ARTIFACT_BYTES,
-  type ToolOutputCapture,
+  type ToolOutputArtifactInfo, type ToolOutputCapture,
 } from "../../shared/tool-output-artifact.js";
 
 const SESSION_ID = "6eb01b95-755a-454a-9e53-59b203a41f70";
@@ -244,6 +244,91 @@ describe("session tool output artifacts", () => {
     expect(store.read(SESSION_ID, "owned", info)).toBeNull();
     store.prune(SESSION_ID, new Set());
     expect(existsSync(onlyFile(".bin"))).toBe(true);
+  });
+
+  it("validates complete and partial references after reload without hydrating output", async () => {
+    const complete = await saved("original", "complete");
+    const partialCapture = store.start(SESSION_ID, "partial");
+    partialCapture.append(Buffer.from("partial"));
+    const partial = await partialCapture.finish(true);
+    const reloaded = new ToolOutputArtifactStore(sessions);
+    expect(reloaded.validateReference(SESSION_ID, "complete", complete)).toBe(true);
+    expect(reloaded.validateReference(SESSION_ID, "partial", partial)).toBe(true);
+    // Same-sized content corruption is detected by explicit recovery, not by
+    // the cheap reference check performed while loading bounded history rows.
+    const data = readdirSync(outputDir()).find((name) => name.endsWith(`${complete.captureId}.bin`))!;
+    writeFileSync(join(outputDir(), data), "modified");
+    expect(reloaded.validateReference(SESSION_ID, "complete", complete)).toBe(true);
+    expect(reloaded.read(SESSION_ID, "complete", complete)).toBeNull();
+  });
+
+  it("preserves a valid unavailable reference without requiring backing files", async () => {
+    const capture = store.start(SESSION_ID, "unavailable");
+    capture.append(Buffer.alloc(MAX_TOOL_OUTPUT_PENDING_BYTES + 1));
+    const info = await capture.finish();
+    rmSync(join(sessions, SESSION_ID), { recursive: true });
+    expect(store.validateReference(SESSION_ID, "unavailable", info)).toBe(true);
+    expect(store.validateReference("../outside", "unavailable", info)).toBe(false);
+    expect(store.validateReference(SESSION_ID, "bad\nidentity", info)).toBe(false);
+    expect(store.validateReference(SESSION_ID, "unavailable", { ...info, reason: undefined })).toBe(false);
+    expect(existsSync(join(sessions, SESSION_ID))).toBe(false);
+  });
+
+  it("rejects missing, cross-session, forged and expanded references", async () => {
+    const info = await saved("owned");
+    expect(store.validateReference(OTHER_SESSION_ID, "tool-output", info)).toBe(false);
+    expect(store.validateReference(SESSION_ID, "another-tool", info)).toBe(false);
+    expect(store.validateReference(SESSION_ID, "tool-output", { ...info, sha256: "f".repeat(64) })).toBe(false);
+    expect(store.validateReference(SESSION_ID, "tool-output", { ...info, path: "outside" } as ToolOutputArtifactInfo)).toBe(false);
+    unlinkSync(onlyFile(".bin"));
+    expect(store.validateReference(SESSION_ID, "tool-output", info)).toBe(false);
+  });
+
+  it("rejects oversized and mismatched metadata during reference validation", async () => {
+    const info = await saved("owned");
+    const metadata = onlyFile(".json");
+    const original = readFileSync(metadata, "utf8");
+    const record = JSON.parse(original) as Record<string, unknown>;
+    for (const modified of [
+      { ...record, sessionId: OTHER_SESSION_ID }, { ...record, toolUseId: "other" },
+      { ...record, extra: true }, { ...record, info: { ...info, capturedChars: 0 } },
+    ]) {
+      writeFileSync(metadata, JSON.stringify(modified));
+      expect(store.validateReference(SESSION_ID, "tool-output", info)).toBe(false);
+    }
+    writeFileSync(metadata, original + " ".repeat(4096));
+    expect(store.validateReference(SESSION_ID, "tool-output", info)).toBe(false);
+  });
+
+  it("requires a private, single-link regular payload with its recorded size", async () => {
+    const info = await saved("owned");
+    const data = onlyFile(".bin");
+    truncateSync(data, info.capturedBytes + 1);
+    expect(store.validateReference(SESSION_ID, "tool-output", info)).toBe(false);
+    truncateSync(data, info.capturedBytes);
+    const outside = join(root, "linked-output");
+    linkSync(data, outside);
+    expect(store.validateReference(SESSION_ID, "tool-output", info)).toBe(false);
+    unlinkSync(outside);
+    if (process.platform !== "win32") {
+      chmodSync(data, 0o644);
+      expect(store.validateReference(SESSION_ID, "tool-output", info)).toBe(false);
+      chmodSync(data, 0o600);
+    }
+    unlinkSync(data);
+    symlinkSync(join(root, "missing-output"), data);
+    expect(store.validateReference(SESSION_ID, "tool-output", info)).toBe(false);
+    unlinkSync(data);
+    mkdirSync(data, { mode: 0o700 });
+    expect(store.validateReference(SESSION_ID, "tool-output", info)).toBe(false);
+  });
+
+  it("rejects references when the owned directory is replaced by a symlink", async () => {
+    const info = await saved("owned");
+    const moved = join(sessions, SESSION_ID, "moved-output");
+    renameSync(outputDir(), moved);
+    symlinkSync(moved, outputDir(), "dir");
+    expect(store.validateReference(SESSION_ID, "tool-output", info)).toBe(false);
   });
 
   it("rejects modified or oversized payloads before exposing text", async () => {

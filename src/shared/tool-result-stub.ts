@@ -1,3 +1,5 @@
+import { assertValidToolUseId } from "./tool-use-id.js";
+import { normalizeToolOutputArtifactInfo } from "./tool-output-artifact.js";
 import {
   buildHeadTailPreview,
   TOOL_RESULT_READ_DEFAULT_CHARS,
@@ -34,10 +36,13 @@ export function buildToolResultTruncatedStub(
   options?: {
     artifactUnavailable?: ToolResultArtifactUnavailableInfo;
     outputArtifact?: ToolOutputArtifactInfo;
+    outputArtifactUnavailable?: boolean;
   },
 ): string {
-  const capture = options?.outputArtifact;
-  if (!capture && !info) throw new Error("tool result stub requires truncation metadata or an output capture");
+  assertValidToolUseId(toolUseId);
+  const capture = normalizeToolOutputArtifactInfo(options?.outputArtifact);
+  const captureUnavailable = options?.outputArtifactUnavailable === true || (options?.outputArtifact !== undefined && !capture);
+  if (!capture && !captureUnavailable && !info) throw new Error("tool result stub requires truncation metadata or an output capture");
   const normalizedName = (toolName ?? "?").replace(/[^A-Za-z0-9_-]/g, "?");
   const safeName = normalizedName.length > 128 ? `${normalizedName.slice(0, 127)}?` : normalizedName;
   const quotedToolUseId = JSON.stringify(toolUseId);
@@ -45,7 +50,7 @@ export function buildToolResultTruncatedStub(
     `[tool_result truncated by host:` +
     ` tool=${safeName},` +
     ` toolUseId=${quotedToolUseId},`;
-  const base = capture
+  const base = captureUnavailable ? heading + " captureStatus=unavailable." : capture
     ? heading + ` captureStatus=${capture.status}, capturedBytes=${capture.capturedBytes},` +
       ` observedBytes=${capture.observedBytes}, capturedChars=${capture.capturedChars}` +
       `${capture.reason ? `, reason=${capture.reason}` : ""}.`
@@ -60,7 +65,9 @@ export function buildToolResultTruncatedStub(
     ` ${TOOL_RESULT_READ_MIN_CHARS}..${TOOL_RESULT_READ_MAX_CHARS}.` +
     ` Continue from nextOffset, or pass a literal query with an offset to search.`;
   let recovery: string;
-  if (capture?.status === "unavailable") {
+  if (captureUnavailable) {
+    recovery = " The stored output reference is missing or invalid; no artifact can be recovered.";
+  } else if (capture?.status === "unavailable") {
     recovery = " The captured output is unavailable; no artifact can be recovered.";
   } else if (capture?.status === "partial") {
     recovery = " Only the retained portion is available; the complete command output was not captured." +
@@ -73,7 +80,7 @@ export function buildToolResultTruncatedStub(
   } else {
     recovery = " The verbatim result remains available." + readInstructions;
   }
-  const previewLabel = capture ? "Preview of displayed output" : "Preview of original output";
+  const previewLabel = capture || captureUnavailable ? "Preview of displayed output" : "Preview of original output";
   const previewEnvelope = `\n${previewLabel}:\n<head>\n</head>\n<tail>\n</tail>\n<0000000000 chars omitted>`;
   let previewBudget = Math.max(
     0,
