@@ -151,6 +151,11 @@ export function analyzeShellTestExpression(
         } else if (INTEGER_BINARY.has(operator)) {
           const leftInteger = parseProvenShellInteger(left);
           const rightInteger = parseProvenShellInteger(right);
+          // Unlike test/[ operands, [[ operands are recursively interpreted as
+          // arithmetic. Unknown strings may execute array subscript expansions.
+          if (form === "double-bracket" && (leftInteger === undefined || rightInteger === undefined)) {
+            return fail("unproven arithmetic test operand", leftInteger === undefined ? leftIndex : rightIndex);
+          }
           if (leftInteger !== undefined && rightInteger !== undefined) {
             status = compareIntegers(leftInteger, operator, rightInteger) ? "success" : "failure";
           }

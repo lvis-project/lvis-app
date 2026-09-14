@@ -115,6 +115,27 @@ describe("archive entry streaming", () => {
     expect(result.attributes.get("folder/.hidden")).toEqual({ expectedBytes: binary.length, ownerExecutable: true });
   });
 
+  it.each([false, true])("consumes arbitrary member padding without changing file boundaries (gzip=%s)", async (gzip) => {
+    const expected = new Map<string, Buffer>();
+    const entries = [1, 511, 512, 513, 1025].map((size, index) => {
+      const path = `file-${size}`;
+      const body = Buffer.alloc(size, index + 1);
+      expected.set(path, body);
+      const entry = member({ path, body, type: index % 2 ? "" : "0" });
+      entry.fill(0xa5, 512 + body.length);
+      return entry;
+    });
+    const finalBody = Buffer.from([0, 0xff, 0x80, 0x01]);
+    expected.set("after-padding", finalBody);
+    const archive = Buffer.concat([
+      ...entries, pax("path", "after-padding"), member({ path: "placeholder", body: finalBody }), terminal,
+    ]);
+    const result = await consume(gzip ? gzipSync(archive) : archive);
+    expect(result.files).toEqual(expected);
+    expect(result.directories).toEqual([]);
+    for (const [path, body] of expected) expect(result.attributes.get(path)?.expectedBytes).toBe(body.length);
+  });
+
   it("reads actual file-backed tar and gzip fixtures by content", async () => {
     const root = await mkdtemp(join(tmpdir(), "archive-reader-")); temporaryPaths.push(root);
     await mkdir(join(root, "input"));
@@ -345,15 +366,14 @@ describe("archive rejection after a completed valid member", () => {
     await rejectsFollowing(corrupt);
     await rejectsFollowing(member({ path: "short-header" }).subarray(0, 300), "invalid-archive", Buffer.alloc(0));
     await rejectsFollowing(member({ path: "short-body", body: Buffer.from("123"), size: 1024 }), "invalid-archive", Buffer.alloc(0));
+    await rejectsFollowing(member({ path: "short-padding", body: Buffer.from("a") }).subarray(0, 513), "invalid-archive", Buffer.alloc(0));
     await rejectsFollowing(member({ path: "PaxHeader", type: "x", body: Buffer.from("123"), size: 1024 }), "invalid-archive", Buffer.alloc(0));
     for (const tail of [Buffer.alloc(0), Buffer.alloc(512)]) await rejectsFollowing(Buffer.alloc(0), "invalid-archive", tail);
     await rejectsFollowing(pax("path", "dangling"));
   });
 
-  it("rejects concealed directory payload, nonzero padding, concatenation and nonzero trailing data", async () => {
+  it("rejects concealed directory payload, nonzero metadata padding, concatenation and nonzero trailing data", async () => {
     await rejectsFollowing(member({ path: "directory", type: "5", body: Buffer.alloc(512) }));
-    const badPadding = member({ path: "bad-padding", body: Buffer.from("a") }); badPadding[513] = 1;
-    await rejectsFollowing(badPadding);
     const badMetaPadding = pax("path", "target"); badMetaPadding[badMetaPadding.length - 1] = 1;
     await rejectsFollowing(badMetaPadding);
     await rejectsFollowing(Buffer.concat([terminal, member({ path: "concatenated" })]));

@@ -10,6 +10,25 @@
 import { describe, it, expect } from "vitest";
 import { execFileSync } from "node:child_process";
 import { tokenizeShell } from "../shell-tokenizer.js";
+import { isReadOnlyShellLeaf } from "../../permissions/reviewer/host-risk-inspector.js";
+
+describe("compound output risk projection", () => {
+  it.each(['(cat source) >output', '{ cat source; } 2>&1'])("retains output effects for %s", (command) => {
+    const result = tokenizeShell(command);
+    expect(result.parseError).toBe(false);
+    expect(result.leaves.some((leaf) => leaf.argv[0] === "cat")).toBe(true);
+    const output = result.leaves.find((leaf) => leaf.hasOutputRedirect);
+    expect(output).toBeDefined();
+    expect(isReadOnlyShellLeaf(output!)).toBe(false);
+  });
+
+  it("retains nested execution inside a compound output target", () => {
+    const result = tokenizeShell('(cat source) >"$(printf output)"');
+    expect(result.parseError).toBe(false);
+    expect(result.leaves.map((leaf) => leaf.argv[0])).toContain("printf");
+    expect(result.leaves.find((leaf) => leaf.hasOutputRedirect)?.hasCommandSubstitution).toBe(true);
+  });
+});
 
 describe("tokenizeShell — quoting", () => {
   it("keeps whitespace inside single quotes as one argv token", () => {
