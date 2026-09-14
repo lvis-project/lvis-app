@@ -16,9 +16,9 @@ const { assertGraphicsRuntimeFiles } = require("../../scripts/lib/graphics-runti
 
 const roots: string[] = [];
 const RUNTIME_FILES = {
-  linux: ["libEGL.so", "libGLESv2.so", "libvk_swiftshader.so", "libvulkan.so.1", "vk_swiftshader_icd.json"],
-  darwin: ["libEGL.dylib", "libGLESv2.dylib", "libvk_swiftshader.dylib", "vk_swiftshader_icd.json"],
-  win32: ["libEGL.dll", "libGLESv2.dll", "vk_swiftshader.dll", "vulkan-1.dll", "vk_swiftshader_icd.json", "dxcompiler.dll", "dxil.dll"],
+  linux: ["libvk_swiftshader.so", "libvulkan.so.1", "vk_swiftshader_icd.json"],
+  darwin: ["libvk_swiftshader.dylib", "vk_swiftshader_icd.json"],
+  win32: ["vk_swiftshader.dll", "vulkan-1.dll", "vk_swiftshader_icd.json", "dxcompiler.dll", "dxil.dll"],
 };
 
 function putFile(path: string, content: string | Buffer = "runtime asset") {
@@ -91,7 +91,7 @@ describe("packaged graphics runtime", () => {
 
   it("rejects empty files and directories in place of runtime libraries", () => {
     const { libraryDirectory } = createPackage("linux");
-    const library = join(libraryDirectory, "libEGL.so");
+    const library = join(libraryDirectory, "libvk_swiftshader.so");
     writeFileSync(library, "");
     expect(() => assertGraphicsRuntimeFiles(libraryDirectory, "linux")).toThrow(library);
     rmSync(library);

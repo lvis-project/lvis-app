@@ -1,12 +1,3 @@
-/**
- * E4 — startup-launch (auto-run at login) platform semantics.
- *
- * MUTATION CONTRACT:
- *  - Dropping the dev (unpackaged) guard makes the dev test fail (it would call
- *    setLoginItemSettings).
- *  - Swapping the macOS `openAsHidden` for the Windows `args:["--hidden"]`
- *    branch (or vice-versa) makes the per-platform tests fail.
- */
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("electron", () => ({ app: {} }));
@@ -34,14 +25,10 @@ function makeDeps(overrides: Partial<StartupLaunchDeps> = {}): {
 } {
   const loginItemState = {
     openAtLogin: false,
-    openAsHidden: false,
-    wasOpenedAsHidden: false,
+    wasOpenedAtLogin: false,
   } as unknown as Electron.LoginItemSettings;
   const setLoginItemSettings = vi.fn((settings: Electron.Settings) => {
     (loginItemState as { openAtLogin: boolean }).openAtLogin = settings.openAtLogin ?? false;
-    if (settings.openAsHidden !== undefined) {
-      (loginItemState as { openAsHidden: boolean }).openAsHidden = settings.openAsHidden;
-    }
   });
   const deps: StartupLaunchDeps = {
     isPackaged: () => true,
@@ -49,6 +36,7 @@ function makeDeps(overrides: Partial<StartupLaunchDeps> = {}): {
     setLoginItemSettings,
     getLoginItemSettings: () => loginItemState,
     argv: () => [],
+    launchMinimized: () => false,
     ...overrides,
   };
   return { deps, setLoginItemSettings, loginItemState };
@@ -67,7 +55,7 @@ describe("reconcileStartupLaunch", () => {
     expect(state.openAtLogin).toBe(false);
   });
 
-  it("macOS: sets openAtLogin + openAsHidden natively", () => {
+  it("registers a login item and retains the host minimized preference", () => {
     const { deps, setLoginItemSettings } = makeDeps({ platform: () => "darwin" });
     const state = reconcileStartupLaunch(
       { launchAtStartup: true, launchMinimized: true },
@@ -75,18 +63,17 @@ describe("reconcileStartupLaunch", () => {
     );
     expect(setLoginItemSettings).toHaveBeenCalledWith({
       openAtLogin: true,
-      openAsHidden: true,
     });
     expect(state.openAtLogin).toBe(true);
+    expect(state.openAsHidden).toBe(true);
     expect(state.applied).toBe(true);
   });
 
-  it("macOS: openAsHidden is false when launchMinimized is off", () => {
+  it("registers a visible login launch when the minimized preference is off", () => {
     const { deps, setLoginItemSettings } = makeDeps({ platform: () => "darwin" });
     reconcileStartupLaunch({ launchAtStartup: true, launchMinimized: false }, deps);
     expect(setLoginItemSettings).toHaveBeenCalledWith({
       openAtLogin: true,
-      openAsHidden: false,
     });
   });
 
@@ -113,7 +100,6 @@ describe("reconcileStartupLaunch", () => {
     reconcileStartupLaunch({ launchAtStartup: false, launchMinimized: false }, deps);
     expect(setLoginItemSettings).toHaveBeenCalledWith({
       openAtLogin: false,
-      openAsHidden: false,
     });
   });
 });
@@ -128,20 +114,22 @@ describe("readStartupLaunchState", () => {
     expect(state.wasOpenedAsHidden).toBe(true);
   });
 
-  it("macOS: reads wasOpenedAsHidden from the OS login-item settings", () => {
-    const loginItemState = {
-      openAtLogin: true,
-      openAsHidden: true,
-      wasOpenedAsHidden: true,
-    } as unknown as Electron.LoginItemSettings;
-    const state = readStartupLaunchState({
-      isPackaged: () => true,
-      platform: () => "darwin",
-      setLoginItemSettings: vi.fn(),
-      getLoginItemSettings: () => loginItemState,
-      argv: () => [],
+  it.each([
+    { login: true, minimized: true, hidden: true },
+    { login: true, minimized: false, hidden: false },
+    { login: false, minimized: true, hidden: false },
+    { login: false, minimized: false, hidden: false },
+  ])("applies the minimized preference only to a login launch: %j", ({ login, minimized, hidden }) => {
+    const { deps } = makeDeps({
+      getLoginItemSettings: () => ({
+        openAtLogin: true,
+        wasOpenedAtLogin: login,
+      }) as Electron.LoginItemSettings,
+      launchMinimized: () => minimized,
     });
-    expect(state.wasOpenedAsHidden).toBe(true);
+    const state = readStartupLaunchState(deps);
+    expect(state.wasOpenedAsHidden).toBe(hidden);
+    expect(state.openAsHidden).toBe(minimized);
     expect(state.openAtLogin).toBe(true);
   });
 

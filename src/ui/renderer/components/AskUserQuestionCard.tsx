@@ -13,7 +13,7 @@ import { t } from "../../../i18n/runtime.js";
 import { focusIsFreeFor } from "./permissions/ApprovalDock.js";
 import type { LvisApi } from "../types.js";
 
-export interface AskUserQuestionItem {
+interface AskUserQuestionItem {
   question: string;
   choices: string[];
   /**

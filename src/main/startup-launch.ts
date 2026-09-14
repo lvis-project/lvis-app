@@ -1,22 +1,9 @@
 /**
- * E4 — launch-at-startup (auto-run at OS login).
+ * Login-item registration and hidden startup state.
  *
- * Wraps Electron's `app.setLoginItemSettings` / `getLoginItemSettings` with the
- * per-platform semantics the two APIs differ on:
- *
- *   - macOS: `openAsHidden` is honoured natively — a hidden login launch starts
- *     without showing the window. `wasOpenedAsHidden` is queryable at boot.
- *   - Windows: there is no `openAsHidden`; a hidden start is expressed by
- *     passing a `--hidden` launch arg that the boot path (`src/main.ts`) reads.
- *   - Linux: Electron's setLoginItemSettings is a no-op (no autostart .desktop
- *     writer built in). We still call it so the code path is uniform; it simply
- *     does nothing, which we surface honestly via `readStartupLaunchState`.
- *
- * dev (`!app.isPackaged`): a login item would point at the Electron dev binary
- * (not the user's installed app), so registering one is meaningless and
- * confusing. We DO NOT register in dev — instead we return `applied:false` with
- * an explicit `dev-unpackaged` reason so the UI / logs can say so plainly
- * (No-Fallback: no silent no-op that masquerades as success).
+ * On macOS, the host applies its persisted minimized preference when the OS
+ * reports a login launch. Windows persists a --hidden argument in the login
+ * item. Unpackaged development builds never register an OS login item.
  */
 import { app } from "electron";
 import { createLogger } from "../lib/logger.js";
@@ -25,7 +12,7 @@ import { t } from "../i18n/index.js";
 
 const log = createLogger("lvis");
 
-/** Marker arg appended on Windows for a hidden (tray-only) auto-launch. */
+/** Marker argument for a hidden (tray-only) launch. */
 export const HIDDEN_LAUNCH_ARG = "--hidden";
 
 export interface StartupLaunchInput {
@@ -36,12 +23,11 @@ export interface StartupLaunchInput {
 export interface StartupLaunchState {
   /** Whether `openAtLogin` is actually set according to the OS. */
   openAtLogin: boolean;
-  /** Whether a hidden start is configured (openAsHidden / --hidden arg). */
+  /** Whether a hidden start is configured for the login item. */
   openAsHidden: boolean;
   /**
-   * `true` when the OS launched this process as a hidden login item (macOS
-   * `wasOpenedAsHidden`, or a `--hidden` arg on Windows). Drives whether boot
-   * suppresses the first window show.
+   * Whether the login-launch state and minimized preference, or an explicit
+   * --hidden argument, require boot to suppress the first window show.
    */
   wasOpenedAsHidden: boolean;
   /** `true` when the setting was actually applied to the OS this platform/mode. */
@@ -61,6 +47,7 @@ export interface StartupLaunchDeps {
   getLoginItemSettings: () => Electron.LoginItemSettings;
   /** Process argv — used on Windows to detect a `--hidden` cold start. */
   argv: () => readonly string[];
+  launchMinimized: () => boolean;
 }
 
 function defaultDeps(): StartupLaunchDeps {
@@ -70,6 +57,7 @@ function defaultDeps(): StartupLaunchDeps {
     setLoginItemSettings: (settings) => app.setLoginItemSettings(settings),
     getLoginItemSettings: () => app.getLoginItemSettings(),
     argv: () => process.argv,
+    launchMinimized: () => getServices()?.settingsService.getAll().system.launchMinimized ?? false,
   };
 }
 
@@ -102,10 +90,7 @@ export function reconcileStartupLaunch(
   }
 
   const settings: Electron.Settings = { openAtLogin: input.launchAtStartup };
-  if (platform === "darwin") {
-    // macOS honours openAsHidden natively.
-    settings.openAsHidden = input.launchAtStartup && input.launchMinimized;
-  } else if (platform === "win32") {
+  if (platform === "win32") {
     // Windows has no openAsHidden — express "start hidden" via a launch arg the
     // boot path reads. Only pass it when both flags are on.
     settings.args =
@@ -125,7 +110,7 @@ export function reconcileStartupLaunch(
     };
   }
 
-  return readStartupLaunchState(deps);
+  return readStartupLaunchState({ ...deps, launchMinimized: () => input.launchMinimized });
 }
 
 /**
@@ -168,12 +153,12 @@ export function readStartupLaunchState(
     };
   }
 
-  // macOS + Linux. On Linux openAtLogin round-trips as false (Electron no-op),
-  // which readStartupLaunchState reports truthfully.
+  // The OS reports a login launch; the host owns whether it opens minimized.
+  const minimized = platform === "darwin" && deps.launchMinimized();
   return {
     openAtLogin: os.openAtLogin,
-    openAsHidden: os.openAsHidden ?? false,
-    wasOpenedAsHidden: os.wasOpenedAsHidden ?? argvHidden,
+    openAsHidden: os.openAtLogin && minimized,
+    wasOpenedAsHidden: (os.wasOpenedAtLogin && minimized) || argvHidden,
     applied: platform === "darwin" || platform === "linux",
     reason: platform === "darwin" || platform === "linux" ? undefined : "platform-unsupported",
   };

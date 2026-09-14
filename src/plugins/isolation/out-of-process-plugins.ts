@@ -273,7 +273,7 @@
  *      The merge is unconditional: `sandbox-manager.js` composes the
  *    allow-list as `[...getDefaultWritePaths(), ...userAllowWrite]`, so an
  *    ALLOW grant cannot subtract from it. A DENY grant can, which is the lever
- *    named at the end of this outcome list. READ OUT OF ASRT 0.0.73's
+ *    named at the end of this outcome list. READ OUT OF ASRT 0.0.75's
  *    `getDefaultWritePaths()`, the merged list is `/dev/stdout`, `/dev/stderr`,
  *    `/dev/null`, `/dev/tty`, `/dev/dtracehelper`, `/dev/autofs_nowait`,
  *    `/tmp/claude`, `/private/tmp/claude`, `<real home>/.npm/_logs` and
