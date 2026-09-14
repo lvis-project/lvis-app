@@ -35,6 +35,9 @@ function createPackage(platform: keyof typeof RUNTIME_FILES) {
     ? join(contents, "Frameworks", "Electron Framework.framework", "Versions", "A", "Libraries")
     : root;
   const modules = join(resources, "app.asar.unpacked", "node_modules");
+  if (platform !== "win32") {
+    putFile(join(modules, "@anthropic-ai/sandbox-runtime/vendor/java-proxy-agent/srt-proxy-agent.jar"));
+  }
   const uv = Buffer.from("executable");
   const uvName = platform === "win32" ? "uv.exe" : "uv";
   putFile(join(resources, "uv", `${platform}-x64`, `${uvName}.gz`), gzipSync(uv));
@@ -58,6 +61,7 @@ function createPackage(platform: keyof typeof RUNTIME_FILES) {
   for (const file of RUNTIME_FILES[platform]) putFile(join(libraryDirectory, file), file);
   return {
     libraryDirectory,
+    vendorDirectory: join(modules, "@anthropic-ai", "sandbox-runtime", "vendor"),
     context: {
       appOutDir: root,
       electronPlatformName: platform,
@@ -87,6 +91,18 @@ describe("packaged graphics runtime", () => {
     rmSync(missing);
     await expect(afterPack(context)).rejects.toThrow(missing);
     expect(() => assertGraphicsRuntimeFiles(libraryDirectory, platform)).toThrow(missing);
+  });
+
+  it.each(["linux", "darwin"] as const)("requires the physical %s JVM proxy agent", async (platform) => {
+    const { context, vendorDirectory } = createPackage(platform);
+    const jar = join(vendorDirectory, "java-proxy-agent", "srt-proxy-agent.jar");
+    rmSync(jar);
+    await expect(afterPack(context)).rejects.toThrow("packaged JVM proxy agent missing or invalid");
+    putFile(jar, "");
+    await expect(afterPack(context)).rejects.toThrow("packaged JVM proxy agent missing or invalid");
+    rmSync(jar);
+    mkdirSync(jar);
+    await expect(afterPack(context)).rejects.toThrow("packaged JVM proxy agent missing or invalid");
   });
 
   it("rejects empty files and directories in place of runtime libraries", () => {

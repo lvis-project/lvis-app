@@ -1656,9 +1656,9 @@ describe("Windows NSIS installer smoke contracts", () => {
     // install stamped — 0.0.73 added ambient write-deny stamps on the stock
     // world-writable system dirs, which `uninstall` removes (and `--keep-user`
     // deliberately keeps, a flag this installer does not pass). Verified for
-    // 0.0.73; bump this only together with that check.
+    // 0.0.75; bump this only together with that check.
     expect(packageJson.dependencies?.["@anthropic-ai/sandbox-runtime"]).toBe(
-      "0.0.73",
+      "0.0.75",
     );
     expect(packageJson.build?.nsis?.deleteAppDataOnUninstall).toBe(false);
   });

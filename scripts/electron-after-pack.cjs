@@ -4,6 +4,7 @@ const { constants: fsConstants, accessSync, chmodSync } = require("node:fs");
 const { join } = require("node:path");
 const { gunzipSync } = require("node:zlib");
 const { assertGraphicsRuntimeFiles } = require("./lib/graphics-runtime-files.cjs");
+const { assertSandboxRuntimeFiles } = require("./lib/sandbox-runtime-files.cjs");
 
 // electron-builder's `context.arch` is the numeric Arch enum (1=x64, 3=arm64).
 // Native packages name their per-target artifacts by platform+arch (node-pty:
@@ -143,6 +144,8 @@ function assertSandboxVendorBinaries(context) {
       );
     }
   }
+
+  assertSandboxRuntimeFiles(vendorDir, platform);
 
   if (!spec.keep) return;
 

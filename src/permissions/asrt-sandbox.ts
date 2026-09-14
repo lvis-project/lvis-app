@@ -4,7 +4,7 @@
 
 
 import { spawn } from "node:child_process";
-import { mkdirSync } from "node:fs";
+import { lstatSync, mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -99,6 +99,20 @@ export function getVendoredSrtWinExePath(): string {
   const root = rewriteAsarPathToUnpacked(dirname(packageJson));
   const arch = process.arch === "arm64" ? "arm64" : "x64";
   return join(root, "vendor", "srt-win", arch, "srt-win.exe");
+}
+
+/** Resolve the external JVM's agent from the physical packaged payload. */
+export function getVendoredJavaProxyAgentJarPath(): string {
+  const packageJson = createRequire(import.meta.url).resolve(
+    "@anthropic-ai/sandbox-runtime/package.json",
+  );
+  const root = rewriteAsarPathToUnpacked(dirname(packageJson));
+  const path = join(root, "vendor", "java-proxy-agent", "srt-proxy-agent.jar");
+  const stat = lstatSync(path, { throwIfNoEntry: false });
+  if (!stat?.isFile() || stat.size === 0) {
+    throw new Error("[sandbox-java-agent-unavailable] Packaged JVM proxy agent is missing or invalid");
+  }
+  return path;
 }
 
 /**
@@ -810,6 +824,9 @@ export function buildSandboxConfig(trustedSettings: TrustedSandboxSettings): San
     network,
     filesystem,
     ...(windows !== undefined ? { windows } : {}),
+    ...(process.platform === "darwin" || process.platform === "linux"
+      ? { javaAgentJarPath: getVendoredJavaProxyAgentJarPath() }
+      : {}),
     // TRUSTED-ONLY weakening flags (see TrustedSandboxSettings trust-boundary
     // note). Only set when explicitly supplied by trusted settings.
     ...(trustedSettings.weakening?.allowAppleEvents !== undefined
