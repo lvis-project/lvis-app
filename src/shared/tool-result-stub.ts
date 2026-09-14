@@ -1,3 +1,5 @@
+import { assertValidToolUseId } from "./tool-use-id.js";
+import { normalizeToolOutputArtifactInfo } from "./tool-output-artifact.js";
 import {
   buildHeadTailPreview,
   TOOL_RESULT_READ_DEFAULT_CHARS,
@@ -8,6 +10,7 @@ import {
 } from "./bounded-tool-output.js";
 import { estimateTokens } from "./token-estimate.js";
 import { MAX_TOOL_RESULT_TOKENS } from "./tool-result-trim.js";
+import type { ToolOutputArtifactInfo } from "./tool-output-artifact.js";
 
 export interface ToolResultTruncatedInfo {
   originalLines: number;
@@ -28,33 +31,57 @@ export function buildToolResultStrippedStub(toolName: string | undefined, origLe
 export function buildToolResultTruncatedStub(
   toolUseId: string,
   toolName: string | undefined,
-  info: ToolResultTruncatedInfo,
+  info: ToolResultTruncatedInfo | undefined,
   content: string | null,
-  options?: { artifactUnavailable?: ToolResultArtifactUnavailableInfo },
+  options?: {
+    artifactUnavailable?: ToolResultArtifactUnavailableInfo;
+    outputArtifact?: ToolOutputArtifactInfo;
+    outputArtifactUnavailable?: boolean;
+  },
 ): string {
+  assertValidToolUseId(toolUseId);
+  const capture = normalizeToolOutputArtifactInfo(options?.outputArtifact);
+  const captureUnavailable = options?.outputArtifactUnavailable === true || (options?.outputArtifact !== undefined && !capture);
+  if (!capture && !captureUnavailable && !info) throw new Error("tool result stub requires truncation metadata or an output capture");
   const normalizedName = (toolName ?? "?").replace(/[^A-Za-z0-9_-]/g, "?");
   const safeName = normalizedName.length > 128 ? `${normalizedName.slice(0, 127)}?` : normalizedName;
   const quotedToolUseId = JSON.stringify(toolUseId);
-  const lineLabel = info.originalLines === -1 ? "scan-skipped" : `${info.originalLines}`;
-  const tokenLabel = info.originalTokens === -1 ? "scan-skipped" : `${info.originalTokens}`;
-  const originalChars = content?.length ?? info.originalBytes;
-  const base =
+  const heading =
     `[tool_result truncated by host:` +
     ` tool=${safeName},` +
-    ` toolUseId=${quotedToolUseId},` +
-    ` originalLines=${lineLabel},` +
-    ` originalTokens=${tokenLabel},` +
-    ` originalChars=${originalChars},` +
-    ` originalBytes=${info.originalBytes}.`;
-  const recovery = options?.artifactUnavailable
-    ? ` The verbatim artifact was not retained because it exceeded the host artifact storage cap` +
-      ` (${options.artifactUnavailable.maxBytes} bytes).`
-    : ` The verbatim result remains available.` +
-      ` Call read_tool_result_chunk with toolUseId=${quotedToolUseId} and offset=0.` +
-      ` maxChars defaults to ${TOOL_RESULT_READ_DEFAULT_CHARS} and accepts` +
-      ` ${TOOL_RESULT_READ_MIN_CHARS}..${TOOL_RESULT_READ_MAX_CHARS}.` +
-      ` Continue from nextOffset, or pass a literal query with an offset to search.`;
-  const previewEnvelope = "\nPreview of original output:\n<head>\n</head>\n<tail>\n</tail>\n<0000000000 chars omitted>";
+    ` toolUseId=${quotedToolUseId},`;
+  const base = captureUnavailable ? heading + " captureStatus=unavailable." : capture
+    ? heading + ` captureStatus=${capture.status}, capturedBytes=${capture.capturedBytes},` +
+      ` observedBytes=${capture.observedBytes}, capturedChars=${capture.capturedChars}` +
+      `${capture.reason ? `, reason=${capture.reason}` : ""}.`
+    : heading +
+      ` originalLines=${info!.originalLines === -1 ? "scan-skipped" : info!.originalLines},` +
+      ` originalTokens=${info!.originalTokens === -1 ? "scan-skipped" : info!.originalTokens},` +
+      ` originalChars=${content?.length ?? info!.originalBytes},` +
+      ` originalBytes=${info!.originalBytes}.`;
+  const readInstructions =
+    ` Call read_tool_result_chunk with toolUseId=${quotedToolUseId} and offset=0.` +
+    ` maxChars defaults to ${TOOL_RESULT_READ_DEFAULT_CHARS} and accepts` +
+    ` ${TOOL_RESULT_READ_MIN_CHARS}..${TOOL_RESULT_READ_MAX_CHARS}.` +
+    ` Continue from nextOffset, or pass a literal query with an offset to search.`;
+  let recovery: string;
+  if (captureUnavailable) {
+    recovery = " The stored output reference is missing or invalid; no artifact can be recovered.";
+  } else if (capture?.status === "unavailable") {
+    recovery = " The captured output is unavailable; no artifact can be recovered.";
+  } else if (capture?.status === "partial") {
+    recovery = " Only the retained portion is available; the complete command output was not captured." +
+      readInstructions + " hasMore describes the retained range, not source completeness.";
+  } else if (capture) {
+    recovery = " The complete captured output is available." + readInstructions;
+  } else if (options?.artifactUnavailable) {
+    recovery = ` The verbatim artifact was not retained because it exceeded the host artifact storage cap` +
+      ` (${options.artifactUnavailable.maxBytes} bytes).`;
+  } else {
+    recovery = " The verbatim result remains available." + readInstructions;
+  }
+  const previewLabel = capture || captureUnavailable ? "Preview of displayed output" : "Preview of original output";
+  const previewEnvelope = `\n${previewLabel}:\n<head>\n</head>\n<tail>\n</tail>\n<0000000000 chars omitted>`;
   let previewBudget = Math.max(
     0,
     Math.min(
@@ -66,9 +93,9 @@ export function buildToolResultTruncatedStub(
     const preview = content === null ? null : buildHeadTailPreview(content, previewBudget);
     if (preview === null) return "";
     if (preview.tail.length === 0) {
-      return `\nPreview of original output:\n<head>\n${preview.head}\n</head>`;
+      return `\n${previewLabel}:\n<head>\n${preview.head}\n</head>`;
     }
-    return `\nPreview of original output:\n<head>\n${preview.head}\n</head>` +
+    return `\n${previewLabel}:\n<head>\n${preview.head}\n</head>` +
       `\n<${preview.omittedChars} chars omitted>` +
       `\n<tail>\n${preview.tail}\n</tail>`;
   };

@@ -10,6 +10,18 @@ export interface ProviderRateLimitDiagnostics {
   retryAfterSeconds?: number;
 }
 
+/** Diagnostic facts only: these fields do not select retries or recovery. */
+export interface ProviderTransportDiagnostics {
+  phase: "process-start" | "process-error" | "stdout-parse" | "stdout-frame" | "stdout-read"
+    | "stdin-write" | "stderr-read" | "process-exit" | "rpc-write"
+    | "rpc-timeout" | "rpc-response" | "turn-completion" | "native-request";
+  kind: "process" | "protocol" | "network" | "timeout" | "authentication"
+    | "rate-limit" | "server" | "model" | "unknown";
+  statusCode?: number;
+  exitCode?: number | null;
+  signal?: string | null;
+}
+
 export interface ProviderErrorDiagnostics {
   origin: "provider" | "ai-sdk" | "unknown";
   providerType?: string;
@@ -21,6 +33,7 @@ export interface ProviderErrorDiagnostics {
   messagePreview: string;
   classification?: ErrorCategory;
   rateLimit?: ProviderRateLimitDiagnostics;
+  transport?: ProviderTransportDiagnostics;
 }
 
 interface ApiCallErrorLike {

@@ -1,17 +1,59 @@
 /**
- * Safe recovery metadata from an authenticated subscription transport.
+ * Safe recovery and failure metadata from an authenticated subscription transport.
  *
  * Remote runtimes are allowed to return arbitrary error text, which can contain
  * user content, paths, account information, or credentials. This module may
  * inspect a narrowly bounded portion of that response to recognize the three
  * recoveries LVIS supports, but it never returns server text or unrecognised
- * fields. The result is deliberately suitable for `StreamEvent.providerError`.
+ * fields. Closed transport facts describe other failures without enabling new
+ * recoveries. The result is suitable for `StreamEvent.providerError`.
  */
+import { constants } from "node:os";
 import type {
   ProviderErrorDiagnostics,
   ProviderRateLimitDiagnostics,
+  ProviderTransportDiagnostics,
 } from "../engine/llm/provider-error-diagnostics.js";
 import { isRecord } from "../shared/is-record.js";
+
+const TRANSPORT_FAILURE_PREVIEW = "subscription runtime transport failure";
+const TRANSPORT_PHASES: readonly ProviderTransportDiagnostics["phase"][] = [
+  "process-start", "process-error", "stdout-parse", "stdout-frame", "stdout-read", "stdin-write",
+  "stderr-read", "process-exit", "rpc-write", "rpc-timeout", "rpc-response",
+  "turn-completion", "native-request",
+];
+const TRANSPORT_KINDS: readonly ProviderTransportDiagnostics["kind"][] = [
+  "process", "protocol", "network", "timeout", "authentication", "rate-limit",
+  "server", "model", "unknown",
+];
+
+/** Copy only closed labels and bounded process facts; never copy runtime text. */
+function normalizeTransportDiagnostics(value: unknown): ProviderTransportDiagnostics | undefined {
+  if (!isRecord(value)) return undefined;
+  const { phase, kind, statusCode, exitCode, signal } = value;
+  if (!TRANSPORT_PHASES.some((candidate) => candidate === phase)
+    || !TRANSPORT_KINDS.some((candidate) => candidate === kind)) return undefined;
+  if (statusCode !== undefined && safeStatusCode(statusCode) === undefined) return undefined;
+  if (exitCode !== undefined && exitCode !== null && (typeof exitCode !== "number"
+    || !Number.isInteger(exitCode) || exitCode < -2_147_483_648 || exitCode > 4_294_967_295)) return undefined;
+  if (signal !== undefined && signal !== null && (typeof signal !== "string"
+    || !Object.hasOwn(constants.signals, signal))) return undefined;
+  return {
+    phase: phase as ProviderTransportDiagnostics["phase"],
+    kind: kind as ProviderTransportDiagnostics["kind"],
+    ...(statusCode === undefined ? {} : { statusCode: statusCode as number }),
+    ...(exitCode === undefined ? {} : { exitCode: exitCode as number | null }),
+    ...(signal === undefined ? {} : { signal: signal as string | null }),
+  };
+}
+
+export function subscriptionTransportFailure(
+  transport: ProviderTransportDiagnostics,
+): ProviderErrorDiagnostics {
+  const normalized = normalizeTransportDiagnostics(transport);
+  if (!normalized) throw new Error("Invalid subscription transport diagnostics");
+  return { origin: "unknown", classification: "unknown", messagePreview: TRANSPORT_FAILURE_PREVIEW, transport: normalized };
+}
 
 const MAX_REMOTE_DIAGNOSTIC_TEXT_LENGTH = 8_192;
 const MAX_RATE_LIMIT_VALUE = 1_000_000_000_000;
@@ -146,13 +188,14 @@ function rateLimitDiagnostics(
 }
 
 /**
- * Project only the exact recovery cases that the engine can act on. Unknown
- * errors return `undefined` and keep the transport's existing generic failure.
+ * Project the exact recovery cases that the engine can act on. When a failure
+ * phase is supplied, other errors retain diagnostic facts with no new recovery.
  */
 export function projectSubscriptionTransportErrorDiagnostics(
   error: unknown,
+  phase?: "rpc-response" | "turn-completion",
 ): ProviderErrorDiagnostics | undefined {
-  if (!isRecord(error)) return undefined;
+  if (!isRecord(error)) return phase ? subscriptionTransportFailure({ phase, kind: "unknown" }) : undefined;
   const records = directRecords(error);
   const texts = diagnosticText(records);
   const statusCode = diagnosticStatus(records);
@@ -190,7 +233,17 @@ export function projectSubscriptionTransportErrorDiagnostics(
     };
   }
 
-  return undefined;
+  if (!phase) return undefined;
+  // Keep HTTP status inside the diagnostic, so it cannot alter retry behavior.
+  const codes = records.flatMap((record) => [ownValue(record, "code"), ownValue(record, "type")]);
+  const kind: ProviderTransportDiagnostics["kind"] = statusCode === 401 || statusCode === 403 ? "authentication"
+    : statusCode === 429 ? "rate-limit"
+    : statusCode === 408 || statusCode === 504 || codes.includes("ETIMEDOUT") ? "timeout"
+    : statusCode !== undefined && statusCode >= 500 ? "server"
+    : codes.some((code) => typeof code === "string" && ["ECONNRESET", "ECONNREFUSED", "ENOTFOUND", "EPIPE"].includes(code)) ? "network"
+    : codes.some((code) => code === "model_not_found" || code === "invalid_model") ? "model"
+    : "unknown";
+  return subscriptionTransportFailure({ phase, kind, ...(statusCode === undefined ? {} : { statusCode }) });
 }
 
 /** Revalidate an error-carried diagnostic before it crosses another local layer. */
@@ -199,6 +252,11 @@ export function projectedSubscriptionTransportDiagnosticsFromError(
 ): ProviderErrorDiagnostics | undefined {
   if (!isRecord(error)) return undefined;
   const candidate = ownValue(error, "providerError");
+  if (isRecord(candidate) && candidate.origin === "unknown"
+    && candidate.classification === "unknown" && candidate.messagePreview === TRANSPORT_FAILURE_PREVIEW) {
+    const transport = normalizeTransportDiagnostics(ownValue(candidate, "transport"));
+    return transport ? subscriptionTransportFailure(transport) : undefined;
+  }
   if (!isRecord(candidate) || candidate.origin !== "provider" || typeof candidate.messagePreview !== "string") {
     return undefined;
   }

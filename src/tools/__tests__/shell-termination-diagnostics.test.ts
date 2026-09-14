@@ -1,3 +1,4 @@
+import type { ToolOutputCapture } from "../../shared/tool-output-artifact.js";
 import { ChildProcess, spawn } from "node:child_process";
 import { PassThrough } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -41,7 +42,7 @@ afterEach(() => {
 
 describe.each(["plain", "sandbox"] as const)("%s shell completion", (route) => {
   describe.each(["bash", "powershell"] as const)("%s", (dialect) => {
-    async function start() {
+    async function start(captureFactory?: () => ToolOutputCapture) {
       setSandboxRequestedAtBoot(route === "sandbox");
       if (route === "sandbox") setActiveSandboxCapability({
         kind: "asrt", confidence: "verified", platform: process.platform,
@@ -62,12 +63,51 @@ describe.each(["plain", "sandbox"] as const)("%s shell completion", (route) => {
       const controller = new AbortController();
       const tool = dialect === "bash" ? new BashTool() : new PowerShellTool();
       const pending = tool.execute({ command: dialect === "bash" ? "echo ready" : "Write-Output ready", timeoutSeconds: 1 }, {
-        cwd: process.cwd(), extraAllowedDirectories: [], metadata: {}, abortSignal: controller.signal,
+        cwd: process.cwd(), extraAllowedDirectories: [], metadata: captureFactory ? { toolOutputCaptureFactory: captureFactory } : {}, abortSignal: controller.signal,
       });
       await vi.advanceTimersByTimeAsync(0);
       expect(child.listenerCount("close")).toBeGreaterThan(0);
       return { child, controller, pending };
     }
+
+    it.each(["close", "error", "timeout", "cancel"] as const)("awaits one artifact publication on %s", async (cause) => {
+      const chunks: Buffer[] = [];
+      let publish!: () => void;
+      const gate = new Promise<void>((resolve) => { publish = resolve; });
+      const finish = vi.fn(async (interrupted?: boolean) => {
+        await gate;
+        return {
+          version: 1 as const, captureId: "3138f9c6-89f0-4645-85ea-2c205f9523f4",
+          status: interrupted ? "partial" as const : "complete" as const,
+          ...(interrupted ? { reason: "interrupted" as const } : {}),
+          capturedBytes: 15_012, observedBytes: 15_012, capturedChars: 15_012, sha256: "a".repeat(64),
+        };
+      });
+      const f = await start(() => ({
+        captureId: "3138f9c6-89f0-4645-85ea-2c205f9523f4",
+        append: (bytes) => { chunks.push(Buffer.from(bytes)); return true; },
+        waitForDrain: async () => {}, finish,
+      }));
+      f.child.stdout.write("a".repeat(15_000));
+      f.child.stderr.write("stderr");
+      f.child.stdout.write("stdout");
+      let resolved = false;
+      void f.pending.then(() => { resolved = true; });
+      if (cause === "close") close(f.child, 7, null);
+      else if (cause === "error") f.child.emit("error", new Error("operation failed"));
+      else if (cause === "cancel") f.controller.abort();
+      else await vi.advanceTimersByTimeAsync(1_000);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(finish).toHaveBeenCalledExactlyOnceWith(cause !== "close");
+      expect(resolved).toBe(false);
+      publish();
+      const result = await f.pending;
+      expect(result.isError).toBe(true);
+      expect(result.metadata?.outputArtifact).toMatchObject({ status: cause === "close" ? "complete" : "partial" });
+      expect(Buffer.concat(chunks).toString()).toBe("a".repeat(15_000) + "stderrstdout");
+      close(f.child, null, "SIGKILL");
+      expect(finish).toHaveBeenCalledTimes(1);
+    });
 
     it.each([
       [0, null, "", "(no output)", false],

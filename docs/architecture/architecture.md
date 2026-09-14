@@ -93,8 +93,42 @@ the executor ceiling also references. Cancellation terminates the managed child
 tree. An interrupted foreground call settles after requesting that termination
 and releasing its output pipe ends, even if a descendant keeps an inherited
 pipe open. Ordinary completion still drains stdout and stderr through closure;
-sandbox cleanup waits for confirmed root termination. Output capture keeps a
-bounded prefix. Child environment filtering stays in
+sandbox cleanup waits for confirmed root termination. Output display keeps a
+bounded prefix. Foreground capture also retains the original stdout/stderr bytes
+in observed event order in a session artifact owned by `MemoryManager`.
+Each foreground capture artifact is limited to 5,000,000 bytes. Retained captures
+plus active reservations are limited to 20,000,000 bytes per session. Capture
+reserves the full artifact allowance before it starts and releases unused
+reservation when it settles; retained files count after reload, so concurrent
+captures within the host process cannot overbook the session. Separate processes
+concurrently writing the same session are outside this ownership contract.
+Small outputs remain in the existing preview without reserving an artifact.
+
+Pending disk buffers are bounded at 262,144 bytes (256 KiB). Backpressure pauses
+both child streams until the queue drains. A single excessive chunk, quota
+exhaustion, storage failure, or interruption produces an explicit `partial` or
+`unavailable` capture; the command pipes continue draining when capture cannot
+continue. A capture becomes `complete` only after accepted writes and metadata
+publication finish. Partial captures expose only retained content; unavailable
+captures have no recoverable artifact. Capture status does not replace the shell
+exit code, signal, timeout, cancellation, or process cleanup result.
+
+The host derives private artifact locations from validated session/tool identity
+and an opaque capture ID. Reads validate ownership, metadata, and content hashes;
+symlink traversal is rejected. Transcript saves retain capture references from
+current messages and checkpoints and remove only verified, unreferenced captures.
+In-flight captures remain reserved; published captures remain pinned until a
+session or checkpoint save commits their reference or their invocation abandons
+ownership.
+The executor abandons undelivered results and the turn releases captures absent
+from its final history. New capture admission sweeps verified orphan artifacts
+against persisted session/checkpoint references, including after restart.
+Unverifiable orphan payloads remain charged to the quota instead of being deleted.
+Artifacts preserve whitespace and CRLF even though the display formatter
+normalizes them. Recovery decodes the stored bytes as UTF-8 text and omits an
+incomplete trailing code point from a partial capture.
+
+Child environment filtering stays in
 [`safe-env.ts`](../../src/tools/safe-env.ts). Plain host shells additionally
 retain the operator's configured proxy and bypass settings. Sandbox children
 keep the generic filtered baseline and receive proxy changes only from their
@@ -328,8 +362,8 @@ the existing custom budget and thinking on/off remain available. Retry uses the
 user ceiling and restores the prior budget afterward. Raw internal generation
 retains its separate protocol contract.
 
-Oversized text tool results remain verbatim in live memory and the renderer,
-and within the artifact storage cap they remain in file-backed session
+Ordinary oversized text tool results remain verbatim in live memory and the
+renderer, and within the artifact storage cap they remain in file-backed session
 artifacts. Provider requests receive a bounded head/tail preview with the
 original size and `toolUseId`. The builtin
 `read_tool_result_chunk` tool reads from an absolute UTF-16 `offset`, returns an
@@ -338,6 +372,23 @@ shared size contract defaults to 3,000 characters and accepts 500 through 5,000;
 changing `maxChars` never changes the requested position. Returned boundaries do
 not split Unicode surrogate pairs. Search misses return `found: false` and no
 next offset; after a match, `nextOffset` continues after the returned context.
+
+Foreground shell history and session records retain the bounded display prefix
+and a trusted capture reference. The persisted preview ceiling is 16,384 UTF-16
+characters, which preserves the 12,000-character shell display plus completion
+annotations; the smaller provider head/tail budget applies only to projection. Generic artifact serialization must not replace
+the captured bytes with that prefix. Recovery first resolves the current
+history's `toolUseId`, then validates the matching capture. Session reload keeps
+a bounded preview and validates reference metadata and file ownership without
+eagerly loading the artifact. Missing or invalid references are explicitly
+unavailable. Provider recovery stubs are projections rather than persisted
+preview content. Forking a checkpoint into a different session marks these
+session-owned captures unavailable; it does not copy their original files.
+Chunk reads and literal
+search use the same UTF-16 offset contract and report capture completeness;
+reaching the end of retained partial content never means the complete command
+output was recovered. Only host execution bookkeeping can attach trusted capture
+references. Provider requests keep their existing bounded preview budget.
 
 Smaller purpose-specific limits stay with the internal/background
 `generateText` callers that own them. Managed subscription transports retain

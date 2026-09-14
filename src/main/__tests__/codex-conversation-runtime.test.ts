@@ -8,6 +8,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { makeRecordedSpawn } from "../../__tests__/test-helpers.js";
 import {
   CodexConversationRuntime,
+  attachCodexStdioTransport,
+  CODEX_MAX_RPC_LINE_BYTES,
   isCodexAppServerRequestId,
   sanitizedCodexConversationEnvironment,
   type CodexConversationRuntimeOptions,
@@ -20,6 +22,8 @@ import { MAX_SUBSCRIPTION_ATTACHMENT_BYTES, MAX_SUBSCRIPTION_PROMPT_ATTACHMENTS 
 import { SubscriptionRuntimeService, type AcpSubscriptionRuntimeRegistry } from "../subscription-runtime-service.js";
 import type { CodexAppServerClient } from "../codex-app-server-client.js";
 import { collectRoundStream } from "../../engine/turn/stream-collector.js";
+import type { ProviderTransportDiagnostics } from "../../engine/llm/provider-error-diagnostics.js";
+import * as managedChildProcesses from "../managed-child-processes.js";
 
 type Spawn = NonNullable<CodexConversationRuntimeOptions["spawn"]>;
 type JsonRecord = Record<string, unknown>;
@@ -112,6 +116,34 @@ function requestId(message: JsonRecord): number {
   return message.id as number;
 }
 
+async function createServiceForRuntimes(harness: Harness, runtimes: CodexConversationRuntime[]) {
+  const audit = vi.fn();
+  const service = await SubscriptionRuntimeService.create(async () => undefined, {
+    audit,
+    namespace: {
+      dir: harness.runtimeRoot,
+      childDir: async (name) => {
+        const directory = join(harness.runtimeRoot, name);
+        mkdirSync(directory);
+        return directory;
+      },
+      readJson: async (_name, fallback) => fallback,
+      writeJson: async () => { throw new Error("Unexpected profile write"); },
+    },
+    codexClient: {
+      getStatus: async () => ({ runtime: "ready", connection: "connected", planType: "plus", pendingLogin: null, pendingDeviceCode: null }),
+      stop: vi.fn(),
+    } as unknown as CodexAppServerClient,
+    acpRegistry: { stopAll: async () => undefined } as unknown as AcpSubscriptionRuntimeRegistry,
+    createCodexConversationRuntime: () => {
+      const runtime = runtimes.shift();
+      if (!runtime) throw new Error("Unexpected runtime creation");
+      return runtime;
+    },
+  });
+  return { service, runtimes, audit };
+}
+
 afterEach(async () => {
   for (const harness of harnesses.splice(0)) {
     harness.runtime.stop();
@@ -153,6 +185,106 @@ describe("isCodexAppServerRequestId", () => {
 });
 
 describe("CodexConversationRuntime", () => {
+  it("distinguishes a running process error from a start failure after initialization", async () => {
+    vi.spyOn(managedChildProcesses, "forceKillManagedChildProcess").mockImplementation(() => undefined);
+    const harness = createHarness((message, current) => {
+      if (message.method === "initialize") {
+        current.child.pid = 123;
+        reply(current.child, requestId(message), {});
+      }
+      if (message.method === "thread/start") {
+        current.child.emit("error", new Error("secret signal-delivery error"));
+      }
+    });
+    await expect(harness.runtime.startTurn({ text: "private prompt" })).rejects.toMatchObject({
+      code: "codex-runtime-start-failed",
+      providerError: {
+        origin: "unknown", classification: "unknown", messagePreview: "subscription runtime transport failure",
+        transport: { phase: "process-error", kind: "process" },
+      },
+    });
+    expect(methodMessages(harness, "initialized")).toHaveLength(1);
+  });
+
+  it.each([
+    { phase: "stdout-parse", kind: "protocol", trigger: (child: FakeAppServerProcess) => child.stdout.write("secret invalid JSON\n") },
+    { phase: "stdout-frame", kind: "protocol", trigger: (child: FakeAppServerProcess) => child.stdout.write("x".repeat(CODEX_MAX_RPC_LINE_BYTES + 1)) },
+    { phase: "stdout-read", kind: "process", trigger: (child: FakeAppServerProcess) => child.stdout.emit("error", new Error("secret stdout")) },
+    { phase: "stdin-write", kind: "process", trigger: (child: FakeAppServerProcess) => child.stdin.emit("error", new Error("secret stdin")) },
+    { phase: "stderr-read", kind: "process", trigger: (child: FakeAppServerProcess) => child.stderr.emit("error", new Error("secret stderr")) },
+    { phase: "process-start", kind: "process", trigger: (child: FakeAppServerProcess) => child.emit("error", new Error("secret executable")) },
+    { phase: "process-exit", kind: "process", exitCode: 1, signal: null, trigger: (child: FakeAppServerProcess) => child.emit("exit", 1, null) },
+    { phase: "process-exit", kind: "process", exitCode: null, signal: "SIGKILL", trigger: (child: FakeAppServerProcess) => child.emit("exit", null, "SIGKILL") },
+  ] as const)("preserves $phase process diagnostics without runtime text", ({ trigger, ...transport }) => {
+    const child = new FakeAppServerProcess();
+    const aborted = vi.fn();
+    attachCodexStdioTransport(child as unknown as Parameters<typeof attachCodexStdioTransport>[0], vi.fn(), aborted);
+    child.stderr.write("secret authentication and prompt\n");
+    expect(aborted).not.toHaveBeenCalled();
+    trigger(child);
+    expect(aborted).toHaveBeenCalledExactlyOnceWith(
+      transport.phase === "process-start" ? "codex-runtime-start-failed" : "codex-operation-failed",
+      { origin: "unknown", classification: "unknown", messagePreview: "subscription runtime transport failure", transport },
+    );
+    expect(JSON.stringify(aborted.mock.calls)).not.toContain("secret");
+    child.stdin.destroy();
+    child.stdout.destroy();
+    child.stderr.destroy();
+  });
+
+  it.each([
+    { phase: "process-exit", kind: "process", exitCode: null, signal: "SIGKILL" },
+    { phase: "stdout-parse", kind: "protocol" },
+    { phase: "turn-completion", kind: "server", statusCode: 503 },
+  ] satisfies ProviderTransportDiagnostics[])("carries $phase failure through the service and provider to the collector", async (transport) => {
+    const verification = createHarness((message, current) => {
+      if (message.method === "initialize") reply(current.child, requestId(message), {});
+      if (message.method === "account/read") reply(current.child, requestId(message), { account: { type: "chatgpt" } });
+    });
+    const harness = createHarness((message, current) => {
+      if (message.method === "initialize") reply(current.child, requestId(message), {});
+      if (message.method === "thread/start") reply(current.child, requestId(message), { thread: { id: "thread-1" } });
+      if (message.method !== "turn/start") return;
+      current.child.stderr.write("secret runtime stderr\n");
+      if (transport.phase === "process-exit") current.child.emit("exit", transport.exitCode, transport.signal);
+      else if (transport.phase === "stdout-parse") current.child.stdout.write("secret malformed response\n");
+      else {
+        reply(current.child, requestId(message), { turn: { id: "turn-1", status: "inProgress" } });
+        notify(current.child, "turn/completed", { threadId: "thread-1", turn: {
+          id: "turn-1", status: "failed", error: { statusCode: 503, message: "secret server failure" },
+        } });
+      }
+    });
+    const reverification = createHarness((message, current) => {
+      if (message.method === "initialize") reply(current.child, requestId(message), {});
+      if (message.method === "account/read") reply(current.child, requestId(message), { account: { type: "chatgpt" } });
+    });
+    const nextRuntime = createHarness();
+    const { service, runtimes, audit } = await createServiceForRuntimes(harness, [
+      verification.runtime, harness.runtime, reverification.runtime, nextRuntime.runtime,
+    ]);
+    try {
+      const provider = createSubscriptionLlmProvider({ selection: { kind: "subscription", provider: "codex" }, service });
+      const result = await collectRoundStream({
+        provider, model: "default", systemPrompt: "private system prompt",
+        messages: [{ role: "user", content: "private user prompt" }], toolSchemas: [],
+        llmSettings: { streamSmoothing: "none", enableThinking: false },
+      });
+      expect(result).toMatchObject({ kind: "stream_error", classification: "unknown", providerError: { transport } });
+      expect(result).toHaveProperty("userMessage", expect.stringContaining("Subscription runtime could not complete."));
+      expect(JSON.stringify(result)).not.toMatch(/secret|private/);
+      expect(methodMessages(harness, "turn/start")).toHaveLength(1);
+      expect(audit).toHaveBeenCalledExactlyOnceWith({ provider: "codex", outcome: "session-failed" });
+      expect(methodMessages(reverification, "account/read")).toHaveLength(0);
+      const nextSession = await service.openTextSession({ kind: "subscription", provider: "codex" });
+      expect(methodMessages(reverification, "account/read")).toHaveLength(1);
+      expect(runtimes).toHaveLength(0);
+      await nextSession.stop();
+    } finally {
+      await service.stop();
+    }
+  });
+
   it.each([
     { label: "complete fragments", text: ["alpha\n \tbeta\r\n\ngamma "], reasoning: ["first\n\tsecond\r\n third "] },
     {
@@ -193,29 +325,7 @@ describe("CodexConversationRuntime", () => {
         threadId: "thread-1", turn: { id: "turn-1", status: "completed", items },
       });
     });
-    const runtimes = [verification.runtime, harness.runtime];
-    const service = await SubscriptionRuntimeService.create(async () => undefined, {
-      namespace: {
-        dir: harness.runtimeRoot,
-        childDir: async (name) => {
-          const directory = join(harness.runtimeRoot, name);
-          mkdirSync(directory);
-          return directory;
-        },
-        readJson: async (_name, fallback) => fallback,
-        writeJson: async () => { throw new Error("Unexpected profile write"); },
-      },
-      codexClient: {
-        getStatus: async () => ({ runtime: "ready", connection: "connected", planType: "plus", pendingLogin: null, pendingDeviceCode: null }),
-        stop: vi.fn(),
-      } as unknown as CodexAppServerClient,
-      acpRegistry: { stopAll: async () => undefined } as unknown as AcpSubscriptionRuntimeRegistry,
-      createCodexConversationRuntime: () => {
-        const runtime = runtimes.shift();
-        if (!runtime) throw new Error("Unexpected runtime creation");
-        return runtime;
-      },
-    });
+    const { service, runtimes } = await createServiceForRuntimes(harness, [verification.runtime, harness.runtime]);
     const textDeltas: string[] = [];
     const reasoningDeltas: string[] = [];
     try {

@@ -1,3 +1,4 @@
+import { normalizeToolOutputArtifactInfo } from "../shared/tool-output-artifact.js";
 
 
 
@@ -292,6 +293,11 @@ function applyToolResultCap(
   opts?: { recompute?: boolean },
 ): GenericMessage {
   if (message.role !== "tool_result") return message;
+  if (message.meta?.outputArtifact !== undefined) {
+    const outputArtifact = normalizeToolOutputArtifactInfo(message.meta.outputArtifact);
+    const { outputArtifact: _oldArtifact, ...meta } = message.meta;
+    message = { ...message, meta: { ...meta, ...(outputArtifact ? { outputArtifact } : { outputArtifactUnavailable: true as const }) } };
+  }
   if (!opts?.recompute && message.meta?.truncated !== undefined) return message;
   const trimmed = trimOversizedToolResult(message.content);
   if (trimmed.truncated === undefined) {

@@ -11,6 +11,7 @@ import { contextBudgetForCurrentRuntime } from "../compaction.js";
 import { buildProvider, pingProvider } from "../provider.js";
 import { collectRoundStream } from "../stream-collector.js";
 import type { ConversationLoopDeps } from "../types.js";
+import { subscriptionTransportFailure } from "../../../main/subscription-transport-error-diagnostics.js";
 import {
   MAX_SUBSCRIPTION_RUNTIME_MODEL_ID_LENGTH,
   type SubscriptionChatRuntimeSelection,
@@ -85,6 +86,28 @@ function buildSubscriptionDeps(
     subscriptionProviderFactory,
   };
 }
+
+it.each([401, 503])("keeps diagnostic HTTP status %i out of retry decisions", async (statusCode) => {
+  vi.useFakeTimers();
+  try {
+    const selection = { kind: "subscription", provider: "codex" } as const;
+    const providerError = subscriptionTransportFailure({
+      phase: "turn-completion", kind: statusCode === 401 ? "authentication" : "server", statusCode,
+    });
+    const streamTurn = vi.fn(async function* (): AsyncIterable<StreamEvent> {
+      yield { type: "error", error: SAFE_SUBSCRIPTION_FAILURE, classification: "subscription-chat-unavailable", providerError };
+    });
+    const { deps, getSecret } = buildRetryDeps(selection, { vendor: "openai", subscriptionRuntime: selection, streamTurn });
+    const pending = collectSubscriptionRound(buildProvider(deps)!);
+    await vi.advanceTimersByTimeAsync(5_000);
+    const result = await pending;
+    expect(streamTurn).toHaveBeenCalledTimes(5);
+    expect(getSecret).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ kind: "stream_error", classification: "unknown", providerError });
+  } finally {
+    vi.useRealTimers();
+  }
+});
 
 describe("buildProvider subscription model overrides", () => {
   it("forwards a clean Codex override as a new immutable selection", async () => {

@@ -8,6 +8,7 @@ import { getLvisAppVersion } from "../shared/app-version.js";
 import { MAX_SUBSCRIPTION_RUNTIME_MODEL_ID_LENGTH, isSubscriptionToolDescription } from "../shared/subscription-runtime.js";
 import {
   projectSubscriptionTransportErrorDiagnostics,
+  subscriptionTransportFailure,
   type SubscriptionTransportDiagnosticError,
 } from "./subscription-transport-error-diagnostics.js";
 import { forceKillManagedChildProcess, spawnManaged } from "./managed-child-processes.js";
@@ -128,7 +129,10 @@ export function hasCodexStdioStreams(child: ChildProcess): child is CodexAppServ
 export function attachCodexStdioTransport(
   child: CodexAppServerChild,
   onLine: (message: unknown) => void,
-  onAbort: (code: "codex-runtime-start-failed" | "codex-operation-failed") => void,
+  onAbort: (
+    code: "codex-runtime-start-failed" | "codex-operation-failed",
+    diagnostics: NonNullable<SubscriptionTransportDiagnosticError["providerError"]>,
+  ) => void,
 ): void {
   const decoder = new StringDecoder("utf8");
   let buffer = "";
@@ -136,7 +140,7 @@ export function attachCodexStdioTransport(
     buffer += typeof chunk === "string" ? chunk : decoder.write(chunk);
     if (Buffer.byteLength(buffer, "utf8") > CODEX_MAX_RPC_LINE_BYTES) {
       buffer = "";
-      onAbort("codex-operation-failed");
+      onAbort("codex-operation-failed", subscriptionTransportFailure({ phase: "stdout-frame", kind: "protocol" }));
       return;
     }
     for (;;) {
@@ -150,18 +154,23 @@ export function attachCodexStdioTransport(
         message = JSON.parse(line);
       } catch {
         buffer = "";
-        onAbort("codex-operation-failed");
+        onAbort("codex-operation-failed", subscriptionTransportFailure({ phase: "stdout-parse", kind: "protocol" }));
         return;
       }
       onLine(message);
     }
   });
-  child.stdout.once("error", () => onAbort("codex-operation-failed"));
-  child.stdin.once("error", () => onAbort("codex-operation-failed"));
+  child.stdout.once("error", () => onAbort("codex-operation-failed", subscriptionTransportFailure({ phase: "stdout-read", kind: "process" })));
+  child.stdin.once("error", () => onAbort("codex-operation-failed", subscriptionTransportFailure({ phase: "stdin-write", kind: "process" })));
   child.stderr?.on("data", () => {});
-  child.stderr?.once("error", () => onAbort("codex-operation-failed"));
-  child.once("error", () => onAbort("codex-runtime-start-failed"));
-  child.once("exit", () => onAbort("codex-operation-failed"));
+  child.stderr?.once("error", () => onAbort("codex-operation-failed", subscriptionTransportFailure({ phase: "stderr-read", kind: "process" })));
+  child.once("error", () => onAbort("codex-runtime-start-failed", subscriptionTransportFailure({
+    phase: typeof child.pid === "number" && child.pid > 0 ? "process-error" : "process-start",
+    kind: "process",
+  })));
+  child.once("exit", (exitCode, signal) => onAbort("codex-operation-failed", subscriptionTransportFailure({
+    phase: "process-exit", kind: "process", exitCode, signal,
+  })));
 }
 
 export type CodexConversationRuntimeErrorCode =
@@ -1140,7 +1149,7 @@ export class CodexConversationRuntime {
         },
       );
     } catch {
-      throw new CodexConversationRuntimeError("codex-runtime-start-failed");
+      throw new CodexConversationRuntimeError("codex-runtime-start-failed", subscriptionTransportFailure({ phase: "process-start", kind: "process" }));
     }
     if (!hasCodexStdioStreams(child)) {
       forceKillManagedChildProcess(child, "codex conversation missing transport streams");
@@ -1153,7 +1162,7 @@ export class CodexConversationRuntime {
       (message) => {
         if (this.child === child) this.handleMessage(message, child);
       },
-      (code) => this.abortTransport(new CodexConversationRuntimeError(code), child),
+      (code, diagnostics) => this.abortTransport(new CodexConversationRuntimeError(code, diagnostics), child),
     );
 
     try {
@@ -1175,8 +1184,9 @@ export class CodexConversationRuntime {
           throw new CodexConversationRuntimeError("codex-runtime-start-failed");
         }
       }
-    } catch {
-      const error = new CodexConversationRuntimeError("codex-runtime-start-failed");
+    } catch (cause) {
+      const error = new CodexConversationRuntimeError("codex-runtime-start-failed",
+        cause instanceof CodexConversationRuntimeError ? cause.providerError : undefined);
       this.abortTransport(error, child);
       throw error;
     }
@@ -1293,7 +1303,8 @@ export class CodexConversationRuntime {
     return new Promise<unknown>((resolveRequest, rejectRequest) => {
       const timer = setTimeout(() => {
         if (!this.pendingRequests.has(id)) return;
-        this.abortTransport(new CodexConversationRuntimeError("codex-operation-failed"), child);
+        this.abortTransport(new CodexConversationRuntimeError("codex-operation-failed",
+          subscriptionTransportFailure({ phase: "rpc-timeout", kind: "timeout" })), child);
       }, CODEX_RPC_REQUEST_TIMEOUT_MS);
       timer.unref?.();
       this.pendingRequests.set(id, { method, resolve: resolveRequest, reject: rejectRequest, timer });
@@ -1310,14 +1321,16 @@ export class CodexConversationRuntime {
   private writeMessage(message: CodexJsonRecord, child: ChildProcess): void {
     if (this.child !== child || !child.stdin || !child.stdin.writable || !this.isWithinRpcLimit(message)) {
       if (this.child === child) {
-        this.abortTransport(new CodexConversationRuntimeError("codex-operation-failed"), child);
+        this.abortTransport(new CodexConversationRuntimeError("codex-operation-failed",
+          subscriptionTransportFailure({ phase: "rpc-write", kind: "process" })), child);
       }
       return;
     }
     try {
       child.stdin.write(`${JSON.stringify(message)}\n`);
     } catch {
-      this.abortTransport(new CodexConversationRuntimeError("codex-operation-failed"), child);
+      this.abortTransport(new CodexConversationRuntimeError("codex-operation-failed",
+        subscriptionTransportFailure({ phase: "rpc-write", kind: "process" })), child);
     }
   }
 
@@ -1331,7 +1344,8 @@ export class CodexConversationRuntime {
 
   private handleMessage(message: unknown, child: ChildProcess): void {
     if (!isCodexJsonRecord(message)) {
-      this.abortTransport(new CodexConversationRuntimeError("codex-operation-failed"), child);
+      this.abortTransport(new CodexConversationRuntimeError("codex-operation-failed",
+        subscriptionTransportFailure({ phase: "stdout-parse", kind: "protocol" })), child);
       return;
     }
     if (isCodexAppServerRequestId(message.id) && typeof message.method === "string") {
@@ -1346,7 +1360,9 @@ export class CodexConversationRuntime {
       if (message.error !== undefined) {
         pending.reject(new CodexConversationRuntimeError(
           "codex-operation-failed",
-          pending.method === "turn/start" ? projectSubscriptionTransportErrorDiagnostics(message.error) : undefined,
+          pending.method === "turn/start"
+            ? projectSubscriptionTransportErrorDiagnostics(message.error, "rpc-response")
+            : subscriptionTransportFailure({ phase: "rpc-response", kind: "unknown" }),
         ));
       } else {
         pending.resolve(message.result);
@@ -1678,7 +1694,7 @@ export class CodexConversationRuntime {
     if (!active || active.settled || !threadId || !turnId || active.threadId !== threadId) return;
 
     const status = projectTurnStatus(turn?.status);
-    const providerError = status === "failed" ? projectSubscriptionTransportErrorDiagnostics(turn) : undefined;
+    const providerError = status === "failed" ? projectSubscriptionTransportErrorDiagnostics(turn, "turn-completion") : undefined;
     // A terminal notification cannot establish identity: resumed/forked threads
     // may replay historic completions before this request's turn/start reply.
     if (active.authoritativeTurnId === null) {

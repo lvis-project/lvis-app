@@ -1,3 +1,4 @@
+import type { ToolOutputCapture } from "../shared/tool-output-artifact.js";
 /**
  * Host shell tool family: the `bash` and `powershell` execution tools, the
  * session-scoped background-shell registry, and the `bash_output` /
@@ -97,18 +98,53 @@ function formatShellCompletion(output: string, empty: boolean, completion: Shell
 }
 
 /** Keep a bounded UTF-8 prefix while continuing to drain both child pipes. */
-function createOutputCollector() {
+type BoundOutputCaptureFactory = () => ToolOutputCapture;
+
+function captureFactoryFromContext(ctx: ToolExecutionContext): BoundOutputCaptureFactory | undefined {
+  const factory = ctx.metadata.toolOutputCaptureFactory;
+  return typeof factory === "function" ? factory as BoundOutputCaptureFactory : undefined;
+}
+
+function createOutputCollector(child: PipedChild, factory?: BoundOutputCaptureFactory) {
   // Four bytes cover any UTF-8 code point. The display cap remains in UTF-16
   // characters; raw whitespace also counts against this capture budget.
   const buffer = Buffer.alloc(OUTPUT_CAP * 4);
   let size = 0;
   let truncated = false;
+  let capture: ToolOutputCapture | undefined;
+  let finalized = false;
+  let paused = false;
+  const append = (chunk: Buffer): void => {
+    if (!capture || capture.append(chunk) || paused) return;
+    paused = true;
+    child.stdout.pause();
+    child.stderr.pause();
+    void capture.waitForDrain().then(() => {
+      paused = false;
+      if (!finalized) {
+        child.stdout.resume();
+        child.stderr.resume();
+      }
+    });
+  };
   return {
     collect(chunk: Buffer): void {
+      if (finalized) return;
+      // Reserve only when output can exceed the bounded display. The prefix
+      // accumulated before reservation is replayed once, in observed order.
+      if (!capture && factory && size + chunk.length > OUTPUT_CAP) {
+        capture = factory();
+        if (size > 0) append(buffer.subarray(0, size));
+      }
+      append(chunk);
       const retained = Math.min(chunk.length, buffer.length - size);
       if (retained > 0) chunk.copy(buffer, size, 0, retained);
       size += retained;
       if (retained < chunk.length) truncated = true;
+    },
+    async finish(interrupted: boolean): Promise<Record<string, unknown>> {
+      finalized = true;
+      return capture ? { outputArtifact: await capture.finish(interrupted) } : {};
     },
     format(completion?: ShellCompletion): string {
       const prefix = buffer.subarray(0, size);
@@ -509,6 +545,7 @@ export function isCanonicalBashTool(tool: unknown): tool is BashTool {
 }
 
 export class BashTool extends ZodTool<typeof BashToolInputSchema> {
+  readonly awaitCancellationSettlement = true;
   constructor() {
     super();
     if (new.target === BashTool) canonicalBashTools.add(this);
@@ -644,7 +681,7 @@ export class BashTool extends ZodTool<typeof BashToolInputSchema> {
         input.command,
         resolvedCwd,
         writePaths,
-        input.timeoutSeconds, prepared, ctx.abortSignal,
+        input.timeoutSeconds, prepared, ctx.abortSignal, captureFactoryFromContext(ctx),
       );
       return withBackgroundUnavailable(sandboxResult, input.run_in_background === true);
     }
@@ -660,7 +697,7 @@ export class BashTool extends ZodTool<typeof BashToolInputSchema> {
       return spawnBackground(input.command, resolvedCwd, sessionIdFromContext(ctx), prepared);
     }
 
-    const plainResult = await spawnWithTimeout(input.command, resolvedCwd, input.timeoutSeconds, prepared, ctx.abortSignal);
+    const plainResult = await spawnWithTimeout(input.command, resolvedCwd, input.timeoutSeconds, prepared, ctx.abortSignal, captureFactoryFromContext(ctx));
     if (!hostShellPlan.requiresExplicitUserApproval) {
       return withBackgroundUnavailable(plainResult, input.run_in_background === true);
     }
@@ -820,6 +857,7 @@ export async function spawnWithSandbox(
   timeoutSeconds: number,
   prepared: PreparedShellInvocation,
   signal?: AbortSignal,
+  outputCaptureFactory?: BoundOutputCaptureFactory,
 ): Promise<SpawnResult> {
   const releaseClaim = claimPreparedShellInvocation(prepared);
   try {
@@ -907,7 +945,7 @@ export async function spawnWithSandbox(
     const cleanupPreparedAfterTermination = transferPreparedShellInvocation(prepared);
     trackManagedChildProcess(child, { killProcessGroup: process.platform !== "win32", label: "tool:bash:asrt" });
 
-    const outputCollector = createOutputCollector();
+    const outputCollector = createOutputCollector(child, outputCaptureFactory);
     child.stdout.on("data", outputCollector.collect);
     child.stderr.on("data", outputCollector.collect);
 
@@ -923,11 +961,12 @@ export async function spawnWithSandbox(
     };
     const lifetime = watchShellLifetime(child, timeoutSeconds, signal, () => abortController.abort());
 
-    const finish = (code: number | null, signal: NodeJS.Signals | null = null): void => {
+    const finish = async (code: number | null, signal: NodeJS.Signals | null = null): Promise<void> => {
       cleanupAfterTermination();
       lifetime.dispose();
       if (settled) return;
       settled = true;
+      const artifactMetadata = await outputCollector.finish(lifetime.timedOut || lifetime.aborted || signal !== null);
       // Per-command cleanup (proxy/helper state) after the wrapped command ends.
       const formatted = lifetime.output(outputCollector.format(
         lifetime.timedOut || lifetime.aborted ? undefined : { code, signal },
@@ -936,29 +975,32 @@ export async function spawnWithSandbox(
         resolveResult({
           output: formatTimeoutOutput(formatted, command, timeoutSeconds),
           isError: true,
-          metadata: { ...lifetime.metadata(), returncode: code, timedOut: true, sandboxed: true },
+          metadata: { ...artifactMetadata, ...lifetime.metadata(), returncode: code, timedOut: true, sandboxed: true },
         });
       } else {
         resolveResult({
           output: formatted,
           isError: lifetime.aborted || code !== 0,
-          metadata: { ...lifetime.metadata(), returncode: code, sandboxed: true },
+          metadata: { ...artifactMetadata, ...lifetime.metadata(), returncode: code, sandboxed: true },
         });
       }
     };
 
     void lifetime.stopped.then(() => finish(child.exitCode));
-    child.once("close", (code, signal) => finish(code, signal));
+    child.once("close", (code, signal) => { void finish(code, signal); });
     child.on("error", (err) => {
-      if (settled) return;
-      settled = true;
-      // Node can emit `error` for a failed process operation while the child
-      // remains alive. The later `close` event owns ASRT/HOME finalization.
-      resolveResult({
-        output: `spawn failed: ${err.message}`,
-        isError: true,
-        metadata: { sandboxed: false, sandboxAttempted: true, isolation: "unavailable" },
-      });
+      void (async () => {
+        if (settled) return;
+        settled = true;
+        const artifactMetadata = await outputCollector.finish(true);
+        // Node can emit `error` for a failed process operation while the child
+        // remains alive. The later `close` event owns ASRT/HOME finalization.
+        resolveResult({
+          output: `spawn failed: ${err.message}`,
+          isError: true,
+          metadata: { ...artifactMetadata, sandboxed: false, sandboxAttempted: true, isolation: "unavailable" },
+        });
+      })();
     });
   });
   } finally { releaseClaim(); }
@@ -970,6 +1012,7 @@ async function spawnWithTimeout(
   timeoutSeconds: number,
   prepared: PreparedShellInvocation,
   signal?: AbortSignal,
+  outputCaptureFactory?: BoundOutputCaptureFactory,
 ): Promise<SpawnResult> {
   const releaseClaim = claimPreparedShellInvocation(prepared);
   try {
@@ -990,7 +1033,7 @@ async function spawnWithTimeout(
     child.once("close", cleanupPreparedAfterTermination);
     trackManagedChildProcess(child, { killProcessGroup: process.platform !== "win32", label: "tool:bash" });
 
-    const outputCollector = createOutputCollector();
+    const outputCollector = createOutputCollector(child, outputCaptureFactory);
     child.stdout.on("data", outputCollector.collect);
     child.stderr.on("data", outputCollector.collect);
 
@@ -998,10 +1041,11 @@ async function spawnWithTimeout(
 
     const lifetime = watchShellLifetime(child, timeoutSeconds, signal);
 
-    const finish = (code: number | null, signal: NodeJS.Signals | null = null): void => {
+    const finish = async (code: number | null, signal: NodeJS.Signals | null = null): Promise<void> => {
       lifetime.dispose();
       if (settled) return;
       settled = true;
+      const artifactMetadata = await outputCollector.finish(lifetime.timedOut || lifetime.aborted || signal !== null);
       const formatted = lifetime.output(outputCollector.format(
         lifetime.timedOut || lifetime.aborted ? undefined : { code, signal },
       ));
@@ -1009,27 +1053,30 @@ async function spawnWithTimeout(
         resolve({
           output: formatTimeoutOutput(formatted, command, timeoutSeconds),
           isError: true,
-          metadata: { ...lifetime.metadata(), returncode: code, timedOut: true },
+          metadata: { ...artifactMetadata, ...lifetime.metadata(), returncode: code, timedOut: true },
         });
       } else {
         resolve({
           output: formatted,
           isError: lifetime.aborted || code !== 0,
-          metadata: { ...lifetime.metadata(), returncode: code },
+          metadata: { ...artifactMetadata, ...lifetime.metadata(), returncode: code },
         });
       }
     };
 
     void lifetime.stopped.then(() => finish(child.exitCode));
-    child.once("close", (code, signal) => finish(code, signal));
+    child.once("close", (code, signal) => { void finish(code, signal); });
     child.on("error", (err) => {
-      if (settled) return;
-      settled = true;
-      resolve({
-        output: `spawn failed: ${err.message}`,
-        isError: true,
-        metadata: {},
-      });
+      void (async () => {
+        if (settled) return;
+        settled = true;
+        const artifactMetadata = await outputCollector.finish(true);
+        resolve({
+          output: `spawn failed: ${err.message}`,
+          isError: true,
+          metadata: { ...artifactMetadata },
+        });
+      })();
     });
   });
   } finally { releaseClaim(); }
@@ -1313,6 +1360,7 @@ export function isCanonicalPowerShellTool(tool: unknown): tool is Tool & PowerSh
 }
 
 export class PowerShellTool extends ZodTool<typeof PowerShellToolInputSchema> {
+  readonly awaitCancellationSettlement = true;
   constructor() {
     super();
     if (new.target === PowerShellTool) canonicalPowerShellTools.add(this);
@@ -1423,11 +1471,11 @@ export class PowerShellTool extends ZodTool<typeof PowerShellToolInputSchema> {
         input.command,
         resolvedCwd,
         writePaths,
-        input.timeoutSeconds, ctx.abortSignal,
+        input.timeoutSeconds, ctx.abortSignal, captureFactoryFromContext(ctx),
       );
     }
 
-    const plainResult = await spawnPowerShell(input.command, resolvedCwd, input.timeoutSeconds, ctx.abortSignal);
+    const plainResult = await spawnPowerShell(input.command, resolvedCwd, input.timeoutSeconds, ctx.abortSignal, captureFactoryFromContext(ctx));
     if (!hostShellPlan.requiresExplicitUserApproval) return plainResult;
     return {
       ...plainResult,
@@ -1692,6 +1740,7 @@ async function spawnPowerShellWithSandbox(
   writePaths: readonly string[],
   timeoutSeconds: number,
   signal?: AbortSignal,
+  outputCaptureFactory?: BoundOutputCaptureFactory,
 ): Promise<ToolExecutionResult> {
   signal?.throwIfAborted();
   // Resolve before allocating the temporary profile so a missing PowerShell
@@ -1813,7 +1862,7 @@ async function spawnPowerShellWithSandbox(
     }
     trackManagedChildProcess(child, { killProcessGroup: process.platform !== "win32", label: "tool:powershell:asrt" });
 
-    const outputCollector = createOutputCollector();
+    const outputCollector = createOutputCollector(child, outputCaptureFactory);
     child.stdout.on("data", outputCollector.collect);
     child.stderr.on("data", outputCollector.collect);
 
@@ -1829,11 +1878,12 @@ async function spawnPowerShellWithSandbox(
     };
     const lifetime = watchShellLifetime(child, timeoutSeconds, signal, () => abortController.abort());
 
-    const finish = (code: number | null, signal: NodeJS.Signals | null = null): void => {
+    const finish = async (code: number | null, signal: NodeJS.Signals | null = null): Promise<void> => {
       cleanupAfterTermination();
       lifetime.dispose();
       if (settled) return;
       settled = true;
+      const artifactMetadata = await outputCollector.finish(lifetime.timedOut || lifetime.aborted || signal !== null);
       const output = lifetime.output(outputCollector.format(
         lifetime.timedOut || lifetime.aborted ? undefined : { code, signal },
       ));
@@ -1842,24 +1892,27 @@ async function spawnPowerShellWithSandbox(
           ? `PowerShell command timed out after ${resolveShellTimeoutMs(timeoutSeconds) / 1000} seconds.\n${output}`
           : output,
         isError: lifetime.aborted || lifetime.timedOut || code !== 0,
-        metadata: { ...lifetime.metadata(), returncode: code, timedOut: lifetime.timedOut, sandboxed: true },
+        metadata: { ...artifactMetadata, ...lifetime.metadata(), returncode: code, timedOut: lifetime.timedOut, sandboxed: true },
       });
     };
 
     void lifetime.stopped.then(() => finish(child.exitCode));
-    child.once("close", (code, signal) => finish(code, signal));
+    child.once("close", (code, signal) => { void finish(code, signal); });
     child.on("error", (err) => {
-      if (settled) return;
-      settled = true;
-      // `error` may be a failed operation on a live process. The definitive
-      // `close` event retains ASRT/HOME cleanup ownership.
-      resolveResult({
-        output: err && "code" in err && err.code === "ENOENT"
-          ? `PowerShell executable not found: ${executable}`
-          : `PowerShell spawn failed: ${err.message}`,
-        isError: true,
-        metadata: { sandboxed: false, sandboxAttempted: true, isolation: "unavailable" },
-      });
+      void (async () => {
+        if (settled) return;
+        settled = true;
+        const artifactMetadata = await outputCollector.finish(true);
+        // `error` may be a failed operation on a live process. The definitive
+        // `close` event retains ASRT/HOME cleanup ownership.
+        resolveResult({
+          output: err && "code" in err && err.code === "ENOENT"
+            ? `PowerShell executable not found: ${executable}`
+            : `PowerShell spawn failed: ${err.message}`,
+          isError: true,
+          metadata: { ...artifactMetadata, sandboxed: false, sandboxAttempted: true, isolation: "unavailable" },
+        });
+      })();
     });
   });
 }
@@ -1869,6 +1922,7 @@ async function spawnPowerShell(
   cwd: string,
   timeoutSeconds: number,
   signal?: AbortSignal,
+  outputCaptureFactory?: BoundOutputCaptureFactory,
 ): Promise<ToolExecutionResult> {
   signal?.throwIfAborted();
   return new Promise((resolve) => {
@@ -1887,7 +1941,7 @@ async function spawnPowerShell(
     );
     trackManagedChildProcess(child, { killProcessGroup: process.platform !== "win32", label: "tool:powershell" });
 
-    const outputCollector = createOutputCollector();
+    const outputCollector = createOutputCollector(child, outputCaptureFactory);
     child.stdout.on("data", outputCollector.collect);
     child.stderr.on("data", outputCollector.collect);
 
@@ -1895,10 +1949,11 @@ async function spawnPowerShell(
 
     const lifetime = watchShellLifetime(child, timeoutSeconds, signal);
 
-    const finish = (code: number | null, signal: NodeJS.Signals | null = null): void => {
+    const finish = async (code: number | null, signal: NodeJS.Signals | null = null): Promise<void> => {
       lifetime.dispose();
       if (settled) return;
       settled = true;
+      const artifactMetadata = await outputCollector.finish(lifetime.timedOut || lifetime.aborted || signal !== null);
       const output = lifetime.output(outputCollector.format(
         lifetime.timedOut || lifetime.aborted ? undefined : { code, signal },
       ));
@@ -1907,22 +1962,25 @@ async function spawnPowerShell(
           ? `PowerShell command timed out after ${resolveShellTimeoutMs(timeoutSeconds) / 1000} seconds.\n${output}`
           : output,
         isError: lifetime.aborted || lifetime.timedOut || code !== 0,
-        metadata: { ...lifetime.metadata(), returncode: code, timedOut: lifetime.timedOut },
+        metadata: { ...artifactMetadata, ...lifetime.metadata(), returncode: code, timedOut: lifetime.timedOut },
       });
     };
 
     void lifetime.stopped.then(() => finish(child.exitCode));
-    child.once("close", (code, signal) => finish(code, signal));
+    child.once("close", (code, signal) => { void finish(code, signal); });
     child.on("error", (err) => {
-      if (settled) return;
-      settled = true;
-      resolve({
-        output: err && "code" in err && err.code === "ENOENT"
-          ? `PowerShell executable not found: ${executable}`
-          : `PowerShell spawn failed: ${err.message}`,
-        isError: true,
-        metadata: {},
-      });
+      void (async () => {
+        if (settled) return;
+        settled = true;
+        const artifactMetadata = await outputCollector.finish(true);
+        resolve({
+          output: err && "code" in err && err.code === "ENOENT"
+            ? `PowerShell executable not found: ${executable}`
+            : `PowerShell spawn failed: ${err.message}`,
+          isError: true,
+          metadata: { ...artifactMetadata },
+        });
+      })();
     });
   });
 }
