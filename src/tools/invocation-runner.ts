@@ -1,4 +1,4 @@
-import { prepareShellInvocation, preparedShellFacts, disposePreparedShellInvocation, type PreparedShellInvocation } from "./prepared-shell-invocation.js";
+import { prepareShellInvocation, preparedShellFacts, bindPreparedShellExecutableReadPaths, disposePreparedShellInvocation, type PreparedShellInvocation } from "./prepared-shell-invocation.js";
 import { resolveHostShellWorkingDirectory } from "../permissions/host-shell-execution-permit.js";
 import { randomUUID } from "node:crypto";
 import { statSync } from "node:fs";
@@ -1572,6 +1572,10 @@ export async function runToolInvocation(
       if (bashResult.decision === "warn") {
         log.warn(`${bashResult.reason}`);
       }
+    }
+
+    if (preparedShellInvocation && hostShellExecutionPlan?.mode === "asrt") {
+      bindPreparedShellExecutableReadPaths(preparedShellInvocation);
     }
 
     const targetFilePaths = extractTargetFilePaths(tool, finalInput, executionCwd);

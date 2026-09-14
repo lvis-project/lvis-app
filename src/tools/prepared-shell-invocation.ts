@@ -5,6 +5,7 @@ import { createSandboxProcessHome, type SandboxProcessHome } from "../permission
 import type { HostShellExecutionPlan } from "../permissions/host-shell-execution-plan.js";
 import type { ShellExecutionFacts } from "../shared/shell-execution.js";
 import { buildHostShellChildEnv, buildSafeChildEnv, captureSandboxEnvironmentBaseline, FORWARD_ENV_KEYS, overlaySandboxChildEnv } from "./safe-env.js";
+import { collectShellExecutableReadPaths } from "./shell-executable-read-paths.js";
 
 export interface ShellInvocationIdentity {
   readonly command: string;
@@ -27,6 +28,7 @@ interface PreparedState {
   readonly facts: Readonly<ShellExecutionFacts>;
   readonly home?: SandboxProcessHome;
   readonly hostHome?: string;
+  executableReadPaths?: readonly string[];
   phase: "prepared" | "claimed" | "spawned" | "disposed";
 }
 const issued = new WeakMap<PreparedShellInvocation, PreparedState>();
@@ -82,6 +84,21 @@ export function matchesPreparedShellInvocation(handle: PreparedShellInvocation, 
 }
 
 export function preparedShellFacts(handle: PreparedShellInvocation): Readonly<ShellExecutionFacts> { return stateOf(handle).facts; }
+
+/** Bind only after command policy accepts the final source, before approval. */
+export function bindPreparedShellExecutableReadPaths(handle: PreparedShellInvocation): void {
+  const state = stateOf(handle);
+  if (state.phase !== "prepared") throw new Error("Shell executable reads must be bound before claim");
+  state.executableReadPaths ??= Object.freeze([...collectShellExecutableReadPaths(
+    state.identity.command, state.identity.resolvedCwd, state.facts,
+  )]);
+}
+
+export function preparedShellExecutableReadPaths(handle: PreparedShellInvocation): readonly string[] {
+  const paths = stateOf(handle).executableReadPaths;
+  if (!paths) throw new Error("Shell executable reads were not bound before execution");
+  return paths;
+}
 export function preparedShellCommand(handle: PreparedShellInvocation): Readonly<{
   shell: Readonly<ResolvedShellCommand>; argv: readonly string[]; environment: Readonly<Record<string, string>>; homePath?: string; hostHome?: string;
 }> {

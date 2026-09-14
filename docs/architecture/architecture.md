@@ -186,6 +186,14 @@ argument and fixes the prepared environment after wrapper setup. Its HOME and
 temporary directory belong to that invocation; this replaces the shared
 temporary directory for the inner command without enlarging allowed roots.
 Final grants materialize the wrapper without recapturing environment facts.
+After command policy accepts the source, its executable lookups are resolved
+through the same typed execution analysis and bound to the prepared invocation
+before approval. Only precise, non-sensitive executable files from a provable
+captured search path receive read access. The wrapper consumes those frozen
+paths; it never grants a whole search directory or the real home directory.
+This supports runtimes installed beneath the user home without adding write or
+network permissions. Runtime dependency directories and private configuration
+are not inferred from the executable's location.
 One synchronous claim precedes wrapper or spawn effects. A denied preparation
 is released, pending wrapper work retains ownership until settlement, and a
 spawned child's resources remain until confirmed termination even if the tool
