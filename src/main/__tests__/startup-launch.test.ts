@@ -140,6 +140,7 @@ describe("readStartupLaunchState", () => {
       setLoginItemSettings: vi.fn(),
       getLoginItemSettings: vi.fn(),
       argv: () => [],
+      launchMinimized: () => false,
     });
     expect(state.applied).toBe(false);
     expect(state.reason).toBe("dev-unpackaged");
