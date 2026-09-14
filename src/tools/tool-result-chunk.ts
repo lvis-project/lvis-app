@@ -12,6 +12,7 @@ import {
 } from "../shared/bounded-tool-output.js";
 import { estimateTokens } from "../shared/token-estimate.js";
 import { MAX_TOOL_RESULT_TOKENS } from "../shared/tool-result-trim.js";
+import { isValidToolUseId, MAX_TOOL_USE_ID_UTF8_BYTES } from "../shared/tool-use-id.js";
 
 export const READ_TOOL_RESULT_CHUNK_TOOL = "read_tool_result_chunk";
 export const TOOL_RESULT_CHUNK_READER_METADATA_KEY = "toolResultChunkReader";
@@ -80,8 +81,8 @@ export function createReadToolResultChunkTool(): Tool {
         toolUseId: {
           type: "string",
           minLength: 1,
-          maxLength: 160,
-          description: "The toolUseId shown in the host-truncated tool_result stub.",
+          maxLength: MAX_TOOL_USE_ID_UTF8_BYTES,
+          description: `The toolUseId shown in the host-truncated tool_result stub, up to ${MAX_TOOL_USE_ID_UTF8_BYTES} UTF-8 bytes.`,
         },
         offset: {
           type: "integer",
@@ -114,10 +115,12 @@ export function createReadToolResultChunkTool(): Tool {
       if (unknownKey) {
         return unavailable(`unknown argument: ${unknownKey}`);
       }
-      const toolUseId = typeof input.toolUseId === "string" ? input.toolUseId : "";
-      if (!toolUseId || toolUseId.length > 160) {
-        return unavailable("toolUseId must be a non-empty string of at most 160 characters");
+      if (!isValidToolUseId(input.toolUseId)) {
+        return unavailable(
+          `toolUseId must be non-empty, contain no control characters, and use at most ${MAX_TOOL_USE_ID_UTF8_BYTES} UTF-8 bytes`,
+        );
       }
+      const toolUseId = input.toolUseId;
 
       let offset: number;
       let maxChars: number;

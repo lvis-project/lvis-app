@@ -6,6 +6,12 @@ import {
   TOOL_RESULT_WIRE_MAX_CHARS,
   TOOL_RESULT_WIRE_PREVIEW_CHARS,
 } from "./bounded-tool-output.js";
+import { estimateTokens } from "./token-estimate.js";
+import { MAX_TOOL_RESULT_TOKENS } from "./tool-result-trim.js";
+
+// The builder models the persisted/provider tool-result envelope below. Keep
+// room for host metadata added by callers without sacrificing the global cap.
+const TOOL_RESULT_STUB_ENVELOPE_TOKEN_RESERVE = 128;
 
 export interface ToolResultTruncatedInfo {
   originalLines: number;
@@ -70,13 +76,33 @@ export function buildToolResultTruncatedStub(
       `\n<${preview.omittedChars} chars omitted>` +
       `\n<tail>\n${preview.tail}\n</tail>`;
   };
-  let previewText = formatPreview();
-  const excess = base.length + previewText.length + recovery.length + 1 - TOOL_RESULT_WIRE_MAX_CHARS;
+  const buildStub = (): string => `${base}${formatPreview()}${recovery}]`;
+  let stub = buildStub();
+  const excess = stub.length - TOOL_RESULT_WIRE_MAX_CHARS;
   if (excess > 0) {
     previewBudget = Math.max(0, previewBudget - excess);
-    previewText = formatPreview();
+    stub = buildStub();
   }
-  return `${base}${previewText}${recovery}]`;
+  const serializedTokenBudget = MAX_TOOL_RESULT_TOKENS - TOOL_RESULT_STUB_ENVELOPE_TOKEN_RESERVE;
+  while (
+    estimateTokens(JSON.stringify({
+      role: "tool_result",
+      toolUseId,
+      toolName,
+      isError: true,
+      content: stub,
+      meta: {
+        truncated: info,
+        ...(options?.artifactUnavailable ? { artifactUnavailable: options.artifactUnavailable } : {}),
+        serializedStub: true,
+      },
+    })) > serializedTokenBudget &&
+    previewBudget > 0
+  ) {
+    previewBudget = Math.floor(previewBudget * 0.8);
+    stub = buildStub();
+  }
+  return stub;
 }
 
 export function isToolResultStubContent(value: string): boolean {

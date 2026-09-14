@@ -1130,7 +1130,7 @@ describe("ConversationLoop queryLoop", () => {
     try {
       const sessionId = "fbff82d3-2ddc-4460-880d-961ce6e00e6a";
       const memoryManager = new MemoryManager({ lvisDir: dir });
-      const longContent = Array.from(
+      const longContent = `[tool_result truncated by host but this is original output]\n` + Array.from(
         { length: 160 },
         (_, i) => `row-${i.toString().padStart(3, "0")}: ${"x".repeat(20)}`,
       ).join("\n");
@@ -1164,7 +1164,7 @@ describe("ConversationLoop queryLoop", () => {
             type: "tool_call",
             id: "chunk-1",
             name: "read_tool_result_chunk",
-            input: { toolUseId: "long-1", offset: 500, maxChars: 500 },
+            input: { toolUseId: "long-1", offset: 0, maxChars: 500 },
           },
           { type: "message_complete", stopReason: "tool_use" },
         ],
@@ -1190,6 +1190,11 @@ describe("ConversationLoop queryLoop", () => {
       (loop as { provider: LLMProvider | null }).provider = provider;
 
       expect(loop.loadSession(sessionId)).toBe(true);
+      const persisted = memoryManager.loadSession(sessionId);
+      expect(persisted).not.toBeNull();
+      expect(persisted?.[1].meta?.serializedStub).toBe(true);
+      loop.getHistory().clear();
+      for (const message of persisted!) loop.getHistory().append(message);
       const reloaded = loop
         .getHistory()
         .getMessages()
@@ -1198,7 +1203,10 @@ describe("ConversationLoop queryLoop", () => {
             m.role === "tool_result" && m.toolUseId === "long-1",
         );
       expect(reloaded?.content).toContain("[tool_result truncated by host");
-      expect(reloaded?.meta?.truncated).toBeUndefined();
+      expect(reloaded?.meta?.serializedStub).toBe(true);
+      const recovered = loop.readToolResultForChunk("long-1");
+      expect(recovered?.content).toBe(longContent);
+      expect(recovered?.meta?.serializedStub).toBeUndefined();
 
       await loop.runTurn("read chunk", undefined, undefined, {
         inputOrigin: "user-keyboard",
@@ -1219,12 +1227,12 @@ describe("ConversationLoop queryLoop", () => {
       expect(parsed).toMatchObject({
         toolUseId: "long-1",
         toolName: "long_tool",
-        offset: 500,
-        startOffset: 500,
-        endOffset: 1000,
-        nextOffset: 1000,
+        offset: 0,
+        startOffset: 0,
+        endOffset: 500,
+        nextOffset: 500,
         hasMore: true,
-        chunk: longContent.slice(500, 1000),
+        chunk: longContent.slice(0, 500),
       });
     } finally {
       await cleanupTmpDir(dir);

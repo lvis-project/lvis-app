@@ -7,6 +7,7 @@ import {
 } from "../../shared/bounded-tool-output.js";
 import { estimateTokens } from "../../shared/token-estimate.js";
 import { MAX_TOOL_RESULT_TOKENS, trimOversizedToolResult } from "../../shared/tool-result-trim.js";
+import { MAX_TOOL_USE_ID_UTF8_BYTES } from "../../shared/tool-use-id.js";
 import {
   createReadToolResultChunkTool,
   TOOL_RESULT_CHUNK_READER_METADATA_KEY,
@@ -172,6 +173,35 @@ describe("read_tool_result_chunk", () => {
       const result = await tool.execute(input, reader);
       expect(result.isError).toBe(true);
     }
+  });
+
+  it("uses the shared 256-byte toolUseId contract", async () => {
+    const tool = createReadToolResultChunkTool();
+    const schema = tool.toJsonSchema() as {
+      properties: { toolUseId: { maxLength: number } };
+    };
+    expect(schema.properties.toolUseId.maxLength).toBe(MAX_TOOL_USE_ID_UTF8_BYTES);
+
+    const asciiId = "a".repeat(161);
+    const ascii = await tool.execute(
+      { toolUseId: asciiId },
+      ctx(() => ({ ...truncatedResult("x".repeat(800)), toolUseId: asciiId })),
+    );
+    expect(ascii.isError).toBe(false);
+
+    const boundaryId = "😀".repeat(64);
+    const boundary = await tool.execute(
+      { toolUseId: boundaryId },
+      ctx(() => ({ ...truncatedResult("x".repeat(800)), toolUseId: boundaryId })),
+    );
+    expect(boundary.isError).toBe(false);
+
+    const overBoundary = await tool.execute(
+      { toolUseId: `${boundaryId}😀` },
+      ctx(() => truncatedResult("x".repeat(800))),
+    );
+    expect(overBoundary.isError).toBe(true);
+    expect(JSON.parse(overBoundary.output).error).toContain("256 UTF-8 bytes");
   });
 
   it("keeps the JSON wrapper under the ordinary output cap for escape-heavy content", async () => {

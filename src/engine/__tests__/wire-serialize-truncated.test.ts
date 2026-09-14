@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { GenericMessage } from "../llm/types.js";
 import { prepareMarkedToolResultsForWire } from "../wire-serialize.js";
 import { TOOL_RESULT_WIRE_MAX_CHARS } from "../../shared/bounded-tool-output.js";
-import { trimOversizedToolResult } from "../../shared/tool-result-trim.js";
+import { estimateTokens } from "../../shared/token-estimate.js";
+import { MAX_TOOL_RESULT_TOKENS, trimOversizedToolResult } from "../../shared/tool-result-trim.js";
 
 function makeToolResult(opts: {
   toolUseId: string;
@@ -234,5 +235,26 @@ describe("prepareMarkedToolResultsForWire truncated output", () => {
     expect(stub.content).toContain("row-0");
     expect(stub.content).toContain("row-999");
     expect(trimOversizedToolResult(stub.content).truncated).toBeUndefined();
+  });
+
+  it("bounds the final serialized result after JSON control-character escaping", () => {
+    const content = "\u0001".repeat(10_000);
+    const msg = makeToolResult({
+      toolUseId: "t-controls",
+      toolName: "large_output",
+      content,
+      truncated: {
+        originalLines: 1,
+        originalTokens: 2_501,
+        originalBytes: content.length,
+        trimmedAt: "2026-05-18T00:00:00.000Z",
+      },
+    });
+    const wireResult = prepareMarkedToolResultsForWire([msg])[0] as Extract<GenericMessage, { role: "tool_result" }>;
+    const serialized = JSON.stringify(wireResult);
+
+    expect(wireResult.content).toContain("Preview of original output");
+    expect(estimateTokens(serialized)).toBeLessThanOrEqual(MAX_TOOL_RESULT_TOKENS);
+    expect(trimOversizedToolResult(serialized).truncated).toBeUndefined();
   });
 });

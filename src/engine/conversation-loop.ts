@@ -611,12 +611,13 @@ export class ConversationLoop {
         ? null
         : this.deps.memoryManager.loadToolResultArtifact(this.sessionId, toolUseId);
       if (!artifact) return match;
+      const { serializedStub: _serializedStub, ...restMeta } = match.meta ?? {};
       return {
         toolUseId: artifact.toolUseId,
         toolName: artifact.toolName ?? match.toolName,
         content: artifact.content,
         isError: match.isError,
-        meta: { ...(match.meta ?? {}), truncated: artifact.truncated },
+        meta: { ...restMeta, truncated: artifact.truncated },
       };
     }
     return {
