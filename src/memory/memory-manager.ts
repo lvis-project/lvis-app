@@ -2467,8 +2467,9 @@ export class MemoryManager implements PromptMemorySource {
 
   startToolOutputCapture(sessionId: string, toolUseId: string): ToolOutputCapture {
     if (!isValidSessionId(sessionId)) throw new TypeError("tool-output-session-id-invalid");
-    this.cleanupToolOutputArtifacts(sessionId, this.loadPersistedOutputCaptureIds(sessionId));
-    const capture = this.toolOutputArtifacts.start(sessionId, toolUseId);
+    const capture = this.toolOutputArtifacts.start(sessionId, toolUseId, () => {
+      this.cleanupToolOutputArtifacts(sessionId, this.loadPersistedOutputCaptureIds(sessionId));
+    });
     // Pin before finish can publish or release its disk reservation. Waiting
     // for finish first leaves a microtask gap in which another save can prune it.
     let pending = this.unpublishedOutputCaptures.get(sessionId);

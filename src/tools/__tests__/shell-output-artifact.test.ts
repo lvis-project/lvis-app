@@ -4,7 +4,7 @@ import { ToolExecutor } from "../executor.js";
 import { ToolRegistry } from "../registry.js";
 import { PermissionManager } from "../../permissions/permission-manager.js";
 import { createDynamicTool } from "../base.js";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -44,6 +44,27 @@ function setup() {
 }
 
 describe.skipIf(process.platform === "win32")("foreground shell artifact recovery", () => {
+  it("keeps shell execution alive when persisted capture references cannot be read", async () => {
+    const { dir, memoryManager, shellContext } = setup();
+    mkdirSync(join(dir, "sessions", `${SESSION}.jsonl`));
+    // Invalid on-disk storage must settle as unavailable before the factory is
+    // invoked from a child data event, where a thrown error would escape it.
+    const capture = memoryManager.startToolOutputCapture(SESSION, "unreadable-reference-probe");
+    capture.append(Buffer.from("probe"));
+    expect(await capture.finish()).toMatchObject({
+      status: "unavailable", reason: "write-failed", capturedBytes: 0, observedBytes: 5,
+    });
+    const result = await new BashTool().execute({
+      command: "printf '%60000s' x", timeoutSeconds: 5,
+    }, shellContext);
+    expect(result.isError).toBe(false);
+    expect(result.output.length).toBeLessThan(12_100);
+    expect(normalizeToolOutputArtifactInfo(result.metadata?.outputArtifact)).toMatchObject({
+      status: "unavailable", reason: "write-failed", capturedBytes: 0, observedBytes: 60_000,
+    });
+    expect(existsSync(join(dir, "sessions", SESSION, "tool-output"))).toBe(false);
+  });
+
   it("recovers the real shell tail through history, chunk lookup, save and lazy reload", async () => {
     const { dir, memoryManager, history, loop, shellContext, chunkContext } = setup();
     const result = await new BashTool().execute({
