@@ -122,6 +122,9 @@ describe("CLI conversation boundary", () => {
     child.send(init()); child.send(assistant()); child.send(result()); child.close();
     expect(await done).toEqual([{ type: "text_delta", text: "hello" }, { type: "message_complete", stopReason: "end_turn" }]);
     expect(readdirSync(h.runtimeTempDir)).toEqual([]);
+    // A closed root may still own a live descendant group. Its exact handle
+    // must reach the registry, which decides whether a group remains.
+    expect(managed.forceKillManagedChildProcess).toHaveBeenCalledWith(child, "claude-code-turn-cancel");
   });
 
   it("reads stdout arriving after exit and a valid final frame without newline", async () => {
@@ -302,6 +305,7 @@ describe("CLI account and verification boundary", () => {
   it("classifies the documented logged-out exit 1 as signed out", async () => {
     const h = clientHarness((child) => { child.send({ loggedIn: false }); child.close(1); });
     expect(await h.client.getStatus()).toMatchObject({ runtime: "unverified", connection: "signed-out" });
+    expect(managed.forceKillManagedChildProcess).toHaveBeenCalledWith(h.calls[0]!.child, "claude-code-command-complete");
   });
 
   it.each([

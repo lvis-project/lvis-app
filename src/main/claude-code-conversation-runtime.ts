@@ -188,7 +188,8 @@ export class ClaudeCodeConversationRuntime {
         if (outputBytes > CLAUDE_CODE_MAX_OUTPUT_BYTES) fail(operationFailed());
       });
       spawned.once("close", (code, exitSignal) => {
-        if (child === spawned) child = null;
+        // Keep the exact handle through finally: a settled root can still
+        // own a live MCP descendant group in the managed-child registry.
         if (failure || ended) return;
         try {
           decoder.decode();

@@ -436,6 +436,7 @@ export class ClaudeCodeSubscriptionClient {
           clearTimeout(this.pendingLogin.timer);
           this.pendingLogin = null;
         }
+        forceKillManagedChildProcess(child, "claude-code-login-complete");
       });
       const failLogin = () => { if (this.pendingLogin?.child === child) void this.cancelLoginQuietly(); };
       child.on("error", failLogin);
@@ -652,6 +653,7 @@ export class ClaudeCodeSubscriptionClient {
             throw new Error("invalid-command-result");
           }
           finish(() => resolvePromise({ stdout, code }));
+          forceKillManagedChildProcess(child, "claude-code-command-complete");
         } catch { cancel(); }
       });
       if (!child.stdout || !child.stderr || (options.input !== undefined && !child.stdin)) { cancel(); return; }
