@@ -4,6 +4,7 @@ import type { McpUiPayload } from "../mcp/types.js";
 import type { HostShellExecutionPlanAuditProjection } from "../permissions/host-shell-execution-plan.js";
 import type { PluginOperationPrincipal } from "../permissions/plugin-operation-grant.js";
 import type { PermissionReviewEvent } from "../shared/permission-review-status.js";
+import type { ToolOutputCaptureFactory } from "../shared/tool-output-artifact.js";
 import type { RationaleExecutorControlOutcome } from "./pipeline/rationale-pr1-contract.js";
 import type { RationaleHostRuntime } from "./pipeline/rationale-orchestrator.js";
 import type { RationaleResumeHostRuntime } from "./pipeline/rationale-resume-runner.js";
@@ -137,7 +138,7 @@ export interface ExecuteOptions {
   a2aCausalContext?: A2AAgentCausalContext;
   abortSignal?: AbortSignal;
   toolResultChunkReader?: ToolResultChunkReader;
-  toolOutputCaptureFactory?: import("../shared/tool-output-artifact.js").ToolOutputCaptureFactory;
+  toolOutputCaptureFactory?: ToolOutputCaptureFactory;
   permissionContext?: ToolPermissionContext;
   executionCwd?: string;
   /** Host-only lifecycle for an exact governed auth Tool; never plugin data. */
