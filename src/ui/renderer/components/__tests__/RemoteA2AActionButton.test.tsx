@@ -41,8 +41,8 @@ describe("RemoteA2AActionButton production IPC surface", () => {
     await openPanel();
     fireEvent.change(screen.getByTestId("remote-a2a-intent"), { target: { value: "Do the bounded task" } });
     fireEvent.click(screen.getByTestId("remote-a2a-send"));
-    await waitFor(() => expect(api.send).toHaveBeenCalledWith(1, "Do the bounded task"));
-    expect(screen.getByTestId("remote-a2a-status").getAttribute("data-state")).toBe("sent");
+    await waitFor(() => expect(screen.getByTestId("remote-a2a-status").getAttribute("data-state")).toBe("sent"));
+    expect(api.send).toHaveBeenCalledWith(1, "Do the bounded task");
   });
 
   it("exposes Replay only for an operation-recovery handle without fabricating Task actions", async () => {
