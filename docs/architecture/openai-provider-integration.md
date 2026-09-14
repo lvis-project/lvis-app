@@ -30,6 +30,10 @@ credentials. Authentication and billing stay attached to the selected route.
 It neither falls back between routes nor converts subscription authentication
 into an API credential.
 
+The [Claude Code subscription runtime](claude-code-subscription-runtime.md)
+uses the same engine contract and JSONL reader with its own CLI authentication,
+print-stream validation, and MCP bridge adapter.
+
 ## Request and stream semantics
 
 Both connections use the common model-visible projection before their wire

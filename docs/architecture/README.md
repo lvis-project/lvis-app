@@ -36,6 +36,7 @@ This page owns the architecture index for host services, renderer boundaries, pl
 - [Getting Started](../guides/getting-started.md)
 - [Multi-surface conversation runtime](multisurface-conversation-runtime.md)
 - [OpenAI provider integration](openai-provider-integration.md)
+- [Claude Code subscription runtime](claude-code-subscription-runtime.md)
 
 ## Review Notes
 
