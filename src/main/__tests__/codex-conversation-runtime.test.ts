@@ -116,7 +116,9 @@ function requestId(message: JsonRecord): number {
 }
 
 async function createServiceForRuntimes(harness: Harness, runtimes: CodexConversationRuntime[]) {
+  const audit = vi.fn();
   const service = await SubscriptionRuntimeService.create(async () => undefined, {
+    audit,
     namespace: {
       dir: harness.runtimeRoot,
       childDir: async (name) => {
@@ -138,7 +140,7 @@ async function createServiceForRuntimes(harness: Harness, runtimes: CodexConvers
       return runtime;
     },
   });
-  return { service, runtimes };
+  return { service, runtimes, audit };
 }
 
 afterEach(async () => {
@@ -231,7 +233,14 @@ describe("CodexConversationRuntime", () => {
         } });
       }
     });
-    const { service, runtimes } = await createServiceForRuntimes(harness, [verification.runtime, harness.runtime]);
+    const reverification = createHarness((message, current) => {
+      if (message.method === "initialize") reply(current.child, requestId(message), {});
+      if (message.method === "account/read") reply(current.child, requestId(message), { account: { type: "chatgpt" } });
+    });
+    const nextRuntime = createHarness();
+    const { service, runtimes, audit } = await createServiceForRuntimes(harness, [
+      verification.runtime, harness.runtime, reverification.runtime, nextRuntime.runtime,
+    ]);
     try {
       const provider = createSubscriptionLlmProvider({ selection: { kind: "subscription", provider: "codex" }, service });
       const result = await collectRoundStream({
@@ -242,8 +251,13 @@ describe("CodexConversationRuntime", () => {
       expect(result).toMatchObject({ kind: "stream_error", classification: "unknown", providerError: { transport } });
       expect(result).toHaveProperty("userMessage", expect.stringContaining("Subscription runtime could not complete."));
       expect(JSON.stringify(result)).not.toMatch(/secret|private/);
-      expect(runtimes).toHaveLength(0);
       expect(methodMessages(harness, "turn/start")).toHaveLength(1);
+      expect(audit).toHaveBeenCalledExactlyOnceWith({ provider: "codex", outcome: "session-failed" });
+      expect(methodMessages(reverification, "account/read")).toHaveLength(0);
+      const nextSession = await service.openTextSession({ kind: "subscription", provider: "codex" });
+      expect(methodMessages(reverification, "account/read")).toHaveLength(1);
+      expect(runtimes).toHaveLength(0);
+      await nextSession.stop();
     } finally {
       await service.stop();
     }

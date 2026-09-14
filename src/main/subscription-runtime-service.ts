@@ -593,17 +593,21 @@ function stableError(error: unknown): Error {
   ) {
     return error;
   }
-  return new SubscriptionRuntimeServiceError(subscriptionRuntimeErrorCode(error));
+  return new SubscriptionRuntimeServiceError(
+    subscriptionRuntimeErrorCode(error),
+    projectedSubscriptionTransportDiagnosticsFromError(error),
+  );
 }
 
 /**
  * Preserve only the transport's already-sanitized recovery facts. The string
  * is intentionally generic because SubscriptionLlmProvider owns the final
- * renderer-safe error projection.
+ * renderer-safe error projection. Other diagnostic failures still throw so
+ * the tracked session invalidates its safety proof and records the failure.
  */
 function transportDiagnosticFailure(error: unknown): Extract<StreamEvent, { type: "error" }> | undefined {
   const providerError = projectedSubscriptionTransportDiagnosticsFromError(error);
-  return providerError
+  return providerError && !providerError.transport
     ? {
       type: "error",
       error: "Subscription runtime operation failed.",
@@ -842,7 +846,7 @@ class CodexSubscriptionTextSession implements SubscriptionTextSession {
         }
         queue.fail(result.status === "interrupted"
           ? abortError()
-          : new SubscriptionRuntimeServiceError("subscription-operation-failed"));
+          : stableError(result));
       },
       (error: unknown) => {
         if (aborted) {
