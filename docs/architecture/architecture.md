@@ -44,6 +44,16 @@ primary-product contract.
 | Tool execution and governance | Tool registry, executor, permissions, audit, sandbox helpers | Enforce one route for builtin/plugin/MCP tool calls and record decisions. |
 | External integrations | LLM providers, MCP servers, marketplace, web auth, local indexers | Connect to outside systems through host-owned adapters and explicit credentials. |
 
+Native image requests use the active transport's count and byte limits. Request
+projection and dispatch select the same image set without modifying stored
+conversation rows: newly authored input and fresh tool images take priority,
+then earlier images fill the remaining budget from newest to oldest. Omitted
+history images leave explicit text markers. A fresh tool image that cannot fit
+returns a visible delivery error to the model so it can request fewer or smaller
+images; a valid tool result cannot silently terminate the conversation because
+older images consumed the request budget. Authored image input must fit as a
+whole, and malformed image payloads still fail at the boundary.
+
 ## Process Boundaries
 
 Host service bootstrap accepts `BootHost` (`src/boot/host-runtime.ts`) for

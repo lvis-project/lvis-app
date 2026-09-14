@@ -11,7 +11,6 @@
 import {
   MAX_COMPOSER_ATTACHMENT_COUNT,
   MAX_COMPOSER_IMAGE_BASE64_CHARS,
-  MAX_COMPOSER_IMAGE_BYTES,
   composerImageFormatForMimeType,
   sniffComposerImageFormat,
 } from "../shared/composer-image-input.js";
@@ -33,8 +32,8 @@ export type SubscriptionPromptAttachment = Readonly<{
   data: string;
 }>;
 
-/** Aliases of the composer source of truth, retained for transport callers. */
-export const MAX_SUBSCRIPTION_PROMPT_ATTACHMENTS = MAX_COMPOSER_ATTACHMENT_COUNT;
+/** Host-verified native prompt budget, independent of the input picker limit. */
+export const MAX_SUBSCRIPTION_PROMPT_ATTACHMENTS = 5;
 /**
  * One composed turn has its text part plus independently bounded image and
  * resource attachment parts. Reject larger (including sparse) arrays before
@@ -51,8 +50,8 @@ export const MAX_LOCAL_USER_CONTENT_TEXT_PARTS =
  * narrowing normal exported-session input.
  */
 export const MAX_LOCAL_USER_CONTENT_TEXT_CHARS = 5_000_000;
-export const MAX_SUBSCRIPTION_ATTACHMENT_BYTES = MAX_COMPOSER_IMAGE_BYTES;
-/** Default Codex/native transport budget, derived from composer input limits. */
+export const MAX_SUBSCRIPTION_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+/** Default native transport budget shared by projection, capabilities, and dispatch. */
 export const DEFAULT_SUBSCRIPTION_IMAGE_ATTACHMENT_LIMITS: SubscriptionImageAttachmentLimits = Object.freeze({
   maxCount: MAX_SUBSCRIPTION_PROMPT_ATTACHMENTS,
   maxBytesPerImage: MAX_SUBSCRIPTION_ATTACHMENT_BYTES,
