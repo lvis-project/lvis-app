@@ -12,7 +12,7 @@ export interface ProviderRateLimitDiagnostics {
 
 /** Diagnostic facts only: these fields do not select retries or recovery. */
 export interface ProviderTransportDiagnostics {
-  phase: "process-start" | "stdout-parse" | "stdout-frame" | "stdout-read"
+  phase: "process-start" | "process-error" | "stdout-parse" | "stdout-frame" | "stdout-read"
     | "stdin-write" | "stderr-read" | "process-exit" | "rpc-write"
     | "rpc-timeout" | "rpc-response" | "turn-completion" | "native-request";
   kind: "process" | "protocol" | "network" | "timeout" | "authentication"

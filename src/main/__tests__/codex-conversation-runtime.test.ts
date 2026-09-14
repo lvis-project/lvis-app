@@ -23,6 +23,7 @@ import { SubscriptionRuntimeService, type AcpSubscriptionRuntimeRegistry } from 
 import type { CodexAppServerClient } from "../codex-app-server-client.js";
 import { collectRoundStream } from "../../engine/turn/stream-collector.js";
 import type { ProviderTransportDiagnostics } from "../../engine/llm/provider-error-diagnostics.js";
+import * as managedChildProcesses from "../managed-child-processes.js";
 
 type Spawn = NonNullable<CodexConversationRuntimeOptions["spawn"]>;
 type JsonRecord = Record<string, unknown>;
@@ -184,6 +185,27 @@ describe("isCodexAppServerRequestId", () => {
 });
 
 describe("CodexConversationRuntime", () => {
+  it("distinguishes a running process error from a start failure after initialization", async () => {
+    vi.spyOn(managedChildProcesses, "forceKillManagedChildProcess").mockImplementation(() => undefined);
+    const harness = createHarness((message, current) => {
+      if (message.method === "initialize") {
+        current.child.pid = 123;
+        reply(current.child, requestId(message), {});
+      }
+      if (message.method === "thread/start") {
+        current.child.emit("error", new Error("secret signal-delivery error"));
+      }
+    });
+    await expect(harness.runtime.startTurn({ text: "private prompt" })).rejects.toMatchObject({
+      code: "codex-runtime-start-failed",
+      providerError: {
+        origin: "unknown", classification: "unknown", messagePreview: "subscription runtime transport failure",
+        transport: { phase: "process-error", kind: "process" },
+      },
+    });
+    expect(methodMessages(harness, "initialized")).toHaveLength(1);
+  });
+
   it.each([
     { phase: "stdout-parse", kind: "protocol", trigger: (child: FakeAppServerProcess) => child.stdout.write("secret invalid JSON\n") },
     { phase: "stdout-frame", kind: "protocol", trigger: (child: FakeAppServerProcess) => child.stdout.write("x".repeat(CODEX_MAX_RPC_LINE_BYTES + 1)) },

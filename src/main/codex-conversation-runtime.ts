@@ -164,7 +164,10 @@ export function attachCodexStdioTransport(
   child.stdin.once("error", () => onAbort("codex-operation-failed", subscriptionTransportFailure({ phase: "stdin-write", kind: "process" })));
   child.stderr?.on("data", () => {});
   child.stderr?.once("error", () => onAbort("codex-operation-failed", subscriptionTransportFailure({ phase: "stderr-read", kind: "process" })));
-  child.once("error", () => onAbort("codex-runtime-start-failed", subscriptionTransportFailure({ phase: "process-start", kind: "process" })));
+  child.once("error", () => onAbort("codex-runtime-start-failed", subscriptionTransportFailure({
+    phase: typeof child.pid === "number" && child.pid > 0 ? "process-error" : "process-start",
+    kind: "process",
+  })));
   child.once("exit", (exitCode, signal) => onAbort("codex-operation-failed", subscriptionTransportFailure({
     phase: "process-exit", kind: "process", exitCode, signal,
   })));

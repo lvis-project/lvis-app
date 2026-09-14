@@ -18,7 +18,7 @@ import { isRecord } from "../shared/is-record.js";
 
 const TRANSPORT_FAILURE_PREVIEW = "subscription runtime transport failure";
 const TRANSPORT_PHASES: readonly ProviderTransportDiagnostics["phase"][] = [
-  "process-start", "stdout-parse", "stdout-frame", "stdout-read", "stdin-write",
+  "process-start", "process-error", "stdout-parse", "stdout-frame", "stdout-read", "stdin-write",
   "stderr-read", "process-exit", "rpc-write", "rpc-timeout", "rpc-response",
   "turn-completion", "native-request",
 ];
