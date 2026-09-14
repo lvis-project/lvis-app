@@ -1,6 +1,6 @@
 import { accessSync, constants, statSync } from "node:fs";
 import { isAbsolute, resolve as pathResolve } from "node:path";
-import { analyzeShell, literalWord, staticShellWord, type ShellCommand, type ShellStatement, type ShellWord, type ShellWordPart } from "./shell-analysis.js";
+import { analyzeShell, literalWord, staticShellWord, type ShellCommand, type ShellRedirect, type ShellStatement, type ShellWord, type ShellWordPart } from "./shell-analysis.js";
 import { effectiveShellCommand, stripCommandPath, type EffectiveShellCommand } from "./shell-effective-command.js";
 import { SHELL_ANALYSIS_LIMITS } from "./shell-parser.js";
 import { resolveShellFilesystemPath } from "./shell-filesystem-path.js";
@@ -234,24 +234,28 @@ export function inspectShellExecution(command: string, cwd: string, facts: Shell
     if (!nested.ok) decline(`nested command cannot be analyzed: ${nested.reason}`);
     walk(nested.program, state, depth + 1, freshExecutionContext());
   };
+  const markRedirectEffects = (redirects: readonly ShellRedirect[]): void => {
+    if (redirects.some((redirect) => redirect.effect === "write" && redirect.target)) filesystemMayChange = true;
+  };
+  const inspectRedirects = (redirects: readonly ShellRedirect[], state: ShellState, depth: number): void => {
+    for (const redirect of redirects) {
+      if (redirect.target) {
+        const path = resolveWord(redirect.target, state, depth);
+        if (path === undefined) decline("unresolved redirect target", redirect.target);
+        checkPath(path, redirect.target.source.raw, state, redirect.effect);
+      }
+      if (redirect.data) inspectSubstitutions(redirect.data, state, depth);
+    }
+  };
   const executeCommand = (node: ShellCommand, incoming: ShellState, depth: number, context: ExecutionContext): StateResult[] => {
     const state = cloneState(incoming);
     const resolvedWords = resolveWords(node.words, incoming, depth);
     const assigned = cloneState(incoming);
     const assignmentEvaluation: WordEvaluation = {};
     applyAssignments(node, assigned, incoming, depth, assignmentEvaluation);
-    if (node.redirects.some((redirect) => redirect.effect === "write" && redirect.target)) {
-      filesystemMayChange = true;
-    }
+    markRedirectEffects(node.redirects);
     if (node.words.length === 0) {
-      for (const redirect of node.redirects) {
-        if (redirect.target) {
-          const path = resolveWord(redirect.target, assigned, depth);
-          if (path === undefined) decline("unresolved redirect target", redirect.target);
-          checkPath(path, redirect.target.source.raw, assigned, redirect.effect);
-        }
-        if (redirect.data) inspectSubstitutions(redirect.data, assigned, depth);
-      }
+      inspectRedirects(node.redirects, assigned, depth);
       return [{ state: assigned, status: node.redirects.length || assignmentEvaluation.mayFail ? "unknown" : assignmentEvaluation.lastSubstitutionStatus ?? "success" }];
     }
     const resolvedNode = { ...node, words: resolvedWords };
@@ -287,14 +291,7 @@ export function inspectShellExecution(command: string, cwd: string, facts: Shell
       if (target === undefined) decline("unresolved wrapper path", path);
       checkPath(target, path.source.raw, state, "read");
     }
-    for (const redirect of node.redirects) {
-      if (redirect.target) {
-        const path = resolveWord(redirect.target, incoming, depth);
-        if (path === undefined) decline("unresolved redirect target", redirect.target);
-        checkPath(path, redirect.target.source.raw, incoming, redirect.effect);
-      }
-      if (redirect.data) inspectSubstitutions(redirect.data, incoming, depth);
-    }
+    inspectRedirects(node.redirects, incoming, depth);
     if (effective.unsupported) decline(effective.unsupported, effective.words[0]);
     const functionBody = effective.wrappers.length === 0 && !head.includes("/") && state.functions.get(head);
     const testForm = functionBody || !shellBuiltin ? undefined
@@ -496,6 +493,14 @@ export function inspectShellExecution(command: string, cwd: string, facts: Shell
     switch (node.kind) {
       case "unsupported": decline(node.reason);
       case "command": return inspectCommand(node, state, depth, context);
+      case "redirected": {
+        markRedirectEffects(node.redirects);
+        inspectRedirects(node.redirects, state, depth);
+        // A failed open prevents the entire body, including state changes and
+        // lexical control transfers, from running.
+        return uniqueResults([...walk(node.body, cloneState(state), depth + 1, context),
+          { state: cloneState(state), status: "failure" }]);
+      }
       case "sequence": {
         let results: StateResult[] = [{ state, status: "success" }];
         for (const statement of node.statements) results = uniqueResults(results.flatMap((result) =>

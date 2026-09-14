@@ -1,4 +1,4 @@
-import { analyzeShell, type ShellStatement, type ShellWord } from "./shell-analysis.js";
+import { analyzeShell, type ShellRedirect, type ShellStatement, type ShellWord } from "./shell-analysis.js";
 import { commandLeaf, effectiveShellCommand, type ShellLeaf } from "./shell-effective-command.js";
 export { stripCommandPath, type ShellLeaf } from "./shell-effective-command.js";
 
@@ -17,6 +17,12 @@ export function tokenizeShell(command: string): TokenizeResult {
       if (part.kind === "unknown") parseError = true;
     }
   };
+  const redirectWords = (redirects: readonly ShellRedirect[]): void => {
+    for (const redirect of redirects) {
+      if (redirect.target) word(redirect.target);
+      if (redirect.data) word(redirect.data);
+    }
+  };
   const visit = (statement: ShellStatement): void => {
     switch (statement.kind) {
       case "command": {
@@ -26,14 +32,16 @@ export function tokenizeShell(command: string): TokenizeResult {
         leaves.push(leaf);
         statement.words.forEach(word);
         statement.assignments.forEach((assignment) => { word(assignment.value); assignment.elements?.forEach(word); });
-        for (const redirect of statement.redirects) {
-          if (redirect.target) word(redirect.target);
-          if (redirect.data) {
-            word(redirect.data);
-          }
-        }
+        redirectWords(statement.redirects);
         return;
       }
+      case "redirected":
+        // Only the risk projection needs this redirection-only leaf. The
+        // execution walker retains the compound owner and its opening scope.
+        leaves.push(commandLeaf({ kind: "command", source: statement.source, words: [], assignments: [],
+          assignmentScope: "current", redirects: statement.redirects }));
+        redirectWords(statement.redirects);
+        visit(statement.body); return;
       case "sequence": statement.statements.forEach(visit); return;
       case "and": case "or": visit(statement.left); visit(statement.right); return;
       case "if":

@@ -79,6 +79,20 @@ describe("shell test expression contract", () => {
     });
   });
 
+  it.each([undefined, "array[0]", "1+2", "9223372036854775808"])("requires proven arithmetic operands only for double brackets: %s", (value) => {
+    expect(analyze("double-bracket", ["test", value, "-eq", "0"])).toMatchObject({
+      ok: false, error: { reason: "unproven arithmetic test operand", operandIndex: 1 },
+    });
+    expect(analyze("double-bracket", ["test", "0", "-eq", value])).toMatchObject({
+      ok: false, error: { reason: "unproven arithmetic test operand", operandIndex: 3 },
+    });
+    expect(analyze("test", ["test", value, "-eq", "0"]).ok).toBe(true);
+  });
+
+  it("retains unknown truth for proven double-bracket integers", () => {
+    expect(expression("double-bracket", ["test", "0010", "-eq", "8"]).status).toBe("unknown");
+  });
+
   it.each([
     [["test", "-e", undefined], [2]],
     [["test", undefined, "-nt", "./other"], [1, 3]],

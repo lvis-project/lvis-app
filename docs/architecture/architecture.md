@@ -176,6 +176,13 @@ to its actual consumer. A pipe consumed as shell code is explicitly unresolved.
 These rules do not validate the internal behavior of another programming
 language or relax traversal, sensitive-path, approval or sandbox gates.
 
+Compound output redirects retain their own statement scope: targets are checked
+before the body, and failed opens preserve the incoming state. Function redirects
+are checked at invocation. Inherited compound input and dynamic descriptors remain
+unsupported. Quoted command substitutions prove a single argument, not its value;
+nested effects still require inspection. Double-bracket integer comparisons require
+proven integer operands because other strings can trigger arithmetic expansions.
+
 [prepared-shell-invocation.ts](../../src/tools/prepared-shell-invocation.ts)
 issues a private host handle after the final command and execution plan are
 known. It captures the interpreter, immutable argv, cwd, filtered environment
@@ -746,6 +753,11 @@ separate policy bypass.
 Both endpoint fields enter the existing path checks and write approval. At execution, the file-access gate checks both endpoints and every reached entry. The source does not gain the wider read-only scope. [Permission Policy Design](permission-policy-design.md#structured-file-transfers) owns the admission contract. The destination parent must already exist within admitted scope. The exact destination must be absent, including empty directories and dangling links; the tools neither append a source basename nor overwrite or merge existing content. Overlapping source and destination paths fail before creation.
 
 [guarded-file-transfer.ts](../../src/tools/guarded-file-transfer.ts) owns destination creation, streaming, accounting, cancellation and cleanup. It processes files serially with bounded buffers. [file-transfer-policy.ts](../../src/tools/file-transfer-policy.ts) owns the resource ceilings; callers cannot raise them through tool inputs. Copy does not reuse a search traversal's exclusions or truncation. Unsupported entries, detected source changes, invalid archives and exceeded limits fail the operation. Symlinks, hard links and special files are rejected. [archive-entry-reader.ts](../../src/tools/archive-entry-reader.ts) also rejects unsafe or duplicate effective member paths and unsupported sparse semantics, and requires complete tar framing and gzip validation before success.
+
+Regular tar members expose only their declared payload bytes. The reader consumes
+the complete alignment block without treating its trailing bytes as file contents
+or requiring those alignment bytes to be zero. Metadata and terminal validation
+remain separate from regular member alignment.
 
 Where POSIX mode bits are supported, destination directories use `0700`; files start at `0600` and retain only the owner's executable bit from the source file or archive member mode when applicable. These modes do not establish an ACL-based privacy guarantee on platforms without owner/group/other permission support. Source ownership, group/world permissions, timestamps, ACLs and extended attributes are not copied. The tools do not modify source bytes or metadata, although filesystem reads may update access times. A concurrent source edit is not guaranteed to produce a snapshot.
 

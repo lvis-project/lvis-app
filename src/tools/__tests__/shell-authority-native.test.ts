@@ -24,6 +24,119 @@ function fixture() {
 }
 
 describe.skipIf(process.platform === "win32")("literal bytes and scoped shell path authority", () => {
+  it.each([
+    ['(printf stdout; printf stderr >&2) 2>./output', 'stderr'],
+    ['{ printf saved; } >./output', 'saved'],
+    ['if true; then printf selected; fi >>./output', 'selected'],
+    ['for item in one two; do printf "%s" "$item"; done >./output', 'onetwo'],
+    ['(printf background) >./output & wait', 'background'],
+  ])("checks compound output and preserves native bytes: %s", (command, expected) => {
+    const { cwd, policy, native } = fixture();
+    expect(policy(command)).toBeNull();
+    const result = native(command);
+    expect(result.status, result.stderr).toBe(0);
+    expect(readFileSync(join(cwd, "output"), "utf8")).toBe(expected);
+  });
+
+  it.each(['{ TARGET=second; cd safe; printf saved; }', '(TARGET=second; cd safe; printf saved)'])(
+    "resolves the output before entering the compound body: %s", (body) => {
+      const { cwd, policy, native } = fixture();
+      const command = `TARGET=first; ${body} >"$TARGET"`;
+      expect(policy(command)).toBeNull();
+      expect(native(command).status).toBe(0);
+      expect(readFileSync(join(cwd, "first"), "utf8")).toBe("saved");
+    },
+  );
+
+  it.each([
+    'TARGET=../outside/file; { TARGET=./safe/file; } >./missing/output; cp source "$TARGET"',
+    'TARGET=../outside/file; { TARGET=./safe/file; } >./missing/output || cp source "$TARGET"',
+    'for item in one; do { break; } >./missing/output; cp source ../outside/file; done',
+    'TARGET=../outside/file; (TARGET=./safe/file) >./output; cp source "$TARGET"',
+  ])("retains the original state when output cannot open: %s", (command) => {
+    const { policy, native, outside } = fixture();
+    expect(policy(command)?.kind).toBe("sandbox-boundary");
+    native(command);
+    expect(readFileSync(join(outside, "file"), "utf8")).not.toBe("sentinel");
+  });
+
+  it("delays function output expansion until invocation and uses the caller state", () => {
+    const { cwd, policy, native } = fixture();
+    const definition = 'TARGET=../outside/file; save(){ printf saved; } >"$TARGET";';
+    expect(policy(definition)).toBeNull();
+    const command = `${definition} TARGET=./output; cd safe; save`;
+    expect(policy(command)).toBeNull();
+    expect(native(command).status).toBe(0);
+    expect(readFileSync(join(cwd, "safe/output"), "utf8")).toBe("saved");
+  });
+
+  it.each([
+    '(printf saved) >../outside/file',
+    '{ cp source ../outside/file; } >./output',
+    'TARGET=../outside/file; { TARGET=./output; } >"$TARGET"',
+    '{ printf saved; } >"$(cp source ../outside/file; printf ./output)"',
+    'if true; then :; fi >./output; cp source ../outside/file',
+  ])("retains redirect, body and expansion authority: %s", (command) => {
+    const { policy, outside } = fixture();
+    expect(policy(command)).not.toBeNull();
+    expect(readFileSync(join(outside, "file"), "utf8")).toBe("sentinel");
+  });
+
+  it.each([
+    '{ sh; } <./source', '{ sh; } <>./source', '{ sh; } <<<"printf escaped"',
+    '{ sh; } <<EOF\nprintf escaped\nEOF', '(sh) 0>&3', '(sh) 0>./source',
+    '(sh) {input}>./source', '{ sh; } 3<&0', 'printf "printf escaped" | (sh) 2>./output',
+  ])("does not infer inherited input or descriptor authority: %s", (command) => {
+    expect(fixture().policy(command)).not.toBeNull();
+  });
+
+  it("runs the redirected command group through the public shell tool", async () => {
+    const { cwd } = fixture();
+    const result = await new BashTool().execute({ command: '(printf grouped; printf hidden >&2) 2>./diagnostic', timeoutSeconds: 5 }, {
+      cwd, extraAllowedDirectories: [], metadata: {},
+    });
+    expect(result.isError, result.output).toBe(false);
+    expect(result.metadata?.returncode).toBe(0);
+    expect(result.output).toContain("grouped");
+    expect(result.output).not.toContain("hidden");
+    expect(readFileSync(join(cwd, "diagnostic"), "utf8")).toBe("hidden");
+  });
+
+  it.each([
+    'test -z "$(printf \"\")"',
+    '[ -n "$(printf \"a b\")" ]',
+    'test "$(printf \"a b\")" = "a b"',
+    'test -n "`printf \"a b\"`"',
+    '[[ -n $(printf "a b") ]]',
+  ])("preserves the single argument of a quoted substitution: %s", (command) => {
+    const { policy, native } = fixture();
+    expect(policy(command)).toBeNull();
+    expect(native(command).status).toBe(0);
+  });
+
+  it.each([
+    'test -n $(printf "a b")',
+    'test -n "$(cp source ../outside/file; printf data)"',
+    'test -e "$(printf ../outside/file)"',
+    'test -z "$(printf value)" && cp source ../outside/file',
+    'test -z "$(printf value)" || cp source ../outside/file',
+  ])("does not treat a known argument count as known data or path authority: %s", (command) => {
+    expect(fixture().policy(command)).not.toBeNull();
+  });
+
+  it("does not admit strings that double brackets execute as arithmetic", () => {
+    const { policy, native, outside } = fixture();
+    const operand = '"$(printf \'%s\' \'array[$(printf expanded > ../outside/file)]\')"';
+    const command = `[[ ${operand} -eq 0 ]]`;
+    expect(policy(command)).not.toBeNull();
+    expect(policy(`test ${operand} -eq 0`)).toBeNull();
+    expect(native(`test ${operand} -eq 0`).status).toBe(2);
+    expect(readFileSync(join(outside, "file"), "utf8")).toBe("sentinel");
+    // This native control deliberately writes only the fixture's owned marker.
+    expect(native(command).status).toBe(0);
+    expect(readFileSync(join(outside, "file"), "utf8")).toBe("expanded");
+  });
+
   it.each(["direct", "nested", "wrapped"])("confines an unknown absolute executable with wide reads: %s", (form) => {
     const { cwd, outside, facts, native } = fixture();
     const script = join(outside, "owned-program");

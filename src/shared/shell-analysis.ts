@@ -8,11 +8,11 @@ export type ShellWordPart =
   | { kind: "parameter-choice"; name: string; operator: "-" | ":-" | "+" | ":+"; operand: ShellWord; quoted: boolean }
   | { kind: "arithmetic-data"; variables: readonly string[] }
   | { kind: "pattern"; value: string }
-  | { kind: "substitution"; body: ShellStatement; process: boolean; backquotes: boolean }
+  | { kind: "substitution"; body: ShellStatement; process: boolean; backquotes: boolean; quoted: boolean }
   | { kind: "unknown"; reason: string };
 export interface ShellWord { source: ShellSpan; parts: readonly ShellWordPart[]; preservesEmpty: boolean }
 export interface ShellAssignment { name: string; value: ShellWord; elements?: readonly ShellWord[]; append: boolean; declarationOnly?: boolean; source: ShellSpan }
-interface ShellRedirect {
+export interface ShellRedirect {
   source: ShellSpan;
   effect: "read" | "write";
   target?: ShellWord;
@@ -34,6 +34,7 @@ export type ShellStatement =
   | { kind: "sequence"; source: ShellSpan; statements: readonly ShellStatement[] }
   | { kind: "and" | "or"; source: ShellSpan; left: ShellStatement; right: ShellStatement }
   | { kind: "subshell" | "background" | "negate"; source: ShellSpan; body: ShellStatement }
+  | { kind: "redirected"; source: ShellSpan; body: ShellStatement; redirects: readonly ShellRedirect[] }
   | { kind: "pipeline"; source: ShellSpan; statements: readonly ShellStatement[] }
   | { kind: "for"; source: ShellSpan; name: string; values: readonly ShellWord[] | null; body: ShellStatement }
   | { kind: "if"; source: ShellSpan; condition: ShellStatement; consequent: ShellStatement; alternate: ShellStatement }
@@ -64,6 +65,7 @@ export function shellWordHasSingleField(word: ShellWord): boolean {
   return word.parts.every((part) => {
     if (part.kind === "literal" || part.kind === "unicode-escaped" || part.kind === "arithmetic-data") return true;
     if (part.kind === "parameter") return part.quoted && part.index !== "@" && part.name !== "@";
+    if (part.kind === "substitution") return part.quoted && !part.process;
     if (part.kind === "parameter-choice") return part.quoted && shellWordHasSingleField(part.operand);
     return false;
   });
@@ -152,8 +154,17 @@ function lowerStatement(node: ShellSyntaxNode, source: ShellSource): ShellStatem
   let statement: ShellStatement = raw ? lowerCommandNode(raw, source) : { kind: "command", source: location, words: [], assignments: [], assignmentScope: "current", redirects: [] };
   const redirects = children(node, "Redirs");
   if (redirects.length > 0) {
-    if (statement.kind !== "command") return unsupported(node, source);
-    statement = { ...statement, source: location, redirects: redirects.map((redirect) => lowerRedirect(redirect, source)) };
+    if (statement.kind === "command") {
+      statement = { ...statement, source: location, redirects: redirects.map((redirect) => lowerRedirect(redirect, source)) };
+    } else {
+      // Inherited input needs descriptor and consumption provenance. Until the
+      // execution model owns it, only fixed output descriptors are supported.
+      if (redirects.some((redirect) => ![">", ">>", ">|", ">&", "&>", "&>>"].includes(value(redirect, "Op"))
+        || (redirect.N && !/^0*[1-9][0-9]*$/.test(value(child(redirect, "N"), "Value"))))) {
+        return { kind: "unsupported", source: location, reason: "Unsupported compound input or dynamic descriptor redirection" };
+      }
+      statement = { kind: "redirected", source: location, body: statement, redirects: redirects.map((redirect) => lowerRedirect(redirect, source)) };
+    }
   }
   if (node.Negated) statement = { kind: "negate", source: location, body: statement };
   if (node.Background) statement = { kind: "background", source: location, body: statement };
@@ -331,7 +342,7 @@ function lowerWordPart(node: ShellSyntaxNode, source: ShellSource, context: Word
     }
     case "CmdSubst": case "ProcSubst":
       if (node.Type === "ProcSubst" && source.dialect !== "bash") return [{ kind: "unknown", reason: "Unsupported non-POSIX process substitution" }];
-      return [{ kind: "substitution", body: sequence(children(node, "Stmts"), source, span(node, source)), process: node.Type === "ProcSubst", backquotes: node.Backquotes === true }];
+      return [{ kind: "substitution", body: sequence(children(node, "Stmts"), source, span(node, source)), process: node.Type === "ProcSubst", backquotes: node.Backquotes === true, quoted: context !== "unquoted" }];
     default: return [{ kind: "unknown", reason: `Unsupported shell word: ${node.Type}` }];
   }
 }

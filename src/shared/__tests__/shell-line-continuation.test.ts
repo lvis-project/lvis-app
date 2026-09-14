@@ -9,6 +9,7 @@ function commands(node: ShellStatement): string[] {
     case "command":return [node.source.raw];
     case "sequence":case "pipeline":return node.statements.flatMap(commands);
     case "and":case "or":return [...commands(node.left),...commands(node.right)];
+    case "redirected":return commands(node.body);
     default:return [];
   }
 }
