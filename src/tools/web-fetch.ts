@@ -1,6 +1,48 @@
 import { createDynamicTool, type Tool } from "./base.js";
 import { fetchPublicHttpResponse } from "../core/network-guard.js";
 import { t } from "../i18n/index.js";
+import { MAX_TOOL_RESULT_ARTIFACT_BYTES } from "../shared/tool-output-artifact.js";
+
+const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
+
+/** Bound decoded transport bytes before retaining text or extracting HTML. */
+async function readResponseText(response: Response, signal?: AbortSignal): Promise<string> {
+  if (!response.body) {
+    signal?.throwIfAborted();
+    return "";
+  }
+  const reader = response.body.getReader();
+  const cancel = () => { void reader.cancel(signal?.reason).catch(() => {}); };
+  signal?.addEventListener("abort", cancel, { once: true });
+  let finished = false;
+  try {
+    signal?.throwIfAborted();
+    const declaredBytes = Number(response.headers.get("content-length"));
+    if (declaredBytes > MAX_RESPONSE_BYTES) {
+      throw new Error(`Response exceeds the ${MAX_RESPONSE_BYTES}-byte body limit.`);
+    }
+    // A byte buffer also bounds bookkeeping for tiny or empty stream chunks.
+    const buffer = Buffer.allocUnsafe(MAX_RESPONSE_BYTES);
+    let bytes = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      signal?.throwIfAborted();
+      if (done) {
+        finished = true;
+        return new TextDecoder().decode(buffer.subarray(0, bytes));
+      }
+      if (value.byteLength > MAX_RESPONSE_BYTES - bytes) {
+        throw new Error(`Response exceeds the ${MAX_RESPONSE_BYTES}-byte body limit.`);
+      }
+      buffer.set(value, bytes);
+      bytes += value.byteLength;
+    }
+  } finally {
+    signal?.removeEventListener("abort", cancel);
+    if (!finished) cancel();
+    reader.releaseLock();
+  }
+}
 
 // ─── web_fetch private-network policy helpers ───────────────────────
 // The `allowPrivateNetwork` input opts a fetch into private / loopback
@@ -158,27 +200,34 @@ export function createWebFetchTool(singleHopFetch: typeof fetch): Tool {
       },
       required: ["url"],
     },
-    execute: async (rawInput) => {
+    execute: async (rawInput, context) => {
       const args = (rawInput ?? {}) as Record<string, unknown>;
       const url = args.url as string;
       const allowPrivateNetwork = webFetchPrivateNetworkPolicy(rawInput);
       try {
+        context.abortSignal?.throwIfAborted();
         // SSRF guard: route through NetworkGuard so private / loopback /
         // link-local / metadata endpoints are rejected per hop (incl. redirect
         // chain) and bad schemes / embedded credentials are refused up front.
         const response = await fetchPublicHttpResponse(url, {
           allowPrivateNetworks: allowPrivateNetwork,
           fetchImpl: singleHopFetch,
+          signal: context.abortSignal,
           headers: { "User-Agent": "LVIS-Assistant/0.1.0" },
         });
-        const html = await response.text();
-        const text = htmlToPlainTextForWebFetch(html);
+        const body = await readResponseText(response, context.abortSignal);
+        const contentType = response.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
+        const text = contentType === "text/html" || contentType === "application/xhtml+xml"
+          ? htmlToPlainTextForWebFetch(body)
+          : body;
+        // Preserve complete bounded output for the shared history/artifact and
+        // chunk reader. Provider projection owns previews, not this producer.
+        const output = JSON.stringify({ url, content: text, truncated: false });
+        if (Buffer.byteLength(output, "utf8") > MAX_TOOL_RESULT_ARTIFACT_BYTES) {
+          throw new Error(`Serialized response exceeds the ${MAX_TOOL_RESULT_ARTIFACT_BYTES}-byte tool result limit.`);
+        }
         return {
-          output: JSON.stringify({
-            url,
-            content: text.slice(0, 5000),
-            truncated: text.length > 5000,
-          }),
+          output,
           isError: false,
         };
       } catch (error) {
@@ -186,7 +235,7 @@ export function createWebFetchTool(singleHopFetch: typeof fetch): Tool {
           output: JSON.stringify({
             url,
             error: t("be_tools.webFetchError"),
-            details: (error as Error).message,
+            details: error instanceof Error ? error.message : String(error),
           }),
           isError: true,
         };
