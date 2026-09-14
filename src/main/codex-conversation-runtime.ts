@@ -75,9 +75,9 @@ export type CodexAppServerRequestId = string | number;
 /**
  * argv for every `codex app-server` LVIS spawns. The subscription client
  * (`codex-app-server-client.ts`) and the conversation runtime below start the
- * same binary behind the same hardening boundary — `--disable` names the
- * surfaces (plugins, remote control, hooks) the isolated runtime may not
- * grow — so the list exists once: a flag added here reaches both, and the two
+ * same binary behind the same hardening boundary. Native execution and
+ * hosted tools are disabled where the protocol supports it, so the list
+ * exists once: a flag added here reaches both, and the two
  * processes can no longer come up with different boundaries.
  */
 export const CODEX_APP_SERVER_ARGV: readonly string[] = Object.freeze([
@@ -89,15 +89,17 @@ export const CODEX_APP_SERVER_ARGV: readonly string[] = Object.freeze([
   // "A default keychain could not be found".
   "-c",
   'cli_auth_credentials_store="file"',
+  "-c",
+  'web_search="disabled"',
   "--strict-config",
-  "--disable",
-  "plugins",
-  "--disable",
-  "remote_control",
-  "--disable",
-  "remote_plugin",
-  "--disable",
-  "hooks",
+  ...[
+    "plugins", "remote_control", "remote_plugin", "hooks",
+    "apps", "browser_use", "browser_use_external", "browser_use_full_cdp_access",
+    "code_mode", "computer_use", "goals", "image_generation", "multi_agent",
+    "shell_snapshot", "shell_tool", "shell_zsh_fork", "unified_exec",
+    "skill_mcp_dependency_install", "skill_search", "sleep_tool", "tool_suggest",
+    "view_image", "workspace_dependencies",
+  ].flatMap((feature) => ["--disable", feature]),
   "--listen",
   "stdio://",
 ]);
@@ -909,11 +911,8 @@ export class CodexConversationRuntime {
         environments: NO_NATIVE_ENVIRONMENTS,
         approvalPolicy: "untrusted",
         sandboxPolicy: {
-          type: "workspaceWrite",
-          writableRoots: [workspaceDir],
+          type: "readOnly",
           networkAccess: false,
-          excludeTmpdirEnvVar: true,
-          excludeSlashTmp: true,
         },
       });
       const turnId = this.projectTurnId(result);
@@ -1203,10 +1202,10 @@ export class CodexConversationRuntime {
         ...(dynamicTools.definitions.length > 0 ? { dynamicTools: dynamicTools.definitions } : {}),
         cwd: this.currentWorkspaceDir(),
         environments: NO_NATIVE_ENVIRONMENTS,
-        // Hide native writable-root instructions without changing the sandbox.
+        // Native tool restrictions do not describe the separate host tool context.
         config: { include_permissions_instructions: false },
         approvalPolicy: "untrusted",
-        sandbox: "workspace-write",
+        sandbox: "read-only",
         ephemeral: true,
       }).then((result) => {
         const root = isCodexJsonRecord(result) ? result : null;

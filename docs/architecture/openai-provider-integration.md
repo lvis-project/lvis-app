@@ -47,11 +47,26 @@ The native transport uses its selected profile and supported native effort.
 Those controls are distinct contracts: sharing the provider layer does not
 translate a numeric thinking budget into a native effort or change the model.
 
-Native tool requests return through the governed LVIS tool path. The external
-turn interruption and its native IDs remain transport state. LVIS executes the
-tool and supplies the next round through its ordinary engine. Unsupported native
-host capabilities remain rejected. Text, reasoning, tool, usage, completion,
-cancellation, and sanitized error events retain their existing stream contract.
+Registered dynamic tool requests return through the governed LVIS tool path.
+LVIS executes the tool and supplies the next round through its ordinary engine.
+Both account and conversation processes explicitly disable native shell,
+snapshot, connector, browser, computer, subagent, and other optional execution
+features. Hosted web search is separately disabled because the native sandbox's
+network setting does not remove it.
+
+The App Server does not expose a complete native-tool allowlist. Its patch tool
+can remain in the native catalog, and `unified_exec` can report enabled despite
+the disable flag; `shell_tool=false` is the command-tool control. Unsupported
+native execution still triggers the existing interrupt and transport shutdown,
+and native approval requests are declined. These flags do not replace that
+enforcement boundary. Native command and patch execution additionally receive a
+read-only filesystem policy with network access disabled. LVIS dynamic tools
+execute in the host callback under their own permission policy, outside that
+native sandbox. The host stages image inputs before native turn startup; the
+App Server needs to read those files, not create them. Native IDs and
+interruption remain transport state. Text,
+reasoning, tool, usage, completion, cancellation, and sanitized error events
+retain their existing stream contract.
 
 ## Shared child-process transport
 
