@@ -9,10 +9,6 @@ import {
 import { estimateTokens } from "./token-estimate.js";
 import { MAX_TOOL_RESULT_TOKENS } from "./tool-result-trim.js";
 
-// The builder models the persisted/provider tool-result envelope below. Keep
-// room for host metadata added by callers without sacrificing the global cap.
-const TOOL_RESULT_STUB_ENVELOPE_TOKEN_RESERVE = 128;
-
 export interface ToolResultTruncatedInfo {
   originalLines: number;
   originalTokens: number;
@@ -83,20 +79,14 @@ export function buildToolResultTruncatedStub(
     previewBudget = Math.max(0, previewBudget - excess);
     stub = buildStub();
   }
-  const serializedTokenBudget = MAX_TOOL_RESULT_TOKENS - TOOL_RESULT_STUB_ENVELOPE_TOKEN_RESERVE;
   while (
     estimateTokens(JSON.stringify({
       role: "tool_result",
       toolUseId,
-      toolName,
-      isError: true,
+      toolName: toolName ?? "",
       content: stub,
-      meta: {
-        truncated: info,
-        ...(options?.artifactUnavailable ? { artifactUnavailable: options.artifactUnavailable } : {}),
-        serializedStub: true,
-      },
-    })) > serializedTokenBudget &&
+      isError: false,
+    })) > MAX_TOOL_RESULT_TOKENS &&
     previewBudget > 0
   ) {
     previewBudget = Math.floor(previewBudget * 0.8);

@@ -1190,11 +1190,17 @@ describe("ConversationLoop queryLoop", () => {
       (loop as { provider: LLMProvider | null }).provider = provider;
 
       expect(loop.loadSession(sessionId)).toBe(true);
-      const persisted = memoryManager.loadSession(sessionId);
-      expect(persisted).not.toBeNull();
-      expect(persisted?.[1].meta?.serializedStub).toBe(true);
+      const persistedUnknown = memoryManager.loadSession(sessionId);
+      expect(persistedUnknown).not.toBeNull();
+      const persisted = persistedUnknown as GenericMessage[];
+      const persistedResult = persisted[1];
+      expect(persistedResult?.role).toBe("tool_result");
+      if (persistedResult?.role !== "tool_result") {
+        throw new Error("Expected the controlled fixture to persist a tool result");
+      }
+      expect(persistedResult.meta?.serializedStub).toBe(true);
       loop.getHistory().clear();
-      for (const message of persisted!) loop.getHistory().append(message);
+      for (const message of persisted) loop.getHistory().append(message);
       const reloaded = loop
         .getHistory()
         .getMessages()

@@ -578,6 +578,52 @@ describe("SubscriptionLlmProvider", () => {
     expect(provider.projectRequestInput(input)).toMatchObject({ messageTokens: expectedTokens, totalTokens: expectedTokens });
   });
 
+  it("projects a bounded truncated result without host display metadata", () => {
+    const provider = createSubscriptionLlmProvider({
+      selection: { kind: "subscription", provider: "codex" },
+      service: { openTextSession: vi.fn() },
+    });
+    const title = "z".repeat(10_000);
+    const uiPayload = { serverId: "server-1", resourceUri: "ui://large-output", title };
+    const input: ProviderRequestInputProjectionParams = {
+      systemPrompt: "", toolSchemas: [],
+      messages: [{
+        role: "tool_result",
+        toolUseId: "large-result",
+        toolName: "large_output",
+        isError: true,
+        content: "\u0001".repeat(10_000),
+        meta: {
+          truncated: {
+            originalLines: 1,
+            originalTokens: 2_501,
+            originalBytes: 10_000,
+            trimmedAt: "2026-01-01T00:00:00.000Z",
+          },
+          toolDisplay: { uiPayload },
+        },
+      }],
+    };
+
+    const once = prepareMarkedToolResultsForWire(input.messages);
+    const twice = prepareMarkedToolResultsForWire(once);
+    const payload = serializeSubscriptionConversationPayload(params({ ...input, messages: twice }));
+    const projection = provider.projectRequestInput(input);
+
+    expect(twice).toBe(once);
+    expect(twice[0]).toMatchObject({
+      role: "tool_result",
+      toolUseId: "large-result",
+      toolName: "large_output",
+      isError: true,
+    });
+    expect(twice[0]?.meta).toBeUndefined();
+    expect(payload.text).toContain("read_tool_result_chunk");
+    expect(payload.text).not.toContain(title);
+    expect(input.messages[0]?.meta?.toolDisplay?.uiPayload).toEqual(uiPayload);
+    expect(projection).toMatchObject({ messageTokens: estimateTokens(payload.text) });
+  });
+
   it.each(["codex", "kimi-code"] as const)("continues with bounded images and an explicit delivery error above the %s count limit", async (providerId) => {
     const { session, streamTurn } = sessionWith([{ type: "message_complete", stopReason: "end_turn" }]);
     const provider = createSubscriptionLlmProvider({

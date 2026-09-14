@@ -40,14 +40,11 @@ function buildToolResultTruncatedStubForWire(
 
 
 export function prepareMarkedToolResultsForWire(messages: GenericMessage[]): GenericMessage[] {
-
-
   let firstEligibleIdx = -1;
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i];
     if (msg.role !== "tool_result") continue;
-    if (msg.meta?.compactedAt === undefined && msg.meta?.truncated === undefined) continue;
-    if (msg.meta.serializedStub === true) continue;
+    if (msg.meta === undefined) continue;
     firstEligibleIdx = i;
     break;
   }
@@ -57,11 +54,13 @@ export function prepareMarkedToolResultsForWire(messages: GenericMessage[]): Gen
   const out: GenericMessage[] = messages.slice(0, firstEligibleIdx);
   for (let i = firstEligibleIdx; i < messages.length; i++) {
     const msg = messages[i];
-    if (
-      msg.role === "tool_result" &&
-      (msg.meta?.compactedAt !== undefined || msg.meta?.truncated !== undefined) &&
-      msg.meta.serializedStub !== true
-    ) {
+    if (msg.role !== "tool_result" || msg.meta === undefined) {
+      out.push(msg); // reference share
+      continue;
+    }
+
+    const marked = msg.meta.compactedAt !== undefined || msg.meta.truncated !== undefined;
+    if (marked && msg.meta.serializedStub !== true) {
       // Oversized results keep their bounded preview and retrieval path even
       // after later compaction. Other stale results use the shorter stripped form.
       const compactedResultText = msg.meta.truncated !== undefined
@@ -73,10 +72,13 @@ export function prepareMarkedToolResultsForWire(messages: GenericMessage[]): Gen
         toolName: msg.toolName,
         isError: msg.isError,
         content: compactedResultText,
-        meta: { ...msg.meta, serializedStub: true },
       } as GenericMessage);
     } else {
-      out.push(msg); // reference share
+      // Tool-result metadata is host-only state for history, UI, recovery, and
+      // compaction. Provider adapters map the request fields explicitly, so the
+      // request projection must exclude metadata instead of charging or sending it.
+      const { meta: _meta, ...wireMessage } = msg;
+      out.push(wireMessage);
     }
   }
   return out;
