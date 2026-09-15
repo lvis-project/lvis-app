@@ -1085,13 +1085,18 @@ function buildUserPrompt(
   }));
   const hostPolicyFacts = {
     ruleVerdict,
-    executionCwd: input.executionCwd,
+    executionCwd: input.executionCwd?.slice(0, 512),
+    executionCwdTruncated: (input.executionCwd?.length ?? 0) > 512,
     declaredPathCount: declaredPaths.length,
     allDeclaredPathsInsideAllowedDirectories: pathChecks.length > 0 &&
       pathChecks.every((path) => path.insideAllowedDirectories),
     anyDeclaredPathSensitiveRead: pathChecks.some((path) => path.sensitiveRead),
     anyDeclaredPathSensitiveWrite: pathChecks.some((path) => path.sensitiveWrite),
-    declaredPaths: pathChecks.slice(0, 8),
+    declaredPaths: pathChecks.slice(0, 8).map((check) => ({
+      ...check,
+      path: check.path.slice(0, 512),
+      pathTruncated: check.path.length > 512,
+    })),
     omittedDeclaredPathCount: Math.max(0, pathChecks.length - 8),
     explicitIntentPresent: !isContextMissingIntent(input),
   };
@@ -1099,9 +1104,7 @@ function buildUserPrompt(
   // close the host-data block or introduce a second apparent control block.
   const hostFactsJson = maskSensitiveData(JSON.stringify(hostPolicyFacts)).masked
     .replace(/</g, "\\u003c").replace(/>/g, "\\u003e");
-  return (
-    `<HOST_POLICY_FACTS>\n${hostFactsJson}\n</HOST_POLICY_FACTS>\n` +
-    `<UNTRUSTED_INPUT>\n` +
+  const untrustedInput = (
     `tool: ${input.toolName}\n` +
     `source: ${input.source}\n` +
     `category: ${input.category}\n` +
@@ -1111,9 +1114,10 @@ function buildUserPrompt(
     `conversationContext (DLP-redacted): ${JSON.stringify(redactedContext ?? null)}\n` +
     `allowedDirectories: ${JSON.stringify(input.allowedDirectories.slice(0, 8))}\n` +
     `sensitivePathsAdjacent: ${JSON.stringify(input.sensitivePathsAdjacent.slice(0, 8))}\n` +
-    `${formatSandboxCapabilityForPrompt(input.sandboxCapability)}\n` +
-    `</UNTRUSTED_INPUT>`
-  );
+    `${formatSandboxCapabilityForPrompt(input.sandboxCapability)}\n`
+  ).replace(/</g, "\\u003c").replace(/>/g, "\\u003e");
+  return `<HOST_POLICY_FACTS>\n${hostFactsJson}\n</HOST_POLICY_FACTS>\n` +
+    `<UNTRUSTED_INPUT>\n${untrustedInput}</UNTRUSTED_INPUT>`;
 }
 
 function tryParseVerdict(text: string): RiskVerdict | null {
