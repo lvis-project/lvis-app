@@ -19,6 +19,7 @@ import {
   AGENTS_DOC_NAME,
   lvisHome,
 } from "../shared/lvis-home.js";
+import { sessionStorePath } from "../shared/session-store-path.js";
 import { t } from "../i18n/index.js";
 import { projectRootEquals, projectRootKey } from "../shared/project-identity.js";
 import { parseWorkBoardOriginSessionId } from "../shared/work-board-types.js";
@@ -1393,7 +1394,7 @@ export class MemoryManager implements PromptMemorySource {
   constructor(options?: MemoryManagerOptions) {
     this.lvisDir = resolve(options?.lvisDir ?? lvisHome());
     this.memoryDir = join(this.lvisDir, "memories");
-    this.sessionsDir = join(this.lvisDir, "sessions");
+    this.sessionsDir = sessionStorePath(this.lvisDir);
     this.toolOutputArtifacts = new ToolOutputArtifactStore(this.sessionsDir);
     this.defaultWorkspaceRoot = normalizeMetadataString(
       options?.defaultWorkspaceRoot,

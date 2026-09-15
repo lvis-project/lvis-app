@@ -128,6 +128,65 @@ describe("ToolExecutor — Windows partial shell Plan B", () => {
     setProcessPlatform(ORIGINAL_PLATFORM);
   });
 
+  it.each(["active", "off"])("requires native one-shot approval for explicit host with sandbox %s and ordinary allow", async (sandbox) => {
+    if (sandbox === "active") fullDarwinAsrt();
+    else explicitlySandboxOff("darwin");
+    const executed = vi.fn();
+    const registry = new ToolRegistry();
+    registry.register(shellProbe(executed));
+    let gate: ApprovalGate;
+    const send = vi.fn((channel: string, request: ApprovalRequest) => {
+      if (channel !== "lvis:approval:request") return;
+      expect(request).toMatchObject({ executionPlan: { executionRequest: "host", mode: "plain", fallbackReason: "none", requiresExplicitUserApproval: true }, allowedChoices: ["allow-once", "deny-once"], requireExplicit: true });
+      gate.resolveFromDesktopRenderer(request.id, { requestId: request.id, choice: "allow-once", nonce: request.nonce, hmac: request.hmac });
+    });
+    gate = new ApprovalGate({ isDestroyed: () => false, send } as never);
+    const pm = pmReturning({ decision: "allow", reason: "ordinary allow mode", layer: 6 });
+    const executor = new ToolExecutor(registry, undefined, pm, undefined, gate);
+    const result = await executor.executeAll([{ id: "explicit-host", name: "bash", input: { command: "echo host", executionMode: "host", justification: "Use the host execution environment" } }], { sessionId: "explicit-host", permissionContext: permissionContext() });
+    expect(sentApprovalCards({ send })).toHaveLength(1);
+    expect(executed).toHaveBeenCalledOnce();
+    expect(executed.mock.calls[0][0].hostShellExecutionPermit).toBeDefined();
+    expect(result[0].is_error).toBeUndefined();
+  });
+
+  it("does not turn a hard denial into explicit host approval", async () => {
+    fullDarwinAsrt();
+    const executed = vi.fn();
+    const registry = new ToolRegistry();
+    registry.register(shellProbe(executed));
+    const { gate, send } = gateResolving("allow-once");
+    const executor = new ToolExecutor(registry, undefined, pmReturning({ decision: "deny", reason: "hard policy denial", layer: 1 }), undefined, gate);
+    const result = await executor.executeAll([{ id: "explicit-host-deny", name: "bash", input: { command: "echo host", executionMode: "host", justification: "Use the host execution environment" } }], { permissionContext: permissionContext() });
+    expect(result[0].is_error).toBe(true);
+    expect(executed).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it.each(["headless", "remote"])("rejects %s host requests before a prerequisite directory prompt", async (origin) => {
+    fullDarwinAsrt();
+    const executed = vi.fn();
+    const registry = new ToolRegistry();
+    registry.register(shellProbe(executed));
+    const { gate, send } = gateResolving("allow-once");
+    const executor = new ToolExecutor(registry, undefined, pmReturning({ decision: "allow", reason: "ordinary allow", layer: 6 }), undefined, gate);
+    const context = origin === "headless" ? { headless: true } : { remoteControllerAuthority: { kind: "tailnet-controller" as const, actorId: "tailnet:fixture" as const } };
+    const result = await executor.executeAll([{ id: "unavailable-host", name: "bash", input: { command: "echo host", cwd: "/outside-host-request", executionMode: "host", justification: "Use the host environment" } }], { permissionContext: permissionContext(context) });
+    expect(result[0].is_error).toBe(true);
+    expect(result[0].content.toLowerCase()).toMatch(/headless|remote controller|remote-controller/);
+    expect(send).not.toHaveBeenCalled();
+    expect(executed).not.toHaveBeenCalled();
+  });
+
+  it("returns a recoverable tool error for malformed explicit host input", async () => {
+    fullDarwinAsrt();
+    const registry = new ToolRegistry();
+    registry.register(new BashTool());
+    const result = await new ToolExecutor(registry).executeAll([{ id: "malformed-host", name: "bash", input: { command: "echo host", executionMode: "host", justification: " " } }], { permissionContext: permissionContext() });
+    expect(result[0].is_error).toBe(true);
+    expect(result[0].content).toContain("nonblank justification");
+  });
+
   it("threads one sealed full-ASRT plan through the interactive reviewer and cache key", async () => {
     fullDarwinAsrt();
     let executedPlan: import("../../permissions/host-shell-execution-plan.js").HostShellExecutionPlan | undefined;
@@ -167,7 +226,7 @@ describe("ToolExecutor — Windows partial shell Plan B", () => {
     });
     expect(reviewerInput?.hostShellExecutionPlan).toBe(executedPlan);
     expect(reviewerInput?.approvalCacheKey).toContain(
-      "host-shell-execution-plan-cache/v2:",
+      "host-shell-execution-plan-cache/v3:",
     );
   });
   it("bypasses foreground reviewer and durable memory with a one-shot explicit modal", async () => {
@@ -262,6 +321,9 @@ describe("ToolExecutor — Windows partial shell Plan B", () => {
         executionCwd: ctx.cwd,
         resolvedCwd: resolveHostShellWorkingDirectory(ctx.cwd, undefined),
         timeoutSeconds: TOOL_TIMEOUT_POLICY.shellDefaultMs / 1000,
+        executionMode: "default",
+        justification: undefined,
+        runInBackground: false,
         allowedDirectories: canonicalizeHostShellAllowedDirectories(
           ctx.extraAllowedDirectories,
         ),
@@ -613,6 +675,9 @@ describe("ToolExecutor — Windows partial shell Plan B", () => {
           executionCwd: ctx.cwd,
           resolvedCwd: resolveHostShellWorkingDirectory(ctx.cwd, undefined),
           timeoutSeconds: TOOL_TIMEOUT_POLICY.shellDefaultMs / 1000,
+        executionMode: "default",
+        justification: undefined,
+        runInBackground: false,
           allowedDirectories: canonicalizeHostShellAllowedDirectories(
             ctx.extraAllowedDirectories,
           ),

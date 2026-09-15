@@ -9,8 +9,10 @@ import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { lvisHome } from "../shared/lvis-home.js";
+import { expandLeadingTilde } from "../shared/home-tilde.js";
+import { globMatch } from "../lib/glob-matcher.js";
 import { llmRouteBaseUrls } from "../shared/llm-vendor-defaults.js";
-import { getRuntimeSensitiveKeyPaths, SENSITIVE_PATH_ENTRIES } from "./sensitive-paths.js";
+import { canonicalizePathForMatch, caseFoldForMatch, getConfiguredSessionReadPolicy, getRuntimeSensitiveKeyPaths, SENSITIVE_PATH_ENTRIES } from "./sensitive-paths.js";
 
 import type {
   SandboxRuntimeConfig,
@@ -531,6 +533,51 @@ export function isAsrtSandboxActive(): boolean {
  * @returns deduped, order-stable absolute paths to deny reads of.
  */
 export function getDefaultSensitiveReadDenyPaths(userDataDir?: string): string[] {
+  return getDefaultSensitiveDenyPaths(userDataDir);
+}
+
+/**
+ * Only builtin shell workloads receive primary saved-history read access.
+ * Per-command read denies replace the shared runtime floor, so this projection
+ * carries every other default deny as well as the grant's nested exclusions.
+ */
+export function getBuiltinShellSessionReadPolicy(userDataDir = _baseTrustedSettings?.userDataDir): {
+  readonly allowRead: readonly string[];
+  readonly denyRead: readonly string[];
+} {
+  const sessionPolicy = getConfiguredSessionReadPolicy();
+  const sessionRoot = sessionPolicy.allowRead[0];
+  const otherDenies = [
+    ...getDefaultSensitiveDenyPaths(userDataDir, sessionRoot),
+    ...(_baseTrustedSettings?.denyRead ?? []),
+  ];
+  // A session allowance must not carve into another protected namespace or a
+  // trusted custom deny. The whole-HOME deny added by shell callers is separate.
+  if (sessionRoot !== undefined && otherDenies.some((denied) => readDenyCoversPath(denied, sessionRoot))) {
+    return Object.freeze({
+      allowRead: Object.freeze([]),
+      denyRead: Object.freeze([...getDefaultSensitiveReadDenyPaths(userDataDir), ...(_baseTrustedSettings?.denyRead ?? [])]),
+    });
+  }
+  return Object.freeze({
+    allowRead: sessionPolicy.allowRead,
+    denyRead: Object.freeze([...otherDenies, ...sessionPolicy.denyRead]),
+  });
+}
+
+/** Use the shared policy grammar; unrepresented runtime patterns keep the deny. */
+function readDenyCoversPath(denied: string, canonicalPath: string): boolean {
+  // Native patterns additionally support character classes and, on Windows,
+  // environment references. Do not claim a safe carve-out from those forms.
+  if (/[\[\]]/.test(denied) || (process.platform === "win32" && denied.includes("%"))) return true;
+  const pattern = canonicalizePathForMatch(expandLeadingTilde(denied));
+  for (let candidate = canonicalPath; ; candidate = dirname(candidate)) {
+    if (globMatch(candidate, pattern) || globMatch(`${candidate}/`, pattern)) return true;
+    if (dirname(candidate) === candidate) return false;
+  }
+}
+
+function getDefaultSensitiveDenyPaths(userDataDir: string | undefined, readablePrimarySessionRoot?: string): string[] {
   const home = homedir();
   const lvis = lvisHome();
   // Electron userData dir — exact path when provided by a trusted caller;
@@ -555,7 +602,11 @@ export function getDefaultSensitiveReadDenyPaths(userDataDir?: string): string[]
     // src/permissions/sensitive-paths.ts, which the in-process host-tool guard
     // projects into globs. Do NOT hand-add a `join(home, …)` entry here — add a
     // row to that table and BOTH surfaces deny it.
-    ...SENSITIVE_PATH_ENTRIES.map((entry) => {
+    ...SENSITIVE_PATH_ENTRIES.filter((entry) => {
+      if (readablePrimarySessionRoot === undefined || entry.anchor !== "lvis-home" || entry.access !== "read-only") return true;
+      const entryPath = canonicalizePathForMatch(join(lvis, ...entry.segments));
+      return caseFoldForMatch(entryPath) !== caseFoldForMatch(readablePrimarySessionRoot);
+    }).map((entry) => {
       switch (entry.anchor) {
         case "lvis-home":
           return join(lvis, ...entry.segments);
@@ -616,7 +667,7 @@ export function getDefaultSensitiveReadDenyPaths(userDataDir?: string): string[]
  * when the write-jail is the whole home the child still cannot touch these.
  *
  * The floor is the UNION of:
- *   1. every read-deny path (no writing a secret/credential store either); and
+ *   1. every sensitive store, including read-only saved conversations; and
  *   2. write-persistence / re-exec vectors that are not secret-READ concerns:
  *      - POSIX shell startup files (sourced on the next interactive/login shell)
  *      - `~/.config` WHOLESALE (XDG autostart, systemd --user units, app config)

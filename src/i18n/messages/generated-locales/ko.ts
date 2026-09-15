@@ -145,6 +145,7 @@ import { ko as ko_sessionGoalPanel } from "../generated/sessionGoalPanel.js";
 import { ko as ko_sessionResumeDivider } from "../generated/sessionResumeDivider.js";
 import { ko as ko_sessionTasksPanel } from "../generated/sessionTasksPanel.js";
 import { ko as ko_settingsContent } from "../generated/settingsContent.js";
+import { ko as ko_shellExecution } from "../generated/shellExecution.js";
 import { ko as ko_sidebar } from "../generated/sidebar.js";
 import { ko as ko_skillBadge } from "../generated/skillBadge.js";
 import { ko as ko_slashPicker } from "../generated/slashPicker.js";
@@ -334,6 +335,7 @@ export const koMessages: Record<string, string> = {
   ...ko_sessionResumeDivider,
   ...ko_sessionTasksPanel,
   ...ko_settingsContent,
+  ...ko_shellExecution,
   ...ko_sidebar,
   ...ko_skillBadge,
   ...ko_slashPicker,

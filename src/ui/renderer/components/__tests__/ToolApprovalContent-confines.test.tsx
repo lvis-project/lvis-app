@@ -107,10 +107,11 @@ describe("ToolApprovalContent sandbox confines label", () => {
     // renderer still derives its row only from the safe projection and displays
     // none of the extra host-only fields if such a value reaches it.
     request.executionPlan = {
-      version: "host-shell-execution-plan/v2",
-      identity: "host-shell-execution-plan/v2:win32:windows-partial-shell-acl-unsafe",
+      version: "host-shell-execution-plan/v3",
+      identity: "host-shell-execution-plan/v3:win32:windows-partial-shell-acl-unsafe",
       platform: "win32",
       requestedSandbox: true,
+      executionRequest: "default",
       mode: "plain",
       fallbackReason: "windows-partial-shell-acl-unsafe",
       requiresExplicitUserApproval: true,
@@ -145,10 +146,11 @@ describe("ToolApprovalContent sandbox confines label", () => {
       reason: "process capability must not override the sealed shell plan",
     });
     request.executionPlan = {
-      version: "host-shell-execution-plan/v2",
-      identity: "host-shell-execution-plan/v2:linux:requested-sandbox-unavailable",
+      version: "host-shell-execution-plan/v3",
+      identity: "host-shell-execution-plan/v3:linux:requested-sandbox-unavailable",
       platform: "linux",
       requestedSandbox: true,
+      executionRequest: "default",
       mode: "plain",
       fallbackReason: "requested-sandbox-unavailable",
       requiresExplicitUserApproval: true,

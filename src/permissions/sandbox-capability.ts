@@ -41,6 +41,7 @@ import {
   buildHostShellExecutionPlan,
   getHostShellExecutionPlanAuditProjection,
   type HostShellExecutionPlan,
+  type HostShellExecutionRequest,
   type HostShellExecutionPlanAuditProjection,
 } from "./host-shell-execution-plan.js";
 
@@ -216,11 +217,12 @@ export function detectSandboxCapability(): SandboxCapability {
  * selects a plain child and must not present the process-global partial ASRT
  * capability as if it confined that child.
  */
-export function getHostShellExecutionPlan(): HostShellExecutionPlan {
+export function getHostShellExecutionPlan(executionMode: HostShellExecutionRequest = "default"): HostShellExecutionPlan {
   const plan = buildHostShellExecutionPlan({
     platform: process.platform,
     requestedSandbox: isSandboxRequestedAtBoot(),
     activeCapability: detectSandboxCapability(),
+    executionMode,
   });
   _issuedHostShellExecutionPlans.add(plan);
   return plan;

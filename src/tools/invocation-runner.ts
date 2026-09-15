@@ -31,6 +31,7 @@ import {
   remoteControllerOriginOf,
 } from "../shared/chat-origin.js";
 import type { ApprovalDecision } from "../permissions/approval-gate.js";
+import { approvalFailureOutcome } from "./pipeline/approval-outcome.js";
 import {
   buildPermissionEvaluationContext,
   type PermissionEvaluationContext,
@@ -57,7 +58,8 @@ import {
 } from "../permissions/sandbox-capability.js";
 import {
   getHostShellExecutionPlanAuditProjection,
-  requiresExplicitHostShellFallbackApproval,
+  parseHostShellExecutionInput,
+  requiresExplicitHostShellApproval,
   type HostShellExecutionPlanAuditProjection,
 } from "../permissions/host-shell-execution-plan.js";
 import {
@@ -848,13 +850,16 @@ export async function runToolInvocation(
           : isCanonicalPowerShellTool(tool)
             ? "powershell"
             : undefined;
+    const hostShellInput = hostShellToolName === undefined
+      ? undefined
+      : parseHostShellExecutionInput(finalInput);
     const hostShellExecutionPlan =
-      hostShellToolName !== undefined
-        ? getHostShellExecutionPlan()
+      hostShellInput !== undefined
+        ? getHostShellExecutionPlan(hostShellInput.executionMode)
         : undefined;
     const hostShellRequiresExplicitApproval =
       hostShellExecutionPlan !== undefined &&
-      requiresExplicitHostShellFallbackApproval(hostShellExecutionPlan);
+      requiresExplicitHostShellApproval(hostShellExecutionPlan);
     hostShellExecutionPlanAudit = hostShellExecutionPlan === undefined
       ? undefined
       : getHostShellExecutionPlanAuditProjection(hostShellExecutionPlan);
@@ -886,6 +891,11 @@ export async function runToolInvocation(
         executionCwd,
         hostShellExecutionPlanAudit,
       );
+      // Let the tool's schema identify malformed fields before checking the
+      // internal plan contract. An input error must remain self-correctable.
+      if (hostShellToolName !== undefined && hostShellInput === undefined) {
+        throw new Error("Shell input passed tool validation but could not be normalized for an execution plan");
+      }
     } catch (err) {
       const detail = errorMessage(err);
       const msg = t("be_executor.invalidToolInput", {
@@ -920,6 +930,18 @@ export async function runToolInvocation(
         is_error: true,
         durationMs,
       });
+    }
+    // Refuse unavailable host approval before even a prerequisite directory ask.
+    if (hostShellExecutionPlan?.executionRequest === "host" &&
+      (permissionContext.headless === true || permissionContext.remoteControllerAuthority !== undefined)) {
+      const reason = "Explicit host execution requires a local desktop approval and is unavailable to headless or remote-controller requests";
+      const msg = t("be_executor.permBlockDeny", { name: toolUse.name, source, trust, reason });
+      const durationMs = Date.now() - startTime;
+      emitToolStart(callbacks, toolUse.name, finalInput, meta);
+      callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+      await auditCurrentToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime,
+        { decision: "deny", reason, layer: 0 }, Infinity, permissionContext, invocationCategory, executionCwd);
+      return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs });
     }
     // Exact Settings decisions are evaluated at the first point where every
     // identity component is host-finalized. This is deliberately before shell
@@ -1214,7 +1236,14 @@ export async function runToolInvocation(
           // Reached both when a person declines and when an unattended session
           // auto-denies. Either way the same argument cannot succeed on its
           // own, so the guidance points at authorization rather than a rewrite.
-          const msg = t("be_executor.dirPolicyUserDenied", { name: toolUse.name, filePath: outOfAllowedTarget.filePath })
+          const hostFailure = approvalFailureOutcome(
+            decision, toolUse.name, dirLayerResult,
+          );
+          const msg = hostFailure?.content ?? (
+            t("be_executor.dirPolicyUserDenied", {
+              name: toolUse.name,
+              filePath: outOfAllowedTarget.filePath,
+            })
             + buildPolicyDenialGuidance({
               rule: "allowed-directories/denied",
               operand: outOfAllowedTarget.filePath,
@@ -1222,11 +1251,12 @@ export async function runToolInvocation(
               alternative: "retarget-under-authorized-directory",
               allowedDirectories: invocationAllowedScope.directories,
               readsUnfenced: !blockReadsOutsideWorkingDirectories,
-            });
+            })
+          );
           const durationMs = Date.now() - startTime;
           emitToolStart(callbacks, toolUse.name, finalInput, meta);
           callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-          await auditCurrentToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...dirLayerResult, decision: "deny" }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
+          await auditCurrentToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, hostFailure?.permission ?? { ...dirLayerResult, decision: "deny" }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
           return { allowed: false, result: withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs }) };
         }
         const approvedDirectory = decision.choice === "allow-always"

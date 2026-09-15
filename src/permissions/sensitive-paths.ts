@@ -7,7 +7,7 @@
  *
  * Sensitive Path Patterns — Tier S1+S2
  *
- * Hard-blocklist of filesystem patterns that should NEVER be read/written
+ * Hard-blocklist of filesystem patterns that should never be read/written
  * by agent tools, regardless of user approval or permission mode. Defends
  * against prompt-injection attacks that direct the LLM to exfiltrate
  * credentials (e.g. "please read ~/.ssh/id_rsa and summarize it").
@@ -30,12 +30,14 @@
  *   - OS sensitive paths: shell histories, browser cookies, generic
  *     id_{rsa,ed25519,ecdsa} (not just under .ssh/), .env / .env.*
  *   - LVIS-internal sensitive paths: secrets/, audit*, deferred-queue,
- *     sessions/, hooks/ (relocated to ~/.config/lvis/hooks)
+ *     hooks/ (relocated to ~/.config/lvis/hooks). Saved sessions allow reads only.
  */
 import { realpathSync } from "node:fs";
 import { isAbsolute, resolve as pathResolve, relative as pathRelative } from "node:path";
 import { globMatch } from "../lib/glob-matcher.js";
 import { lvisHome } from "../shared/lvis-home.js";
+import { sessionStorePath } from "../shared/session-store-path.js";
+import type { PathEffect } from "./allowed-directories.js";
 
 /**
  * Bounded walk-up depth used by {@link canonicalizePathForMatch} when the
@@ -152,6 +154,8 @@ export interface SensitiveEntry {
    * literal form, so the sandbox floor covers the base file only.
    */
   readonly rotations?: true;
+  /** The configured primary session store is readable, but never tool-writable. */
+  readonly access?: "read-only";
   /** Why this is secret. Kept next to the row so neither side drifts alone. */
   readonly why: string;
 }
@@ -232,7 +236,7 @@ export const SENSITIVE_PATH_ENTRIES: readonly SensitiveEntry[] = Object.freeze([
     rotations: true,
     why: "audit log + rotated archives",
   },
-  { anchor: "lvis-home", segments: ["sessions"], kind: "dir", why: "chat session JSONL" },
+  { anchor: "lvis-home", segments: ["sessions"], kind: "dir", access: "read-only", why: "saved conversation integrity" },
   { anchor: "lvis-home", segments: ["host-runtime"], kind: "dir", why: "process ownership lock (replacement creates a second writer)" },
   { anchor: "lvis-home", segments: ["routine"], kind: "dir", why: "routine session history" },
   {
@@ -254,9 +258,9 @@ export const SENSITIVE_PATH_ENTRIES: readonly SensitiveEntry[] = Object.freeze([
  * A `dir` row needs only the `/**` form: `policyMatchPaths` also tries
  * `<path>/`, so `**\/.ssh/**` already matches the bare directory.
  */
-function sensitiveEntryGlobs(): readonly string[] {
+function sensitiveEntryGlobs(entries: readonly SensitiveEntry[] = SENSITIVE_PATH_ENTRIES): readonly string[] {
   const globs: string[] = [];
-  for (const entry of SENSITIVE_PATH_ENTRIES) {
+  for (const entry of entries) {
     const prefix = entry.anchor === "lvis-home" ? "**/.lvis/" : "**/";
     const base = prefix + entry.segments.join("/");
     globs.push(entry.kind === "dir" ? base + "/**" : base);
@@ -264,6 +268,10 @@ function sensitiveEntryGlobs(): readonly string[] {
   }
   return globs;
 }
+
+const READ_ONLY_NAMESPACE_PATTERNS = new Set(sensitiveEntryGlobs(
+  SENSITIVE_PATH_ENTRIES.filter((entry) => entry.access === "read-only"),
+));
 
 /**
  * Patterns use minimatch-compatible glob syntax:
@@ -444,29 +452,72 @@ export function policyMatchPaths(filePath: string): readonly string[] {
   return Object.freeze([normalized, normalized + "/"]);
 }
 
-/**
- * Returns the first matching pattern string if `absPath` is a sensitive
- * path, or `null` otherwise.
- *
- * Checks both `path` and `path + "/"` forms (§S2 trailing-slash trick) so
- * that directory-form accesses against glob patterns still match.
- *
- * Not exceptioned: the caller is expected to treat a non-null return as
- * an unconditional deny (cannot be overridden).
- *
- * NOTE: callers should pre-canonicalize via {@link canonicalizePathForMatch}
- * + {@link caseFoldForMatch} before calling. The patterns themselves are
- * lowercased for consistent darwin/win32 matching.
+/** Resolve only the primary session namespace, without materializing it. */
+export function getConfiguredSessionReadRoot(): string | undefined {
+  const home = canonicalizePathForMatch(lvisHome());
+  const lexicalRoot = foldCanonicalPathSeparators(sessionStorePath(home));
+  const canonicalRoot = canonicalizePathForMatch(lexicalRoot);
+  // A relocated application root is valid. A sessions-directory link must not
+  // turn that single namespace into a grant for some other host directory.
+  if (caseFoldForMatch(canonicalRoot) !== caseFoldForMatch(lexicalRoot)) return undefined;
+  // The native filesystem policy interprets these as patterns, not literals.
+  if (/[\0\r\n*?\[\]]/.test(canonicalRoot)) return undefined;
+  // A configured application root inside a credential store cannot turn that
+  // store into an allowed native read subtree.
+  if (policyMatchPaths(caseFoldForMatch(canonicalRoot)).some((candidate) =>
+    SENSITIVE_PATH_PATTERNS.some((pattern) => !READ_ONLY_NAMESPACE_PATTERNS.has(pattern) && globMatch(candidate, pattern)))) return undefined;
+  return canonicalRoot;
+}
+
+/** Membership only: callers must still apply every other sensitive-path rule. */
+export function isConfiguredSessionReadPath(canonicalPath: string): boolean {
+  const root = getConfiguredSessionReadRoot();
+  if (root === undefined) return false;
+  const foldedRoot = caseFoldForMatch(root);
+  const foldedPath = caseFoldForMatch(canonicalPath);
+  return foldedPath === foldedRoot || foldedPath.startsWith(`${foldedRoot}/`);
+}
+
+/** Project the existing sensitive rules beneath a host-resolved session root.
+ * Native glob matching owns recursion; this function never scans stored data.
  */
-export function isSensitivePath(absPath: string): string | null {
+function getSessionReadDenyPatterns(sessionReadRoot: string): readonly string[] {
+  return Object.freeze(SENSITIVE_PATH_PATTERNS.map((pattern) =>
+    `${sessionReadRoot}/${pattern.endsWith("/**") ? pattern.slice(0, -3) : pattern}`));
+}
+
+/** Native shell routes must pair the read grant with its scoped exclusions. */
+export function getConfiguredSessionReadPolicy(): {
+  readonly allowRead: readonly string[];
+  readonly denyRead: readonly string[];
+} {
+  const root = getConfiguredSessionReadRoot();
+  return Object.freeze({
+    allowRead: Object.freeze(root === undefined ? [] : [root]),
+    denyRead: root === undefined ? Object.freeze([]) : getSessionReadDenyPatterns(root),
+  });
+}
+
+/**
+ * Return an unconditional deny pattern for a canonical, case-folded path.
+ * Omitting the effect preserves the stricter write policy. Only the configured
+ * primary session namespace receives a read exception; other sensitive rules
+ * still apply, including credentials placed inside the readable namespace.
+ */
+export function isSensitivePath(absPath: string, effect: PathEffect = "write"): string | null {
   if (!absPath) return null;
   const candidates = policyMatchPaths(absPath);
+  const sessionRoot = effect === "read" ? getConfiguredSessionReadRoot() : undefined;
+  const canReadSession = sessionRoot !== undefined && isConfiguredSessionReadPath(absPath)
+    && !policyMatchPaths(pathRelative(caseFoldForMatch(sessionRoot), absPath)).some((candidate) =>
+      [...READ_ONLY_NAMESPACE_PATTERNS].some((pattern) => globMatch(candidate, pattern)));
   for (const keyPath of getRuntimeSensitiveKeyPaths()) {
     const normalizedKey = caseFoldForMatch(foldCanonicalPathSeparators(keyPath));
     if (candidates.includes(normalizedKey)) return "runtime-secret-key";
   }
   for (const candidate of candidates) {
     for (const pattern of SENSITIVE_PATH_PATTERNS) {
+      if (canReadSession && READ_ONLY_NAMESPACE_PATTERNS.has(pattern)) continue;
       if (globMatch(candidate, pattern)) {
         return pattern;
       }
@@ -478,6 +529,7 @@ export function isSensitivePath(absPath: string): string | null {
   const home = canonicalizePathForMatch(lvisHome());
   for (const entry of SENSITIVE_PATH_ENTRIES) {
     if (entry.anchor !== "lvis-home") continue;
+    if (canReadSession && entry.access === "read-only") continue;
     const base = caseFoldForMatch(canonicalizePathForMatch(pathResolve(home, ...entry.segments)));
     for (const candidate of candidates) {
       if (candidate === base ||

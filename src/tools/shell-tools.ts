@@ -43,7 +43,7 @@ import {
 import {
   wrapToolCommand,
   cleanupAsrtSandboxAfterCommand,
-  getDefaultSensitiveReadDenyPaths,
+  getBuiltinShellSessionReadPolicy,
   getDefaultSensitiveWriteDenyPaths,
 } from "../permissions/asrt-sandbox.js";
 import {
@@ -52,7 +52,7 @@ import {
 } from "../permissions/sandbox-capability.js";
 import {
   getHostShellExecutionPlanAuditProjection,
-  requiresExplicitHostShellFallbackApproval,
+  requiresExplicitHostShellApproval,
 } from "../permissions/host-shell-execution-plan.js";
 import {
   canonicalizeHostShellAllowedDirectories,
@@ -493,7 +493,28 @@ export const backgroundShellManager: BackgroundShellManager = createManager();
  * (Step 2.5 of the tool executor pipeline) prevents dangerous syntax.
  */
 
+const hostShellExecutionFields = {
+  executionMode: z.enum(["default", "host"]).optional().describe(
+    "Use default execution, or explicitly request one foreground execution as the current user without OS sandboxing. Host requires a fresh desktop allow-once approval.",
+  ),
+  justification: z.string().optional().describe("Required nonblank reason for explicit host execution"),
+};
+
+function validateHostShellExecutionRequest(
+  input: { executionMode?: "default" | "host"; justification?: string; run_in_background?: boolean },
+  ctx: z.RefinementCtx,
+): void {
+  if (input.executionMode !== "host") return;
+  if (!input.justification?.trim()) {
+    ctx.addIssue({ code: "custom", path: ["justification"], message: "Host execution requires a nonblank justification" });
+  }
+  if (input.run_in_background === true) {
+    ctx.addIssue({ code: "custom", path: ["run_in_background"], message: "Host execution must run in the foreground" });
+  }
+}
+
 export const BashToolInputSchema = z.object({
+  ...hostShellExecutionFields,
   command: z.string().min(1).describe("Shell command to execute"),
   cwd: z.string().optional().describe("Working directory override"),
   // Optional-but-defaulted and strictly positive: a command always has a
@@ -513,7 +534,7 @@ export const BashToolInputSchema = z.object({
         "the OS sandbox (ASRT) the command runs synchronously and the result is flagged " +
         "backgroundUnavailable, because the sandbox cannot safely run concurrent commands.",
     ),
-});
+}).superRefine(validateHostShellExecutionRequest);
 
 const INTERACTIVE_SCAFFOLDS = [
   "create-next-app",
@@ -600,9 +621,12 @@ export class BashTool extends ZodTool<typeof BashToolInputSchema> {
         metadata: { sandboxed: false, isolation: "none" },
       };
     }
-    const hostShellPlan = suppliedHostShellPlan ?? getHostShellExecutionPlan();
-    if (requiresExplicitHostShellFallbackApproval(hostShellPlan) && !ctx.hostShellExecutionPermit) {
-      return { output: "spawn failed: requested-sandbox shell execution requires a one-shot host approval permit.", isError: true, metadata: { sandboxed: false, isolation: "none" } };
+    const hostShellPlan = suppliedHostShellPlan ?? getHostShellExecutionPlan(input.executionMode);
+    if (hostShellPlan.executionRequest !== (input.executionMode ?? "default")) {
+      return { output: "Shell execution request does not match the host plan.", isError: true };
+    }
+    if (requiresExplicitHostShellApproval(hostShellPlan) && !ctx.hostShellExecutionPermit) {
+      return { output: "spawn failed: this host shell execution requires a one-shot host approval permit.", isError: true, metadata: { sandboxed: false, isolation: "none" } };
     }
     const identity = { command: input.command, requestedCwd: input.cwd, executionCwd: ctx.cwd, resolvedCwd,
       toolUseId: typeof ctx.metadata.toolUseId === "string" ? ctx.metadata.toolUseId : undefined, plan: hostShellPlan };
@@ -630,10 +654,10 @@ export class BashTool extends ZodTool<typeof BashToolInputSchema> {
     }
 
 
-    // A requested-sandbox fallback is an honest plain host child, never an ASRT child.
+    // Explicit host requests and sandbox fallbacks both select a plain host child.
     // Its opaque permit exists only after an allow-once approval for this exact
     // command/cwd/tool-use tuple and is consumed before spawn.
-    if (requiresExplicitHostShellFallbackApproval(hostShellPlan)) {
+    if (requiresExplicitHostShellApproval(hostShellPlan)) {
       const permitAccepted = consumeHostShellExecutionPermit({
         permit: ctx.hostShellExecutionPermit,
         plan: hostShellPlan,
@@ -647,11 +671,14 @@ export class BashTool extends ZodTool<typeof BashToolInputSchema> {
         executionCwd: ctx.cwd,
         resolvedCwd,
         timeoutSeconds: input.timeoutSeconds,
+        executionMode: input.executionMode ?? "default",
+        justification: input.justification,
+        runInBackground: input.run_in_background ?? false,
         allowedDirectories: canonicalizeHostShellAllowedDirectories(ctx.extraAllowedDirectories),
       });
       if (!permitAccepted) {
         return {
-          output: "spawn failed: requested-sandbox shell execution requires a one-shot host approval permit.",
+          output: "spawn failed: this host shell execution requires a one-shot host approval permit.",
           isError: true,
           metadata: { sandboxed: false, isolation: "none" },
         };
@@ -871,9 +898,11 @@ export async function spawnWithSandbox(
   // tree (cwd + write paths). Omitting denyRead when HOME is unset avoids
   // denying nothing-meaningful; the write paths are always re-allowed for read.
   const sandboxWritePaths = [...writePaths, homePath];
-  const allowRead = [resolvedCwd, ...sandboxWritePaths, ...preparedShellExecutableReadPaths(prepared)];
+  const sessionReadPolicy = getBuiltinShellSessionReadPolicy();
+  const allowRead = [resolvedCwd, ...sandboxWritePaths, ...preparedShellExecutableReadPaths(prepared),
+    ...sessionReadPolicy.allowRead];
   const denyRead = [
-    ...getDefaultSensitiveReadDenyPaths(),
+    ...sessionReadPolicy.denyRead,
     ...(home !== undefined && home !== "" ? [home] : []),
   ];
   const filesystem = {
@@ -1270,11 +1299,13 @@ export function createBashKillTool(
 type PowerShellParser = (command: string) => Promise<PowerShellAstSummary>;
 
 export const PowerShellToolInputSchema = z.object({
+  ...hostShellExecutionFields,
+  run_in_background: z.boolean().optional().describe("PowerShell runs in the foreground; host requests must not set this to true"),
   command: z.string().min(1).describe("PowerShell command to execute"),
   cwd: z.string().optional().describe("Working directory override"),
   // Optional-but-defaulted and strictly positive — see BashToolInputSchema.
   timeoutSeconds: shellTimeoutSchema,
-});
+}).superRefine(validateHostShellExecutionRequest);
 
 const POWERSHELL_ALIASES = new Map<string, string>([
   ["ac", "add-content"],
@@ -1409,9 +1440,12 @@ export class PowerShellTool extends ZodTool<typeof PowerShellToolInputSchema> {
         metadata: { sandboxed: false, isolation: "none" },
       };
     }
-    const hostShellPlan = suppliedHostShellPlan ?? getHostShellExecutionPlan();
-    if (requiresExplicitHostShellFallbackApproval(hostShellPlan) && !ctx.hostShellExecutionPermit) {
-      return { output: "PowerShell spawn failed: requested-sandbox shell execution requires a one-shot host approval permit.", isError: true, metadata: { sandboxed: false, isolation: "none" } };
+    const hostShellPlan = suppliedHostShellPlan ?? getHostShellExecutionPlan(input.executionMode);
+    if (hostShellPlan.executionRequest !== (input.executionMode ?? "default")) {
+      return { output: "Shell execution request does not match the host plan.", isError: true };
+    }
+    if (requiresExplicitHostShellApproval(hostShellPlan) && !ctx.hostShellExecutionPermit) {
+      return { output: "PowerShell spawn failed: this host shell execution requires a one-shot host approval permit.", isError: true, metadata: { sandboxed: false, isolation: "none" } };
     }
     const commandPathViolation = await findPowerShellCommandPathViolation(
       input.command,
@@ -1423,10 +1457,10 @@ export class PowerShellTool extends ZodTool<typeof PowerShellToolInputSchema> {
     if (commandPathViolation) {
       return { output: commandPathViolation.reason, isError: true };
     }
-    // A requested-sandbox fallback is an honest plain host child, never an ASRT child.
+    // Explicit host requests and sandbox fallbacks both select a plain host child.
     // Its opaque permit exists only after an allow-once approval for this exact
     // command/cwd/tool-use tuple and is consumed before spawn.
-    if (requiresExplicitHostShellFallbackApproval(hostShellPlan)) {
+    if (requiresExplicitHostShellApproval(hostShellPlan)) {
       const permitAccepted = consumeHostShellExecutionPermit({
         permit: ctx.hostShellExecutionPermit,
         plan: hostShellPlan,
@@ -1440,11 +1474,14 @@ export class PowerShellTool extends ZodTool<typeof PowerShellToolInputSchema> {
         executionCwd: ctx.cwd,
         resolvedCwd,
         timeoutSeconds: input.timeoutSeconds,
+        executionMode: input.executionMode ?? "default",
+        justification: input.justification,
+        runInBackground: input.run_in_background ?? false,
         allowedDirectories: canonicalizeHostShellAllowedDirectories(ctx.extraAllowedDirectories),
       });
       if (!permitAccepted) {
         return {
-          output: "PowerShell spawn failed: requested-sandbox shell execution requires a one-shot host approval permit.",
+          output: "PowerShell spawn failed: this host shell execution requires a one-shot host approval permit.",
           isError: true,
           metadata: { sandboxed: false, isolation: "none" },
         };
@@ -1786,9 +1823,10 @@ async function spawnPowerShellWithSandbox(
 
   const home = process.env["HOME"];
   const sandboxWritePaths = [...writePaths, sandboxHome.path];
-  const allowRead = [cwd, ...sandboxWritePaths];
+  const sessionReadPolicy = getBuiltinShellSessionReadPolicy();
+  const allowRead = [cwd, ...sandboxWritePaths, ...sessionReadPolicy.allowRead];
   const denyRead = [
-    ...getDefaultSensitiveReadDenyPaths(),
+    ...sessionReadPolicy.denyRead,
     ...(home !== undefined && home !== "" ? [home] : []),
   ];
   const filesystem = {

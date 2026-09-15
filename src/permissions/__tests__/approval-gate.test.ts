@@ -220,7 +220,7 @@ describe("ApprovalGate", () => {
     });
     const binding: HostShellExecutionPermitBinding = Object.freeze({
       plan,
-      planIdentity: "host-shell-execution-plan/v2:win32:windows-partial-shell-acl-unsafe",
+      planIdentity: "host-shell-execution-plan/v3:win32:windows-partial-shell-acl-unsafe",
       toolName: "bash",
       toolUseId: "receipt-tool-use",
       command: "echo receipt",
@@ -228,6 +228,9 @@ describe("ApprovalGate", () => {
       executionCwd: "C:/repo",
       resolvedCwd: "C:/repo/subdir",
       timeoutSeconds: 30,
+      executionMode: "default",
+      justification: undefined,
+      runInBackground: false,
       allowedDirectories: Object.freeze(["c:/repo/extra"]),
     });
     const req = makeRequest({
@@ -301,6 +304,9 @@ describe("ApprovalGate", () => {
       executionCwd: "C:/repo",
       resolvedCwd: "C:/repo/subdir",
       timeoutSeconds: 30,
+      executionMode: "default",
+      justification: undefined,
+      runInBackground: false,
       allowedDirectories: Object.freeze(["c:/repo/extra"]),
     });
     const cases = [
@@ -408,6 +414,9 @@ describe("ApprovalGate", () => {
       executionCwd: "C:/repo",
       resolvedCwd: "C:/repo/subdir",
       timeoutSeconds: 30,
+      executionMode: "default",
+      justification: undefined,
+      runInBackground: false,
       allowedDirectories: Object.freeze(["c:/repo/extra"]),
     });
     const otherPlan = buildHostShellExecutionPlan({
@@ -2747,6 +2756,9 @@ describe("ApprovalGate", () => {
               executionCwd: "/repo",
               resolvedCwd: "/repo",
               timeoutSeconds: 30,
+      executionMode: "default",
+      justification: undefined,
+      runInBackground: false,
               allowedDirectories: Object.freeze([AWAY_DIR]),
             }) satisfies HostShellExecutionPermitBinding,
           }),

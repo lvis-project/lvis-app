@@ -47,6 +47,15 @@ anchors. Input files, pattern files supplied with `-f`/`--file`, exclusion files
 and redirection targets remain subject to path checks. Shell substitutions are
 checked separately because they execute commands before argument passing.
 
+For `git commit`, the operand classifier in
+[shell-path-policy.ts](../../src/tools/shell-path-policy.ts) recognizes message
+values as data, including attached option values. Path-like text in a literal
+message does not request filesystem access. Directory options, file-backed
+messages, templates and pathspec files retain path checks. Unsupported option
+arity is refused rather than used to infer later operand roles. Classification
+preserves the original command bytes; substitutions, redirections and commit
+mutation still receive their normal checks.
+
 Literal dollars and percent markers remain exact filename bytes in Bash,
 including quoted `$PWD` and `%CD%`. Only typed active expansions use the
 prepared environment and point-of-use bindings. A known expansion is checked
@@ -162,6 +171,80 @@ compares supported argv, state and owned filesystem effects with the actual
 native shell. PowerShell's separate function/method restriction and public
 lifecycle coverage are described in the architecture contract.
 
+## Shell Execution And Explicit Host Approval
+
+Execution location, configuration, authentication and OS identity are separate
+properties. ASRT launches processes on the current host with a temporary HOME
+and configuration profile for each invocation. It does not inherit the user's
+terminal login state. Plain execution uses the host HOME and filtered child
+environment. Both run as the current OS user; selecting host execution grants
+no administrator privileges. The final host-owned execution plan determines
+confinement; a temporary HOME alone is not an OS sandbox.
+
+Bash and PowerShell accept `executionMode: "default" | "host"` and an optional
+`justification`. Omission keeps the default route. An explicit host request
+requires a nonblank justification and foreground execution. The host selects
+the final plan after input hooks and before environment capture and path
+analysis. Host mode selects plain execution without OS confinement and requires
+a fresh exact-action `allow-once`, including in allow mode or when sandboxing
+was already disabled. Sensitive-path, directory, command and dynamic-syntax
+checks remain mandatory.
+
+Only a response from the verified local desktop renderer can authorize this
+explicit request. The approval displays the exact command, cwd and justification
+and states that the command runs once as the current user without the OS sandbox.
+Headless and remote-controller requests are denied before approval. Automatic,
+remembered, plugin, platform and parent-agent decisions cannot authorize host
+mode. The signed approval receipt binds the final action; an opaque permit is
+consumed once before spawn. Changed commands, cwd, plans or request fields and
+replayed permits fail closed. The parser and plan in
+[host-shell-execution-plan.ts](../../src/permissions/host-shell-execution-plan.ts),
+the [approval gate](../../src/permissions/approval-gate.ts) and
+[execution permit](../../src/permissions/host-shell-execution-permit.ts) own this
+contract.
+
+Every plain-shell call requiring one-shot consent exposes its complete command
+and resolved working directory before the decision. If sensitive-data masking
+would change its arguments or working directory, the gate rejects the request
+before parking it. Masking is retained; hidden command bytes cannot receive an
+execution permit through a redacted display.
+
+Host execution is not a credential broker. Programs may consult host
+configuration, but the environment filter does not forward token variables or
+the SSH agent, and authentication success is not guaranteed. Without OS
+confinement, this feature cannot guarantee that arbitrary programs never read
+credential files. The actual environment remains owned by
+[safe-env.ts](../../src/tools/safe-env.ts) and the prepared invocation.
+[shell-execution-environment.ts](../../src/shared/shell-execution-environment.ts)
+provides shared descriptions for the system prompt and approval UI; the prompt
+describes the default route, while the approval describes the final call's plan.
+
+## Saved-Session Reads
+
+Tool policy permits reads of the configured primary session store and denies
+write and delete effects. Its root comes from
+[sessionStorePath](../../src/shared/session-store-path.ts) under the application
+data root resolved by `lvisHome()`; `LVIS_HOME` relocation applies to storage and
+read policy together. This grants no access to another session-store namespace,
+credentials, audit or routine state.
+
+[sensitive-paths.ts](../../src/permissions/sensitive-paths.ts) owns the namespace
+classification and canonical-path checks. Supported file reads and shell
+commands with proven read effects can reach this root even when ordinary reads
+are confined to working directories. A linked session root or an escaping path
+cannot widen that grant, and other sensitive-path rules still apply inside it.
+Only the builtin shell wrapper receives that root through
+`getBuiltinShellSessionReadPolicy` in
+[asrt-sandbox.ts](../../src/permissions/asrt-sandbox.ts). The global read-deny
+floor still protects sessions from confined plugin, MCP and terminal processes.
+The builtin projection retains other sensitive paths, nested exclusions and
+trusted custom read denies; a conflicting protected ancestor suppresses the
+session grant. The sensitive write-deny floor remains intact.
+Removing a read-deny pattern alone
+does not establish this contract: both the file gates and actual sandboxed reads
+must enforce the same boundary. Structured transfers retain their write-effect
+checks on both endpoints.
+
 ## Structured File Transfers
 
 `copy_path` declares `sourcePath` and `destinationPath`; `extract_archive` declares `archivePath` and `destinationPath`. Both tools are builtin writes, and both endpoint fields are declared in `pathFields`. The executor resolves these paths for the existing scope checks and write approval. Approval reuse is bound to the semantic operation and both resolved paths.
@@ -190,6 +273,12 @@ deferred queue and surface through a queue button or history view.
 
 Closing a deferred modal does not grant permission and does not delete the audit
 record. It leaves the item pending or closed according to the queue state.
+
+An unanswered approval that expires is distinct from a user or parent refusal.
+Host-owned expiration and rejected-request outcomes propagate through
+[approval-outcome.ts](../../src/tools/pipeline/approval-outcome.ts) to tool and
+directory approval results and audit reasons. Expiration does not grant access,
+change the approval deadline or alter command timeouts and cancellation.
 
 ## Reviewer Failure
 

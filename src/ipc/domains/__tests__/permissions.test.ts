@@ -160,6 +160,7 @@ function makeDeps(options: {
         choice: options.approvalChoice ?? "allow-once",
       })),
       resolve: vi.fn((_requestId: string, decision: unknown) => decision),
+      resolveFromDesktopRenderer: vi.fn((_requestId: string, decision: unknown) => decision),
       // #799 + CRITICAL-2 ralph iter 4: server-side ApprovalRequest binding.
       // userApprovalRecord handler reads identity, raw args, and verdict from
       // this host snapshot. Tests opt into HIGH explicitly; renderer claims
@@ -314,6 +315,23 @@ describe("permissions IPC handlers", () => {
         windowMs: 300000,
       });
     }
+  });
+
+  it("marks only a registered app window main-frame response as native", async () => {
+    const { deps, appWindows } = await setup();
+    const fn = handlers.get(PERMISSIONS.approvalRespond)!;
+    const sender = appWindows[0].webContents;
+    const frame = { url: "file:///application/index.html" };
+    Object.assign(sender, { mainFrame: frame });
+    const decision = { requestId: "host-approval", choice: "allow-once" };
+    await fn({ sender, senderFrame: frame }, decision);
+    expect(deps.approvalGate.resolveFromDesktopRenderer).toHaveBeenCalledWith("host-approval", decision);
+    expect(deps.approvalGate.resolve).not.toHaveBeenCalled();
+    deps.approvalGate.resolveFromDesktopRenderer.mockClear();
+    await fn({ sender, senderFrame: { url: frame.url } }, decision);
+    await fn({ sender: { mainFrame: frame }, senderFrame: frame }, decision);
+    expect(deps.approvalGate.resolveFromDesktopRenderer).not.toHaveBeenCalled();
+    expect(deps.approvalGate.resolve).toHaveBeenCalledTimes(2);
   });
 
   it("suggests LLM permission review immediately after allow-always in default mode", async () => {

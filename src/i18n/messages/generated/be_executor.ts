@@ -43,6 +43,10 @@ export const en = {
   "be_executor.hookPermissionBlock": "[Hook permission blocked] {reason}",
   "be_executor.approvalGateError": "[Approval error] Tool '{name}' — approval gate internal error: {error}",
   "be_executor.approvalDeniedByUser": "[Approval denied] Tool '{name}' — user denied execution.",
+  "be_executor.approvalRejectedByHost": "[Approval blocked by host] Tool '{name}' did not run: {reason}",
+  "be_executor.approvalHostRejectedReason": "The host could not validate or deliver this approval request. No user denial was received.",
+  "be_executor.approvalExpired":
+    "[Approval expired] Tool '{name}' did not run because the approval wait time elapsed without a decision. Execution still requires approval.",
   "be_executor.approvalDeniedByParent": "[Approval denied] Tool '{name}' — the parent agent refused: {reason}",
   "be_executor.approvalDeferredForReview":
     "[Approval deferred] Tool '{name}' — nobody was at the desk, so this call was denied and queued for the user to review later. Do not retry it; report what you needed and why.",
@@ -95,6 +99,10 @@ export const ko: Record<keyof typeof en, string> = {
   "be_executor.hookPermissionBlock": "[Hook Permission 차단] {reason}",
   "be_executor.approvalGateError": "[승인 오류] 도구 '{name}' — 승인 게이트 내부 오류: {error}",
   "be_executor.approvalDeniedByUser": "[승인 거부] 도구 '{name}' — 사용자가 실행을 거부했습니다.",
+  "be_executor.approvalRejectedByHost": "[호스트가 승인 차단] 도구 '{name}'을 실행하지 않았습니다: {reason}",
+  "be_executor.approvalHostRejectedReason": "호스트가 승인 요청을 검증하거나 전달할 수 없었습니다. 사용자 거절을 받은 것은 아닙니다.",
+  "be_executor.approvalExpired":
+    "[승인 대기 시간 만료] 승인 응답을 기다리는 시간이 끝나 도구 '{name}'을 실행하지 않았습니다. 실행하려면 승인이 필요합니다.",
   "be_executor.approvalDeniedByParent": "[승인 거부] 도구 '{name}' — 상위 에이전트가 거부했습니다: {reason}",
   "be_executor.approvalDeferredForReview":
     "[승인 보류] 도구 '{name}' — 자리에 아무도 없어 이 호출을 거부하고 사용자가 나중에 검토하도록 대기열에 넣었습니다. 재시도하지 말고, 무엇이 왜 필요했는지 보고하세요.",

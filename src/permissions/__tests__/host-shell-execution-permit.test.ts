@@ -39,6 +39,9 @@ function makeBinding(
     executionCwd: "C:/repo",
     resolvedCwd: "C:/repo/subdir",
     timeoutSeconds: 30,
+      executionMode: "default",
+      justification: undefined,
+      runInBackground: false,
     allowedDirectories: Object.freeze(["c:/repo/extra"]),
     ...overrides,
   };
@@ -97,6 +100,9 @@ function permitInput(
     executionCwd: binding.executionCwd,
     resolvedCwd: binding.resolvedCwd,
     timeoutSeconds: binding.timeoutSeconds,
+    executionMode: binding.executionMode,
+    justification: binding.justification,
+    runInBackground: binding.runInBackground,
     allowedDirectories: binding.allowedDirectories,
   };
 }

@@ -8,6 +8,7 @@ vi.mock("../../permissions/asrt-sandbox.js", () => ({
   })),
   cleanupAsrtSandboxAfterCommand: vi.fn(async () => {}),
   getDefaultSensitiveReadDenyPaths: () => [],
+  getBuiltinShellSessionReadPolicy: () => ({ allowRead: [], denyRead: [] }),
   getDefaultSensitiveWriteDenyPaths: () => [],
 }));
 
