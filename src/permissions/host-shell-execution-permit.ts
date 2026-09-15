@@ -1,5 +1,5 @@
 /**
- * One-shot execution permit for any requested-sandbox plain-shell fallback.
+ * One-shot execution permit for explicit host requests and sandbox fallbacks.
  *
  * The execution plan says which substrate is honest for a shell invocation;
  * it is not itself proof that the user approved that invocation. This module
@@ -10,8 +10,9 @@ import { isAbsolute, resolve as pathResolve } from "node:path";
 import { canonicalizePathForMatch, caseFoldForMatch } from "./sensitive-paths.js";
 import {
   parseHostShellExecutionInput,
-  requiresExplicitHostShellFallbackApproval,
+  requiresExplicitHostShellApproval,
   type HostShellExecutionPlan,
+  type HostShellExecutionRequest,
 } from "./host-shell-execution-plan.js";
 import {
   consumeHostApprovedOneShotExecutionBinding,
@@ -35,6 +36,9 @@ export interface HostShellExecutionPermitBinding {
   readonly executionCwd: string;
   readonly resolvedCwd: string;
   readonly timeoutSeconds: number;
+  readonly executionMode: HostShellExecutionRequest;
+  readonly justification: string | undefined;
+  readonly runInBackground: boolean;
   readonly allowedDirectories: readonly string[];
 }
 
@@ -81,7 +85,7 @@ export function canonicalizeHostShellAllowedDirectories(
 /**
  * Build the host-only action binding after all path grants and hooks have
  * finalized the invocation. Undefined means the raw input cannot represent a
- * native shell spawn, so the explicit fallback must fail closed before it can request a permit.
+ * native shell spawn, so the invocation must fail closed before requesting a permit.
  */
 export function buildHostShellExecutionPermitBinding(input: {
   plan: HostShellExecutionPlan;
@@ -92,7 +96,7 @@ export function buildHostShellExecutionPermitBinding(input: {
   extraAllowedDirectories: readonly string[];
 }): HostShellExecutionPermitBinding | undefined {
   const parsed = parseHostShellExecutionInput(input.rawInput);
-  if (parsed === undefined) return undefined;
+  if (parsed === undefined || parsed.executionMode !== input.plan.executionRequest) return undefined;
   const executionCwd = pathResolve(input.executionCwd);
   return Object.freeze({
     planIdentity: input.plan.identity,
@@ -104,6 +108,9 @@ export function buildHostShellExecutionPermitBinding(input: {
     executionCwd,
     resolvedCwd: resolveHostShellWorkingDirectory(executionCwd, parsed.cwd),
     timeoutSeconds: parsed.timeoutSeconds,
+    executionMode: parsed.executionMode,
+    justification: parsed.justification,
+    runInBackground: parsed.runInBackground,
     allowedDirectories: canonicalizeHostShellAllowedDirectories(
       input.extraAllowedDirectories,
     ),
@@ -138,7 +145,7 @@ export function mintHostShellExecutionPermit(input: {
   ) return undefined;
   // Any receipt-bearing mint attempt consumes its receipt before checking
   // plan compatibility, so a mismatch cannot be probed or replayed.
-  if (!requiresExplicitHostShellFallbackApproval(input.plan)) return undefined;
+  if (!requiresExplicitHostShellApproval(input.plan)) return undefined;
   if (
     input.binding.plan !== input.plan ||
     input.binding.planIdentity !== input.plan.identity
@@ -162,6 +169,9 @@ export function consumeHostShellExecutionPermit(input: {
   executionCwd: string;
   resolvedCwd: string;
   timeoutSeconds: number;
+  executionMode: HostShellExecutionRequest;
+  justification: string | undefined;
+  runInBackground: boolean;
   allowedDirectories: readonly string[];
 }): boolean {
   if (input.permit === undefined) return false;
@@ -177,6 +187,10 @@ export function consumeHostShellExecutionPermit(input: {
     record.executionCwd === input.executionCwd &&
     record.resolvedCwd === input.resolvedCwd &&
     record.timeoutSeconds === input.timeoutSeconds &&
+    record.executionMode === input.executionMode &&
+    record.justification === input.justification &&
+    record.runInBackground === input.runInBackground &&
+    record.executionMode === input.plan.executionRequest &&
     record.allowedDirectories.length === input.allowedDirectories.length &&
     record.allowedDirectories.every(
       (directory, index) => directory === input.allowedDirectories[index],

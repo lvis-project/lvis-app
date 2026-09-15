@@ -58,7 +58,8 @@ import {
 } from "../permissions/sandbox-capability.js";
 import {
   getHostShellExecutionPlanAuditProjection,
-  requiresExplicitHostShellFallbackApproval,
+  parseHostShellExecutionInput,
+  requiresExplicitHostShellApproval,
   type HostShellExecutionPlanAuditProjection,
 } from "../permissions/host-shell-execution-plan.js";
 import {
@@ -849,13 +850,16 @@ export async function runToolInvocation(
           : isCanonicalPowerShellTool(tool)
             ? "powershell"
             : undefined;
+    const hostShellInput = hostShellToolName === undefined
+      ? undefined
+      : parseHostShellExecutionInput(finalInput);
     const hostShellExecutionPlan =
-      hostShellToolName !== undefined
-        ? getHostShellExecutionPlan()
+      hostShellInput !== undefined
+        ? getHostShellExecutionPlan(hostShellInput.executionMode)
         : undefined;
     const hostShellRequiresExplicitApproval =
       hostShellExecutionPlan !== undefined &&
-      requiresExplicitHostShellFallbackApproval(hostShellExecutionPlan);
+      requiresExplicitHostShellApproval(hostShellExecutionPlan);
     hostShellExecutionPlanAudit = hostShellExecutionPlan === undefined
       ? undefined
       : getHostShellExecutionPlanAuditProjection(hostShellExecutionPlan);
@@ -881,6 +885,9 @@ export async function runToolInvocation(
     // its input takes this path, not just bash.
     let approvalCacheKey: string | undefined;
     try {
+      if (hostShellToolName !== undefined && hostShellInput === undefined) {
+        throw new Error("Invalid host shell execution input: host mode requires a nonblank justification and foreground execution");
+      }
       approvalCacheKey = approvalCacheKeyFor(
         tool,
         finalInput,
@@ -921,6 +928,18 @@ export async function runToolInvocation(
         is_error: true,
         durationMs,
       });
+    }
+    // Refuse unavailable host approval before even a prerequisite directory ask.
+    if (hostShellExecutionPlan?.executionRequest === "host" &&
+      (permissionContext.headless === true || permissionContext.remoteControllerAuthority !== undefined)) {
+      const reason = "Explicit host execution requires a local desktop approval and is unavailable to headless or remote-controller requests";
+      const msg = t("be_executor.permBlockDeny", { name: toolUse.name, source, trust, reason });
+      const durationMs = Date.now() - startTime;
+      emitToolStart(callbacks, toolUse.name, finalInput, meta);
+      callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+      await auditCurrentToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime,
+        { decision: "deny", reason, layer: 0 }, Infinity, permissionContext, invocationCategory, executionCwd);
+      return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs });
     }
     // Exact Settings decisions are evaluated at the first point where every
     // identity component is host-finalized. This is deliberately before shell

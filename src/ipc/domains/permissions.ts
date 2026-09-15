@@ -410,7 +410,12 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
     const snapshot = approvalGate?.getRequestSnapshot?.(decision.requestId);
     let honoredDecision: ApprovalDecision | null = null;
     if (approvalGate) {
-      honoredDecision = approvalGate.resolve(decision.requestId, decision);
+      const windows = deps.getAppWindows?.() ?? [deps.getMainWindow()];
+      const nativeRenderer = e.senderFrame === e.sender?.mainFrame &&
+        windows.some((window) => window?.webContents === e.sender);
+      honoredDecision = nativeRenderer
+        ? approvalGate.resolveFromDesktopRenderer(decision.requestId, decision)
+        : approvalGate.resolve(decision.requestId, decision);
     }
     if (honoredDecision) {
       reviewSuggestionTracker.record(deps, honoredDecision, snapshot);

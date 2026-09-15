@@ -5,7 +5,7 @@ import {
   getHostShellExecutionPlanAuditProjection,
   getHostShellExecutionPlanCacheIdentity,
   isIssuedHostShellExecutionPlanAuditProjection,
-  requiresExplicitHostShellFallbackApproval,
+  requiresExplicitHostShellApproval,
 } from "../host-shell-execution-plan.js";
 
 const FULL_ASRT = {
@@ -80,14 +80,14 @@ describe("host shell execution plan", () => {
           confines: { filesystem: false, process: false, network: false },
         },
       });
-      expect(requiresExplicitHostShellFallbackApproval(requested)).toBe(true);
+      expect(requiresExplicitHostShellApproval(requested)).toBe(true);
       expect(off).toMatchObject({
         requestedSandbox: false,
         mode: "plain",
         fallbackReason: "none",
         requiresExplicitUserApproval: false,
       });
-      expect(requiresExplicitHostShellFallbackApproval(off)).toBe(false);
+      expect(requiresExplicitHostShellApproval(off)).toBe(false);
     },
   );
   it.each(["darwin", "linux", "win32"] as const)(

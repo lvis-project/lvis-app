@@ -13,7 +13,7 @@ function expectShellDialectContracts(section: string): void {
   expect(section).toContain("const suppliedHostShellPlan = ctx.hostShellExecutionPlan");
   expect(section).toContain("isIssuedHostShellExecutionPlan(suppliedHostShellPlan)");
   expect(section).toContain("consumeHostShellExecutionPermit");
-  expect(section).toContain("requiresExplicitHostShellFallbackApproval(hostShellPlan)");
+  expect(section).toContain("requiresExplicitHostShellApproval(hostShellPlan)");
   expect(section).toContain('hostShellPlan.mode === "blocked"');
   expect(section).toContain('hostShellPlan.mode === "asrt"');
   expect(section).toContain("shell: false");

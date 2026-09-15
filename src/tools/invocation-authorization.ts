@@ -284,16 +284,24 @@ export async function authorizeToolInvocation(
       hostShellRequiresExplicitApproval &&
       permissionResult.decision !== "deny"
     ) {
-      const fallbackReason = hostShellExecutionPlan?.fallbackReason ?? "requested-sandbox-unavailable";
-      permissionResult = invocationPermissionContext.headless === true
+      const executionReason = hostShellExecutionPlan?.executionRequest === "host"
+        ? "explicit host execution"
+        : hostShellExecutionPlan!.fallbackReason;
+      permissionResult = remoteControllerOrigin !== undefined && hostShellExecutionPlan?.executionRequest === "host"
         ? {
             decision: "deny",
-            reason: `${fallbackReason}: headless invocation blocked because interactive approval is unavailable`,
+            reason: "Explicit host execution is unavailable to remote-controller requests",
+            layer: permissionResult.layer,
+          }
+        : invocationPermissionContext.headless === true
+        ? {
+            decision: "deny",
+            reason: `${executionReason}: headless invocation blocked because interactive approval is unavailable`,
               layer: permissionResult.layer,
             }
           : {
               decision: "ask",
-              reason: `${fallbackReason}: this shell will run without OS isolation and requires an exact allow-once approval`,
+              reason: `${executionReason}: this shell will run without OS isolation and requires an exact allow-once approval`,
               layer: permissionResult.layer,
               forceModal: true,
             };

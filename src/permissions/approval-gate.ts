@@ -299,6 +299,8 @@ export interface ApprovalRequest {
    * approval binding, permit, nonce, or HMAC material.
    */
   executionPlan?: HostShellExecutionPlanAuditProjection;
+  /** Actual shell cwd derived from the bound host action; caller values are ignored. */
+  executionCwd?: string;
   /**
    * §S1: absolute filesystem path the tool intends to touch. When set and
    * matched against SENSITIVE_PATH_PATTERNS, the request is hard-blocked
@@ -383,6 +385,8 @@ export interface ApprovalSignatureFields {
   /** Conversation attribution; `undefined` is signed as an explicit null. */
   sessionId: string | undefined;
   args: unknown;
+  /** Host-resolved shell working directory, when the approval binds a shell action. */
+  executionCwd?: string;
 }
 
 /**
@@ -436,6 +440,7 @@ export function signApprovalRequest(
     toolName: fields.toolName,
     sessionId: fields.sessionId ?? null,
     args: fields.args,
+    executionCwd: fields.executionCwd ?? null,
   });
   return createHmac("sha256", sessionKey).update(preimage).digest("hex");
 }
@@ -872,6 +877,9 @@ function sameHostShellExecutionPermitBinding(
     actual.executionCwd === expected.executionCwd &&
     actual.resolvedCwd === expected.resolvedCwd &&
     actual.timeoutSeconds === expected.timeoutSeconds &&
+    actual.executionMode === expected.executionMode &&
+    actual.justification === expected.justification &&
+    actual.runInBackground === expected.runInBackground &&
     actual.allowedDirectories.length === expected.allowedDirectories.length &&
     actual.allowedDirectories.every(
       (directory, index) => directory === expected.allowedDirectories[index],
@@ -895,21 +903,28 @@ function matchesHostShellExecutionPermitBindingRequest(
     (request.kind !== undefined && request.kind !== "tool") ||
     request.source !== "builtin" ||
     request.toolCategory !== "shell" ||
-    request.toolName !== binding.toolName
+    request.toolName !== binding.toolName ||
+    typeof binding.resolvedCwd !== "string" || binding.resolvedCwd.trim().length === 0
   ) {
     return false;
   }
   try {
     const parsed = parseHostShellExecutionInput(request.args);
-    if (parsed === undefined) return false;
+    if (parsed === undefined || parsed.executionMode !== binding.plan.executionRequest) return false;
     return canonicalStringify({
       command: parsed.command,
       cwd: parsed.cwd ?? null,
       timeoutSeconds: parsed.timeoutSeconds,
+      executionMode: parsed.executionMode,
+      justification: parsed.justification ?? null,
+      runInBackground: parsed.runInBackground,
     }) === canonicalStringify({
       command: binding.command,
       cwd: binding.requestedCwd ?? null,
       timeoutSeconds: binding.timeoutSeconds,
+      executionMode: binding.executionMode,
+      justification: binding.justification ?? null,
+      runInBackground: binding.runInBackground,
     });
   } catch {
     // A malformed/proxy argument or binding is never approval-equivalent.
@@ -1235,6 +1250,7 @@ function formatApprovalAuditFields(
       `executionPlan.identity=${executionPlan.identity}`,
       `executionPlan.platform=${executionPlan.platform}`,
       `executionPlan.requestedSandbox=${executionPlan.requestedSandbox}`,
+      `executionPlan.executionRequest=${executionPlan.executionRequest}`,
       `executionPlan.mode=${executionPlan.mode}`,
       `executionPlan.fallbackReason=${executionPlan.fallbackReason}`,
       `executionPlan.requiresExplicitUserApproval=${executionPlan.requiresExplicitUserApproval}`,
@@ -2096,6 +2112,7 @@ export class ApprovalGate {
       durableApprovalRecordAllowed: requestedDurableApprovalRecordAllowed,
       hostShellExecutionPermitBinding,
       executionPlan: requestedExecutionPlan,
+      executionCwd: _requestedExecutionCwd,
       sandboxCapability: requestedSandboxCapability,
       remoteControllerOrigin,
       remoteControllerAuthority,
@@ -2251,6 +2268,15 @@ export class ApprovalGate {
       });
     }
     const executionPlanAudit = boundExecutionPlan ?? suppliedExecutionPlan;
+    if (executionPlanAudit?.executionRequest === "host" &&
+      (oneShotPermitBinding === undefined || remoteControllerOrigin !== undefined || remoteControllerAuthority !== undefined ||
+        !this.webContents || this.webContents.isDestroyed())) {
+      return markHostApprovalRejectedDecision({
+        requestId: req.id,
+        choice: "deny-once",
+        rememberPattern: "explicit host execution requires a local desktop approval",
+      });
+    }
 
     // Sandbox capability injection is scoped to the
     // tool-execution approval surface. Non-execution surfaces
@@ -2279,6 +2305,9 @@ export class ApprovalGate {
       ...(executionPlanAudit === undefined
         ? {}
         : { executionPlan: executionPlanAudit }),
+      ...(oneShotPermitBinding === undefined
+        ? {}
+        : { executionCwd: oneShotPermitBinding.resolvedCwd }),
       // Rationale's generic reason is deliberately not caller-controlled.
       // Set this before all downstream handling, including audit, OS
       // notification, HMAC sealing, pending state, and renderer narrowing.
@@ -2357,6 +2386,7 @@ export class ApprovalGate {
     // path is a scope-grant decision the user has to make explicitly.
     if (
       fullReq.isReadOnly === true &&
+      oneShotPermitBinding === undefined &&
       fullReq.mode !== "ask_all" &&
       fullReq.mode !== "plan" &&
       fullReq.kind !== "out-of-allowed-dir" &&
@@ -2596,6 +2626,7 @@ export class ApprovalGate {
       toolName: fullReq.toolName,
       sessionId: fullReq.sessionId,
       args: fullReq.args,
+      executionCwd: fullReq.executionCwd,
     });
     const signedReq: ApprovalRequest = {
       ...fullReq,
@@ -2703,7 +2734,7 @@ export class ApprovalGate {
       // after `pending.set` so an observer's answer through `resolve()` finds
       // the entry, and below every host-only short circuit above (which all
       // returned before a pending entry existed).
-      this.notifyPendingParked({
+      if (oneShotPermitBinding?.executionMode !== "host") this.notifyPendingParked({
         requestId: fullReq.id,
         toolName: fullReq.toolName,
         ...(fullReq.source === undefined ? {} : { source: fullReq.source }),
@@ -2804,23 +2835,51 @@ export class ApprovalGate {
   }
 
   /**
-   * Called by the IPC handler when the renderer responds.
+   * Resolve responses from non-native host surfaces.
    * Ignores unknown pending entries, making duplicate responses safe.
    *
    * `answeredBy` is host-derived AT THE CALL SITE, never read from the
    * decision payload: the renderer's IPC route and the plugin host-API route
-   * omit it and stay `desk`; the paired chat-platform card handler is the one
+   * use separate entry points; the paired chat-platform card handler is the one
    * caller that passes `"platform-bridge"`. Every answerer passes the same
    * integrity and allowed-choice checks below — there is deliberately no
-   * second resolution path.
+   * second integrity or choice-validation implementation.
    */
   resolve(
     requestId: string,
     decision: ApprovalDecision,
     answeredBy: ApprovalAnswerer = "desk",
   ): ApprovalDecision | null {
+    return this.resolveDecision(requestId, decision, answeredBy, false);
+  }
+
+  /** Only the renderer IPC handler may call this after validating its sender. */
+  resolveFromDesktopRenderer(
+    requestId: string,
+    decision: ApprovalDecision,
+  ): ApprovalDecision | null {
+    return this.resolveDecision(requestId, decision, "desk", true);
+  }
+
+  private resolveDecision(
+    requestId: string,
+    decision: ApprovalDecision,
+    answeredBy: ApprovalAnswerer,
+    nativeRenderer: boolean,
+  ): ApprovalDecision | null {
     const entry = this.pending.get(requestId);
     if (!entry) return null;
+    if (entry.hostShellExecutionPermitBinding?.executionMode === "host" && !nativeRenderer) {
+      // Signed card contents authenticate a request, not the answering surface.
+      // Reject plugin/platform answers while keeping the desktop request pending.
+      this.auditLogger?.log({
+        timestamp: new Date().toISOString(),
+        sessionId: entry.sessionId ?? UNATTRIBUTED_APPROVAL_SESSION_ID,
+        type: "approval",
+        output: `[approval:native-desktop-required] ${requestId} ${formatApprovalAuditFields({ ...entry, answeredBy }, entry.executionPlan)} -> response-rejected`,
+      });
+      return null;
+    }
 
     // Confused-deputy defense — verify nonce + HMAC BEFORE honoring the
     // decision. A mismatch indicates either a malicious/compromised renderer,

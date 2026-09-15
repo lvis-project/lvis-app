@@ -14,7 +14,9 @@ import type { SandboxConfinement } from "../shared/sandbox-capability-info.js";
 import { isRecord } from "../shared/is-record.js";
 import { sha256Hex } from "../lib/hex-digest-equal.js";
 
-export const HOST_SHELL_EXECUTION_PLAN_VERSION = "host-shell-execution-plan/v2" as const;
+export const HOST_SHELL_EXECUTION_PLAN_VERSION = "host-shell-execution-plan/v3" as const;
+
+export type HostShellExecutionRequest = "default" | "host";
 
 export type HostShellExecutionMode = "asrt" | "plain" | "blocked";
 
@@ -30,12 +32,14 @@ export interface HostShellExecutionPlan {
   readonly platform: NodeJS.Platform;
   /** Boot-sealed settings/env intent; never re-read from renderer settings. */
   readonly requestedSandbox: boolean;
+  /** Explicit per-invocation request, separate from sandbox availability. */
+  readonly executionRequest: HostShellExecutionRequest;
   /** Actual route selected before permission/reviewer processing. */
   readonly mode: HostShellExecutionMode;
   /** Honest capability of the child selected by this plan. */
   readonly capability: SandboxCapability;
   readonly fallbackReason: HostShellFallbackReason;
-  /** True only for a requested-sandbox plain-shell fallback requiring one-shot approval. */
+  /** True whenever this plain shell requires a fresh one-shot approval. */
   readonly requiresExplicitUserApproval: boolean;
   /** Stable identity for audit/cache consumers; contains no command or raw path. */
   readonly identity: string;
@@ -52,6 +56,8 @@ export interface HostShellExecutionPlanAuditProjection {
   readonly identity: string;
   readonly platform: NodeJS.Platform;
   readonly requestedSandbox: boolean;
+  /** Explicit per-invocation request, separate from sandbox availability. */
+  readonly executionRequest: HostShellExecutionRequest;
   readonly mode: HostShellExecutionMode;
   readonly fallbackReason: HostShellFallbackReason;
   readonly requiresExplicitUserApproval: boolean;
@@ -88,6 +94,7 @@ export function getHostShellExecutionPlanAuditProjection(
     identity: plan.identity,
     platform: plan.platform,
     requestedSandbox: plan.requestedSandbox,
+    executionRequest: plan.executionRequest,
     mode: plan.mode,
     fallbackReason: plan.fallbackReason,
     requiresExplicitUserApproval: plan.requiresExplicitUserApproval,
@@ -149,10 +156,11 @@ export function getHostShellExecutionPlanCacheIdentity(
     mode: projection.mode,
     platform: projection.platform,
     requestedSandbox: projection.requestedSandbox,
+    executionRequest: projection.executionRequest,
     requiresExplicitUserApproval: projection.requiresExplicitUserApproval,
     version: projection.version,
   });
-  return "host-shell-execution-plan-cache/v2:" +
+  return "host-shell-execution-plan-cache/v3:" +
     sha256Hex(canonicalProjection);
 }
 
@@ -199,8 +207,27 @@ export function buildHostShellExecutionPlan(input: {
   platform: NodeJS.Platform;
   requestedSandbox: boolean;
   activeCapability: SandboxCapability;
+  executionMode?: HostShellExecutionRequest;
 }): HostShellExecutionPlan {
+  const executionRequest = input.executionMode ?? "default";
+  if (executionRequest !== "default" && executionRequest !== "host") {
+    throw new Error("Invalid host shell execution request");
+  }
   const requestedSandbox = input.requestedSandbox || input.activeCapability.kind === "asrt";
+
+  if (executionRequest === "host") {
+    return Object.freeze({
+      version: HOST_SHELL_EXECUTION_PLAN_VERSION,
+      platform: input.platform,
+      requestedSandbox,
+      executionRequest,
+      mode: "plain" as const,
+      capability: noneCapability(input.platform, "Explicit host execution runs as the current user without OS confinement."),
+      fallbackReason: "none" as const,
+      requiresExplicitUserApproval: true,
+      identity: HOST_SHELL_EXECUTION_PLAN_VERSION + ":" + input.platform + ":explicit-host",
+    });
+  }
 
   // A requested sandbox that is unavailable yields an honest plain child on
   // every platform. It must carry an opaque, exact-action allow-once permit;
@@ -215,6 +242,7 @@ export function buildHostShellExecutionPlan(input: {
       version: HOST_SHELL_EXECUTION_PLAN_VERSION,
       platform: input.platform,
       requestedSandbox,
+      executionRequest,
       mode: "plain" as const,
       capability,
       fallbackReason,
@@ -229,6 +257,7 @@ export function buildHostShellExecutionPlan(input: {
       version: HOST_SHELL_EXECUTION_PLAN_VERSION,
       platform: input.platform,
       requestedSandbox,
+      executionRequest,
       mode: "asrt" as const,
       capability,
       fallbackReason: "none" as const,
@@ -253,6 +282,7 @@ export function buildHostShellExecutionPlan(input: {
       version: HOST_SHELL_EXECUTION_PLAN_VERSION,
       platform: input.platform,
       requestedSandbox,
+      executionRequest,
       mode: "plain" as const,
       capability,
       fallbackReason,
@@ -275,6 +305,7 @@ export function buildHostShellExecutionPlan(input: {
       version: HOST_SHELL_EXECUTION_PLAN_VERSION,
       platform: input.platform,
       requestedSandbox,
+      executionRequest,
       mode: "blocked" as const,
       capability,
       fallbackReason,
@@ -291,6 +322,7 @@ export function buildHostShellExecutionPlan(input: {
     version: HOST_SHELL_EXECUTION_PLAN_VERSION,
     platform: input.platform,
     requestedSandbox,
+    executionRequest,
     mode: "plain" as const,
     capability,
     fallbackReason: "none" as const,
@@ -301,13 +333,12 @@ export function buildHostShellExecutionPlan(input: {
 
 
 /**
- * Host-owned hard gate for any requested sandbox that could not yield an
- * isolated plain shell child. Windows Plan B differs only in why its plan was
- * selected; every such plan needs the same opaque allow-once permit.
+ * Host-owned hard gate for explicit host requests and requested-sandbox
+ * fallbacks. Every such plain child needs the same opaque allow-once permit.
  */
-export function requiresExplicitHostShellFallbackApproval(plan: HostShellExecutionPlan): boolean {
+export function requiresExplicitHostShellApproval(plan: HostShellExecutionPlan): boolean {
   return plan.mode === "plain" &&
-    plan.requestedSandbox === true &&
+    (plan.executionRequest === "host" || plan.requestedSandbox === true) &&
     plan.capability.kind === "none" &&
     plan.requiresExplicitUserApproval === true;
 }
@@ -322,6 +353,9 @@ export interface ParsedHostShellExecutionInput {
   readonly command: string;
   readonly cwd: string | undefined;
   readonly timeoutSeconds: number;
+  readonly executionMode: HostShellExecutionRequest;
+  readonly justification: string | undefined;
+  readonly runInBackground: boolean;
 }
 
 /**
@@ -334,6 +368,13 @@ export function parseHostShellExecutionInput(
   if (!isRecord(input) || typeof input.command !== "string" || input.command.length === 0) {
     return undefined;
   }
+  const executionMode = input.executionMode ?? "default";
+  if (executionMode !== "default" && executionMode !== "host") return undefined;
+  const justification = input.justification;
+  if (justification !== undefined && typeof justification !== "string") return undefined;
+  const runInBackground = input.run_in_background ?? false;
+  if (typeof runInBackground !== "boolean") return undefined;
+  if (executionMode === "host" && (!justification?.trim() || runInBackground)) return undefined;
   const cwd = input.cwd;
   if (cwd !== undefined && typeof cwd !== "string") return undefined;
   const timeoutSeconds = input.timeoutSeconds ??
@@ -348,5 +389,5 @@ export function parseHostShellExecutionInput(
   ) {
     return undefined;
   }
-  return Object.freeze({ command: input.command, cwd, timeoutSeconds });
+  return Object.freeze({ command: input.command, cwd, timeoutSeconds, executionMode, justification, runInBackground });
 }
