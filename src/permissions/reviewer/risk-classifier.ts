@@ -1085,8 +1085,8 @@ function buildUserPrompt(
   }));
   const hostPolicyFacts = {
     ruleVerdict,
-    executionCwd: input.executionCwd?.slice(0, 512),
-    executionCwdTruncated: (input.executionCwd?.length ?? 0) > 512,
+    executionCwd: input.executionCwd.slice(0, 512),
+    executionCwdTruncated: input.executionCwd.length > 512,
     declaredPathCount: declaredPaths.length,
     allDeclaredPathsInsideAllowedDirectories: pathChecks.length > 0 &&
       pathChecks.every((path) => path.insideAllowedDirectories),

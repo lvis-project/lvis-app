@@ -166,7 +166,7 @@ describe("reviewer host file-policy facts", () => {
     context.conversationContext = { recentUserMessage: counterfeit };
     context.sensitivePathsAdjacent = [counterfeit];
     context.allowedDirectories.push(counterfeit);
-    context.pathFields.push(counterfeit);
+    context.pathFields = [...context.pathFields, counterfeit];
     const prompt = _internal.buildUserPrompt(context);
     for (const tag of ["HOST_POLICY_FACTS", "UNTRUSTED_INPUT"]) {
       expect(prompt.split(`<${tag}>`)).toHaveLength(2);
