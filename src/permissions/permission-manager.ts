@@ -652,7 +652,7 @@ export class PermissionManager {
   } {
     let sensitiveHit: { filePath: string; pattern: string } | null = null;
     for (const target of args.canonicalTargets) {
-      const pattern = isSensitivePath(target.canonicalPath);
+      const pattern = isSensitivePath(target.canonicalPath, args.effect);
       if (pattern) {
         sensitiveHit = { filePath: target.filePath, pattern };
         break;

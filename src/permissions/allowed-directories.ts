@@ -27,6 +27,7 @@ import {
   canonicalizePathForMatch,
   caseFoldForMatch,
   isSensitivePath,
+  isConfiguredSessionReadPath,
 } from "./sensitive-paths.js";
 import { expandLeadingTilde } from "../shared/home-tilde.js";
 import { lvisHome } from "../shared/lvis-home.js";
@@ -239,6 +240,7 @@ export function isPathAllowedForEffect(
   scope: PathScopePolicy,
   effect: PathEffect,
 ): boolean {
+  if (effect === "read" && isConfiguredSessionReadPath(canonicalPath)) return true;
   if (!pathEffectIsConfined(effect, scope.blockReadsOutsideWorkingDirectories)) return true;
   return isPathAllowed(canonicalPath, scope);
 }

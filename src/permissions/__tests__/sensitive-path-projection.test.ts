@@ -80,7 +80,7 @@ describe("sensitive paths — one table, two projections", () => {
     else process.env.LVIS_HOME = prevLvisHome;
   });
 
-  it("denies every table row on BOTH surfaces", () => {
+  it("projects each table row's read policy to both surfaces", () => {
     for (const entry of SENSITIVE_PATH_ENTRIES) {
       const base = entryPath(entry);
       const target = entry.kind === "dir" ? base + "/probe-child" : base;
@@ -89,8 +89,8 @@ describe("sensitive paths — one table, two projections", () => {
       expect(
         hostDeniesAsSensitive(target, allowedRoot),
         `host guard must hard-block ${target}`,
-      ).toBe(true);
-      expect(sandboxDenies(target), `sandbox floor must deny ${target}`).toBe(true);
+      ).toBe(entry.access !== "read-only");
+      expect(sandboxDenies(target), `sandbox floor must apply ${target}`).toBe(entry.access !== "read-only");
     }
   });
 
@@ -109,7 +109,6 @@ describe("sensitive paths — one table, two projections", () => {
     ["routine", join(FAKE_LVIS_HOME, "routine", "session-1.jsonl")],
     ["auth partitions", join(FAKE_LVIS_HOME, "plugins", "auth-partitions.json")],
     ["secrets", join(FAKE_LVIS_HOME, "secrets", "k.key")],
-    ["sessions", join(FAKE_LVIS_HOME, "sessions", "abc.jsonl")],
     ["audit", join(FAKE_LVIS_HOME, "audit", "today.jsonl")],
     ["audit log", join(FAKE_LVIS_HOME, "audit.log")],
     ["settings", join(FAKE_LVIS_HOME, "settings.json")],

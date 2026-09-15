@@ -20,6 +20,7 @@ import {
   canonicalizePathForMatch,
   caseFoldForMatch,
   isSensitivePath,
+  isConfiguredSessionReadPath,
 } from "../permissions/sensitive-paths.js";
 
 /** Hard cap for text files rendered/read for preview (matches read_file). */
@@ -48,7 +49,7 @@ export type AssertReadableResult =
  * hard-block → Layer 1 sandbox boundary (symlink-safe realpath).
  *
  * Ordering is load-bearing: `~/.lvis` is a Layer 1 allow root, but
- * `~/.lvis/secrets` / `~/.lvis/sessions` are Layer 0 denies — sensitive MUST be
+ * `~/.lvis/secrets` and other private stores are Layer 0 denies — sensitive MUST be
  * checked before the boundary so allow-listed roots never leak their sensitive
  * children.
  */
@@ -72,8 +73,9 @@ export function assertReadableFilePath(
   } catch {
     resolved = lexical;
   }
-  const sensitive = isSensitivePath(caseFoldForMatch(canonicalizePathForMatch(resolved)));
+  const sensitive = isSensitivePath(caseFoldForMatch(canonicalizePathForMatch(resolved)), "read");
   if (sensitive) return { ok: false, error: "sensitive-path" };
+  if (isConfiguredSessionReadPath(resolved)) return { ok: true, resolved };
   const check = validateSandboxPath(resolved, cwd, [...extraAllowed]);
   if (!check.allowed) return { ok: false, error: "path-not-allowed" };
   return { ok: true, resolved };

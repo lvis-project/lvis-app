@@ -845,7 +845,8 @@ describe("asrt-sandbox — sensitive read deny-list (host-secret hardening)", ()
 
     // LVIS host-domain sensitive namespaces, derived from the (overridden) lvisHome.
     expect(paths).toContain(join(FAKE_LVIS_HOME, "secrets"));
-    expect(paths).toContain(join(FAKE_LVIS_HOME, "sessions"));
+    expect(paths).not.toContain(join(FAKE_LVIS_HOME, "sessions"));
+    expect(getDefaultSensitiveWriteDenyPaths()).toContain(join(FAKE_LVIS_HOME, "sessions"));
     expect(paths).toContain(join(FAKE_LVIS_HOME, "routine"));
     expect(paths).toContain(join(FAKE_LVIS_HOME, "audit.log"));
     expect(paths).toContain(join(FAKE_LVIS_HOME, "audit"));

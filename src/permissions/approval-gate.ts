@@ -27,6 +27,7 @@ import type { PermissionEvaluationContext } from "./evaluation-context.js";
 import {
   isSensitivePath,
   canonicalizePathForMatch,
+  caseFoldForMatch,
 } from "./sensitive-paths.js";
 import { maskSensitiveData } from "../audit/dlp-filter.js";
 import { displaySafeLabel } from "../shared/display-safe-text.js";
@@ -2329,8 +2330,9 @@ export class ApprovalGate {
     // case-insensitive filesystems, and duplicate slashes.
     const rawCandidate = fullReq.target?.filePath;
     if (rawCandidate) {
-      const caseFolded = canonicalizePathForMatch(rawCandidate);
-      const matchedPattern = isSensitivePath(caseFolded);
+      const caseFolded = caseFoldForMatch(canonicalizePathForMatch(rawCandidate));
+      const effect = fullReq.isReadOnly === true && fullReq.kind !== "out-of-allowed-dir" ? "read" : "write";
+      const matchedPattern = isSensitivePath(caseFolded, effect);
       if (matchedPattern) {
         this.auditLogger?.log({
           timestamp: new Date().toISOString(),

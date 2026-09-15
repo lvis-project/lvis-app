@@ -10,7 +10,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { lvisHome } from "../shared/lvis-home.js";
 import { llmRouteBaseUrls } from "../shared/llm-vendor-defaults.js";
-import { getRuntimeSensitiveKeyPaths, SENSITIVE_PATH_ENTRIES } from "./sensitive-paths.js";
+import { getConfiguredSessionReadRoot, getRuntimeSensitiveKeyPaths, SENSITIVE_PATH_ENTRIES } from "./sensitive-paths.js";
 
 import type {
   SandboxRuntimeConfig,
@@ -531,6 +531,10 @@ export function isAsrtSandboxActive(): boolean {
  * @returns deduped, order-stable absolute paths to deny reads of.
  */
 export function getDefaultSensitiveReadDenyPaths(userDataDir?: string): string[] {
+  return getDefaultSensitiveDenyPaths(userDataDir, "read");
+}
+
+function getDefaultSensitiveDenyPaths(userDataDir: string | undefined, effect: "read" | "write"): string[] {
   const home = homedir();
   const lvis = lvisHome();
   // Electron userData dir — exact path when provided by a trusted caller;
@@ -555,7 +559,7 @@ export function getDefaultSensitiveReadDenyPaths(userDataDir?: string): string[]
     // src/permissions/sensitive-paths.ts, which the in-process host-tool guard
     // projects into globs. Do NOT hand-add a `join(home, …)` entry here — add a
     // row to that table and BOTH surfaces deny it.
-    ...SENSITIVE_PATH_ENTRIES.map((entry) => {
+    ...SENSITIVE_PATH_ENTRIES.filter((entry) => effect !== "read" || entry.access !== "read-only" || getConfiguredSessionReadRoot() === undefined).map((entry) => {
       switch (entry.anchor) {
         case "lvis-home":
           return join(lvis, ...entry.segments);
@@ -616,7 +620,7 @@ export function getDefaultSensitiveReadDenyPaths(userDataDir?: string): string[]
  * when the write-jail is the whole home the child still cannot touch these.
  *
  * The floor is the UNION of:
- *   1. every read-deny path (no writing a secret/credential store either); and
+ *   1. every sensitive store, including read-only saved conversations; and
  *   2. write-persistence / re-exec vectors that are not secret-READ concerns:
  *      - POSIX shell startup files (sourced on the next interactive/login shell)
  *      - `~/.config` WHOLESALE (XDG autostart, systemd --user units, app config)
@@ -639,7 +643,7 @@ export function getDefaultSensitiveReadDenyPaths(userDataDir?: string): string[]
  */
 export function getDefaultSensitiveWriteDenyPaths(userDataDir?: string): string[] {
   const home = homedir();
-  const readDeny = getDefaultSensitiveReadDenyPaths(userDataDir);
+  const readDeny = getDefaultSensitiveDenyPaths(userDataDir, "write");
   const writePersistence = [
     // ── POSIX shell startup files — a write here re-executes on the next shell ──
     join(home, ".zshenv"),

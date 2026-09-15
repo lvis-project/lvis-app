@@ -36,6 +36,7 @@ import { resolveShellFilesystemPath } from "../shared/shell-filesystem-path.js";
 import { findResolvedShellPathViolation, type ShellPathPolicyViolation } from "./shell-path-policy.js";
 export type { PowerShellAstSummary } from "./powershell-ast.js";
 import { createSandboxProcessHome } from "../permissions/sandbox-process-home.js";
+import { getConfiguredSessionReadRoot, getSessionReadDenyPatterns } from "../permissions/sensitive-paths.js";
 import {
   validateShellCommandPathPolicy,
   validateShellWorkingDirectory,
@@ -871,9 +872,12 @@ export async function spawnWithSandbox(
   // tree (cwd + write paths). Omitting denyRead when HOME is unset avoids
   // denying nothing-meaningful; the write paths are always re-allowed for read.
   const sandboxWritePaths = [...writePaths, homePath];
-  const allowRead = [resolvedCwd, ...sandboxWritePaths, ...preparedShellExecutableReadPaths(prepared)];
+  const sessionReadRoot = getConfiguredSessionReadRoot();
+  const allowRead = [resolvedCwd, ...sandboxWritePaths, ...preparedShellExecutableReadPaths(prepared),
+    ...(sessionReadRoot === undefined ? [] : [sessionReadRoot])];
   const denyRead = [
     ...getDefaultSensitiveReadDenyPaths(),
+    ...(sessionReadRoot === undefined ? [] : getSessionReadDenyPatterns(sessionReadRoot)),
     ...(home !== undefined && home !== "" ? [home] : []),
   ];
   const filesystem = {
