@@ -23,6 +23,7 @@ import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { TEST_IDS } from "../../../src/shared/test-ids.js";
+import { buildHostShellExecutionPlan, getHostShellExecutionPlanAuditProjection } from "../../../src/permissions/host-shell-execution-plan.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "../../..");
@@ -191,6 +192,37 @@ test.describe("Sandbox approval flow", () => {
     // Sandbox row should show partial isolation label
     const sandboxRow = page.getByTestId("tool-approval-sandbox");
     await expect(sandboxRow).toContainText(t("toolApprovalDialog.sandboxPartial"));
+  });
+
+  test("explicit host approval displays the resolved directory and complete command", async ({}, testInfo) => {
+    const plan = buildHostShellExecutionPlan({
+      platform: "darwin", requestedSandbox: true, executionMode: "host",
+      activeCapability: { kind: "asrt", confidence: "verified", platform: "darwin", confines: { filesystem: true, process: true, network: true } },
+    });
+    const command = `printf '%s' '${"a".repeat(700)}-complete-command'`;
+    await app.evaluate(({ BrowserWindow }, req) => {
+      BrowserWindow.getAllWindows()[0]?.webContents.send("lvis:approval:request", req);
+    }, buildApprovalRequest({
+      toolName: "bash",
+      reviewerVerdict: { level: "high", reason: "Explicit host execution" },
+      args: { command, executionMode: "host", justification: "Use the configured host client" },
+      executionPlan: getHostShellExecutionPlanAuditProjection(plan),
+      executionCwd: "/workspace/project",
+      allowedChoices: ["deny-once", "allow-once"],
+    }));
+
+    const dock = page.getByTestId(TEST_IDS.approvalDock);
+    await expect(dock).toBeVisible();
+    await expect(dock.getByTestId("tool-approval-host-execution")).toContainText(t("shellExecution.hostWarning"));
+    await expect(dock.getByTestId("tool-approval-execution-cwd")).toContainText("/workspace/project");
+    await expect(dock.getByTestId("tool-approval-shell-environment")).toContainText(t("shellExecution.hostHome"));
+    await expect(dock.getByTestId(TEST_IDS.approvalReviewDetails)).toHaveAttribute("open", "");
+    await expect(dock.getByText(command, { exact: false })).toContainText("-complete-command");
+    await expect(dock.getByTestId(TEST_IDS.allowAlwaysButton)).toBeDisabled();
+    await expect(dock.getByTestId(TEST_IDS.approveButton)).toBeEnabled();
+    await expect(dock.getByTestId(TEST_IDS.denyButton)).toBeFocused();
+    await expect(dock.locator('input, textarea, [contenteditable="true"]')).toHaveCount(0);
+    await testInfo.attach("explicit-host-approval", { body: await dock.screenshot(), contentType: "image/png" });
   });
 
   test("PermissionsTab shows the exact permission decisions section", async () => {

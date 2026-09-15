@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { t } from "../../../../i18n/runtime.js";
 import { ToolApprovalContent } from "../ToolApprovalContent.js";
 import type { ApprovalRequest } from "../../types.js";
+import { buildHostShellExecutionPlan, getHostShellExecutionPlanAuditProjection } from "../../../../permissions/host-shell-execution-plan.js";
 
 function request(host: boolean): ApprovalRequest {
   return {
@@ -13,13 +14,11 @@ function request(host: boolean): ApprovalRequest {
     reason: "Explicit host execution request", source: "builtin", createdAt: Date.now(),
     requireExplicit: true, allowedChoices: ["allow-once", "deny-once"],
     executionCwd: "/workspace/project",
-    executionPlan: {
-      version: "host-shell-execution-plan/v3", identity: "host-shell-execution-plan/v3:darwin:explicit-host",
-      executionRequest: host ? "host" : "default", platform: "darwin", requestedSandbox: true,
-      mode: host ? "plain" : "asrt", fallbackReason: "none", requiresExplicitUserApproval: host,
-      capability: { kind: host ? "none" : "asrt", confidence: "verified", platform: "darwin",
-        confines: { filesystem: !host, process: !host, network: !host } },
-    } as NonNullable<ApprovalRequest["executionPlan"]>,
+    executionPlan: getHostShellExecutionPlanAuditProjection(buildHostShellExecutionPlan({
+      executionMode: host ? "host" : "default", platform: "darwin", requestedSandbox: true,
+      activeCapability: { kind: "asrt", confidence: "verified", platform: "darwin",
+        confines: { filesystem: true, process: true, network: true } },
+    })),
   };
 }
 
