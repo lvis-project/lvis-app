@@ -1101,12 +1101,10 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
       return { ok: false, error: "verdict-mismatch", message: "user-approval record: displayed verdict does not match the host request" };
     }
     const verdictAtApproval = snapshot.verdictAtApproval;
-    // HIGH verdict enforcement uses the host-owned snapshot, never a renderer
-    // claim. HIGH allows are explicit one-shot decisions and therefore never
-    // enter exact decision memory. Exact deny is a more restrictive Settings
-    // policy and remains eligible regardless of the risk that raised the card.
-    if (decision === "allow" && verdictAtApproval === "high") {
-      return { ok: false, error: "high-is-one-shot", message: "HIGH verdict approvals are explicit one-shot decisions and cannot be recorded" };
+    // Conservative risk display during a failed assessment does not decide
+    // persistence. Only the gate's live eligibility snapshot can authorize it.
+    if (decision === "allow" && (!snapshot.persistentAllowAllowed || !snapshot.workingDirectoryIdentity)) {
+      return { ok: false, error: verdictAtApproval === "high" ? "high-is-one-shot" : "one-shot-not-recordable", message: "This request requires a one-shot approval and cannot be recorded" };
     }
     try {
       // Canonicalize the host-owned raw input from ApprovalGate. The renderer
@@ -1131,6 +1129,10 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
         nlJustification: typeof nlJustification === "string" ? nlJustification : null,
         trustOrigin: snapshot.trustOrigin,
         approvalCacheKey: snapshot.approvalCacheKey,
+        ...(decision === "allow" ? {
+          workingDirectoryIdentity: snapshot.workingDirectoryIdentity,
+          riskCeilingAtApproval: snapshot.riskCeilingAtApproval,
+        } : {}),
       });
       // User-approval store mutation — outside PermissionManager, so
       // emit the broadcast explicitly to keep the Active Approvals view

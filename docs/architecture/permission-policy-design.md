@@ -309,6 +309,29 @@ returns malformed output, the host fails closed:
 - headless calls defer or deny according to configured failure behavior;
 - audit records include the reviewer failure path.
 
+An unavailable or failed assessment does not prevent the user from remembering
+an ordinary request. The approval gate derives `persistentAllowAllowed` from
+host-owned request context and typed reviewer outcomes. The dispatcher issues
+exact-input-bound evidence from its existing raw-input rule trace; the gate
+uses this evidence without reclassifying display data. A conservative HIGH
+display during assessment failure is separate from a completed HIGH judgment.
+Completed HIGH judgments, changed sandbox state and mandatory one-shot requests
+retain their restrictions, including explicit host execution, remote controllers
+and sealed rationale approvals.
+
+“Always allow” stores the exact tool, canonical arguments, source, trust origin
+and invocation working-directory identity. Existing tool-specific identity and
+the host shell's sealed execution plan remain part of the key. The versioned
+directory scope prevents reuse across projects. Older unscoped allows no longer
+match scoped requests; existing policy rules and exact denials retain their
+identity and precedence. Exact rejections remain independent of cwd. The host
+captures the canonical directory before displaying its scope and recording its
+frozen identity. The UI does not create a wildcard rule. Recording
+requires fresh user intent and a live host approval snapshot. On subsequent
+calls, hard denies and per-invocation approval requirements still run before the
+remembered-decision lookup. Both memory consumers compare current deterministic
+risk with the stored reuse ceiling, separately from conservative display risk.
+
 ## Plugin And MCP Tools
 
 Plugins and MCP servers use the same path as builtin tools. The tool provider

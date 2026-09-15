@@ -18,6 +18,7 @@ import {
 import {
   __resetSessionStoreForTest,
   canonicalStringify,
+  captureApprovalWorkingDirectory,
   recordApproval,
 } from "../../../permissions/user-approval-store.js";
 
@@ -46,6 +47,7 @@ describe("foreground approval memory — sealed host shell plan", () => {
         nlJustification: null,
         trustOrigin: "user-keyboard",
         approvalCacheKey,
+        workingDirectoryIdentity: captureApprovalWorkingDirectory(process.cwd()).identity,
       },
     );
     const sealedPlan = buildHostShellExecutionPlan({

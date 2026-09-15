@@ -34,7 +34,7 @@ import type { DeferredEntry, DeferredQueue } from "./reviewer/deferred-queue.js"
 import { globMatch } from "../lib/glob-matcher.js";
 import { lvisHome } from "../shared/lvis-home.js";
 import { t } from "../i18n/index.js";
-import { lookupApproval, canonicalStringify } from "./user-approval-store.js";
+import { lookupApproval, canonicalStringify, captureApprovalWorkingDirectory } from "./user-approval-store.js";
 import { buildSandboxAuditEntry } from "../audit/sandbox-audit.js";
 import { emitSandboxAudit } from "../audit/sandbox-audit-sink.js";
 import { maskSensitiveData } from "../audit/dlp-filter.js";
@@ -196,6 +196,8 @@ export interface PermissionCheckResult {
     route: ReviewerLane;
     verdict?: RiskVerdict;
     outcome?: ReviewerDispatchOutcome;
+    /** Host-issued deterministic evidence for this exact invocation. */
+    approvalBasis?: ReviewerApprovalBasis;
   };
   /**
    * Per-invocation hard-ask marker. When `true`, this `ask` decision MUST be
@@ -357,6 +359,27 @@ export interface ReviewerDispatchInput {
   hostShellExecutionPlan?: HostShellExecutionPlan;
 }
 
+/** Host-only assessment evidence; structural lookalikes cannot grant persistence. */
+export interface ReviewerApprovalBasis {
+  readonly ruleVerdict: RiskVerdict["level"];
+  readonly outcome: ReviewerDispatchOutcome;
+  readonly workingDirectory: Readonly<{ path: string; identity: string }>;
+  readonly requestIdentity: string;
+}
+const issuedApprovalBases = new WeakSet<ReviewerApprovalBasis>();
+export function matchesReviewerApprovalBasis(
+  basis: ReviewerApprovalBasis | undefined,
+  request: { reviewerOutcome?: ReviewerDispatchOutcome; toolName: string; args: unknown; source?: string; toolCategory?: string; trustOrigin?: string; approvalCacheKey?: string; evaluationContext?: PermissionEvaluationContext },
+): basis is ReviewerApprovalBasis {
+  return basis !== undefined && issuedApprovalBases.has(basis) && basis.outcome === request.reviewerOutcome &&
+    basis.requestIdentity === canonicalStringify({
+      toolName: request.toolName, args: request.args, source: request.source,
+      category: request.toolCategory, trustOrigin: request.trustOrigin,
+      approvalCacheKey: request.approvalCacheKey,
+      executionCwd: request.evaluationContext?.executionCwd,
+    });
+}
+
 /**
  * Result returned by {@link PermissionManager.dispatchReviewer}. The
  * caller (executor) translates this according to its lane: foreground
@@ -366,6 +389,7 @@ export interface ReviewerDispatchInput {
 export interface ReviewerDispatchResult {
   verdict: RiskVerdict;
   outcome: ReviewerDispatchOutcome;
+  approvalBasis?: ReviewerApprovalBasis;
   /**
    * "hit" / "miss-stale" / "miss-expired" / "miss-not-found" — surfaces
    * the audit-trail "from cache" hint (design v2.1 §11 selective
@@ -1492,11 +1516,48 @@ export class PermissionManager {
     routineScope?: Record<string, unknown>,
     options?: { defer?: ReviewerDeferPolicy; abortSignal?: AbortSignal },
   ): Promise<ReviewerDispatchResult> {
+    // Freeze the canonical scope before review can await; the same path grades
+    // raw arguments and later appears on the exact remembered-allow card.
+    const workingDirectory = input.executionCwd === undefined
+      ? undefined : captureApprovalWorkingDirectory(input.executionCwd);
+    const readSandboxCacheState = (): ReviewerSandboxCacheState =>
+      resolveReviewerSandboxCacheState(
+        input.source, toolName, input.mcpServerId, input.workerId,
+        input.pluginId, input.hostShellExecutionPlan,
+      );
+    let sandboxCacheState = readSandboxCacheState();
+    const buildReviewerContext = (
+      reviewerSandboxState: ReviewerSandboxCacheState = sandboxCacheState,
+    ): ToolInvocationContext => ({
+      toolName, source: input.source, category: input.category,
+      pathFields: input.pathFields, trustOrigin: input.trustOrigin,
+      finalInput: input.finalInput,
+      executionCwd: workingDirectory?.path ?? input.executionCwd,
+      allowedDirectories: input.allowedDirectories,
+      sensitivePathsAdjacent: input.sensitivePathsAdjacent,
+      sandboxCapability: reviewerSandboxState.capability,
+      ...(input.conversationContext ? { conversationContext: input.conversationContext } : {}),
+      ...(input.ownerPluginSandboxRoot !== undefined ? { ownerPluginSandboxRoot: input.ownerPluginSandboxRoot } : {}),
+    });
+    const approvalBasisFor = (ruleVerdict: RiskVerdict["level"], outcome: ReviewerDispatchOutcome): ReviewerApprovalBasis | undefined => {
+      if (workingDirectory === undefined) return undefined;
+      const basis = Object.freeze({
+        ruleVerdict, outcome, workingDirectory,
+        requestIdentity: canonicalStringify({
+          toolName, args: input.finalInput, source: input.source,
+          category: input.category, trustOrigin: input.trustOrigin,
+          approvalCacheKey: input.approvalCacheKey, executionCwd: input.executionCwd,
+        }),
+      });
+      issuedApprovalBases.add(basis);
+      return basis;
+    };
     if (!this.hasReviewer()) {
       return {
         verdict: { level: "high", reason: "reviewer not wired — fail-safe defer" },
         cacheReason: "miss-not-found",
         outcome: "unavailable",
+        approvalBasis: approvalBasisFor(new RuleBasedRiskClassifier().classify(buildReviewerContext()).level, "unavailable"),
       };
     }
     const classifier = this.reviewerClassifier!;
@@ -1539,17 +1600,9 @@ export class PermissionManager {
       input.source,
       input.trustOrigin,
       input.approvalCacheKey,
+      input.executionCwd,
     ).catch(() => null); // storage failure must not block tool execution
 
-    const readSandboxCacheState = (): ReviewerSandboxCacheState =>
-      resolveReviewerSandboxCacheState(
-        input.source,
-        toolName,
-        input.mcpServerId,
-        input.workerId,
-        input.pluginId,
-        input.hostShellExecutionPlan,
-      );
     const buildCacheContext = (sandboxCacheState: ReviewerSandboxCacheState) => {
       const sandboxScope = sandboxCacheState.capability;
       return {
@@ -1572,7 +1625,7 @@ export class PermissionManager {
     // assumptions. Capture this live state immediately before cache lookup:
     // no await may sit between wrap-state sampling and cache lookup, or a
     // worker un-wrap could replay a verdict relaxed under stale confinement.
-    const sandboxCacheState = readSandboxCacheState();
+    sandboxCacheState = readSandboxCacheState();
     const cacheCtx = buildCacheContext(sandboxCacheState);
     const cacheResult = cache.lookup(lookupKey, cacheCtx);
     let verdict: RiskVerdict;
@@ -1585,32 +1638,6 @@ export class PermissionManager {
     } | null = null;
     let outcome: ReviewerDispatchOutcome = "fresh";
     let sandboxStateForAudit = sandboxCacheState;
-    const buildReviewerContext = (
-      reviewerSandboxState: ReviewerSandboxCacheState = sandboxCacheState,
-    ): ToolInvocationContext => ({
-      toolName,
-      source: input.source,
-      category: input.category,
-      pathFields: input.pathFields,
-      trustOrigin: input.trustOrigin,
-      finalInput: input.finalInput,
-      executionCwd: input.executionCwd,
-      allowedDirectories: input.allowedDirectories,
-      sensitivePathsAdjacent: input.sensitivePathsAdjacent,
-      // Substrate-aware (NOT process-global): only the ASRT-wrapped host-shell
-      // path may present `asrt` to the reviewer. plugin/MCP (unwrapped worker)
-      // and in-process builtins resolve to `none` so isWeakSandbox stays weak
-      // and the LLM cannot downgrade a MEDIUM/HIGH verdict for an unsandboxed
-      // effect — except a genuinely ASRT-wrapped external MCP worker
-      // (keyed on input.mcpServerId) or plugin worker (keyed on
-      // input.pluginId/input.workerId). See the resolver invariant.
-      sandboxCapability: reviewerSandboxState.capability,
-      ...(input.conversationContext ? { conversationContext: input.conversationContext } : {}),
-      ...(input.ownerPluginSandboxRoot !== undefined
-        ? { ownerPluginSandboxRoot: input.ownerPluginSandboxRoot }
-        : {}),
-    });
-
     // Cross-cutting root-cause fix: a legacy user-approval entry may carry
     // `null verdictAtApproval` (the field was added in the user-approval-store
     // wiring; entries written before that change pre-date it). A legacy null
@@ -1647,7 +1674,7 @@ export class PermissionManager {
       ruleVerdictForAudit = ruleVerdict.level;
       // Narrowed above: the outer `userApproval.verdictAtApproval != null`
       // gate guarantees a concrete verdict literal here.
-      const storedLevel: UserApprovalVerdict = userApproval.verdictAtApproval;
+      const storedLevel: UserApprovalVerdict = userApproval.riskCeilingAtApproval ?? userApproval.verdictAtApproval;
       verdict = maxVerdict(ruleVerdict, { level: storedLevel, reason: `stored approval verdict at approval time` });
       userApprovalUsed = {
         memoryHit: true,
@@ -1663,7 +1690,7 @@ export class PermissionManager {
       this.discloseUserApprovalHit({
         toolName,
         scope: userApproval.scope,
-        verdictAtApproval: storedLevel,
+        verdictAtApproval: userApproval.verdictAtApproval,
       });
     } else if (cacheResult.hit && cacheResult.verdict) {
       const ruleClassifier = new RuleBasedRiskClassifier();
@@ -1812,9 +1839,9 @@ export class PermissionManager {
         ...(input.evaluationContext ? { evaluationContext: input.evaluationContext } : {}),
         verdict,
       });
-      return { verdict, outcome, cacheReason: cacheResult.reason, deferredId };
+      return { verdict, outcome, approvalBasis: approvalBasisFor(ruleVerdictForAudit ?? verdict.level, outcome), cacheReason: cacheResult.reason, deferredId };
     }
-    return { verdict, outcome, cacheReason: cacheResult.reason };
+    return { verdict, outcome, approvalBasis: approvalBasisFor(ruleVerdictForAudit ?? verdict.level, outcome), cacheReason: cacheResult.reason };
   }
 
   // ─── Private ─────────────────────────────────────

@@ -38,6 +38,8 @@ import {
   auditRowStartingWith,
 } from "./test-helpers.js";
 import { sentApprovalCards } from "../../__tests__/test-helpers.js";
+import { PermissionManager } from "../permission-manager.js";
+import { buildPermissionEvaluationContext } from "../evaluation-context.js";
 
 // ─── Mock WebContents ─────────────────────────────────
 
@@ -679,6 +681,81 @@ describe("ApprovalGate", () => {
       rememberPattern: "approval choice not allowed",
     });
     await expect(promise).resolves.toMatchObject({ choice: "deny-once" });
+  });
+
+  it.each(["unavailable"] as const)(
+    "allows an exact scoped decision when the reviewer assessment is %s", async (outcome) => {
+      const wc = makeMockWebContents();
+      const gate = new ApprovalGate(wc as never);
+      const req = makeRequest({
+        id: `req-assessment-${outcome}`,
+        toolName: "bash", toolCategory: "shell",
+        trustOrigin: "user-keyboard",
+        args: { command: "printf hello" },
+        reviewerOutcome: outcome,
+        reviewerVerdict: { level: "high", reason: "assessment unavailable" },
+        approvalCacheKey: "scoped-exact-request",
+        evaluationContext: buildPermissionEvaluationContext({
+          policyMode: "auto_review", headless: false, source: "builtin", category: "shell",
+          trustOrigin: "user-keyboard", executionCwd: "/workspace/project", allowedDirectories: ["/workspace/project"],
+          pathFields: [], targetFilePaths: [], sensitivePathsAdjacent: [],
+        }),
+      });
+      const reviewer = await new PermissionManager("/workspace/permissions.json").dispatchReviewer(req.toolName, {
+        source: "builtin", category: "shell", finalInput: req.args as Record<string, unknown>,
+        pathFields: [], executionCwd: req.evaluationContext!.executionCwd,
+        allowedDirectories: ["/workspace/project"], sensitivePathsAdjacent: [],
+        trustOrigin: "user-keyboard", approvalCacheKey: req.approvalCacheKey,
+      });
+      const pending = gate.requestAndWait({ ...req, reviewerApprovalBasis: reviewer.approvalBasis });
+      const sent = sentApprovalCards<ApprovalRequest>(wc)[0]!;
+      expect(sent.persistentAllowAllowed).toBe(true);
+      expect(sent.allowedChoices).toBeUndefined();
+      expect(sent).not.toHaveProperty("reviewerOutcome");
+      expect(gate.getRequestSnapshot(req.id)).toMatchObject({ persistentAllowAllowed: true, verdictAtApproval: "high", riskCeilingAtApproval: reviewer.approvalBasis!.ruleVerdict });
+      gate.resolveFromDesktopRenderer(req.id, { requestId: req.id, choice: "allow-always", nonce: sent.nonce, hmac: sent.hmac });
+      await expect(pending).resolves.toMatchObject({ choice: "allow-always" });
+    },
+  );
+
+  it.each([
+    { reviewerOutcome: "fresh" as const },
+    { reviewerOutcome: "error" as const },
+    { reviewerOutcome: "host-determined" as const },
+    { reviewerOutcome: "sandbox-state-changed" as const },
+    { reviewerOutcome: undefined, reviewerVerdict: undefined },
+    { evaluationContext: undefined },
+    { allowedChoices: ["allow-once", "deny-once"] as const },
+    { forceExplicit: true as const },
+    { mode: "ask_all" as const },
+    { kind: "agent-action" as const, category: "agent-action" as const },
+  ])("retains one-shot eligibility for %j despite failed-assessment input", async (restriction) => {
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    const req = makeRequest({
+      toolName: "bash", toolCategory: "shell", reviewerOutcome: "unavailable",
+      trustOrigin: "user-keyboard",
+      args: { command: "printf hello" },
+      reviewerVerdict: { level: "high", reason: "assessment unavailable" },
+      approvalCacheKey: "scoped-exact-request",
+      evaluationContext: buildPermissionEvaluationContext({
+        policyMode: "auto_review", headless: false, source: "builtin", category: "shell",
+        trustOrigin: "user-keyboard", executionCwd: "/workspace/project", allowedDirectories: ["/workspace/project"],
+        pathFields: [], targetFilePaths: [], sensitivePathsAdjacent: [],
+      }),
+      ...restriction,
+    });
+    const reviewer = await new PermissionManager("/workspace/permissions.json").dispatchReviewer("bash", {
+      source: "builtin", category: "shell", finalInput: { command: "printf hello" },
+      pathFields: [], executionCwd: "/workspace/project", allowedDirectories: ["/workspace/project"],
+      sensitivePathsAdjacent: [], trustOrigin: "user-keyboard", approvalCacheKey: "scoped-exact-request",
+    });
+    const pending = gate.requestAndWait({ ...req, reviewerApprovalBasis: reviewer.approvalBasis });
+    const sent = sentApprovalCards<ApprovalRequest>(wc)[0]!;
+    expect(sent.persistentAllowAllowed).toBe(false);
+    expect(gate.getRequestSnapshot(req.id)?.persistentAllowAllowed).toBe(false);
+    gate.resolveFromDesktopRenderer(req.id, { requestId: req.id, choice: "deny-once", nonce: sent.nonce, hmac: sent.hmac });
+    await pending;
   });
 
   it("webContents.send is called with the correct channel and payload shape", async () => {

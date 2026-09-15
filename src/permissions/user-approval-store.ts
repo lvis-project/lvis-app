@@ -26,9 +26,10 @@
  *   "session"    — approval held in this process only; revoked on restart.
  *   "persistent" — approval written to disk; survives restarts.
  *
- * HIGH-verdict ALLOW decisions MUST include a non-null nlJustification and
- * cannot use scope "persistent". Exact deny decisions are configured in
- * Settings and may persist regardless of the risk that triggered the review.
+ * The live approval gate owns persistence eligibility. An unavailable review
+ * can retain a conservative HIGH display while the user remembers the exact
+ * request. A completed HIGH assessment and mandatory one-shot approvals remain
+ * ineligible. Exact deny decisions may persist regardless of displayed risk.
  *
  * Atomicity: writes go through the feature-namespace writer -- random-suffix
  * staging file, O_CREAT|O_EXCL, fsync of file and parent directory, then
@@ -36,7 +37,7 @@
  * the rest of `~/.lvis` did not have it.
  */
 import { mkdir, readFile, access, constants, stat, chmod } from "node:fs/promises";
-import { resolve, dirname } from "node:path";
+import { resolve, dirname, isAbsolute } from "node:path";
 import { writeFileAtomicAtPath } from "../main/storage/feature-namespace.js";
 import { lvisHome } from "../shared/lvis-home.js";
 import { canonicalStringify } from "../shared/canonical-json.js";
@@ -49,6 +50,7 @@ import type {
 import { sha256Hex } from "../lib/hex-digest-equal.js";
 import { isMissingPathError } from "../lib/atomic-file.js";
 import { createSerialQueue } from "../lib/with-file-lock.js";
+import { canonicalizePathForMatch, caseFoldForMatch } from "./sensitive-paths.js";
 
 
 const log = createLogger("user-approval-store");
@@ -65,10 +67,11 @@ export interface UserApprovalEntry {
   scope: UserApprovalScope;
   /** The reviewer verdict that was shown to the user when they approved. */
   verdictAtApproval: UserApprovalVerdict;
+  /** Host rule risk, separate from a conservative failed-assessment display. */
+  riskCeilingAtApproval?: UserApprovalVerdict;
   /**
-   * Natural-language justification entered by the user.
-   * Required (non-null) for HIGH-verdict approvals.
-   * null for LOW/MEDIUM approvals where the dialog does not prompt for it.
+   * Optional historical justification. The approval dock does not require
+   * renderer-authored prose to record an eligible exact decision.
    */
   nlJustification: string | null;
   /**
@@ -149,17 +152,40 @@ function migrationMarkerPath(): string {
  */
 export { canonicalStringify } from "../shared/canonical-json.js";
 
+/** Capture once before approval display; persistence consumes the frozen identity. */
+export function captureApprovalWorkingDirectory(executionCwd: string): { path: string; identity: string } {
+  if (!isAbsolute(executionCwd)) throw new Error("Approval working directory must be absolute");
+  const path = canonicalizePathForMatch(executionCwd);
+  return Object.freeze({ path, identity: sha256Hex(caseFoldForMatch(path)) });
+}
+
 function entryKey(
   toolName: string,
   args: string,
   source: string,
   trustOrigin?: string,
   approvalCacheKey?: string,
+  workingDirectoryIdentity?: string,
 ): string {
   const components = [toolName, args, source];
   if (trustOrigin) components.push(trustOrigin);
   if (approvalCacheKey) components.push(approvalCacheKey);
-  return sha256Hex(components.join("\0"));
+  const unscopedKey = sha256Hex(components.join("\0"));
+  if (workingDirectoryIdentity === undefined) return unscopedKey;
+  if (!/^[a-f0-9]{64}$/.test(workingDirectoryIdentity)) throw new Error("Invalid approval working-directory identity");
+  return sha256Hex(canonicalStringify({
+    version: "working-directory/v1",
+    unscopedKey,
+    workingDirectoryIdentity,
+  }));
+}
+
+function isApprovalVerdict(value: unknown): value is UserApprovalVerdict {
+  return value === "low" || value === "medium" || value === "high";
+}
+function hasValidRiskProvenance(entry: UserApprovalEntry): boolean {
+  return isApprovalVerdict(entry.verdictAtApproval) &&
+    (entry.riskCeilingAtApproval === undefined || isApprovalVerdict(entry.riskCeilingAtApproval));
 }
 
 async function readApprovalsFile(): Promise<ApprovalsFile> {
@@ -217,9 +243,8 @@ async function mutatePersistentApprovals(
  * For "session" scope, stores only in memory (no disk write).
  * For "persistent" scope, appends to ~/.lvis/permissions/user-approvals.json.
  *
- * Callers recording an allow (ToolApprovalContent via IPC) MUST:
- *   - Pass nlJustification !== null when verdictAtApproval === "high".
- *   - Use scope "session" (not "persistent") for high-verdict approvals.
+ * The IPC caller must bind an allow to a live request whose host snapshot
+ * permits persistence. This storage layer does not derive authority from risk.
  */
 export async function recordApproval(
   toolName: string,
@@ -233,14 +258,21 @@ export async function recordApproval(
     approvedAt?: string;
     trustOrigin?: string;
     approvalCacheKey?: string;
+    workingDirectoryIdentity?: string;
+    riskCeilingAtApproval?: UserApprovalVerdict;
   },
 ): Promise<void> {
-  const key = entryKey(toolName, args, source, entry.trustOrigin, entry.approvalCacheKey);
+  if (!isApprovalVerdict(entry.verdictAtApproval) ||
+      (entry.riskCeilingAtApproval !== undefined && !isApprovalVerdict(entry.riskCeilingAtApproval))) {
+    throw new Error("Invalid approval risk provenance");
+  }
+  const key = entryKey(toolName, args, source, entry.trustOrigin, entry.approvalCacheKey, entry.workingDirectoryIdentity);
   const full: UserApprovalEntry = {
     decision: entry.decision ?? "allow",
     approvedAt: entry.approvedAt ?? new Date().toISOString(),
     scope: entry.scope,
     verdictAtApproval: entry.verdictAtApproval,
+    ...(entry.riskCeilingAtApproval === undefined ? {} : { riskCeilingAtApproval: entry.riskCeilingAtApproval }),
     nlJustification: entry.nlJustification,
     revokedAt: null,
     // Store display metadata so listApprovals() can surface toolName/source
@@ -284,25 +316,28 @@ export async function lookupUserDecision(
   source: string,
   trustOrigin?: string,
   approvalCacheKey?: string,
+  executionCwd?: string,
 ): Promise<UserApprovalEntry | null> {
-  const key = entryKey(toolName, args, source, trustOrigin, approvalCacheKey);
-
-  // Fast: in-memory session cache.
-  const cached = sessionStore.get(key);
-  if (cached) {
-    if (cached.revokedAt) return null;
-    return cached;
-  }
-
-  // Slow: persistent disk store (e.g. after a restart).
-  const file = await readApprovalsFile();
-  const entry = file.approvals[key];
-  if (!entry) return null;
-  if (entry.revokedAt) return null;
-
-  // Warm the session cache.
-  sessionStore.set(key, entry);
-  return entry;
+  const key = entryKey(toolName, args, source, trustOrigin, approvalCacheKey,
+    executionCwd === undefined ? undefined : captureApprovalWorkingDirectory(executionCwd).identity);
+  const legacyKey = entryKey(toolName, args, source, trustOrigin, approvalCacheKey);
+  const keys = key === legacyKey ? [key] : [legacyKey, key];
+  const file = keys.some((candidate) => !sessionStore.has(candidate)) ? await readApprovalsFile() : undefined;
+  const readActive = (candidate: string): UserApprovalEntry | null => {
+    const entry = sessionStore.get(candidate) ?? file?.approvals[candidate];
+    if (!entry || entry.revokedAt) return null;
+    // Invalid allow provenance is a miss; exact denies remain restrictive
+    // regardless of the historical display risk stored alongside them.
+    if (entry.decision !== "deny" && !hasValidRiskProvenance(entry)) return null;
+    sessionStore.set(candidate, entry);
+    return entry;
+  };
+  // Existing unscoped denials retain their original scope and precedence.
+  // Only a newly scoped allow can satisfy a scoped lookup; no legacy allow
+  // is migrated or widened implicitly.
+  const legacy = key === legacyKey ? null : readActive(legacyKey);
+  if (legacy?.decision === "deny") return legacy;
+  return readActive(key);
 }
 
 /**
@@ -317,6 +352,7 @@ export async function lookupApproval(
   source: string,
   trustOrigin?: string,
   approvalCacheKey?: string,
+  executionCwd?: string,
 ): Promise<UserApprovalEntry | null> {
   const entry = await lookupUserDecision(
     toolName,
@@ -324,6 +360,7 @@ export async function lookupApproval(
     source,
     trustOrigin,
     approvalCacheKey,
+    executionCwd,
   );
   return entry && (entry.decision ?? "allow") === "allow" ? entry : null;
 }
@@ -340,8 +377,10 @@ export async function revokeApproval(
   source: string,
   trustOrigin?: string,
   approvalCacheKey?: string,
+  executionCwd?: string,
 ): Promise<void> {
-  const key = entryKey(toolName, args, source, trustOrigin, approvalCacheKey);
+  const key = entryKey(toolName, args, source, trustOrigin, approvalCacheKey,
+    executionCwd === undefined ? undefined : captureApprovalWorkingDirectory(executionCwd).identity);
 
   // Evict from session store.
   sessionStore.delete(key);
