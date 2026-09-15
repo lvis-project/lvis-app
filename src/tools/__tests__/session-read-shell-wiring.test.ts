@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 import { getBuiltinShellSessionReadPolicy, getDefaultSensitiveReadDenyPaths, wrapToolCommand } from "../../permissions/asrt-sandbox.js";
@@ -68,17 +68,32 @@ afterEach(async () => {
   await cleanupTmpDir(root);
 });
 
-async function invoke(dialect: "bash" | "powershell") {
+async function invoke(dialect: "bash" | "powershell", extraAllowedDirectories: readonly string[] = []) {
   if (dialect === "bash") {
     const command = "printf fixture";
-    return spawnWithSandbox(command, cwd, [cwd], 5, prepareSandboxFixture(command, cwd));
+    return spawnWithSandbox(command, cwd, [cwd, ...extraAllowedDirectories], 5, prepareSandboxFixture(command, cwd));
   }
   return new PowerShellTool().execute({ command: "Write-Output fixture", timeoutSeconds: 5 }, {
-    cwd, extraAllowedDirectories: [], blockReadsOutsideWorkingDirectories: true, metadata: {},
+    cwd, extraAllowedDirectories, blockReadsOutsideWorkingDirectories: true, metadata: {},
   });
 }
 
 describe.skipIf(process.platform === "win32")("saved-session native shell policy wiring", () => {
+  it.each(["bash", "powershell"] as const)("%s keeps ancestor write scope without conflicting with the HOME read deny", async (dialect) => {
+    const ancestor = dirname(root);
+    const alias = join(root, "ancestor-link");
+    symlinkSync(ancestor, alias);
+    await invoke(dialect, [ancestor, alias]);
+    const filesystem = vi.mocked(wrapToolCommand).mock.calls[0]![1]!.filesystem!;
+    expect(filesystem.allowWrite).toContain(ancestor);
+    expect(filesystem.allowRead).not.toContain(ancestor);
+    expect(filesystem.allowRead).not.toContain(alias);
+    expect(filesystem.allowRead).toContain(cwd);
+    expect(filesystem.allowRead).toContain(sessions);
+    expect(filesystem.denyRead).toContain(root);
+    expect(filesystem.denyWrite).toContain(sessions);
+  });
+
   it.each(["bash", "powershell"] as const)("%s pairs the configured read grant with nested exclusions and write protection", async (dialect) => {
     const result = await invoke(dialect);
     expect(result.output).toContain("fixture wrapper boundary");

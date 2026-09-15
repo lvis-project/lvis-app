@@ -1,14 +1,14 @@
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../../permissions/asrt-sandbox.js", () => ({
+vi.mock("../../permissions/asrt-sandbox.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../permissions/asrt-sandbox.js")>(),
   wrapToolCommand: vi.fn(async (command: string, options: { binShell: string }) => ({
     argv: [options.binShell, "-c", command],
     env: { ...process.env },
   })),
   cleanupAsrtSandboxAfterCommand: vi.fn(async () => {}),
   getDefaultSensitiveReadDenyPaths: () => [],
-  getBuiltinShellSessionReadPolicy: () => ({ allowRead: [], denyRead: [] }),
   getDefaultSensitiveWriteDenyPaths: () => [],
 }));
 

@@ -246,7 +246,11 @@ Only the builtin shell wrapper receives that root through
 floor still protects sessions from confined plugin, MCP and terminal processes.
 The builtin projection retains other sensitive paths, nested exclusions and
 trusted custom read denies; a conflicting protected ancestor suppresses the
-session grant. The sensitive write-deny floor remains intact.
+session grant. `getBuiltinShellReadPolicy` composes invocation reads for both
+shell dialects. It omits redundant read grants strictly above HOME, which
+otherwise cause the native runtime to reapply the HOME deny after narrower
+grants. Surviving read candidates cannot reopen another protected deny; write
+grants and the sensitive write-deny floor remain intact.
 Removing a read-deny pattern alone
 does not establish this contract: both the file gates and actual sandboxed reads
 must enforce the same boundary. Structured transfers retain their write-effect
