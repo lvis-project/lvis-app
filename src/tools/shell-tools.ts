@@ -36,7 +36,7 @@ import { resolveShellFilesystemPath } from "../shared/shell-filesystem-path.js";
 import { findResolvedShellPathViolation, type ShellPathPolicyViolation } from "./shell-path-policy.js";
 export type { PowerShellAstSummary } from "./powershell-ast.js";
 import { createSandboxProcessHome } from "../permissions/sandbox-process-home.js";
-import { getConfiguredSessionReadRoot, getSessionReadDenyPatterns } from "../permissions/sensitive-paths.js";
+import { getConfiguredSessionReadPolicy } from "../permissions/sensitive-paths.js";
 import {
   validateShellCommandPathPolicy,
   validateShellWorkingDirectory,
@@ -899,12 +899,12 @@ export async function spawnWithSandbox(
   // tree (cwd + write paths). Omitting denyRead when HOME is unset avoids
   // denying nothing-meaningful; the write paths are always re-allowed for read.
   const sandboxWritePaths = [...writePaths, homePath];
-  const sessionReadRoot = getConfiguredSessionReadRoot();
+  const sessionReadPolicy = getConfiguredSessionReadPolicy();
   const allowRead = [resolvedCwd, ...sandboxWritePaths, ...preparedShellExecutableReadPaths(prepared),
-    ...(sessionReadRoot === undefined ? [] : [sessionReadRoot])];
+    ...sessionReadPolicy.allowRead];
   const denyRead = [
     ...getDefaultSensitiveReadDenyPaths(),
-    ...(sessionReadRoot === undefined ? [] : getSessionReadDenyPatterns(sessionReadRoot)),
+    ...sessionReadPolicy.denyRead,
     ...(home !== undefined && home !== "" ? [home] : []),
   ];
   const filesystem = {
@@ -1825,9 +1825,11 @@ async function spawnPowerShellWithSandbox(
 
   const home = process.env["HOME"];
   const sandboxWritePaths = [...writePaths, sandboxHome.path];
-  const allowRead = [cwd, ...sandboxWritePaths];
+  const sessionReadPolicy = getConfiguredSessionReadPolicy();
+  const allowRead = [cwd, ...sandboxWritePaths, ...sessionReadPolicy.allowRead];
   const denyRead = [
     ...getDefaultSensitiveReadDenyPaths(),
+    ...sessionReadPolicy.denyRead,
     ...(home !== undefined && home !== "" ? [home] : []),
   ];
   const filesystem = {

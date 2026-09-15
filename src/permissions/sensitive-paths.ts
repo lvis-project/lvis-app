@@ -481,9 +481,21 @@ export function isConfiguredSessionReadPath(canonicalPath: string): boolean {
 /** Project the existing sensitive rules beneath a host-resolved session root.
  * Native glob matching owns recursion; this function never scans stored data.
  */
-export function getSessionReadDenyPatterns(sessionReadRoot: string): readonly string[] {
+function getSessionReadDenyPatterns(sessionReadRoot: string): readonly string[] {
   return Object.freeze(SENSITIVE_PATH_PATTERNS.map((pattern) =>
     `${sessionReadRoot}/${pattern.endsWith("/**") ? pattern.slice(0, -3) : pattern}`));
+}
+
+/** Native shell routes must pair the read grant with its scoped exclusions. */
+export function getConfiguredSessionReadPolicy(): {
+  readonly allowRead: readonly string[];
+  readonly denyRead: readonly string[];
+} {
+  const root = getConfiguredSessionReadRoot();
+  return Object.freeze({
+    allowRead: Object.freeze(root === undefined ? [] : [root]),
+    denyRead: root === undefined ? Object.freeze([]) : getSessionReadDenyPatterns(root),
+  });
 }
 
 /**
