@@ -228,6 +228,13 @@ data root resolved by `lvisHome()`; `LVIS_HOME` relocation applies to storage an
 read policy together. This grants no access to another session-store namespace,
 credentials, audit or routine state.
 
+The per-turn environment context publishes the exact application root and
+primary session-store path as JSON through the same path helpers. These are
+operational tool inputs; audit path redaction does not apply to them. The model
+uses the absolute store path with `list_files` and `read_file` rather than
+inferring it from a shell's temporary HOME. Publishing a path does not grant
+access or change shell expansion and permission checks.
+
 [sensitive-paths.ts](../../src/permissions/sensitive-paths.ts) owns the namespace
 classification and canonical-path checks. Supported file reads and shell
 commands with proven read effects can reach this root even when ordinary reads
