@@ -639,6 +639,81 @@ describe("shell-path-policy", () => {
     { label: "dpkg-query format string", command: `dpkg-query -W -f '\${Package} \${Version}\\n'` },
   ];
 
+  describe("commit message operands", () => {
+    it.each([
+      "git commit -m '/outside/path\n\nDescribe $literal and ../paths without opening them'",
+      'git commit --message "/outside/path\nsecond paragraph"',
+      "git commit --message='/outside/path'",
+      "git commit -m'/outside/path'",
+      "git commit -am'/outside/path'",
+      "git commit -avm '/outside/path'",
+      "git commit -m '/outside/first' -m '/outside/second'",
+      "git -C . commit --amend --no-edit -m '/outside/path'",
+      "git -C. commit --allow-empty -m '/outside/path'",
+      "command git commit -m '/outside/path'",
+      "env MODE=fixture git commit -m '/outside/path'",
+      "MESSAGE='/outside/path'; git commit -m \"$MESSAGE\"",
+      "git commit -m '/outside/path' -- ./source.txt",
+      "git commit -m '/outside/path' && printf '%s' /outside/data",
+    ])("accepts only the proven message slot as data: %s", (command) => {
+      withRoot((root) => {
+        expect(validateShellCommandPathPolicy(command, root, root, [], true)).toBeNull();
+      });
+    });
+
+    it.each([
+      "git commit -m data -F /outside/message",
+      "git commit -m data -F/outside/message",
+      "git commit -m data --file=/outside/message",
+      "git commit -m data -t /outside/template",
+      "git commit -m data --template=/outside/template",
+      "git commit -m data --pathspec-from-file=/outside/paths",
+      "git commit -m data -- /outside/source",
+      "git commit -- -m /outside/source",
+      "git -C /outside/repo commit -m data",
+      "git -C/outside/repo commit -m data",
+      "git commit -F -m /outside/source",
+      "git commit --file -m /outside/source",
+      "git commit -m -- -F/outside/message",
+      "git commit -m -- --pathspec-from-file=/outside/paths",
+      "git commit -m -- --templ=/outside/message",
+      "git commit -Skeym/outside/signing-key -m /outside/message",
+      "git commit --unknown-option -m /outside/source",
+      "git commit --author -m /outside/source",
+      "git --git-dir commit -m /outside/source",
+      "git --unknown-option commit -m /outside/source",
+      "git add -m /outside/source",
+      'git commit "$UNKNOWN_OPTION" -m /outside/source',
+      'git commit -m "$UNKNOWN_MESSAGE"',
+      'GIT commit -m "$UNKNOWN_MESSAGE"',
+      "git commit -m $UNKNOWN_MESSAGE /outside/source",
+      'git commit -m "$(cat /outside/message)"',
+      'git commit -m "`cat /outside/message`"',
+      "git commit -m data > /outside/output",
+      "git commit -m data && cp ./source /outside/output",
+      "printf '%s' data | xargs git commit -m /outside/message",
+      "watch git commit -m /outside/message",
+    ])("retains file, expansion, and unsupported-arity checks: %s", (command) => {
+      withRoot((root) => {
+        expect(validateShellCommandPathPolicy(command, root, root, [], true)).not.toBeNull();
+      });
+    });
+
+    it("keeps sensitive file options and expansion effects separate from message text", () => {
+      withRoot((root) => {
+        const sensitive = join(homedir(), ".ssh", "id_rsa");
+        expect(validateShellCommandPathPolicy(`git commit -m '${sensitive}'`, root, root, [])).toBeNull();
+        for (const command of [
+          `git commit -m data --file='${sensitive}'`,
+          `git commit -m data --template='${sensitive}'`,
+          `git commit -m "$(cat '${sensitive}')"`,
+        ]) {
+          expect(validateShellCommandPathPolicy(command, root, root, [])).toContain("Sensitive path:");
+        }
+      });
+    });
+  });
+
   it.each(NON_PATH_OPERAND_CORPUS)(
     "no longer refuses a non-path operand: $label",
     ({ command }) => {

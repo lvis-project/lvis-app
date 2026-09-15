@@ -292,6 +292,76 @@ interface OperandSlotClassification {
 }
 
 const COMPILER_COMMANDS = new Set(["cc", "c++", "gcc", "g++", "clang", "clang++"]);
+
+const GIT_COMMIT_MESSAGE_OPTIONS = new Set(["-m", "--message"]);
+const GIT_COMMIT_FILE_OPTIONS = new Set(["-F", "--file", "-t", "--template", "--pathspec-from-file"]);
+const GIT_COMMIT_VALUE_OPTIONS = new Set([
+  ...GIT_COMMIT_MESSAGE_OPTIONS, ...GIT_COMMIT_FILE_OPTIONS,
+  "-C", "--reuse-message", "-c", "--reedit-message", "--author", "--date",
+  "--cleanup", "--fixup", "--squash", "--trailer",
+]);
+const GIT_COMMIT_SWITCHES = new Set([
+  "-a", "--all", "-p", "--patch", "--interactive", "-s", "--signoff",
+  "-v", "--verbose", "-q", "--quiet", "-n", "--no-verify", "--amend",
+  "-e", "--edit", "--no-edit", "--reset-author", "--allow-empty",
+  "--allow-empty-message", "--dry-run", "-i", "--include", "-o", "--only",
+  "--pathspec-file-nul",
+]);
+
+/** Only proven commit message values are text; other commands keep their roles. */
+function classifyGitCommitOperandSlots(argv: readonly string[]): OperandSlotClassification {
+  const unclassified: OperandSlotClassification = {
+    nonPathIndices: new Set(), extraCandidates: [], nestedCommands: [], dynamicExecution: null,
+  };
+  const nonPathIndices = new Set<number>();
+  const extraCandidates: { value: string; index: number }[] = [];
+  let i = 1;
+  // Recognize only this global option's arity. Its directory remains a path.
+  while (argv[i]?.startsWith("-C")) {
+    const token = argv[i]!;
+    nonPathIndices.add(i);
+    const value = token === "-C" ? argv[++i] : token.slice(2);
+    if (value === undefined) return unclassified;
+    nonPathIndices.add(i);
+    extraCandidates.push({ value, index: i });
+    i += 1;
+  }
+  if (argv[i] !== "commit") return unclassified;
+  for (i += 1; i < argv.length; i += 1) {
+    const token = argv[i]!;
+    if (token === "--") break;
+    if (!token.startsWith("-") || token === "-") continue;
+    const long = token.startsWith("--");
+    const equals = token.indexOf("=");
+    const options = long
+      ? [equals < 0 ? token : token.slice(0, equals)]
+      : token.slice(1).split("").map((flag) => `-${flag}`);
+    for (let j = 0; j < options.length; j += 1) {
+      const option = options[j]!;
+      if (!GIT_COMMIT_VALUE_OPTIONS.has(option)) {
+        // Unknown options, including optional-value flags, may change arity.
+        // Falling back could mistake a consumed '--' message for a separator.
+        if (!GIT_COMMIT_SWITCHES.has(option) || (long && equals >= 0)) {
+          return { ...unclassified, dynamicExecution: "unsupported git commit option arity" };
+        }
+        continue;
+      }
+      const attached = long ? equals >= 0 : j + 2 < token.length;
+      const value = attached ? token.slice(long ? equals + 1 : j + 2) : argv[i + 1];
+      if (value === undefined) return unclassified;
+      const message = GIT_COMMIT_MESSAGE_OPTIONS.has(option);
+      const file = GIT_COMMIT_FILE_OPTIONS.has(option);
+      if (message || file) nonPathIndices.add(i);
+      if (!attached) i += 1;
+      if (message || file) nonPathIndices.add(i);
+      if (file) extraCandidates.push({ value, index: i });
+      // A value consumes the rest of a short cluster, including any 'm'.
+      break;
+    }
+  }
+  return { nonPathIndices, extraCandidates, nestedCommands: [], dynamicExecution: null };
+}
+
 // Named options precede any shorter option prefix that could claim their value.
 const COMPILER_PATH_OPTIONS = [
   "-include-pch", "-idirafter", "-isysroot", "-isystem", "-iquote", "-include", "-imacros",
@@ -537,6 +607,7 @@ function classifyOperandSlots(argv: readonly string[]): OperandSlotClassificatio
   const head = argv[verbIndex];
   if (head === undefined) return empty;
   const verb = stripCommandPath(head).toLowerCase();
+  if (verb === "git") return classifyGitCommitOperandSlots(argv);
   if (verb === "sqlite3") return classifySqliteArgumentSlots(argv);
   if (verb === "find") return classifyFindOperandSlots(argv, verbIndex);
   if (["grep", "egrep", "fgrep"].includes(verb)) return classifyGrepOperandSlots(argv, verbIndex);
@@ -779,6 +850,12 @@ export function findShellPathPolicyViolation(
       // This role contract mixes option data with executable program values.
       // Establish its argv shape before consuming any option's value count.
       if (verb === "sqlite3") assertOperandCardinality(event);
+      // Do not infer option positions from unknown values that could be flags.
+      // Literal/bound message values are sufficient; substitutions stay checked.
+      if (verb.toLowerCase() === "git") {
+        const unknown = argv.findIndex((argument) => argument === undefined);
+        if (unknown >= 0) decline("unresolved command operand", effective.words[unknown]);
+      }
       const knownArgv = argv.map((argument,index) => argument ?? displayShellWord(effective.words[index]!));
       const leaf = commandLeaf(node, effective);
       const effect: PathEffect = verb === "cd" ? "write" : isReadOnlyShellLeaf(leaf, {ignoreRedirects:true}) ? "read" : "write";
