@@ -1,4 +1,4 @@
-import { buildE2eBaseSettings, buildIsolatedElectronEnv } from "./seeded-electron";
+import { buildE2eBaseSettings, launchSeededElectron, teardownSeededElectron, MAIN_ENTRY, type SeededElectronContext } from "./seeded-electron";
 /**
  * Playwright E2E — Sandbox approval flow (PR-A4 R-2/R-3/R-4)
  *
@@ -17,29 +17,25 @@ import { buildE2eBaseSettings, buildIsolatedElectronEnv } from "./seeded-electro
 import { test, expect } from "@playwright/test";
 import { makeTestT } from "./i18n";
 import { openInlineSettings } from "./inline-settings.js";
-import { _electron as electron, type ElectronApplication, type Page } from "playwright";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { type ElectronApplication, type Page } from "playwright";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { TEST_IDS } from "../../../src/shared/test-ids.js";
 import { buildHostShellExecutionPlan, getHostShellExecutionPlanAuditProjection } from "../../../src/permissions/host-shell-execution-plan.js";
-
-const HERE = dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = resolve(HERE, "../../..");
-const MAIN_ENTRY = resolve(REPO_ROOT, "dist/src/main/main.js");
 
 // Locale-agnostic UI assertions: bind `t` to the locale this spec seeds via
 // buildE2eBaseSettings(true) (default "ko"). Asserting against catalog keys
 // instead of hard-coded Korean lets the suite flip its seed to the English
 // production default without rewriting these assertions. (#1212 follow-up.)
 const t = makeTestT("ko");
+const SESSION_ID = "e2000000-bb11-4cc2-8dd3-eeeeeeeeeeee";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function buildApprovalRequest(overrides: Record<string, unknown> = {}) {
   return {
     id: `e2e-${Date.now()}`,
+    sessionId: SESSION_ID,
     category: "tool",
     kind: "tool",
     toolName: "bash_run",
@@ -67,51 +63,27 @@ test.describe("Sandbox approval flow", () => {
 
   let app: ElectronApplication;
   let page: Page;
-  let userDataDir: string;
+  let context: SeededElectronContext | undefined;
   let tempHome: string;
 
   test.beforeEach(async () => {
-    userDataDir = mkdtempSync(resolve(tmpdir(), "lvis-sandbox-approval-"));
-    tempHome = mkdtempSync(resolve(tmpdir(), "lvis-sandbox-home-"));
-    writeFileSync(
-      resolve(userDataDir, "lvis-settings.json"),
-      JSON.stringify(buildE2eBaseSettings(true), null, 2) + "\n",
-      "utf-8",
-    );
+    context = await launchSeededElectron({
+      historyRows: [],
+      sessionId: SESSION_ID,
+      settings: buildE2eBaseSettings(true),
+      userDataPrefix: "lvis-sandbox-approval-",
+      homePrefix: "lvis-sandbox-home-",
+      launchEnv: { LVIS_SANDBOX_ENABLED: "0" },
+    });
+    app = context.app;
+    page = context.page;
+    tempHome = context.tempHome;
     mkdirSync(resolve(tempHome, ".lvis", "permissions"), { recursive: true });
-
-    app = await electron.launch({
-      args: [MAIN_ENTRY, `--user-data-dir=${userDataDir}`, "--no-sandbox"],
-      env: buildIsolatedElectronEnv({
-        HOME: tempHome,
-        USERPROFILE: tempHome,
-        LVIS_HOME: tempHome,
-        LVIS_SANDBOX_ENABLED: "0", // Keep sandbox off for E2E stability
-        LVIS_MAIN_ENTRY: MAIN_ENTRY,
-        NODE_ENV: "test",
-        ELECTRON_IS_DEV: "0",
-      }),
-      executablePath: undefined,
-    });
-    page = await app.firstWindow();
-    // The app first loads a data: splash URL, then boots and replaces it with
-    // the real index.html. Waiting only for `domcontentloaded` resolves on
-    // the splash, before IPC handlers and
-    // the renderer's approval listeners are wired — webContents.send / IPC
-    // invocations from the test would then race against bootstrap and either
-    // silently no-op or fail with "No handler registered". Wait for the
-    // first persistent post-boot affordance (`[data-testid="main-toolbar"]`)
-    // to match the boot gate used by `fixtures.ts`.
-    await page.locator('[data-testid="main-toolbar"]').first().waitFor({
-      state: "visible",
-      timeout: 60_000,
-    });
   });
 
   test.afterEach(async () => {
-    await app?.close();
-    rmSync(userDataDir, { recursive: true, force: true });
-    rmSync(tempHome, { recursive: true, force: true });
+    if (context) await teardownSeededElectron(context);
+    context = undefined;
   });
 
   test("HIGH verdict shows a read-only audit reason and requires explicit Allow once", async () => {
@@ -125,7 +97,7 @@ test.describe("Sandbox approval flow", () => {
     }, buildApprovalRequest({ reviewerVerdict: { level: "high", reason: "shell destructive verb" } }));
 
     // Dialog should appear
-    const dialog = page.getByTestId(TEST_IDS.approvalDock);
+    const dialog = page.getByRole("region", { name: t("toolApprovalDialog.toolApprovalTitle"), exact: true });
     await expect(dialog).toBeVisible({ timeout: 5000 });
 
     // HIGH uses the host/reviewer reason and never asks the user to type in
@@ -153,7 +125,7 @@ test.describe("Sandbox approval flow", () => {
       reviewerVerdict: { level: "low", reason: "read inside allowed dirs" },
     }));
 
-    const dialog = page.getByTestId(TEST_IDS.approvalDock);
+    const dialog = page.getByRole("region", { name: t("toolApprovalDialog.toolApprovalTitle"), exact: true });
     await expect(dialog).toBeVisible({ timeout: 5000 });
 
     // No approval verdict renders a typeable field.
@@ -186,7 +158,7 @@ test.describe("Sandbox approval flow", () => {
       },
     }));
 
-    const dialog = page.getByTestId(TEST_IDS.approvalDock);
+    const dialog = page.getByRole("region", { name: t("toolApprovalDialog.toolApprovalTitle"), exact: true });
     await expect(dialog).toBeVisible({ timeout: 5000 });
 
     // Sandbox row should show partial isolation label
@@ -211,13 +183,13 @@ test.describe("Sandbox approval flow", () => {
       allowedChoices: ["deny-once", "allow-once"],
     }));
 
-    const dock = page.getByTestId(TEST_IDS.approvalDock);
+    const dock = page.getByRole("region", { name: t("toolApprovalDialog.toolApprovalTitle"), exact: true });
     await expect(dock).toBeVisible();
     await expect(dock.getByTestId("tool-approval-host-execution")).toContainText(t("shellExecution.hostWarning"));
     await expect(dock.getByTestId("tool-approval-execution-cwd")).toContainText("/workspace/project");
     await expect(dock.getByTestId("tool-approval-shell-environment")).toContainText(t("shellExecution.hostHome"));
     await expect(dock.getByTestId(TEST_IDS.approvalReviewDetails)).toHaveAttribute("open", "");
-    await expect(dock.getByText(command, { exact: false })).toContainText("-complete-command");
+    await expect(dock.getByTestId("tool-approval-input")).toHaveText(command);
     await expect(dock.getByTestId(TEST_IDS.allowAlwaysButton)).toBeDisabled();
     await expect(dock.getByTestId(TEST_IDS.approveButton)).toBeEnabled();
     await expect(dock.getByTestId(TEST_IDS.denyButton)).toBeFocused();
