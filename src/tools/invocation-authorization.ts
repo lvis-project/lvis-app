@@ -23,6 +23,7 @@ import {
 } from "../shared/chat-origin.js";
 import type { ApprovalPurposeSuggestion } from "../shared/permission-review-status.js";
 import { t } from "../i18n/index.js";
+import { approvalExpiryOutcome } from "./pipeline/approval-expiry.js";
 import { createLogger } from "../lib/logger.js";
 import {
   hookChainFromDispatch } from "./pipeline/audit-entries.js";
@@ -1594,7 +1595,10 @@ export async function authorizeToolInvocation(
           // with nobody at it, so the host denied the call and queued it for
           // review. A child that read that as a refusal would retry against a
           // dock that is not going to appear.
-          const msg =
+          const expired = approvalExpiryOutcome(
+            decision, toolUse.name, permissionResult,
+          );
+          const msg = expired?.content ?? (
             parentAnswer?.outcome === "deny"
               ? t("be_executor.approvalDeniedByParent", {
                   name: toolUse.name,
@@ -1606,7 +1610,8 @@ export async function authorizeToolInvocation(
                   })
                 : t("be_executor.approvalDeniedByUser", {
                     name: toolUse.name,
-                  });
+                  })
+          );
           const durationMs = Date.now() - startTime;
           // finalInput matches the args the user actually saw + denied via
           // approvalRequest — never log stale pre-hook input here.
@@ -1628,7 +1633,7 @@ export async function authorizeToolInvocation(
             msg,
             true,
             startTime,
-            {
+            expired?.permission ?? {
               ...permissionResult,
               decision: "deny",
               reason:
