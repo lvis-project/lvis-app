@@ -39,4 +39,17 @@ describe("explicit host execution approval", () => {
     expect(container.querySelector('[data-testid="tool-approval-host-execution"]')).toBeNull();
     expect(container.querySelector('[data-testid="tool-approval-shell-environment"]')?.textContent).toContain(t("shellExecution.temporaryHome"));
   });
+
+  it("also exposes the complete command and directory for sandbox-unavailable host consent", () => {
+    const fallback = request(true);
+    fallback.args = { command: "printf '%s' '" + "b".repeat(700) + "-fallback-marker'" };
+    fallback.executionPlan = getHostShellExecutionPlanAuditProjection(buildHostShellExecutionPlan({
+      platform: "darwin", requestedSandbox: true,
+      activeCapability: { kind: "none", confidence: "verified", platform: "darwin" },
+    }));
+    const { container } = render(<ToolApprovalContent conversationLabel="conversation" open request={fallback} onDecide={() => undefined} />);
+    expect(container.querySelector("details")?.open).toBe(true);
+    expect(container.textContent).toContain("-fallback-marker");
+    expect(container.querySelector('[data-testid="tool-approval-execution-cwd"]')?.textContent).toContain("/workspace/project");
+  });
 });

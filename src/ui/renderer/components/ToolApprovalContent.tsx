@@ -944,7 +944,9 @@ export function ToolApprovalContent({
   const explicitHostExecution = request.executionPlan !== undefined
     && "executionRequest" in request.executionPlan
     && request.executionPlan.executionRequest === "host";
-  const argsTruncated = !explicitHostExecution && argsStr.length > 500 && !expanded;
+  const requiresHostConsent = request.executionPlan?.mode === "plain"
+    && request.executionPlan.requiresExplicitUserApproval;
+  const argsTruncated = !requiresHostConsent && argsStr.length > 500 && !expanded;
   const argsDisplay = argsTruncated ? argsStr.slice(0, 500) + "\n…" : argsStr;
   const source = request.source ?? "unknown";
   const sourceBadge = request.source ? SOURCE_BADGE[request.source] ?? request.source : tHook("toolApprovalDialog.unknown");
@@ -1126,16 +1128,18 @@ export function ToolApprovalContent({
                       {shellExecutionEnvironmentLines(request.executionPlan).map((line) => <p key={line}>{line}</p>)}
                     </div>
                   ) : null}
-                  {explicitHostExecution ? (
+                  {requiresHostConsent ? (
                     <div className="mt-2 space-y-1" data-testid="tool-approval-host-execution">
                       <p className="text-sm font-semibold text-destructive">{tHook("shellExecution.hostWarning")}</p>
                       <p className="break-all font-mono text-xs" data-testid="tool-approval-execution-cwd">
                         {tHook("shellExecution.cwd", { path: request.executionCwd ?? "" })}
                       </p>
-                      <p className="text-xs">{tHook("shellExecution.justification")}</p>
-                      <p className="whitespace-pre-wrap break-words text-xs">
-                        {isRecord(request.args) && typeof request.args.justification === "string" ? request.args.justification : ""}
-                      </p>
+                      {explicitHostExecution ? <>
+                        <p className="text-xs">{tHook("shellExecution.justification")}</p>
+                        <p className="whitespace-pre-wrap break-words text-xs">
+                          {isRecord(request.args) && typeof request.args.justification === "string" ? request.args.justification : ""}
+                        </p>
+                      </> : null}
                     </div>
                   ) : null}
                   {showsHighRiskReason ? (
@@ -1150,7 +1154,7 @@ export function ToolApprovalContent({
             <details
               className="group min-w-0 overflow-hidden rounded-lg border border-border-strong bg-muted/(--opacity-light)"
               data-testid={TEST_IDS.approvalReviewDetails}
-              open={explicitHostExecution || undefined}
+              open={requiresHostConsent || undefined}
             >
               <summary className="flex min-w-0 cursor-pointer list-none items-center gap-2 px-3 py-2.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
                 <span className="min-w-0 flex-1">

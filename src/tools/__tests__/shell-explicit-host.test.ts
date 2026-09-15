@@ -1,13 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ApprovalGate, type ApprovalRequest, type ApprovalRequestInput } from "../../permissions/approval-gate.js";
+import { ApprovalGate, IPC_APPROVAL_REQUEST, isHostApprovalRejectedDecision, type ApprovalRequest, type ApprovalRequestInput } from "../../permissions/approval-gate.js";
 import { buildHostShellExecutionPermitBinding, mintHostShellExecutionPermit } from "../../permissions/host-shell-execution-permit.js";
 import { buildHostShellExecutionPlan, getHostShellExecutionPlanAuditProjection, getHostShellExecutionPlanCacheIdentity, parseHostShellExecutionInput } from "../../permissions/host-shell-execution-plan.js";
 import { __resetActiveSandboxCapabilityForTest, __resetSandboxRequestedAtBootForTest, getHostShellExecutionPlan, setActiveSandboxCapability, setSandboxRequestedAtBoot } from "../../permissions/sandbox-capability.js";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 import { BashTool, BashToolInputSchema, PowerShellTool, PowerShellToolInputSchema } from "../shell-tools.js";
+import { approvalFailureOutcome } from "../pipeline/approval-outcome.js";
 
 const HOST_INPUT = { command: "printf approved > host-marker.txt", executionMode: "host" as const, justification: "Verify the explicitly requested host route", timeoutSeconds: 5 };
 const temporaryDirectories: string[] = [];
@@ -30,6 +31,28 @@ afterEach(() => {
 });
 
 describe("explicit host shell authorization", () => {
+  it.each(["host", "default"] as const)("does not ask for %s host consent when the exact action would be masked", async (executionMode) => {
+    for (const field of ["command", "justification", "cwd"] as const) {
+      const { cwd, gate, request, webContents } = prepare();
+      const plan = buildHostShellExecutionPlan({ platform: process.platform, executionMode, requestedSandbox: true,
+        activeCapability: { kind: "none", confidence: "verified", platform: process.platform } });
+      const input = { ...HOST_INPUT, executionMode,
+        [field]: field === "command" ? "printf unchanged > live-abcdefgh" : field === "cwd" ? join(cwd, "live-abcdefgh") : "Use live-abcdefgh" };
+      const binding = buildHostShellExecutionPermitBinding({ plan, toolName: "bash", toolUseId: request.id, rawInput: input, executionCwd: cwd, extraAllowedDirectories: [] })!;
+      const decision = await gate.requestAndWait({ ...request, args: input, hostShellExecutionPermitBinding: binding });
+      expect(decision.choice).toBe("deny-once");
+      expect(isHostApprovalRejectedDecision(decision)).toBe(true);
+      expect(webContents.send.mock.calls.some(([channel]) => channel === IPC_APPROVAL_REQUEST)).toBe(false);
+      expect(gate.pendingCount).toBe(0);
+      expect(mintHostShellExecutionPermit({ plan, binding, decision })).toBeUndefined();
+      const outcome = approvalFailureOutcome(decision, "bash", { decision: "ask", layer: 2, reason: "host consent" });
+      expect(outcome?.content).toContain("sensitive-data masking");
+      expect(outcome?.content).not.toContain("live-abcdefgh");
+      expect(outcome?.permission.reason).toBe("approval rejected by host");
+      expect(existsSync(join(cwd, "live-abcdefgh"))).toBe(false);
+    }
+  });
+
   it.each([true, false])("requires fresh host approval when sandbox requested is %s", (requestedSandbox) => {
     const common = { platform: process.platform, requestedSandbox, activeCapability: { kind: "none" as const, confidence: "verified" as const, platform: process.platform, reason: "fixture" } };
     const explicit = buildHostShellExecutionPlan({ ...common, executionMode: "host" });

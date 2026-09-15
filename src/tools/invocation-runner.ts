@@ -31,7 +31,7 @@ import {
   remoteControllerOriginOf,
 } from "../shared/chat-origin.js";
 import type { ApprovalDecision } from "../permissions/approval-gate.js";
-import { approvalExpiryOutcome } from "./pipeline/approval-expiry.js";
+import { approvalFailureOutcome } from "./pipeline/approval-outcome.js";
 import {
   buildPermissionEvaluationContext,
   type PermissionEvaluationContext,
@@ -1234,10 +1234,10 @@ export async function runToolInvocation(
           // Reached both when a person declines and when an unattended session
           // auto-denies. Either way the same argument cannot succeed on its
           // own, so the guidance points at authorization rather than a rewrite.
-          const expired = approvalExpiryOutcome(
+          const hostFailure = approvalFailureOutcome(
             decision, toolUse.name, dirLayerResult,
           );
-          const msg = expired?.content ?? (
+          const msg = hostFailure?.content ?? (
             t("be_executor.dirPolicyUserDenied", {
               name: toolUse.name,
               filePath: outOfAllowedTarget.filePath,
@@ -1254,7 +1254,7 @@ export async function runToolInvocation(
           const durationMs = Date.now() - startTime;
           emitToolStart(callbacks, toolUse.name, finalInput, meta);
           callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-          await auditCurrentToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, expired?.permission ?? { ...dirLayerResult, decision: "deny" }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
+          await auditCurrentToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, hostFailure?.permission ?? { ...dirLayerResult, decision: "deny" }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
           return { allowed: false, result: withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs }) };
         }
         const approvedDirectory = decision.choice === "allow-always"

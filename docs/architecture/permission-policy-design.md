@@ -203,6 +203,12 @@ the [approval gate](../../src/permissions/approval-gate.ts) and
 [execution permit](../../src/permissions/host-shell-execution-permit.ts) own this
 contract.
 
+Every plain-shell call requiring one-shot consent exposes its complete command
+and resolved working directory before the decision. If sensitive-data masking
+would change its arguments or working directory, the gate rejects the request
+before parking it. Masking is retained; hidden command bytes cannot receive an
+execution permit through a redacted display.
+
 Host execution is not a credential broker. Programs may consult host
 configuration, but the environment filter does not forward token variables or
 the SSH agent, and authentication success is not guaranteed. Without OS
@@ -263,8 +269,8 @@ Closing a deferred modal does not grant permission and does not delete the audit
 record. It leaves the item pending or closed according to the queue state.
 
 An unanswered approval that expires is distinct from a user or parent refusal.
-The host-owned expiration outcome propagates through
-[approval-expiry.ts](../../src/tools/pipeline/approval-expiry.ts) to tool and
+Host-owned expiration and rejected-request outcomes propagate through
+[approval-outcome.ts](../../src/tools/pipeline/approval-outcome.ts) to tool and
 directory approval results and audit reasons. Expiration does not grant access,
 change the approval deadline or alter command timeouts and cancellation.
 

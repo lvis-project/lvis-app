@@ -2603,6 +2603,24 @@ export class ApprovalGate {
       }
     }
 
+    if (oneShotPermitBinding !== undefined) {
+      const displayedArgs = maskArgsForDisplay(fullReq.args, new Set<string>());
+      const displayedCwd = maskSensitiveData(oneShotPermitBinding.resolvedCwd).masked;
+      if (canonicalStringify(displayedArgs) !== canonicalStringify(fullReq.args) ||
+          displayedCwd !== oneShotPermitBinding.resolvedCwd) {
+        // Exact host consent cannot authorize bytes hidden by display masking.
+        // Preserve masking and reject before signing or parking the request.
+        const reason = "Host execution cannot be approved because sensitive-data masking would hide part of the command, working directory, or justification.";
+        this.auditLogger?.log({
+          timestamp: new Date().toISOString(),
+          sessionId: fullReq.sessionId ?? UNATTRIBUTED_APPROVAL_SESSION_ID,
+          type: "approval",
+          output: `[approval:host-display-inexact] ${fullReq.id} toolName=${fullReq.toolName} -> deny-once`,
+        });
+        return markHostApprovalRejectedDecision({ requestId: fullReq.id, choice: "deny-once", rememberPattern: reason });
+      }
+    }
+
     // Issue #260 — surface a system notification when an approval is about
     // to block the user. Approval is the most user-visible gate; default to
     // urgent so the OS toast plays sound even when window is backgrounded.

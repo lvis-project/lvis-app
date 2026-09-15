@@ -129,6 +129,22 @@ describe("tool approval expiration attribution", () => {
     expect(existsSync(join(root, "permissions.json"))).toBe(false);
   });
 
+  it.each(["tool", "directory"] as const)("attributes a rejected %s approval receipt to the host", async (kind) => {
+    const run = start(kind);
+    const request = await run.sent;
+    gate?.resolve(request.id, {
+      requestId: request.id, choice: "allow-once", nonce: request.nonce, hmac: "invalid-receipt",
+    });
+    const [result] = await run.result;
+    expect(result.is_error).toBe(true);
+    expect(result.content).toContain("Approval blocked by host");
+    expect(result.content).not.toMatch(/user denied|사용자가.*거부/);
+    expect(run.execute).not.toHaveBeenCalled();
+    expect(permissions().find((entry) => entry.decision === "deny")).toMatchObject({
+      denyReasons: [{ source: "approval-gate", reason: "approval rejected by host" }],
+    });
+  });
+
   it.each(["tool", "directory"] as const)("retains an actual user denial of the %s request", async (kind) => {
     const run = start(kind);
     const request = await run.sent;
