@@ -20,6 +20,8 @@ import type { ProjectIdentity } from "../shared/project-identity.js";
 import { escapeHtml } from "../shared/escape-html.js";
 import { formatLocalIsoWithOffset, hostTimeZone } from "../shared/format-time.js";
 import { execTurnRequested } from "../main/exec-mode.js";
+import { getHostShellExecutionPlan } from "../permissions/sandbox-capability.js";
+import { shellExecutionEnvironmentPrompt } from "../shared/shell-execution-environment.js";
 
 const log = createLogger("system-prompt");
 
@@ -1024,6 +1026,7 @@ export class SystemPromptBuilder {
           `Host: ${hostname()}`,
           `User: ${userInfo().username}`,
           `LVIS Home: ${redactFsPath(lvisHome())}`,
+          shellExecutionEnvironmentPrompt(getHostShellExecutionPlan(), !execTurnRequested(process.argv)),
           `Time: ${localIso} (${zone})`,
           // The host locale is a statement about the PERSON at the keyboard, so
           // it belongs in the prompt only while there is one. A headless
