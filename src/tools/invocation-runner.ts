@@ -885,15 +885,17 @@ export async function runToolInvocation(
     // its input takes this path, not just bash.
     let approvalCacheKey: string | undefined;
     try {
-      if (hostShellToolName !== undefined && hostShellInput === undefined) {
-        throw new Error("Invalid host shell execution input: host mode requires a nonblank justification and foreground execution");
-      }
       approvalCacheKey = approvalCacheKeyFor(
         tool,
         finalInput,
         executionCwd,
         hostShellExecutionPlanAudit,
       );
+      // Let the tool's schema identify malformed fields before checking the
+      // internal plan contract. An input error must remain self-correctable.
+      if (hostShellToolName !== undefined && hostShellInput === undefined) {
+        throw new Error("Shell input passed tool validation but could not be normalized for an execution plan");
+      }
     } catch (err) {
       const detail = errorMessage(err);
       const msg = t("be_executor.invalidToolInput", {
