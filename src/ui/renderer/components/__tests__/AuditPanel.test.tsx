@@ -190,7 +190,7 @@ describe("AuditPanel", () => {
     });
   });
 
-  it("shows only the public execution-plan projection for a Windows Plan-B audit entry", async () => {
+  it("retains a historical execution-plan projection without inventing request metadata", async () => {
     const executionPlan = {
       version: "host-shell-execution-plan/v2",
       identity: "host-shell-execution-plan/v2:win32:windows-partial-shell-acl-unsafe",
@@ -226,6 +226,7 @@ describe("AuditPanel", () => {
         executionPlan?: Record<string, unknown>;
       };
       expect(rendered.executionPlan).toEqual(executionPlan);
+      expect(rendered.executionPlan).not.toHaveProperty("executionRequest");
       expect(detail.textContent).not.toContain("hostShellExecutionPermitBinding");
       expect(detail.textContent).not.toContain("oneShotPermitBinding");
       expect(detail.textContent).not.toContain("permit");
