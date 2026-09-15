@@ -1,7 +1,7 @@
 /**
  * "Allow always" is an exact Store-B decision, keyed by the canonical
- * (tool, args, source, trustOrigin, approvalCacheKey) tuple. Cache keys and
- * legacy `rememberPattern` values must never become glob-matched Store-A
+ * (tool, args, source, trustOrigin, approvalCacheKey, working directory) tuple.
+ * Cache keys and legacy `rememberPattern` values must never become glob-matched Store-A
  * rules: a literal `*` or `?` in a user-approved target is data, not syntax
  * that widens the grant to siblings.
  *
@@ -84,9 +84,11 @@ function harness(
   });
 
   const requestAndWait = vi.fn(async (req: ApprovalRequestInput) => {
-    // Production ToolApprovalContent awaits this exact persistent record before
-    // resolving the gate. A gate-only unit double must model that renderer
-    // side-effect or the next call correctly has nothing to remember.
+    // The production IPC record uses the gate's frozen directory identity.
+    // This gate double receives that same host-issued scope from the reviewer;
+    // omitting it would create a legacy unscoped record that cannot be reused.
+    const workingDirectory = req.reviewerApprovalBasis?.workingDirectory;
+    expect(workingDirectory).toBeDefined();
     await recordApproval(
       req.toolName,
       canonicalStringify(req.args ?? {}),
@@ -98,6 +100,7 @@ function harness(
         nlJustification: null,
         trustOrigin: req.trustOrigin,
         approvalCacheKey: req.approvalCacheKey,
+        workingDirectoryIdentity: workingDirectory!.identity,
       },
     );
     return {

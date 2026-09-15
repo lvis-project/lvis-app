@@ -1196,10 +1196,12 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
         cache: new VerdictCache(join(dir, "reviewer-cache.jsonl")),
         deferredQueue: new DeferredQueue(join(dir, "deferred-queue.jsonl")),
       });
-      // ToolApprovalContent records the exact persistent tuple before it
-      // resolves `allow-always`. Model that renderer side-effect explicitly;
-      // the executor deliberately no longer creates a broad Store-A rule.
+      // The production record binds the exact tuple to the host-captured
+      // working directory before resolving `allow-always`. This gate double
+      // receives that frozen scope in the reviewer's host-issued evidence.
       const requestAndWait = vi.fn(async (req: ApprovalRequestInput) => {
+        const workingDirectory = req.reviewerApprovalBasis?.workingDirectory;
+        expect(workingDirectory).toBeDefined();
         await recordApproval(
           req.toolName,
           canonicalStringify(req.args ?? {}),
@@ -1211,6 +1213,7 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
             nlJustification: null,
             trustOrigin: req.trustOrigin,
             approvalCacheKey: req.approvalCacheKey,
+            workingDirectoryIdentity: workingDirectory!.identity,
           },
         );
         return {
