@@ -92,6 +92,8 @@ function makeDeps(options: {
   hasReviewer?: boolean;
   workspaceLifecycleAvailable?: boolean;
   durableApprovalRecordAllowed?: boolean;
+  persistentAllowAllowed?: boolean;
+  workingDirectoryIdentity?: string;
   snapshotArgs?: unknown;
   snapshotVerdict?: "low" | "medium" | "high";
   /** Index into the card's own choice list the simulated user picks. */
@@ -172,6 +174,8 @@ function makeDeps(options: {
         trustOrigin: "user-keyboard",
         approvalCacheKey: undefined,
         durableApprovalRecordAllowed: options.durableApprovalRecordAllowed ?? true,
+        persistentAllowAllowed: options.persistentAllowAllowed ?? options.snapshotVerdict !== "high",
+        workingDirectoryIdentity: options.workingDirectoryIdentity ?? "a".repeat(64),
         verdictAtApproval: options.snapshotVerdict ?? "medium",
       })),
     },
@@ -1305,6 +1309,56 @@ describe("Minor-3 R2: REVIEWER_PROVIDERS_SET is the single SOT for allowed provi
 // ─── HIGH verdict IPC enforcement: explicit one-shot only ───────────────────
 
 describe("CRITICAL-2: user-approval-record HIGH verdict IPC enforcement", () => {
+  it("records a conservative HIGH display only when the live host snapshot permits persistence", async () => {
+    await setup({ snapshotVerdict: "high", persistentAllowAllowed: true });
+    const result = await invoke(PERMISSIONS.userApprovalRecord, {
+      requestId: "req-unavailable-reviewer",
+      args: '{"command":"ls"}',
+      scope: "persistent",
+      verdictAtApproval: "high",
+      nlJustification: null,
+    });
+    expect(result).toMatchObject({ ok: true });
+    expect(recordApprovalMock).toHaveBeenCalledWith("bash_run", '{"command":"ls"}', "user-keyboard",
+      expect.objectContaining({ scope: "persistent", verdictAtApproval: "high" }));
+  });
+
+  it("does not accept a renderer claim that a non-recordable request can be remembered", async () => {
+    await setup({ persistentAllowAllowed: false });
+    const result = await invoke(PERMISSIONS.userApprovalRecord, {
+      requestId: "req-one-shot",
+      args: '{}',
+      scope: "persistent",
+      verdictAtApproval: "medium",
+      persistentAllowAllowed: true,
+      reviewerOutcome: "unavailable",
+    });
+    expect(result).toMatchObject({ ok: false, error: "one-shot-not-recordable" });
+    expect(recordApprovalMock).not.toHaveBeenCalled();
+  });
+
+  it("requires a host-captured directory identity for every new allow", async () => {
+    await setup({ persistentAllowAllowed: true, workingDirectoryIdentity: "" });
+    const result = await invoke(PERMISSIONS.userApprovalRecord, {
+      requestId: "missing-scope", args: '{}', scope: "persistent", verdictAtApproval: "medium",
+    });
+    expect(result).toMatchObject({ ok: false, error: "one-shot-not-recordable" });
+    expect(recordApprovalMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps an exact persistent rejection independent of the current directory", async () => {
+    await setup({ workingDirectoryIdentity: "a".repeat(64) });
+    const result = await invoke(PERMISSIONS.userApprovalRecord, {
+      requestId: "req-global-exact-deny", args: '{}', decision: "deny",
+      scope: "persistent", verdictAtApproval: "medium",
+    });
+    expect(result).toMatchObject({ ok: true });
+    const entry = (recordApprovalMock.mock.calls as unknown as [string, string, string, Record<string, unknown>][])[0]?.[3];
+    expect(entry).toMatchObject({ decision: "deny" });
+    expect(entry).not.toHaveProperty("workingDirectoryIdentity");
+    expect(entry).not.toHaveProperty("riskCeilingAtApproval");
+  });
+
   it.each([
     ["session", null],
     ["session", "권한 감사 에이전트가 생성한 사유"],

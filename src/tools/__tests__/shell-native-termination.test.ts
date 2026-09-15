@@ -3,11 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("../../permissions/asrt-sandbox.js", () => ({
+vi.mock("../../permissions/asrt-sandbox.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../permissions/asrt-sandbox.js")>(),
   wrapToolCommand: vi.fn(async (command: string) => ({ argv: ["/bin/bash", "-c", command], env: { ...process.env } })),
   cleanupAsrtSandboxAfterCommand: vi.fn(async () => {}),
   getDefaultSensitiveReadDenyPaths: () => [], getDefaultSensitiveWriteDenyPaths: () => [],
-  getBuiltinShellSessionReadPolicy: () => ({ allowRead: [], denyRead: [] }),
 }));
 
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";

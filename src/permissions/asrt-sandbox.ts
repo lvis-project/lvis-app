@@ -565,6 +565,34 @@ export function getBuiltinShellSessionReadPolicy(userDataDir = _baseTrustedSetti
   });
 }
 
+/** Compose invocation reads without duplicating a grant above the HOME deny. */
+export function getBuiltinShellReadPolicy(readPaths: readonly string[], hostHome: string | undefined): {
+  readonly allowRead: readonly string[];
+  readonly denyRead: readonly string[];
+} {
+  const sessions = getBuiltinShellSessionReadPolicy();
+  const home = hostHome ? caseFoldForMatch(canonicalizePathForMatch(hostHome)) : undefined;
+  const allowRead = [...readPaths, ...sessions.allowRead].filter((path) => {
+    const resolved = canonicalizePathForMatch(path);
+    // An explicit working directory must not reopen protected user data or a
+    // custom deny when removing a broader ancestor changes native rule order.
+    if (sessions.denyRead.some((denied) => readDenyCoversPath(denied, resolved))) return false;
+    if (home === undefined) return true;
+    const canonical = caseFoldForMatch(resolved);
+    if (canonical === home) return true;
+    const prefix = canonical.endsWith("/") ? canonical : `${canonical}/`;
+    // Reads outside HOME are already allowed. An ancestor grant causes the
+    // native runtime to re-emit the nested HOME deny after narrower grants,
+    // hiding both the working tree and saved history. Keep only grants at or
+    // below HOME, or unrelated to it; write grants are composed separately.
+    return !home.startsWith(prefix);
+  });
+  return Object.freeze({
+    allowRead: Object.freeze(allowRead),
+    denyRead: Object.freeze([...sessions.denyRead, ...(hostHome ? [hostHome] : [])]),
+  });
+}
+
 /** Use the shared policy grammar; unrepresented runtime patterns keep the deny. */
 function readDenyCoversPath(denied: string, canonicalPath: string): boolean {
   // Native patterns additionally support character classes and, on Windows,

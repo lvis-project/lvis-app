@@ -24,6 +24,7 @@ import {
   type SandboxCapability,
 } from "./sandbox-capability.js";
 import type { PermissionEvaluationContext } from "./evaluation-context.js";
+import { matchesReviewerApprovalBasis, type ReviewerApprovalBasis, type ReviewerDispatchOutcome } from "./permission-manager.js";
 import {
   isSensitivePath,
   canonicalizePathForMatch,
@@ -36,6 +37,7 @@ import type {
 } from "../shared/parent-escalation-notice.js";
 import { canonicalStringify } from "../shared/canonical-json.js";
 import { resolveUserApprovalVerdict } from "../shared/permissions-events.js";
+import { captureApprovalWorkingDirectory } from "./user-approval-store.js";
 import type {
   RemoteControllerAuthority,
   RemoteControllerOrigin,
@@ -216,6 +218,10 @@ export interface ApprovalRequest {
   kind?: ApprovalKind;
   /** Choices the host will accept for this request. */
   allowedChoices?: readonly ApprovalChoice[];
+  /** Host-derived permission to remember an exact allow for this request. */
+  persistentAllowAllowed?: boolean;
+  /** Canonical scope captured by the host before a remembered decision is shown. */
+  persistentApprovalCwd?: string;
   toolName: string;
   /** Permission policy category for the invocation shown in the UI. */
   toolCategory?: ToolCategory;
@@ -455,8 +461,11 @@ export function signApprovalRequest(
  */
 export type ApprovalRequestInput = Omit<
   ApprovalRequest,
-  "requireExplicit" | "executionPlan"
+  "requireExplicit" | "executionPlan" | "persistentAllowAllowed" | "persistentApprovalCwd"
 > & {
+  /** Host-owned assessment provenance; never inferred from the displayed reason. */
+  readonly reviewerOutcome?: ReviewerDispatchOutcome;
+  readonly reviewerApprovalBasis?: ReviewerApprovalBasis;
   /** Host-issued safe projection; structural lookalikes are rejected before IPC. */
   readonly executionPlan?: HostShellExecutionPlanAuditProjection;
   readonly forceExplicit?: true;
@@ -999,6 +1008,9 @@ interface PendingEntry {
   approvalCacheKey?: string;
   /** Host-owned permission to create a user-approval-store record. */
   durableApprovalRecordAllowed: boolean;
+  persistentAllowAllowed: boolean;
+  workingDirectoryIdentity?: string;
+  riskCeilingAtApproval?: RiskLevel;
   executionPlan?: HostShellExecutionPlanAuditProjection;
   hostShellExecutionPermitBinding?: HostShellExecutionPermitBinding;
   /** Confused-deputy nonce issued for this request (echoed back verbatim) */
@@ -2120,6 +2132,8 @@ export class ApprovalGate {
       abortSignal,
       childProvenance,
       parentAdjudicationEligible,
+      reviewerOutcome,
+      reviewerApprovalBasis,
       ...request
     } = req;
     // Do not forward the host-only binding to renderer or audit payloads.
@@ -2195,7 +2209,16 @@ export class ApprovalGate {
 
     const requestedChoices = req.allowedChoices;
     const verdictAtApproval = resolveUserApprovalVerdict(req);
-    const highRiskOneShot = verdictAtApproval === "high";
+    const assessmentUnavailable = reviewerOutcome === "unavailable" || reviewerOutcome === "error" ||
+      reviewerOutcome === "timeout" || reviewerOutcome === "malformed";
+    const scopedOrdinaryRequest =
+      (req.kind === undefined || req.kind === "tool") && req.category === "tool" &&
+      req.evaluationContext?.headless === false &&
+      Boolean(req.evaluationContext.executionCwd) &&
+      !forceExplicit && req.mode !== "ask_all" && req.mode !== "plan" &&
+      remoteControllerOrigin === undefined && remoteControllerAuthority === undefined;
+    const assessmentBasis = matchesReviewerApprovalBasis(reviewerApprovalBasis, req)
+      ? reviewerApprovalBasis : undefined;
     const hasOneShotApprovalChoiceContract =
       requestedChoices?.length === 2 &&
       requestedChoices.includes("allow-once") &&
@@ -2300,6 +2323,28 @@ export class ApprovalGate {
         req.kind === "tool" ||
         req.kind === "rationale") &&
       req.toolCategory !== "meta";
+    const displayedSandboxCapability = requestedSandboxCapability ??
+      (isExecutionKind && req.source !== undefined
+        ? resolveReviewerSandboxCapability(req.source, req.toolName)
+        : undefined);
+    const riskCeilingAtApproval = assessmentUnavailable && scopedOrdinaryRequest
+      ? assessmentBasis?.ruleVerdict : undefined;
+    const highRiskOneShot = verdictAtApproval === "high" &&
+      (riskCeilingAtApproval === undefined || riskCeilingAtApproval === "high");
+    const canRememberRequest = durableApprovalRecordAllowed && !highRiskOneShot &&
+      riskCeilingAtApproval !== "high" &&
+      (req.kind === undefined || req.kind === "tool") && req.category === "tool" &&
+      !forceExplicit && req.mode !== "ask_all" && req.mode !== "plan" &&
+      remoteControllerOrigin === undefined && remoteControllerAuthority === undefined &&
+      (requestedChoices === undefined || requestedChoices.includes("allow-always"));
+    // One-shot requests never persist a working-directory identity. Do not make
+    // their approval depend on validating an unrelated persistent-store scope.
+    const workingDirectory = canRememberRequest
+      ? assessmentBasis?.workingDirectory ??
+        (req.evaluationContext?.executionCwd
+          ? captureApprovalWorkingDirectory(req.evaluationContext.executionCwd) : undefined)
+      : undefined;
+    const persistentAllowAllowed = canRememberRequest && workingDirectory !== undefined;
     const fullReq: ApprovalRequest = {
       ...request,
       ...(executionPlanAudit === undefined
@@ -2333,16 +2378,15 @@ export class ApprovalGate {
             // a guessed one (fail closed; never fall back to "builtin", whose
             // canonical-shell branch can legitimately report `asrt`).
             sandboxCapability:
-              requestedSandboxCapability ??
-              (isExecutionKind && req.source !== undefined
-                ? resolveReviewerSandboxCapability(req.source, req.toolName)
-                : undefined),
+              displayedSandboxCapability,
           }
         : {}),
       allowedChoices:
         req.kind === "rationale" || highRiskOneShot
           ? ["allow-once", "deny-once"]
           : req.allowedChoices,
+      persistentAllowAllowed,
+      persistentApprovalCwd: persistentAllowAllowed ? workingDirectory?.path : undefined,
       requireExplicit:
         req.kind === "rationale"
           ? true
@@ -2738,6 +2782,9 @@ export class ApprovalGate {
             }),
         approvalCacheKey: fullReq.approvalCacheKey,
         durableApprovalRecordAllowed,
+        persistentAllowAllowed,
+        workingDirectoryIdentity: workingDirectory?.identity,
+        riskCeilingAtApproval,
         ...(executionPlanAudit === undefined
           ? {}
           : { executionPlan: executionPlanAudit }),
@@ -3037,6 +3084,9 @@ export class ApprovalGate {
     trustOrigin: string;
     approvalCacheKey: string | undefined;
     durableApprovalRecordAllowed: boolean;
+    persistentAllowAllowed: boolean;
+    workingDirectoryIdentity: string | undefined;
+    riskCeilingAtApproval: RiskLevel | undefined;
     verdictAtApproval: RiskVerdict["level"];
   } | null {
     const entry = this.pending.get(requestId);
@@ -3052,6 +3102,9 @@ export class ApprovalGate {
       trustOrigin: entry.trustOrigin,
       approvalCacheKey: entry.approvalCacheKey,
       durableApprovalRecordAllowed: entry.durableApprovalRecordAllowed,
+      persistentAllowAllowed: entry.persistentAllowAllowed,
+      workingDirectoryIdentity: entry.workingDirectoryIdentity,
+      riskCeilingAtApproval: entry.riskCeilingAtApproval,
       verdictAtApproval: entry.verdictAtApproval,
     };
   }

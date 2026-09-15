@@ -228,6 +228,13 @@ data root resolved by `lvisHome()`; `LVIS_HOME` relocation applies to storage an
 read policy together. This grants no access to another session-store namespace,
 credentials, audit or routine state.
 
+The per-turn environment context publishes the exact application root and
+primary session-store path as JSON through the same path helpers. These are
+operational tool inputs; audit path redaction does not apply to them. The model
+uses the absolute store path with `list_files` and `read_file` rather than
+inferring it from a shell's temporary HOME. Publishing a path does not grant
+access or change shell expansion and permission checks.
+
 [sensitive-paths.ts](../../src/permissions/sensitive-paths.ts) owns the namespace
 classification and canonical-path checks. Supported file reads and shell
 commands with proven read effects can reach this root even when ordinary reads
@@ -239,7 +246,11 @@ Only the builtin shell wrapper receives that root through
 floor still protects sessions from confined plugin, MCP and terminal processes.
 The builtin projection retains other sensitive paths, nested exclusions and
 trusted custom read denies; a conflicting protected ancestor suppresses the
-session grant. The sensitive write-deny floor remains intact.
+session grant. `getBuiltinShellReadPolicy` composes invocation reads for both
+shell dialects. It omits redundant read grants strictly above HOME, which
+otherwise cause the native runtime to reapply the HOME deny after narrower
+grants. Surviving read candidates cannot reopen another protected deny; write
+grants and the sensitive write-deny floor remain intact.
 Removing a read-deny pattern alone
 does not establish this contract: both the file gates and actual sandboxed reads
 must enforce the same boundary. Structured transfers retain their write-effect
@@ -282,12 +293,48 @@ change the approval deadline or alter command timeouts and cancellation.
 
 ## Reviewer Failure
 
+Reviewer input separates host-computed policy facts from OS isolation. The host
+supplies the existing rule verdict, execution directory, and canonical declared
+path checks using the same resolver and containment predicates as the rule
+classifier. These facts describe declared operands; they do not attest that a
+plugin or custom tool has no other effects. A builtin file operation running
+inside the host process has no OS sandbox, but its file-path gates still apply.
+Weak isolation or missing conversational purpose preserves the rule floor and
+does not alone establish an out-of-scope or destructive write. The model can
+still raise risk for additional effects or uncertainty, and the host retains
+the maximum of the rule and model verdicts. Reviewer framework changes invalidate
+cached verdicts. DLP filtering applies to the policy-fact projection as well as
+tool arguments and conversation context.
+
 Reviewer failure is not a silent allow. If the provider is missing, times out, or
 returns malformed output, the host fails closed:
 
 - foreground calls ask the user with explicit reviewer-unavailable context;
 - headless calls defer or deny according to configured failure behavior;
 - audit records include the reviewer failure path.
+
+An unavailable or failed assessment does not prevent the user from remembering
+an ordinary request. The approval gate derives `persistentAllowAllowed` from
+host-owned request context and typed reviewer outcomes. The dispatcher issues
+exact-input-bound evidence from its existing raw-input rule trace; the gate
+uses this evidence without reclassifying display data. A conservative HIGH
+display during assessment failure is separate from a completed HIGH judgment.
+Completed HIGH judgments, changed sandbox state and mandatory one-shot requests
+retain their restrictions, including explicit host execution, remote controllers
+and sealed rationale approvals.
+
+“Always allow” stores the exact tool, canonical arguments, source, trust origin
+and invocation working-directory identity. Existing tool-specific identity and
+the host shell's sealed execution plan remain part of the key. The versioned
+directory scope prevents reuse across projects. Older unscoped allows no longer
+match scoped requests; existing policy rules and exact denials retain their
+identity and precedence. Exact rejections remain independent of cwd. The host
+captures the canonical directory before displaying its scope and recording its
+frozen identity. The UI does not create a wildcard rule. Recording
+requires fresh user intent and a live host approval snapshot. On subsequent
+calls, hard denies and per-invocation approval requirements still run before the
+remembered-decision lookup. Both memory consumers compare current deterministic
+risk with the stored reuse ceiling, separately from conservative display risk.
 
 ## Plugin And MCP Tools
 

@@ -4,8 +4,9 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 import { shellQuote } from "../../lib/shell-resolver.js";
-import { cleanupAsrtSandboxAfterCommand, getBuiltinShellSessionReadPolicy, initializeAsrtSandbox, isAsrtSandboxActive, resetAsrtSandbox } from "../../permissions/asrt-sandbox.js";
+import { cleanupAsrtSandboxAfterCommand, getBuiltinShellSessionReadPolicy, initializeAsrtSandbox, isAsrtSandboxActive, resetAsrtSandbox, useAppOwnedSandboxTempRoot } from "../../permissions/asrt-sandbox.js";
 import { spawnConfinedChild } from "../../permissions/confined-child.js";
+import { baseAllowedDirectories } from "../../permissions/base-allowed-directories.js";
 import { __resetActiveSandboxCapabilityForTest, setActiveSandboxCapability } from "../../permissions/sandbox-capability.js";
 import { asrtCanInitialize } from "../../permissions/__tests__/test-helpers.js";
 import { sessionStorePath } from "../../shared/session-store-path.js";
@@ -41,6 +42,47 @@ afterEach(async () => {
 });
 
 describe.runIf(process.platform === "darwin" || process.platform === "linux")("saved-session shell confinement", () => {
+  it("reads default application history with the host bootstrap temp root", async (test) => {
+    if (!(await asrtCanInitialize())) return test.skip();
+    const defaultProfile = join(root, ".lvis");
+    const defaultSessions = sessionStorePath(defaultProfile);
+    const defaultTranscript = join(defaultSessions, "conversation.jsonl");
+    mkdirSync(defaultSessions, { recursive: true });
+    writeFileSync(defaultTranscript, CONTENT);
+    const privateSibling = join(root, "private.txt");
+    const nestedSecret = join(defaultSessions, ".env");
+    writeFileSync(privateSibling, "private-home-fixture");
+    writeFileSync(nestedSecret, "private-nested-fixture");
+    const userData = join(root, "user-data");
+    const protectedProject = join(userData, "project");
+    const protectedFile = join(protectedProject, "private.txt");
+    mkdirSync(protectedProject, { recursive: true });
+    writeFileSync(protectedFile, "private-user-data-fixture");
+    vi.stubEnv("LVIS_HOME", defaultProfile);
+    useAppOwnedSandboxTempRoot();
+    await initializeAsrtSandbox({ allowedDomains: [], strictAllowlist: true, userDataDir: userData });
+    const command = "/bin/cat " + shellQuote(defaultTranscript);
+    const read = await spawnWithSandbox(command, cwd, [cwd, ...baseAllowedDirectories()], 15, prepareSandboxFixture(command, cwd));
+    expect(read.isError, read.output).toBe(false);
+    expect(read.metadata.sandboxed).toBe(true);
+    expect(read.output).toContain(CONTENT.trim());
+    for (const path of [privateSibling, nestedSecret]) {
+      const deniedCommand = "/bin/cat " + shellQuote(path);
+      const denied = await spawnWithSandbox(deniedCommand, cwd, [cwd, ...baseAllowedDirectories()], 15, prepareSandboxFixture(deniedCommand, cwd));
+      expect(denied.isError, denied.output).toBe(true);
+      expect(denied.output).not.toContain("private-home-fixture");
+      expect(denied.output).not.toContain("private-nested-fixture");
+    }
+    const writeCommand = "printf changed > " + shellQuote(defaultTranscript);
+    const write = await spawnWithSandbox(writeCommand, cwd, [cwd, ...baseAllowedDirectories()], 15, prepareSandboxFixture(writeCommand, cwd));
+    expect(write.isError, write.output).toBe(true);
+    expect(readFileSync(defaultTranscript, "utf8")).toBe(CONTENT);
+    const protectedCommand = "/bin/cat " + shellQuote(protectedFile);
+    const protectedRead = await spawnWithSandbox(protectedCommand, protectedProject, [protectedProject, ...baseAllowedDirectories()], 15, prepareSandboxFixture(protectedCommand, protectedProject));
+    expect(protectedRead.isError, protectedRead.output).toBe(true);
+    expect(protectedRead.output).not.toContain("private-user-data-fixture");
+  });
+
   it("native sandbox reads configured history while preserving the write floor and neighboring denies", async (test) => {
     if (!(await asrtCanInitialize())) return test.skip();
     const neighbors = ["secrets", "audit", "routine"].map((namespace) => {

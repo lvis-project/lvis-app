@@ -679,7 +679,8 @@ export function ToolApprovalContent({
   // resolved a safe parent AND the host did not narrow the choices.
   const alwaysAllowUnavailable = outOfDirScopes
     ? outOfDirScopes.always === null
-    : approvalIsOneShot || finalVerdict === "high";
+    : approvalIsOneShot || request?.persistentAllowAllowed === false ||
+      (finalVerdict === "high" && request?.persistentAllowAllowed !== true);
   const persistentUnavailableReason = alwaysAllowUnavailable
     ? outOfDirScopes
       ? outOfDirSuggestedParent
@@ -1487,6 +1488,11 @@ export function ToolApprovalContent({
                 data-testid="allow-always-unavailable-reason"
               >
                 {persistentUnavailableReason}
+              </p>
+            ) : null}
+            {!alwaysAllowUnavailable && !isOutOfDir && request.persistentApprovalCwd ? (
+              <p className="text-[10px] text-muted-foreground" data-testid="allow-always-exact-scope">
+                {tHook("toolApprovalDialog.exactPersistentScope", { path: request.persistentApprovalCwd })}
               </p>
             ) : null}
             {interactionLocked ? (

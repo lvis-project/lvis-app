@@ -35,6 +35,7 @@ function makeCtx(overrides: Partial<ToolInvocationContext> = {}): ToolInvocation
     pathFields: [],
     trustOrigin: "user-keyboard",
     finalInput: { command: "ls" },
+    executionCwd: "/home/user",
     allowedDirectories: ["/home/user"],
     sensitivePathsAdjacent: [],
     sandboxCapability: WEAK_CAP,

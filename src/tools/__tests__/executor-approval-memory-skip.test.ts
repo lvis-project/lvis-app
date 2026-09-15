@@ -172,6 +172,7 @@ describe("ToolExecutor — explicit-approval memory skips the foreground modal (
       "builtin",
       "user-keyboard",
       undefined,
+      process.cwd(),
     );
     expect(lookupApprovalMock).not.toHaveBeenCalled();
   });

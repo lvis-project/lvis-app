@@ -43,7 +43,7 @@ import {
 import {
   wrapToolCommand,
   cleanupAsrtSandboxAfterCommand,
-  getBuiltinShellSessionReadPolicy,
+  getBuiltinShellReadPolicy,
   getDefaultSensitiveWriteDenyPaths,
 } from "../permissions/asrt-sandbox.js";
 import {
@@ -894,17 +894,12 @@ export async function spawnWithSandbox(
   signal?.throwIfAborted();
   const { shell, homePath, hostHome: home } = preparedShellCommand(prepared);
   if (!homePath) throw new Error("Sandbox shell preparation has no owned HOME");
-  // Read-jail HOME-leak fix: deny the whole home dir, then re-allow the working
-  // tree (cwd + write paths). Omitting denyRead when HOME is unset avoids
-  // denying nothing-meaningful; the write paths are always re-allowed for read.
+  // Deny HOME and project invocation reads through the shared policy, which
+  // preserves protected denies while admitting scoped work and saved history.
   const sandboxWritePaths = [...writePaths, homePath];
-  const sessionReadPolicy = getBuiltinShellSessionReadPolicy();
-  const allowRead = [resolvedCwd, ...sandboxWritePaths, ...preparedShellExecutableReadPaths(prepared),
-    ...sessionReadPolicy.allowRead];
-  const denyRead = [
-    ...sessionReadPolicy.denyRead,
-    ...(home !== undefined && home !== "" ? [home] : []),
-  ];
+  const { allowRead, denyRead } = getBuiltinShellReadPolicy(
+    [resolvedCwd, ...sandboxWritePaths, ...preparedShellExecutableReadPaths(prepared)], home,
+  );
   const filesystem = {
     allowWrite: sandboxWritePaths,
     allowRead,
@@ -1823,12 +1818,7 @@ async function spawnPowerShellWithSandbox(
 
   const home = process.env["HOME"];
   const sandboxWritePaths = [...writePaths, sandboxHome.path];
-  const sessionReadPolicy = getBuiltinShellSessionReadPolicy();
-  const allowRead = [cwd, ...sandboxWritePaths, ...sessionReadPolicy.allowRead];
-  const denyRead = [
-    ...sessionReadPolicy.denyRead,
-    ...(home !== undefined && home !== "" ? [home] : []),
-  ];
+  const { allowRead, denyRead } = getBuiltinShellReadPolicy([cwd, ...sandboxWritePaths], home);
   const filesystem = {
     allowWrite: sandboxWritePaths,
     allowRead,

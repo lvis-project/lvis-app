@@ -99,7 +99,7 @@ describe("DeferredQueuePanel", () => {
         inputSummary: '{"command":"./update-all.sh"}',
         evaluationContext: {
           version: "permission-evaluation-context/v1",
-          reviewerFrameworkVersion: "permission-reviewer-framework/v1",
+          reviewerFrameworkVersion: "permission-reviewer-framework/v2",
           policyMode: "auto",
           headless: true,
           source: "builtin",
@@ -119,7 +119,7 @@ describe("DeferredQueuePanel", () => {
     const contextPanel = screen.getByTestId("permission-evaluation-context");
     expect(contextPanel).toBeTruthy();
     expect(within(contextPanel).getByText(/auto · headless/)).toBeTruthy();
-    expect(within(contextPanel).getByText(/permission-reviewer-framework\/v1/)).toBeTruthy();
+    expect(within(contextPanel).getByText(/permission-reviewer-framework\/v2/)).toBeTruthy();
   });
 
   it.each([

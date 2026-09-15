@@ -209,7 +209,7 @@ describe("producer wiring — the dispatch lanes thread the invocation cwd", () 
     });
   });
 
-  it("dispatchReviewerForHeadless hands the classifier the evaluation context's executionCwd", async () => {
+  it("dispatchReviewerForHeadless hands the classifier the canonical invocation cwd", async () => {
     const invocationCwd = makeRoot();
     const evaluationContext = buildPermissionEvaluationContext({
       policyMode: "unmanaged",
@@ -241,10 +241,12 @@ describe("producer wiring — the dispatch lanes thread the invocation cwd", () 
     );
     expect(result.allowed).toBe(true);
     expect(captured).toHaveLength(1);
-    // The producer-driven assertion: the value the classifier received is the
-    // invocation cwd, NOT the ambient process cwd.
-    expect(captured[0].executionCwd).toBe(invocationCwd);
+    // The dispatcher freezes the invocation cwd's canonical path before review.
+    // Resolving a relative operand through either directory alias stays aligned.
+    expect(captured[0].executionCwd).toBe(canonicalizePathForMatch(invocationCwd));
     expect(captured[0].executionCwd).not.toBe(process.cwd());
+    expect(enforcerPath(writeTool, "out.txt", captured[0].executionCwd))
+      .toBe(enforcerPath(writeTool, "out.txt", invocationCwd));
   });
 });
 

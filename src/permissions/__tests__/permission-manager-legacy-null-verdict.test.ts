@@ -11,11 +11,14 @@
  * guard for that gate.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { canonicalizePathForMatch, caseFoldForMatch } from "../sensitive-paths.js";
 
 // vi.mock must be at top level (hoisted). We feed the mock from a
 // per-test setter so each case can shape the lookup result.
 let mockLookupResult: unknown = null;
+let useActualApprovalStore = false;
 const { emitSandboxAuditMock } = vi.hoisted(() => ({
   emitSandboxAuditMock: vi.fn(async () => {}),
 }));
@@ -26,7 +29,8 @@ vi.mock("../user-approval-store.js", async () => {
   );
   return {
     ...actual,
-    lookupApproval: vi.fn(async () => mockLookupResult),
+    lookupApproval: vi.fn(async (...args: Parameters<typeof actual.lookupApproval>) =>
+      useActualApprovalStore ? actual.lookupApproval(...args) : mockLookupResult),
   };
 });
 
@@ -47,6 +51,12 @@ import {
   type RiskClassifier,
 } from "../reviewer/risk-classifier.js";
 import { PermissionTestResources } from "./test-resources.js";
+import {
+  __resetSessionStoreForTest,
+  captureApprovalWorkingDirectory,
+  canonicalStringify,
+  recordApproval,
+} from "../user-approval-store.js";
 
 const resources = new PermissionTestResources();
 
@@ -54,6 +64,200 @@ const tmpFile = resources.tmpFileFactory("lvis-pm-legacy-null-");
 
 afterEach(async () => {
   await resources.cleanup();
+});
+
+describe("PermissionManager — scoped approval memory with a separate risk ceiling", () => {
+  let pm: PermissionManager;
+  let cwd: string;
+  let previousHome: string | undefined;
+
+  beforeEach(() => {
+    previousHome = process.env.LVIS_HOME;
+    process.env.LVIS_HOME = resources.makeTmpDir("lvis-pm-scoped-approval-state-");
+    cwd = resources.makeTmpDir("lvis-pm-scoped-approval-project-");
+    useActualApprovalStore = true;
+    __resetSessionStoreForTest();
+    emitSandboxAuditMock.mockClear();
+    ({ pm } = makeManager());
+    pm.setInteractiveAutoApprove("medium");
+  });
+
+  afterEach(() => {
+    useActualApprovalStore = false;
+    __resetSessionStoreForTest();
+    if (previousHome === undefined) delete process.env.LVIS_HOME;
+    else process.env.LVIS_HOME = previousHome;
+  });
+
+  it.each(["low", "medium"] as const)(
+    "uses the persisted %s ceiling while preserving the displayed HIGH and fresh risk escalation", async (ceiling) => {
+      const broadcast = vi.fn();
+      pm.setBroadcastUserApprovalHit(broadcast);
+      const finalInput = {
+        path: ceiling === "low" ? join(cwd, "note.md") : join(cwd, "deep", "nested", "note.md"),
+      };
+      const approvalCacheKey = `write_file:path:${finalInput.path}`;
+      await recordApproval("write_file", canonicalStringify(finalInput), "builtin", {
+        scope: "persistent",
+        verdictAtApproval: "high",
+        riskCeilingAtApproval: ceiling,
+        nlJustification: null,
+        trustOrigin: "user-keyboard",
+        approvalCacheKey,
+        workingDirectoryIdentity: captureApprovalWorkingDirectory(cwd).identity,
+      });
+      // Force the reviewer to read the persisted record rather than its cache.
+      __resetSessionStoreForTest();
+      const input = {
+        source: "builtin" as const,
+        category: "write" as const,
+        pathFields: ["path"],
+        finalInput,
+        executionCwd: cwd,
+        allowedDirectories: [caseFoldForMatch(canonicalizePathForMatch(cwd))],
+        sensitivePathsAdjacent: [],
+        trustOrigin: "user-keyboard" as const,
+        approvalCacheKey,
+      };
+
+      const remembered = await pm.dispatchReviewer("write_file", input, undefined, { defer: "none" });
+      expect(remembered).toMatchObject({ outcome: "approval-memory", verdict: { level: ceiling } });
+      expect(pm.resolveReviewerDecision(remembered.verdict, "foreground-auto").decision).toBe("allow");
+      expect(broadcast).toHaveBeenLastCalledWith({
+        toolName: "write_file", scope: "persistent", verdictAtApproval: "high",
+      });
+      expect((emitSandboxAuditMock.mock.calls as unknown as [unknown][]).at(-1)?.[0]).toMatchObject({
+        reviewer: {
+          ruleVerdict: ceiling,
+          finalVerdict: ceiling,
+          llmVerdict: null,
+          userApprovalUsed: { memoryHit: true, verdictAtApproval: "high" },
+        },
+      });
+
+      // The exact tuple still matches, but the current scope no longer admits
+      // this target. The deterministic HIGH must survive memory composition.
+      const escalated = await pm.dispatchReviewer("write_file", {
+        ...input, allowedDirectories: [],
+      }, undefined, { defer: "none" });
+      expect(escalated).toMatchObject({ outcome: "approval-memory", verdict: { level: "high" } });
+      expect(pm.resolveReviewerDecision(escalated.verdict, "foreground-auto").decision).toBe("ask");
+      expect(broadcast).toHaveBeenLastCalledWith({
+        toolName: "write_file", scope: "persistent", verdictAtApproval: "high",
+      });
+      expect((emitSandboxAuditMock.mock.calls as unknown as [unknown][]).at(-1)?.[0]).toMatchObject({
+        reviewer: {
+          ruleVerdict: "high",
+          finalVerdict: "high",
+          llmVerdict: null,
+          userApprovalUsed: { memoryHit: true, verdictAtApproval: "high" },
+        },
+      });
+
+      const otherCwd = resources.makeTmpDir("lvis-pm-scoped-approval-other-");
+      const otherProject = await pm.dispatchReviewer("write_file", {
+        ...input, executionCwd: otherCwd,
+      }, undefined, { defer: "none" });
+      expect(otherProject.outcome).not.toBe("approval-memory");
+      expect(broadcast).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it.each([
+    ["riskCeilingAtApproval", "bogus"],
+    ["riskCeilingAtApproval", null],
+    ["riskCeilingAtApproval", 7],
+    ["riskCeilingAtApproval", { level: "low" }],
+    ["verdictAtApproval", "bogus"],
+    ["verdictAtApproval", null],
+    ["verdictAtApproval", 7],
+    ["verdictAtApproval", { level: "high" }],
+  ] as const)("does not reuse or disclose a persisted malformed %s=%j", async (field, value) => {
+    const broadcast = vi.fn();
+    pm.setBroadcastUserApprovalHit(broadcast);
+    const finalInput = { path: join(cwd, "note.md") };
+    const approvalCacheKey = `write_file:path:${finalInput.path}`;
+    await recordApproval("write_file", canonicalStringify(finalInput), "builtin", {
+      scope: "persistent",
+      verdictAtApproval: "high",
+      riskCeilingAtApproval: "low",
+      nlJustification: null,
+      trustOrigin: "user-keyboard",
+      approvalCacheKey,
+      workingDirectoryIdentity: captureApprovalWorkingDirectory(cwd).identity,
+    });
+    const storePath = join(process.env.LVIS_HOME!, "permissions", "user-approvals.json");
+    const stored = JSON.parse(await readFile(storePath, "utf8")) as {
+      approvals: Record<string, Record<string, unknown>>;
+    };
+    Object.values(stored.approvals)[0]![field] = value;
+    await writeFile(storePath, JSON.stringify(stored));
+    __resetSessionStoreForTest();
+
+    const result = await pm.dispatchReviewer("write_file", {
+      source: "builtin",
+      category: "write",
+      pathFields: ["path"],
+      finalInput,
+      executionCwd: cwd,
+      allowedDirectories: [caseFoldForMatch(canonicalizePathForMatch(cwd))],
+      sensitivePathsAdjacent: [],
+      trustOrigin: "user-keyboard",
+      approvalCacheKey,
+    }, undefined, { defer: "none" });
+
+    expect(result.outcome).not.toBe("approval-memory");
+    expect(broadcast).not.toHaveBeenCalled();
+    expect((emitSandboxAuditMock.mock.calls as unknown as [unknown][]).at(-1)?.[0]).toMatchObject({
+      reviewer: { userApprovalUsed: null },
+    });
+  });
+
+  it("reuses an exact remembered decision after an unknown MEDIUM required explicit approval", async () => {
+    const broadcast = vi.fn();
+    pm.setBroadcastUserApprovalHit(broadcast);
+    const finalInput = { operation: "inspect" };
+    const approvalCacheKey = "plugin_probe:inspect";
+    const input = {
+      source: "plugin" as const,
+      category: "write" as const,
+      pathFields: [],
+      finalInput,
+      executionCwd: cwd,
+      allowedDirectories: [caseFoldForMatch(canonicalizePathForMatch(cwd))],
+      sensitivePathsAdjacent: [],
+      trustOrigin: "plugin-emitted" as const,
+      approvalCacheKey,
+      ownerPluginSandboxRoot: cwd,
+      pluginId: "plugin_probe",
+    };
+    const fresh = await pm.dispatchReviewer("plugin_probe", input, undefined, { defer: "none" });
+    expect(fresh.verdict).toMatchObject({ level: "medium", requiresExplicitApproval: true });
+    expect(pm.resolveReviewerDecision(fresh.verdict, "foreground-auto").decision).toBe("ask");
+    expect(broadcast).not.toHaveBeenCalled();
+
+    await recordApproval("plugin_probe", canonicalStringify(finalInput), "plugin", {
+      scope: "persistent",
+      verdictAtApproval: "high",
+      riskCeilingAtApproval: "medium",
+      nlJustification: null,
+      trustOrigin: "plugin-emitted",
+      approvalCacheKey,
+      workingDirectoryIdentity: captureApprovalWorkingDirectory(cwd).identity,
+    });
+    __resetSessionStoreForTest();
+    const result = await pm.dispatchReviewer("plugin_probe", input, undefined, { defer: "none" });
+
+    expect(result).toMatchObject({
+      outcome: "approval-memory",
+      verdict: { level: "medium" },
+    });
+    expect(result.verdict.requiresExplicitApproval).toBeUndefined();
+    expect(pm.resolveReviewerDecision(result.verdict, "foreground-auto").decision).toBe("allow");
+    expect(broadcast).toHaveBeenCalledWith({
+      toolName: "plugin_probe", scope: "persistent", verdictAtApproval: "high",
+    });
+  });
 });
 
 function makeManager(): {

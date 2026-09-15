@@ -16,11 +16,11 @@ vi.mock("../../main/managed-child-processes.js", () => ({
 vi.mock("../../permissions/sandbox-process-home.js", () => ({
   createSandboxProcessHome: vi.fn(),
 }));
-vi.mock("../../permissions/asrt-sandbox.js", () => ({
+vi.mock("../../permissions/asrt-sandbox.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../permissions/asrt-sandbox.js")>(),
   wrapToolCommand: vi.fn(async () => ({ argv: ["shell"], env: {} })),
   cleanupAsrtSandboxAfterCommand: vi.fn(async () => {}),
   getDefaultSensitiveReadDenyPaths: () => [],
-  getBuiltinShellSessionReadPolicy: () => ({ allowRead: [], denyRead: [] }),
   getDefaultSensitiveWriteDenyPaths: () => [],
 }));
 

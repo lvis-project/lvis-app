@@ -93,6 +93,7 @@ export async function tryUserApprovalMemorySkip(
     source,
     context.trustOrigin,
     approvalCacheKey,
+    executionCwd,
   ).catch(() => null); // storage failure must never block tool execution
 
   // No active (non-revoked) approval → fall through to the approval dock.
@@ -142,7 +143,7 @@ export async function tryUserApprovalMemorySkip(
       : {}),
   };
   const ruleVerdict = new RuleBasedRiskClassifier().classify(ctx);
-  const storedLevel: UserApprovalVerdict = approval.verdictAtApproval;
+  const storedLevel: UserApprovalVerdict = approval.riskCeilingAtApproval ?? approval.verdictAtApproval;
   const composed = maxVerdict(ruleVerdict, {
     level: storedLevel,
     reason: "stored approval verdict at approval time",
@@ -217,7 +218,7 @@ export async function tryUserApprovalMemorySkip(
   disclose?.({
     toolName,
     scope: approval.scope,
-    verdictAtApproval: storedLevel,
+    verdictAtApproval: approval.verdictAtApproval,
   });
   return {
     decision: "allow",

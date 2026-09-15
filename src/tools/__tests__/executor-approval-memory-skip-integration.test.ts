@@ -21,7 +21,8 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
-import { mkdtempSync } from "node:fs";
+import { readFile, writeFile } from "node:fs/promises";
+import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -33,9 +34,14 @@ import { AuditLogger } from "../../audit/audit-logger.js";
 import {
   recordApproval,
   __resetSessionStoreForTest,
+  captureApprovalWorkingDirectory,
 } from "../../permissions/user-approval-store.js";
 import { canonicalStringify } from "../../shared/canonical-json.js";
 import { makeWriteProbeTool } from "./approval-memory-test-fixtures.js";
+import { approvalCacheKeyFor } from "../pipeline/display-mask.js";
+import { WriteFileTool } from "../file-tools.js";
+import { createDynamicTool } from "../base.js";
+import { ApprovalGate, type ApprovalRequest } from "../../permissions/approval-gate.js";
 
 describe("ToolExecutor — Store B memory skip end-to-end (real PermissionManager + real store)", () => {
   let dir: string;
@@ -103,7 +109,7 @@ describe("ToolExecutor — Store B memory skip end-to-end (real PermissionManage
       "write_probe",
       canonicalStringify({ path: join(dir, "file.txt") }),
       "builtin",
-      { scope: "session", verdictAtApproval: "low", nlJustification: null, trustOrigin: "user-keyboard" },
+      { scope: "session", verdictAtApproval: "low", nlJustification: null, trustOrigin: "user-keyboard", workingDirectoryIdentity: captureApprovalWorkingDirectory(dir).identity },
     );
 
     const requestAndWait = vi.fn();
@@ -123,6 +129,7 @@ describe("ToolExecutor — Store B memory skip end-to-end (real PermissionManage
       [{ id: "tu-deny", name: "write_probe", input: { path: join(dir, "file.txt") } }],
       {
         sessionId: "sess-deny",
+        executionCwd: dir,
         permissionContext: userPermissionContext({ additionalDirectories: [dir] }),
       },
     );
@@ -144,7 +151,7 @@ describe("ToolExecutor — Store B memory skip end-to-end (real PermissionManage
       "write_probe",
       canonicalStringify({ path: join(dir, "file.txt") }),
       "builtin",
-      { scope: "session", verdictAtApproval: "low", nlJustification: null, trustOrigin: "user-keyboard" },
+      { scope: "session", verdictAtApproval: "low", nlJustification: null, trustOrigin: "user-keyboard", workingDirectoryIdentity: captureApprovalWorkingDirectory(dir).identity },
     );
 
     const requestAndWait = vi.fn(async (req: { id: string }) => ({
@@ -167,12 +174,14 @@ describe("ToolExecutor — Store B memory skip end-to-end (real PermissionManage
       [{ id: "tu-overlay", name: "write_probe", input: { path: join(dir, "file.txt") } }],
       {
         sessionId: "sess-overlay",
+        executionCwd: dir,
         // Overlay trigger forces a Layer 2 ask for mutating tools.
         overlayTriggerOrigin: "overlay:meeting-detection",
         permissionContext: userPermissionContext({ additionalDirectories: [dir] }),
       },
     );
 
+    expect(requestAndWait).toHaveBeenCalledWith(expect.objectContaining({ durableApprovalRecordAllowed: false }));
     // Layer 2 hard gate is never memory-skipped — modal shown, tool denied.
     expect(requestAndWait).toHaveBeenCalledTimes(1);
     expect(result[0].is_error).toBe(true);
@@ -191,7 +200,7 @@ describe("ToolExecutor — Store B memory skip end-to-end (real PermissionManage
       "write_probe",
       canonicalStringify({ path: join(dir, "file.txt") }),
       "builtin",
-      { scope: "session", verdictAtApproval: "low", nlJustification: null, trustOrigin: "user-keyboard" },
+      { scope: "session", verdictAtApproval: "low", nlJustification: null, trustOrigin: "user-keyboard", workingDirectoryIdentity: captureApprovalWorkingDirectory(dir).identity },
     );
 
     const requestAndWait = vi.fn(async (req: { id: string }) => ({
@@ -214,6 +223,7 @@ describe("ToolExecutor — Store B memory skip end-to-end (real PermissionManage
       [{ id: "tu-strict", name: "write_probe", input: { path: join(dir, "file.txt") } }],
       {
         sessionId: "sess-strict",
+        executionCwd: dir,
         permissionContext: userPermissionContext({ additionalDirectories: [dir] }),
       },
     );
@@ -237,7 +247,7 @@ describe("ToolExecutor — Store B memory skip end-to-end (real PermissionManage
       "write_probe",
       canonicalStringify({ path: join(dir, "file.txt") }),
       "builtin",
-      { scope: "persistent", verdictAtApproval: "low", nlJustification: null, trustOrigin: "user-keyboard" },
+      { scope: "persistent", verdictAtApproval: "low", nlJustification: null, trustOrigin: "user-keyboard", workingDirectoryIdentity: captureApprovalWorkingDirectory(dir).identity },
     );
 
     const requestAndWait = vi.fn();
@@ -257,6 +267,7 @@ describe("ToolExecutor — Store B memory skip end-to-end (real PermissionManage
       [{ id: "tu-persist", name: "write_probe", input: { path: join(dir, "file.txt") } }],
       {
         sessionId: "sess-persist",
+        executionCwd: dir,
         permissionContext: userPermissionContext({ additionalDirectories: [dir] }),
       },
     );
@@ -311,6 +322,7 @@ describe("ToolExecutor — Store B memory skip end-to-end (real PermissionManage
       [{ id: "tu-keymiss", name: "write_probe", input: { path: join(dir, "file.txt") } }],
       {
         sessionId: "sess-keymiss",
+        executionCwd: dir,
         permissionContext: userPermissionContext({ additionalDirectories: [dir] }),
       },
     );
@@ -320,4 +332,104 @@ describe("ToolExecutor — Store B memory skip end-to-end (real PermissionManage
     expect(result[0].is_error).toBe(true);
     expect(executeSpy).not.toHaveBeenCalled();
   });
+
+  it.each(["printf hello", "inspect_local_fixture"])("reuses unassessed %s in the same directory and asks for a different directory or input", async (command) => {
+    const otherDir = join(dir, "other-project");
+    mkdirSync(otherDir);
+    const execute = vi.fn(async () => ({ output: "hello", isError: false }));
+    const tool = createDynamicTool({
+      name: "shell_probe", description: "shell probe", source: "builtin", category: "shell",
+      jsonSchema: { type: "object", properties: { command: { type: "string" } }, required: ["command"] },
+      execute,
+    });
+    const registry = new ToolRegistry();
+    registry.register(tool);
+    const manager = new PermissionManager(join(dir, "permissions.json"));
+    manager.setMode("auto");
+    manager.setInteractiveAutoApprove("low");
+    const cards: ApprovalRequest[] = [];
+    const recordings: Promise<void>[] = [];
+    const gate = new ApprovalGate({
+      isDestroyed: () => false,
+      send: (channel: string, request: ApprovalRequest) => {
+        if (channel !== "lvis:approval:request") return;
+        cards.push(request);
+        recordings.push((async () => {
+          const snapshot = gate.getRequestSnapshot(request.id)!;
+          expect(snapshot.persistentAllowAllowed).toBe(true);
+          expect(snapshot.verdictAtApproval).toBe("high");
+          await recordApproval(snapshot.toolName, canonicalStringify(snapshot.args), snapshot.source, {
+            scope: "persistent", verdictAtApproval: snapshot.verdictAtApproval, nlJustification: null,
+            trustOrigin: snapshot.trustOrigin, approvalCacheKey: snapshot.approvalCacheKey,
+            workingDirectoryIdentity: snapshot.workingDirectoryIdentity, riskCeilingAtApproval: snapshot.riskCeilingAtApproval,
+          });
+          gate.resolveFromDesktopRenderer(request.id, {
+            requestId: request.id, choice: "allow-always", nonce: request.nonce, hmac: request.hmac,
+          });
+        })());
+      },
+    } as never);
+    const executor = new ToolExecutor(registry, undefined, manager, undefined, gate, undefined, auditLogger);
+    const run = (id: string, cwd: string, nextCommand = command) => executor.executeAll(
+      [{ id, name: tool.name, input: { command: nextCommand } }],
+      { sessionId: "unavailable-reviewer", executionCwd: cwd, permissionContext: userPermissionContext({ additionalDirectories: [dir] }) },
+    );
+    expect((await run("first", dir))[0].is_error).toBeUndefined();
+    expect(cards).toHaveLength(1);
+    __resetSessionStoreForTest();
+    expect((await run("repeat", dir))[0].is_error).toBeUndefined();
+    expect(cards).toHaveLength(1);
+    expect((await run("other-project", otherDir))[0].is_error).toBeUndefined();
+    expect(cards).toHaveLength(2);
+    expect((await run("changed-input", dir, "printf changed"))[0].is_error).toBeUndefined();
+    expect(cards).toHaveLength(3);
+    await Promise.all(recordings);
+    expect(execute).toHaveBeenCalledTimes(4);
+  });
+  it("preserves a path-specific policy deny without widening the tool key", async () => {
+    const tool = new WriteFileTool();
+    const input = { path: join(dir, "blocked.txt"), content: "must not write" };
+    const key = approvalCacheKeyFor(tool, input, dir)!;
+    expect(key).toBe("write_file:path:" + input.path);
+    const registry = new ToolRegistry();
+    registry.register(tool);
+    const manager = new PermissionManager(join(dir, "permissions.json"));
+    manager.setRules([{ pattern: key, action: "deny" }]);
+    const requestAndWait = vi.fn();
+    const executor = new ToolExecutor(registry, undefined, manager, undefined, { requestAndWait } as never, undefined, auditLogger);
+    const result = await executor.executeAll([{ id: "exact-policy-deny", name: tool.name, input }], {
+      executionCwd: dir, permissionContext: userPermissionContext({ additionalDirectories: [dir] }),
+    });
+    expect(result[0].is_error).toBe(true);
+    expect(requestAndWait).not.toHaveBeenCalled();
+  });
+
+  it.each(["riskCeilingAtApproval", "verdictAtApproval"])("rejects malformed persisted %s before foreground reuse", async (field) => {
+    const executeSpy = vi.fn(async () => "wrote");
+    const registry = new ToolRegistry();
+    registry.register(makeWriteProbeTool(executeSpy));
+    const manager = new PermissionManager(join(dir, "permissions.json"));
+    const disclose = vi.fn();
+    manager.setBroadcastUserApprovalHit(disclose);
+    const input = { path: join(dir, "file.txt") };
+    await recordApproval("write_probe", canonicalStringify(input), "builtin", {
+      scope: "persistent", verdictAtApproval: "high", riskCeilingAtApproval: "low", nlJustification: null,
+      trustOrigin: "user-keyboard", workingDirectoryIdentity: captureApprovalWorkingDirectory(dir).identity,
+    });
+    const storePath = join(lvisHomeDir, "permissions", "user-approvals.json");
+    const stored = JSON.parse(await readFile(storePath, "utf8"));
+    (Object.values(stored.approvals)[0] as Record<string, unknown>)[field] = "invalid";
+    await writeFile(storePath, JSON.stringify(stored));
+    __resetSessionStoreForTest();
+    const requestAndWait = vi.fn(async (request: { id: string }) => ({ requestId: request.id, choice: "deny-once" as const }));
+    const executor = new ToolExecutor(registry, undefined, manager, undefined, { requestAndWait } as never, undefined, auditLogger);
+    const result = await executor.executeAll([{ id: "malformed", name: "write_probe", input }], {
+      executionCwd: dir, permissionContext: userPermissionContext({ additionalDirectories: [dir] }),
+    });
+    expect(result[0].is_error).toBe(true);
+    expect(requestAndWait).toHaveBeenCalledTimes(1);
+    expect(executeSpy).not.toHaveBeenCalled();
+    expect(disclose).not.toHaveBeenCalled();
+  });
+
 });

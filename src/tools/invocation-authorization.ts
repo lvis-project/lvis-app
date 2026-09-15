@@ -1310,6 +1310,14 @@ export async function authorizeToolInvocation(
                 scopeTargetFilePaths: targetFilePaths,
               }),
           reviewerVerdict: permissionResult.reviewer?.verdict,
+          reviewerOutcome: permissionResult.reviewer?.outcome,
+          reviewerApprovalBasis: permissionResult.reviewer?.approvalBasis,
+          // Hard policy/A2A asks are per invocation. A reviewer failure alone
+          // remains an ordinary human decision that may be remembered exactly.
+          ...((permissionResult.layer <= 2 ||
+              (permissionResult.forceModal === true && permissionResult.reviewer === undefined) ||
+              (approvalReasonPrefix !== undefined && invocationCategory !== "read"))
+            ? { durableApprovalRecordAllowed: false as const } : {}),
           // The facts about this ask that only this lane can see, for the
           // gate's tier-2 stage. Everything the GATE can observe — request
           // kind, permission mode, remote origin, forced-explicit substrates,

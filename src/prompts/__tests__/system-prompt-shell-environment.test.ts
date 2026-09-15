@@ -10,7 +10,7 @@ describe("system prompt shell environment", () => {
       memoryManager: makePromptMemorySource(),
       toolRegistry: new ToolRegistry(),
     }).build();
-    expect(prompt).toContain("LVIS Home:");
+    expect(prompt).toContain("Application paths (JSON):");
     expect(prompt).toContain("<shell-execution-environment>");
     expect(prompt).toContain(t("shellExecution.currentUser"));
     expect(prompt).toContain(t("shellExecution.pipelineStatus"));

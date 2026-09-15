@@ -218,14 +218,6 @@ export async function dispatchReviewerForInteractiveAuto(
   // Reaching this dispatcher means foreground review was explicitly selected.
   const mgr = permissionManager;
   if (!mgr) return null;
-  if (!mgr.hasReviewer()) {
-    return {
-      decision: "ask",
-      reason: "auto-review reviewer unavailable — explicit user approval required",
-      layer: 5,
-    };
-  }
-
   emitPermissionReview(callbacks, {
     status: "reviewing",
     toolName,
@@ -318,7 +310,7 @@ export async function dispatchReviewerForInteractiveAuto(
       };
   const decision: PermissionCheckResult = {
     ...resolved,
-    reviewer: { route: "foreground-auto", verdict: reviewer.verdict, outcome: reviewer.outcome },
+    reviewer: { route: "foreground-auto", verdict: reviewer.verdict, outcome: reviewer.outcome, approvalBasis: reviewer.approvalBasis },
   };
   // Review-status telemetry derived from the resolved decision so the
   // auto-approve disclosure and the audit decision share one source.
