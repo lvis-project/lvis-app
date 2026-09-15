@@ -1,10 +1,10 @@
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmdirSync, symlinkSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
-import { wrapToolCommand } from "../../permissions/asrt-sandbox.js";
+import { getBuiltinShellSessionReadPolicy, getDefaultSensitiveReadDenyPaths, wrapToolCommand } from "../../permissions/asrt-sandbox.js";
 import { __resetActiveSandboxCapabilityForTest, setActiveSandboxCapability } from "../../permissions/sandbox-capability.js";
 import { getConfiguredSessionReadPolicy } from "../../permissions/sensitive-paths.js";
 import { sessionStorePath } from "../../shared/session-store-path.js";
@@ -89,11 +89,12 @@ describe.skipIf(process.platform === "win32")("saved-session native shell policy
     expect(filesystem.allowWrite).not.toContain(sessions);
     expect(filesystem.denyWrite).toContain(sessions);
     expect(filesystem.denyRead).not.toContain(sessions);
+    expect(getDefaultSensitiveReadDenyPaths()).toContain(sessions);
     expect(filesystem.denyRead).toEqual(expect.arrayContaining([
       root, join(profile, "secrets"), join(profile, "audit"), join(profile, "routine"),
       `${sessions}/**/.ssh`, `${sessions}/**/.env`,
     ]));
-    const policy = getConfiguredSessionReadPolicy();
+    const policy = getBuiltinShellSessionReadPolicy();
     expect(Object.isFrozen(policy)).toBe(true);
     expect(Object.isFrozen(policy.allowRead)).toBe(true);
     expect(Object.isFrozen(policy.denyRead)).toBe(true);
@@ -115,5 +116,23 @@ describe.skipIf(process.platform === "win32")("saved-session native shell policy
     expect(filesystem.allowRead).not.toContain(outside);
     expect(filesystem.allowRead).not.toContain(profile);
     expect(filesystem.denyWrite).toContain(sessions);
+  });
+
+  it("keeps a protected alias of the session root outside the builtin exception", () => {
+    const protectedAlias = join(profile, "certs");
+    symlinkSync(sessions, protectedAlias);
+    const policy = getBuiltinShellSessionReadPolicy();
+    expect(policy.allowRead).toEqual([]);
+    expect(policy.denyRead).toContain(sessions);
+    expect(policy.denyRead).toContain(protectedAlias);
+  });
+
+  it("preserves both runtime-key spellings while granting ordinary saved-history reads", () => {
+    const key = join(sessions, "key-material"); writeFileSync(key, "synthetic-key-fixture");
+    const alias = join(root, "runtime-key"); symlinkSync(key, alias);
+    vi.stubEnv("LVIS_SECRET_KEY_FILE", alias);
+    const policy = getBuiltinShellSessionReadPolicy();
+    expect(policy.allowRead).toContain(sessions);
+    expect(policy.denyRead).toEqual(expect.arrayContaining([key, alias]));
   });
 });

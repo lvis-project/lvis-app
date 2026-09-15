@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 import { ApprovalGate } from "../../permissions/approval-gate.js";
 import { PermissionManager } from "../../permissions/permission-manager.js";
-import { getDefaultSensitiveReadDenyPaths, getDefaultSensitiveWriteDenyPaths } from "../../permissions/asrt-sandbox.js";
+import { getBuiltinShellSessionReadPolicy, getDefaultSensitiveReadDenyPaths, getDefaultSensitiveWriteDenyPaths } from "../../permissions/asrt-sandbox.js";
 import { canonicalizePathForMatch, caseFoldForMatch, getConfiguredSessionReadRoot, isConfiguredSessionReadPath, isSensitivePath } from "../../permissions/sensitive-paths.js";
 import { sessionStorePath } from "../../shared/session-store-path.js";
 import { assertReadableFilePath } from "../file-read-core.js";
@@ -63,7 +63,8 @@ describe("configured saved-session access", () => {
     ];
     for (const result of results) expect(result.output).toContain("Sensitive path:");
     expect(readFileSync(transcript, "utf8")).toBe(CONTENT);
-    expect(getDefaultSensitiveReadDenyPaths()).not.toContain(sessions);
+    expect(getDefaultSensitiveReadDenyPaths()).toContain(sessions);
+    expect(getBuiltinShellSessionReadPolicy().denyRead).not.toContain(sessions);
     expect(getDefaultSensitiveWriteDenyPaths()).toContain(sessions);
     expect(isSensitivePath(canonical(transcript))).not.toBeNull();
   });

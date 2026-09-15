@@ -11,6 +11,8 @@
  * that the host guard let through, while the host guard denied `/etc/shadow`,
  * `~/.config/lvis/hooks` and the REPL/editor histories that the sandbox floor
  * let through.
+ * Primary saved history is the deliberate exception: builtin file reads may
+ * inspect it, while the shared sandbox floor still denies raw worker reads.
  *
  * The host assertions go through `assertReadableFilePath` — the guard the
  * builtin file tools actually run — with the anchor root handed in as an
@@ -90,7 +92,7 @@ describe("sensitive paths — one table, two projections", () => {
         hostDeniesAsSensitive(target, allowedRoot),
         `host guard must hard-block ${target}`,
       ).toBe(entry.access !== "read-only");
-      expect(sandboxDenies(target), `sandbox floor must apply ${target}`).toBe(entry.access !== "read-only");
+      expect(sandboxDenies(target), `shared sandbox floor must protect ${target}`).toBe(true);
     }
   });
 

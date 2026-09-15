@@ -17,7 +17,8 @@ function expectShellDialectContracts(section: string): void {
   expect(section).toContain('hostShellPlan.mode === "blocked"');
   expect(section).toContain('hostShellPlan.mode === "asrt"');
   expect(section).toContain("shell: false");
-  expect(section).toContain("...getDefaultSensitiveReadDenyPaths()");
+  expect(section).toContain("getBuiltinShellSessionReadPolicy()");
+  expect(section).toContain("...sessionReadPolicy.denyRead");
   expect(section).toContain("denyWrite: getDefaultSensitiveWriteDenyPaths()");
 }
 
