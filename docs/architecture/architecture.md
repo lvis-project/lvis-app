@@ -140,6 +140,15 @@ keep the generic filtered baseline and receive proxy changes only from their
 wrapper. Background incremental output and structured parser output have
 separate contracts.
 
+The shared [shell environment description](../../src/shared/shell-execution-environment.ts)
+derives host location, HOME, authentication and OS identity from the execution
+plan for the prompt and approval UI. The
+[explicit host execution contract](permission-policy-design.md#shell-execution-and-explicit-host-approval)
+requires a fresh local desktop approval for foreground `executionMode: "host"`
+requests. [Saved-session read policy](permission-policy-design.md#saved-session-reads)
+separately admits the configured primary conversation store without granting
+writes or access to other protected namespaces.
+
 The Bash tool resolves the same Bash dialect for foreground, background, and
 sandbox execution through `src/lib/shell-resolver.ts`; discovery probes use the
 generic filtered child environment. Background handles belong to a session and
