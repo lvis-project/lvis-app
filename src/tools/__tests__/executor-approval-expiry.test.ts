@@ -56,9 +56,10 @@ describe("tool approval expiration attribution", () => {
     registry.register(makeWriteProbeTool(execute));
     const manager = new PermissionManager(join(root, "permissions.json"));
     const wc = makeMockWebContents();
-    const sent = Promise.withResolvers<ApprovalRequest>();
+    let resolveSent!: (request: ApprovalRequest) => void;
+    const sent = new Promise<ApprovalRequest>((resolve) => { resolveSent = resolve; });
     wc.send.mockImplementation((channel: string, request: ApprovalRequest) => {
-      if (channel === IPC_APPROVAL_REQUEST) sent.resolve(request);
+      if (channel === IPC_APPROVAL_REQUEST) resolveSent(request);
     });
     // Use the real gate and its configured default deadline. Only wall time
     // advances virtually; no synthetic decision can manufacture host provenance.
@@ -78,7 +79,7 @@ describe("tool approval expiration attribution", () => {
       ...(signal ? { abortSignal: signal } : {}),
       permissionContext: userPermissionContext({ additionalDirectories: [workspace] }),
     });
-    return { execute, sent: sent.promise, result, logger };
+    return { execute, sent, result, logger };
   }
 
   function permissions(): PermissionAuditEntryInput[] {

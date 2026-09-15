@@ -233,8 +233,14 @@ classification and canonical-path checks. Supported file reads and shell
 commands with proven read effects can reach this root even when ordinary reads
 are confined to working directories. A linked session root or an escaping path
 cannot widen that grant, and other sensitive-path rules still apply inside it.
-The shell wrapper projects the same root into its OS read allowance while the
-sensitive write-deny floor remains intact. Removing a read-deny pattern alone
+Only the builtin shell wrapper receives that root through
+`getBuiltinShellSessionReadPolicy` in
+[asrt-sandbox.ts](../../src/permissions/asrt-sandbox.ts). The global read-deny
+floor still protects sessions from confined plugin, MCP and terminal processes.
+The builtin projection retains other sensitive paths, nested exclusions and
+trusted custom read denies; a conflicting protected ancestor suppresses the
+session grant. The sensitive write-deny floor remains intact.
+Removing a read-deny pattern alone
 does not establish this contract: both the file gates and actual sandboxed reads
 must enforce the same boundary. Structured transfers retain their write-effect
 checks on both endpoints.

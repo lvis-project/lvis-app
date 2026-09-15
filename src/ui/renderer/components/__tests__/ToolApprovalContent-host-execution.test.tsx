@@ -16,7 +16,7 @@ function request(host: boolean): ApprovalRequest {
     executionCwd: "/workspace/project",
     executionPlan: getHostShellExecutionPlanAuditProjection(buildHostShellExecutionPlan({
       executionMode: host ? "host" : "default", platform: "darwin", requestedSandbox: true,
-      activeCapability: { kind: "asrt", confidence: "verified", platform: "darwin",
+      activeCapability: { reason: "Fixture sandbox available", kind: "asrt", confidence: "verified", platform: "darwin",
         confines: { filesystem: true, process: true, network: true } },
     })),
   };
@@ -45,7 +45,7 @@ describe("explicit host execution approval", () => {
     fallback.args = { command: "printf '%s' '" + "b".repeat(700) + "-fallback-marker'" };
     fallback.executionPlan = getHostShellExecutionPlanAuditProjection(buildHostShellExecutionPlan({
       platform: "darwin", requestedSandbox: true,
-      activeCapability: { kind: "none", confidence: "verified", platform: "darwin" },
+      activeCapability: { reason: "Fixture sandbox unavailable", kind: "none", confidence: "verified", platform: "darwin" },
     }));
     const { container } = render(<ToolApprovalContent conversationLabel="conversation" open request={fallback} onDecide={() => undefined} />);
     expect(container.querySelector("details")?.open).toBe(true);

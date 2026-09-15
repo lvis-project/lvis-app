@@ -35,7 +35,7 @@ describe("explicit host shell authorization", () => {
     for (const field of ["command", "justification", "cwd"] as const) {
       const { cwd, gate, request, webContents } = prepare();
       const plan = buildHostShellExecutionPlan({ platform: process.platform, executionMode, requestedSandbox: true,
-        activeCapability: { kind: "none", confidence: "verified", platform: process.platform } });
+        activeCapability: { reason: "Fixture sandbox unavailable", kind: "none", confidence: "verified", platform: process.platform } });
       const input = { ...HOST_INPUT, executionMode,
         [field]: field === "command" ? "printf unchanged > live-abcdefgh" : field === "cwd" ? join(cwd, "live-abcdefgh") : "Use live-abcdefgh" };
       const binding = buildHostShellExecutionPermitBinding({ plan, toolName: "bash", toolUseId: request.id, rawInput: input, executionCwd: cwd, extraAllowedDirectories: [] })!;
@@ -44,7 +44,7 @@ describe("explicit host shell authorization", () => {
       expect(isHostApprovalRejectedDecision(decision)).toBe(true);
       expect(webContents.send.mock.calls.some(([channel]) => channel === IPC_APPROVAL_REQUEST)).toBe(false);
       expect(gate.pendingCount).toBe(0);
-      expect(mintHostShellExecutionPermit({ plan, binding, decision })).toBeUndefined();
+      expect(mintHostShellExecutionPermit({ plan, binding, approvalDecision: decision })).toBeUndefined();
       const outcome = approvalFailureOutcome(decision, "bash", { decision: "ask", layer: 2, reason: "host consent" });
       expect(outcome?.content).toContain("sensitive-data masking");
       expect(outcome?.content).not.toContain("live-abcdefgh");

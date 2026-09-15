@@ -197,7 +197,7 @@ test.describe("Sandbox approval flow", () => {
   test("explicit host approval displays the resolved directory and complete command", async ({}, testInfo) => {
     const plan = buildHostShellExecutionPlan({
       platform: "darwin", requestedSandbox: true, executionMode: "host",
-      activeCapability: { kind: "asrt", confidence: "verified", platform: "darwin", confines: { filesystem: true, process: true, network: true } },
+      activeCapability: { reason: "Fixture sandbox available", kind: "asrt", confidence: "verified", platform: "darwin", confines: { filesystem: true, process: true, network: true } },
     });
     const command = `printf '%s' '${"a".repeat(700)}-complete-command'`;
     await app.evaluate(({ BrowserWindow }, req) => {

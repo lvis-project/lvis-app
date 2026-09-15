@@ -8,6 +8,7 @@ function plan(sandbox: boolean) {
     platform: "darwin",
     requestedSandbox: sandbox,
     activeCapability: {
+      reason: "Fixture execution environment",
       kind: sandbox ? "asrt" : "none",
       confidence: "verified",
       platform: "darwin",
@@ -28,7 +29,7 @@ describe("shell execution environment", () => {
   it("describes the actual plain child even when a sandbox was requested", () => {
     const fallback = buildHostShellExecutionPlan({
       platform: "linux", requestedSandbox: true,
-      activeCapability: { kind: "none", confidence: "verified", platform: "linux" },
+      activeCapability: { reason: "Fixture sandbox unavailable", kind: "none", confidence: "verified", platform: "linux" },
     });
     expect(shellExecutionEnvironmentLines(fallback)).toContain(t("shellExecution.hostHome"));
     expect(shellExecutionEnvironmentLines(fallback)).toContain(t("shellExecution.hostAuthentication"));
