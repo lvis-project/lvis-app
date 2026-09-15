@@ -2219,9 +2219,6 @@ export class ApprovalGate {
       remoteControllerOrigin === undefined && remoteControllerAuthority === undefined;
     const assessmentBasis = matchesReviewerApprovalBasis(reviewerApprovalBasis, req)
       ? reviewerApprovalBasis : undefined;
-    const workingDirectory = assessmentBasis?.workingDirectory ??
-      (req.evaluationContext?.executionCwd
-        ? captureApprovalWorkingDirectory(req.evaluationContext.executionCwd) : undefined);
     const hasOneShotApprovalChoiceContract =
       requestedChoices?.length === 2 &&
       requestedChoices.includes("allow-once") &&
@@ -2334,13 +2331,20 @@ export class ApprovalGate {
       ? assessmentBasis?.ruleVerdict : undefined;
     const highRiskOneShot = verdictAtApproval === "high" &&
       (riskCeilingAtApproval === undefined || riskCeilingAtApproval === "high");
-    const persistentAllowAllowed = durableApprovalRecordAllowed && !highRiskOneShot &&
+    const canRememberRequest = durableApprovalRecordAllowed && !highRiskOneShot &&
       riskCeilingAtApproval !== "high" &&
-      workingDirectory !== undefined &&
       (req.kind === undefined || req.kind === "tool") && req.category === "tool" &&
       !forceExplicit && req.mode !== "ask_all" && req.mode !== "plan" &&
       remoteControllerOrigin === undefined && remoteControllerAuthority === undefined &&
       (requestedChoices === undefined || requestedChoices.includes("allow-always"));
+    // One-shot requests never persist a working-directory identity. Do not make
+    // their approval depend on validating an unrelated persistent-store scope.
+    const workingDirectory = canRememberRequest
+      ? assessmentBasis?.workingDirectory ??
+        (req.evaluationContext?.executionCwd
+          ? captureApprovalWorkingDirectory(req.evaluationContext.executionCwd) : undefined)
+      : undefined;
+    const persistentAllowAllowed = canRememberRequest && workingDirectory !== undefined;
     const fullReq: ApprovalRequest = {
       ...request,
       ...(executionPlanAudit === undefined

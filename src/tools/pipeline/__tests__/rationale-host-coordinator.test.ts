@@ -639,6 +639,14 @@ describe("RationaleHostCoordinator", () => {
         materialized.control.ticketId,
         { now: NOW + 2 },
       );
+      await vi.advanceTimersByTimeAsync(0);
+      expect(gate.listPendingRendererRequests()).toEqual([expect.objectContaining({
+        id: materialized.control.ticketId,
+        kind: "rationale",
+        allowedChoices: ["allow-once", "deny-once"],
+      })]);
+      expect(gate.listPendingRendererRequests()[0]).not.toHaveProperty("persistentApprovalCwd");
+      expect(gate.getRequestSnapshot(materialized.control.ticketId)).toBeNull();
       await vi.advanceTimersByTimeAsync(26);
       await expect(pending).resolves.toMatchObject({
         outcome: "timed-out",
