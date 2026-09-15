@@ -483,8 +483,9 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
     const shell = new ShellTool();
     registry.register(shell);
     const execute = vi.spyOn(shell, "execute");
-    const approvalGate = { requestAndWait: vi.fn() };
-    const executor = new ToolExecutor(registry);
+    const approvalGate = new ApprovalGate(null);
+    const requestApproval = vi.spyOn(approvalGate, "requestAndWait");
+    const executor = new ToolExecutor(registry, undefined, undefined, undefined, approvalGate);
     for (const [field, input] of [
       ["timeoutSeconds", { command: "echo hi", timeoutSeconds: 0 }],
       ["executionMode", { command: "echo hi", executionMode: "invalid" }],
@@ -493,14 +494,14 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
     ] as const) {
       const results = await executor.executeAll(
         [{ id: `invalid-${field}`, name: shell.name, input }],
-        { sessionId: "invalid-shell-fields", permissionContext: userPermissionContext(), approvalGate: approvalGate as unknown as ApprovalGate },
+        { sessionId: "invalid-shell-fields", permissionContext: userPermissionContext() },
       );
       expect(results).toHaveLength(1);
       expect(results[0].is_error).toBe(true);
       expect(results[0].content).toContain(field);
     }
     expect(execute).not.toHaveBeenCalled();
-    expect(approvalGate.requestAndWait).not.toHaveBeenCalled();
+    expect(requestApproval).not.toHaveBeenCalled();
   });
 
   it.skipIf(process.platform === "win32")("threads shell approvalCacheKey through permission rules so one command does not authorize another", async () => {
