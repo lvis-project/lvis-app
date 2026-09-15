@@ -45,6 +45,7 @@ import {
 import {
   canonicalizePathForMatch,
   caseFoldForMatch,
+  isSensitivePath,
 } from "../sensitive-paths.js";
 import { isPathAllowed } from "../allowed-directories.js";
 import {
@@ -1063,14 +1064,43 @@ export function dlpRedactInputForPrompt(
   return out;
 }
 
-function buildUserPrompt(input: ToolInvocationContext): string {
+function buildUserPrompt(
+  input: ToolInvocationContext,
+  ruleVerdict: RiskVerdict = new RuleBasedRiskClassifier().classify(input),
+): string {
   const redacted = dlpRedactInputForPrompt(input.finalInput);
   const recentUserMessage = input.conversationContext?.recentUserMessage;
   const redactedContext =
     typeof recentUserMessage === "string" && recentUserMessage.trim().length > 0
       ? maskSensitiveData(recentUserMessage).masked.slice(0, 500)
       : undefined;
+  // Use the same resolver and predicates as the rule classifier. This is
+  // evidence about declared operands, not an attestation about tool code.
+  const declaredPaths = extractDeclaredPaths(input);
+  const pathChecks = declaredPaths.map((path) => ({
+    path,
+    insideAllowedDirectories: isInsideAllowed(path, input.allowedDirectories),
+    sensitiveRead: isSensitivePath(path, "read") !== null,
+    sensitiveWrite: isSensitivePath(path, "write") !== null,
+  }));
+  const hostPolicyFacts = {
+    ruleVerdict,
+    executionCwd: input.executionCwd,
+    declaredPathCount: declaredPaths.length,
+    allDeclaredPathsInsideAllowedDirectories: pathChecks.length > 0 &&
+      pathChecks.every((path) => path.insideAllowedDirectories),
+    anyDeclaredPathSensitiveRead: pathChecks.some((path) => path.sensitiveRead),
+    anyDeclaredPathSensitiveWrite: pathChecks.some((path) => path.sensitiveWrite),
+    declaredPaths: pathChecks.slice(0, 8),
+    omittedDeclaredPathCount: Math.max(0, pathChecks.length - 8),
+    explicitIntentPresent: !isContextMissingIntent(input),
+  };
+  // DLP remains a sink policy. Escape markup so path/reason strings cannot
+  // close the host-data block or introduce a second apparent control block.
+  const hostFactsJson = maskSensitiveData(JSON.stringify(hostPolicyFacts)).masked
+    .replace(/</g, "\\u003c").replace(/>/g, "\\u003e");
   return (
+    `<HOST_POLICY_FACTS>\n${hostFactsJson}\n</HOST_POLICY_FACTS>\n` +
     `<UNTRUSTED_INPUT>\n` +
     `tool: ${input.toolName}\n` +
     `source: ${input.source}\n` +
@@ -1379,7 +1409,7 @@ export class LlmRiskClassifier implements RiskClassifier {
 
     let llmVerdict: RiskVerdict;
     try {
-      const userPrompt = buildUserPrompt(input);
+      const userPrompt = buildUserPrompt(input, ruleVerdict);
       const { completion, attempts } = await this.runProviderWithRetry(
         userPrompt,
         opts?.abortSignal,

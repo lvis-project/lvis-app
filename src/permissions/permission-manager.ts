@@ -9,6 +9,7 @@ import { trustFromSource } from "../tools/types.js";
 import { readPermissionsFile, updatePermissionsFile } from "./permissions-store.js";
 import type { ReviewerInteractiveAutoApprove } from "./permission-settings-store.js";
 import { isStagedTurnSource } from "../shared/staged-origins.js";
+import { PERMISSION_REVIEWER_FRAMEWORK_VERSION } from "../shared/permission-reviewer-framework.js";
 import type { UserApprovalHitPayload, UserApprovalVerdict } from "../shared/permissions-events.js";
 import { getToolCategoryDescriptor } from "./category-registry.js";
 import {
@@ -1556,6 +1557,7 @@ export class PermissionManager {
         scope: {
           ...(routineScope ?? {}),
           reviewer: this.reviewerCacheScope,
+          reviewerFrameworkVersion: PERMISSION_REVIEWER_FRAMEWORK_VERSION,
           reviewerOutcomeContractVersion: 1,
           sandboxKind: sandboxScope.kind,
           sandboxConfidence: sandboxScope.confidence,

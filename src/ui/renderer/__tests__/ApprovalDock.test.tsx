@@ -15,7 +15,7 @@ import { TEST_IDS, testIdSelector } from "../../../shared/test-ids.js";
 function makeEvaluationContext(overrides: Partial<PermissionEvaluationContext> = {}): PermissionEvaluationContext {
   return {
     version: "permission-evaluation-context/v1",
-    reviewerFrameworkVersion: "permission-reviewer-framework/v1",
+    reviewerFrameworkVersion: "permission-reviewer-framework/v2",
     policyMode: "auto",
     headless: false,
     source: "builtin",
@@ -742,7 +742,7 @@ describe("ApprovalDock", () => {
     await waitFor(() => {
       expect(document.body.textContent).toContain("검증 환경 / 샌드박스 평가");
       expect(document.body.textContent).toContain("permission-evaluation-context/v1");
-      expect(document.body.textContent).toContain("permission-reviewer-framework/v1");
+      expect(document.body.textContent).toContain("permission-reviewer-framework/v2");
       expect(document.body.textContent).toContain("C:\\Users\\example\\workspace\\lvis-project\\lvis-app");
     });
   });

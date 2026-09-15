@@ -289,6 +289,19 @@ change the approval deadline or alter command timeouts and cancellation.
 
 ## Reviewer Failure
 
+Reviewer input separates host-computed policy facts from OS isolation. The host
+supplies the existing rule verdict, execution directory, and canonical declared
+path checks using the same resolver and containment predicates as the rule
+classifier. These facts describe declared operands; they do not attest that a
+plugin or custom tool has no other effects. A builtin file operation running
+inside the host process has no OS sandbox, but its file-path gates still apply.
+Weak isolation or missing conversational purpose preserves the rule floor and
+does not alone establish an out-of-scope or destructive write. The model can
+still raise risk for additional effects or uncertainty, and the host retains
+the maximum of the rule and model verdicts. Reviewer framework changes invalidate
+cached verdicts. DLP filtering applies to the policy-fact projection as well as
+tool arguments and conversation context.
+
 Reviewer failure is not a silent allow. If the provider is missing, times out, or
 returns malformed output, the host fails closed:
 

@@ -614,6 +614,30 @@ describe("PermissionManager.dispatchReviewer", () => {
     expect(classifierB.classify).toHaveBeenCalledOnce();
   });
 
+  it("reclassifies a cached verdict from before host policy facts were supplied", async () => {
+    const classify = vi.fn(() => ({ level: "medium" as const, reason: "current review" }));
+    pm.setReviewer({ classifier: { classify }, cache, deferredQueue: queue });
+    const store = cache.store.bind(cache);
+    vi.spyOn(cache, "store").mockImplementationOnce((key, context, verdict) => {
+      const { reviewerFrameworkVersion: _obsolete, ...oldScope } = context.scope;
+      return store(key, { ...context, scope: oldScope }, verdict);
+    });
+    const input = {
+      source: "builtin" as const,
+      category: "write" as const,
+      pathFields: ["path"],
+      finalInput: { path: "/Users/example/work/note.md" },
+      allowedDirectories: [allowedDir("/Users/example/work")],
+      executionCwd: process.cwd(),
+      sensitivePathsAdjacent: [],
+      trustOrigin: "user-keyboard" as const,
+    };
+    await pm.dispatchReviewer("fs_write", input);
+    const result = await pm.dispatchReviewer("fs_write", input);
+    expect(result.cacheReason).toBe("miss-stale");
+    expect(classify).toHaveBeenCalledTimes(2);
+  });
+
   it("returns HIGH + no deferredId when reviewer not wired", async () => {
     const fresh = new PermissionManager(tmpFile("permissions.json"));
     const r = await fresh.dispatchReviewer("fs_write", {
