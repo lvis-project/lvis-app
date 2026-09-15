@@ -139,7 +139,7 @@ describe.runIf(process.platform === "darwin" || process.platform === "linux")("s
     }
   });
 
-  it.each(["user-data", "custom-literal", "custom-glob"] as const)("native sandbox preserves %s protection over the configured session root", async (kind, test) => {
+  it.for(["user-data", "custom-literal", "custom-glob"] as const)("native sandbox preserves %s protection over the configured session root", async (kind, test) => {
     if (!(await asrtCanInitialize())) return test.skip();
     const denyRead = kind === "custom-literal" ? [profile] : kind === "custom-glob" ? [`${root}/configured-*`] : [];
     await initializeAsrtSandbox({ allowedDomains: [], strictAllowlist: true, denyRead,
