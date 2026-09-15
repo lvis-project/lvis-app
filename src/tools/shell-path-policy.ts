@@ -5,7 +5,7 @@ import { displayShellWord, shellWordHasSingleField, staticShellWord, type ShellW
 import { commandLeaf, stripCommandPath } from "../shared/shell-effective-command.js";
 import { inspectShellExecution, ShellExecutionError, type ShellExecutionFacts, type ShellCommandEvent } from "../shared/shell-execution.js";
 import { validateSandboxPath } from "../sandbox/path-validator.js";
-import { canonicalizePathForMatch, caseFoldForMatch, isSensitivePath } from "../permissions/sensitive-paths.js";
+import { canonicalizePathForMatch, caseFoldForMatch, isConfiguredSessionReadPath, isSensitivePath } from "../permissions/sensitive-paths.js";
 import { inspectSedScriptFileAccess, isReadOnlyShellLeaf } from "../permissions/reviewer/host-risk-inspector.js";
 import { pathEffectIsConfined, type PathEffect } from "../permissions/allowed-directories.js";
 import { parseTarListing } from "../shared/shell-tar-listing.js";
@@ -74,7 +74,8 @@ export function findResolvedShellPathViolation(
   effect: PathEffect,
   blockReadsOutsideWorkingDirectories: boolean,
 ): ShellPathPolicyViolation | null {
-  const sensitive = isSensitivePath(caseFoldForMatch(canonicalizePathForMatch(absolute)));
+  const canonicalPath = caseFoldForMatch(canonicalizePathForMatch(absolute));
+  const sensitive = isSensitivePath(canonicalPath, effect);
   if (sensitive) {
     return {
       kind: "sensitive-path",
@@ -83,6 +84,7 @@ export function findResolvedShellPathViolation(
       path: absolute,
     };
   }
+  if (effect === "read" && isConfiguredSessionReadPath(canonicalPath)) return null;
   if (!pathEffectIsConfined(effect, blockReadsOutsideWorkingDirectories)) return null;
   const check = validateSandboxPath(absolute, sandboxRoot, [...extraAllowedDirectories]);
   if (!check.allowed) {
