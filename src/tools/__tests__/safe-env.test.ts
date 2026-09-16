@@ -246,6 +246,45 @@ describe("plain host shell proxy inheritance", () => {
   });
 });
 
+describe("plain host shell CA trust inheritance", () => {
+  const caTrustSettings = {
+    NODE_EXTRA_CA_CERTS: "/run/lvis-ca/operator.pem",
+    SSL_CERT_FILE: "/run/lvis-ca/operator.pem",
+    CURL_CA_BUNDLE: "/run/lvis-ca/operator.pem",
+    REQUESTS_CA_BUNDLE: "/run/lvis-ca/operator.pem",
+    PIP_CERT: "/run/lvis-ca/operator.pem",
+    GIT_SSL_CAINFO: "/run/lvis-ca/operator.pem",
+    AWS_CA_BUNDLE: "/run/lvis-ca/operator.pem",
+    CARGO_HTTP_CAINFO: "/run/lvis-ca/operator.pem",
+    DENO_CERT: "/run/lvis-ca/operator.pem",
+  };
+
+  beforeEach(() => {
+    for (const [key, value] of Object.entries(caTrustSettings)) vi.stubEnv(key, value);
+  });
+
+  it("forwards configured CA trust paths only to an explicit plain host shell", () => {
+    expect(buildHostShellChildEnv()).toMatchObject(caTrustSettings);
+    for (const key of Object.keys(caTrustSettings)) {
+      expect(buildSafeChildEnv()).not.toHaveProperty(key);
+      expect(buildSandboxedChildEnv({ ...process.env })).not.toHaveProperty(key);
+    }
+  });
+
+  it("preserves empty overrides and explicit extra precedence", () => {
+    vi.stubEnv("SSL_CERT_FILE", "");
+    const env = buildHostShellChildEnv({ REQUESTS_CA_BUNDLE: "/run/override-ca.pem" });
+    expect(env.SSL_CERT_FILE).toBe("");
+    expect(env.REQUESTS_CA_BUNDLE).toBe("/run/override-ca.pem");
+  });
+
+  it("does not broaden the generic child environment", () => {
+    const env = buildSafeChildEnv();
+    for (const key of Object.keys(caTrustSettings)) expect(env).not.toHaveProperty(key);
+    for (const key of SECRET_KEYS) expect(env).not.toHaveProperty(key);
+  });
+});
+
 describe("buildSandboxedChildEnv — ASRT env composition (PR #1356 allow-list)", () => {
   it("strips host secrets on the sandbox path (wrapped env carrying them does not re-leak)", () => {
     // ASRT's wrapped env = process.env + its additions. Simulate it carrying
