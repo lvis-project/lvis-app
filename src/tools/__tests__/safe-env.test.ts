@@ -257,6 +257,8 @@ describe("plain host shell CA trust inheritance", () => {
     AWS_CA_BUNDLE: "/run/lvis-ca/operator.pem",
     CARGO_HTTP_CAINFO: "/run/lvis-ca/operator.pem",
     DENO_CERT: "/run/lvis-ca/operator.pem",
+    CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE: "/run/lvis-ca/operator.pem",
+    NIX_SSL_CERT_FILE: "/run/lvis-ca/operator.pem",
   };
 
   beforeEach(() => {
@@ -322,12 +324,16 @@ describe("buildSandboxedChildEnv — ASRT env composition (PR #1356 allow-list)"
       SSL_CERT_FILE: "/tmp/srt-ca.pem",
       REQUESTS_CA_BUNDLE: "/tmp/srt-ca.pem",
       PIP_CERT: "/tmp/srt-ca.pem",
+      CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE: "/tmp/srt-ca.pem",
+      NIX_SSL_CERT_FILE: "/tmp/srt-ca.pem",
     };
     const env = buildSandboxedChildEnv(wrapped);
     expect(env.NODE_EXTRA_CA_CERTS).toBe("/tmp/srt-ca.pem");
     expect(env.SSL_CERT_FILE).toBe("/tmp/srt-ca.pem");
     expect(env.REQUESTS_CA_BUNDLE).toBe("/tmp/srt-ca.pem");
     expect(env.PIP_CERT).toBe("/tmp/srt-ca.pem");
+    expect(env.CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE).toBe("/tmp/srt-ca.pem");
+    expect(env.NIX_SSL_CERT_FILE).toBe("/tmp/srt-ca.pem");
   });
 
   it("does NOT propagate a non-allow-listed key even when it differs from process.env", () => {
