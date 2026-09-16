@@ -82,17 +82,37 @@ const PROXY_ENV_KEYS = [
   "no_proxy",
 ] as const;
 
+/** Standard operator-configured CA trust paths used by common command-line clients. */
+const CA_TRUST_ENV_KEYS = [
+  "NODE_EXTRA_CA_CERTS",
+  "SSL_CERT_FILE",
+  "CURL_CA_BUNDLE",
+  "REQUESTS_CA_BUNDLE",
+  "PIP_CERT",
+  "GIT_SSL_CAINFO",
+  "AWS_CA_BUNDLE",
+  "CARGO_HTTP_CAINFO",
+  "DENO_CERT",
+  "CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE",
+  "NIX_SSL_CERT_FILE",
+] as const;
+
+const HOST_SHELL_NETWORK_ENV_KEYS = [
+  ...PROXY_ENV_KEYS,
+  ...CA_TRUST_ENV_KEYS,
+] as const;
+
 /**
- * Plain host shells retain the operator's configured network route. Keep this
- * separate from the generic baseline: sandbox children receive only their
- * wrapper's proxy settings, never an ambient upstream proxy or bypass list.
- * Explicit host-created extras retain the same last-write precedence.
+ * Plain host shells retain the operator's configured network route and trust
+ * paths. Keep this separate from the generic baseline: sandbox children
+ * receive only their wrapper's network settings, never ambient proxy or trust
+ * configuration. Explicit host-created extras retain the same precedence.
  */
 export function buildHostShellChildEnv(
   extra: Record<string, string> = {},
 ): Record<string, string> {
   const env = buildSafeChildEnv();
-  for (const key of PROXY_ENV_KEYS) {
+  for (const key of HOST_SHELL_NETWORK_ENV_KEYS) {
     const value = process.env[key];
     if (value !== undefined) env[key] = value;
   }
@@ -134,15 +154,7 @@ const ASRT_SANDBOX_ENV_KEYS: ReadonlySet<string> = new Set([
   "GIT_CONFIG_PARAMETERS",
   "GIT_SSH_COMMAND",
   // CA-trust store vars pointed at the TLS-termination CA cert (CA_TRUST_VARS).
-  "NODE_EXTRA_CA_CERTS",
-  "SSL_CERT_FILE",
-  "CURL_CA_BUNDLE",
-  "REQUESTS_CA_BUNDLE",
-  "PIP_CERT",
-  "GIT_SSL_CAINFO",
-  "AWS_CA_BUNDLE",
-  "CARGO_HTTP_CAINFO",
-  "DENO_CERT",
+  ...CA_TRUST_ENV_KEYS,
   // Sandbox-scoped temp dir.
   "TMPDIR",
   // Windows (srt-win) emits this benign marker on the sandboxed child's env so
