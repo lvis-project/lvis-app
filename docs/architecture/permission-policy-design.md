@@ -218,6 +218,12 @@ improving analysis, routing to a disposable container, or obtaining explicit
 user authorization. Until a disposable backend exists and truthfully advertises
 its generation-bound capability, it is never selected as a fallback.
 
+The [Linux workload resource controller](linux-workload-resource-controller.md)
+does not change that status. Its cgroup-v2 leaf limits and OOM evidence are a
+resource boundary only; they do not establish the filesystem, network, or
+credential confinement required by `disposable-container`, and no current spawn
+path consumes them.
+
 Execution location, configuration, authentication and OS identity are separate
 properties. ASRT launches processes on the current host with a temporary HOME
 and configuration profile for each invocation. It does not inherit the user's

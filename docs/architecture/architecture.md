@@ -104,6 +104,15 @@ pipe open. Ordinary completion still drains stdout and stderr through closure;
 sandbox cleanup waits for confirmed root termination. Output display keeps a
 bounded prefix. Foreground capture also retains the original stdout/stderr bytes
 in observed event order in a session artifact owned by `MemoryManager`.
+
+The [Linux workload resource controller](linux-workload-resource-controller.md)
+is an unwired cgroup-v2 foundation for keeping the host controller outside
+per-invocation memory/PID bounds and explicit swap/CPU settings. It is not a
+security sandbox and does not make the disposable-container route available.
+Runtime integration remains blocked until the workload cannot see or write a
+parent cgroup hierarchy and the resource capability and limits are bound into
+the execution grant.
+
 Each foreground capture artifact is limited to 5,000,000 bytes. Retained captures
 plus active reservations are limited to 20,000,000 bytes per session. Capture
 reserves the full artifact allowance before it starts and releases unused
