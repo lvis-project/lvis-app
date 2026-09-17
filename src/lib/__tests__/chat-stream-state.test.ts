@@ -993,6 +993,27 @@ describe("transcript frame reducer (shared by the main and the side chat)", () =
     expect(afterLateStatus).toEqual(entries);
   });
 
+  it("does not revive a settled turn with a late provider status", () => {
+    const entries: ChatEntry[] = [
+      ...appendUserEntry([], "q"),
+      { kind: "assistant", text: "최종 답변", streaming: false, phase: "final" },
+    ];
+
+    expect(
+      upsertStreamingAssistant(entries, "모델 응답을 다시 기다리는 중입니다.", "status"),
+    ).toBe(entries);
+  });
+
+  it("does not confuse model text that begins with the localized status prefix for a provider status", () => {
+    const modelText = `${t("useChatState.llmStatusAttemptFirst")}라는 표현을 설명합니다.`;
+    const entries: ChatEntry[] = [
+      ...appendUserEntry([], "q"),
+      { kind: "assistant", text: modelText, streaming: true },
+    ];
+
+    expect(dropPendingLlmStatusAssistant(entries)).toBe(entries);
+  });
+
   it("carries a user stop and the duration through tool_end (the side chat used to drop both)", () => {
     let entries = applyTranscriptFrame(appendUserEntry([], "q"), toolStart);
     entries = applyTranscriptFrame(entries, frame({

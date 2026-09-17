@@ -654,6 +654,22 @@ export function upsertStreamingAssistant(
   const turnEntries = next.slice(turnStartIdx + 1);
 
   if (phase === "status") {
+    const hasSettledTerminalState = turnEntries.some(
+      (entry) =>
+        entry.kind === "turn_summary" ||
+        (
+          entry.kind === "assistant" &&
+          entry.streaming !== true &&
+          (
+            entry.phase === "final" ||
+            entry.terminalError === true ||
+            entry.systemNotice !== undefined ||
+            entry.interrupted === true
+          )
+        ),
+    );
+    if (hasSettledTerminalState) return entries;
+
     const hasLiveModelWork = turnEntries.some(
       (entry) =>
         (entry.kind === "assistant" && entry.streaming === true && entry.phase !== "status") ||

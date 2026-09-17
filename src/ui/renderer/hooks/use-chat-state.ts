@@ -97,6 +97,9 @@ export function useChatState(
   // still land after its successor has finished. Only a transcript boundary
   // — new chat, load, edit, truncate, fresh turn — forgets all three.
   const releaseActiveStream = useCallback(() => {
+    if (activeStreamIdRef.current !== null) {
+      retiredStreamIdRef.current = activeStreamIdRef.current;
+    }
     activeStreamIdRef.current = null;
     supersededStreamIdRef.current = null;
   }, []);
@@ -444,7 +447,9 @@ export function useChatState(
             next = finalizeStreamingAssistant(
               next,
               finalText,
-              doneRoute ? { route: doneRoute, overrideText: finalText } : { overrideText: finalText },
+              doneRoute
+                ? { route: doneRoute, phase: "final", overrideText: finalText }
+                : { phase: "final", overrideText: finalText },
             );
             if (debugStreamEnabled) {
               debugLog("stream", "done:finalized", {
