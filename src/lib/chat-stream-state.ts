@@ -941,7 +941,11 @@ export function setAssistantError(
     kind: "assistant" as const,
     text: interrupted ? current?.text ?? "" : message,
     streaming: false,
-    phase: undefined,
+    // A user-stopped partial response retains its already-stamped lifecycle
+    // phase; terminalError still prevents it from being presented as a clean
+    // completed turn. A provider-status placeholder, by contrast, must lose
+    // its status identity when the terminal error replaces it.
+    phase: interrupted ? current?.phase : undefined,
     terminalError: true,
     ...(systemNotice !== undefined ? { systemNotice } : {}),
   };
