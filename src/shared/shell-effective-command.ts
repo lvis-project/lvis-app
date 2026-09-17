@@ -12,7 +12,7 @@ export interface EffectiveShellCommand {
   wrapperPaths: readonly ShellWord[];
   unsupported?: string;
 }
-export type ShellEnvironmentTransition =
+type ShellEnvironmentTransition =
   | { kind: "reset" }
   | { kind: "unset"; name: string }
   | { kind: "set"; assignment: ShellAssignment }
@@ -20,7 +20,7 @@ export type ShellEnvironmentTransition =
 export function stripCommandPath(word: string): string { return word.slice(word.lastIndexOf("/") + 1); }
 
 /** Wrappers whose option grammar changes the effective executed command. */
-export const SHELL_EXECUTION_WRAPPERS: ReadonlySet<string> = new Set([
+const SHELL_EXECUTION_WRAPPERS: ReadonlySet<string> = new Set([
   "command", "env", "timeout", "nice", "ionice", "nohup", "stdbuf", "time", "watch", "xargs",
 ]);
 
