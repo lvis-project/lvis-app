@@ -133,6 +133,8 @@ workspace is also allowed; choosing another path does not grant access to it.
 ./lvis --set-secret="$SECRET_NAME" < "$SECRET_INPUT_FILE"
 ./lvis --exec="Summarize this project." --exec-cwd="$PROJECT_DIR"
 printf '%s' "$PROMPT" | ./lvis --exec --exec-cwd="$PROJECT_DIR" --exec-output=json
+./lvis --exec="Run the task." \
+  --exec-operator-attestation=/run/lvis/operator-attestation.json
 ./lvis --serve
 ```
 
@@ -149,6 +151,17 @@ paths, prompts, or reviewer prose to the terminal metadata.
 The streaming form remains an owner-detail diagnostic timeline and can contain
 earlier user, assistant, and tool-input events. Use `--exec-output=json` when a
 consumer needs only the bounded terminal response.
+
+`--exec-operator-attestation=<absolute-path>` asks the Linux native host to
+verify launcher-owned isolation evidence before host services, model traffic,
+or installed plugins start. The flag requires `--exec`, cannot share a launch
+with `--set-secret`, and fails closed on other operating systems. The host does
+not infer this authority from an environment variable, a container marker, or
+the presence of a container runtime. See the
+[operator attestation contract](../architecture/permission-policy-design.md#headless-operator-container-attestation)
+for the signed schema and trust-root requirements. This evidence is currently
+published for later execution routing; it does not by itself relax a tool rule
+or select a disposable execution backend.
 
 `--set-secret=<key>` accepts a valid settings-secret name in `SECRET_NAME` and
 reads its value from stdin, never from an argument. The example uses an

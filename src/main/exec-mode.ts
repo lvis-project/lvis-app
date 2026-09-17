@@ -6,6 +6,8 @@
  * for its caller to release the session before the ordinary shutdown cleanup.
  *
  *   --exec=<prompt>          run one conversation turn and stream its events
+ *   --exec-operator-attestation=<absolute-path>
+ *                            verify operator-owned Linux isolation evidence
  *   --set-secret=<key>       write one secret through the app's own store
  *
  * WHY ITS OWN FILE. `src/main.ts` registers Electron listeners and runs
@@ -25,7 +27,7 @@
  */
 import { statSync } from "node:fs";
 import type { EventEmitter } from "node:events";
-import { basename, resolve } from "node:path";
+import { basename, isAbsolute, resolve } from "node:path";
 import { authorizationRequiredStateForOutput } from "../shared/authorization-required.js";
 import { errorMessage } from "../shared/error-message.js";
 import type { ApprovalGate } from "../permissions/approval-gate.js";
@@ -95,6 +97,8 @@ interface ExecSecretRequest {
 export interface ExecRequest {
   readonly secret: ExecSecretRequest | null;
   readonly turn: ExecTurnRequest | null;
+  /** Absolute signed evidence path; only valid for a turn and verified before boot. */
+  readonly operatorAttestationPath?: string;
 }
 
 export interface ExecDeps {
@@ -132,6 +136,8 @@ export function execModeRequested(argv: readonly string[]): boolean {
     (arg) =>
       arg === "--exec"
       || arg.startsWith("--exec=")
+      || arg === "--exec-operator-attestation"
+      || arg.startsWith("--exec-operator-attestation=")
       || arg === "--set-secret"
       || arg.startsWith("--set-secret="),
   );
@@ -203,6 +209,7 @@ export function parseExecFlags(
   let maxRounds: number | undefined;
   let keepAlive = false;
   let secretKey: string | null = null;
+  let operatorAttestationPath: string | null = null;
 
   for (const arg of argv) {
     if (arg === "--exec" || arg === "--exec=-") {
@@ -249,6 +256,25 @@ export function parseExecFlags(
       keepAlive = true;
       continue;
     }
+    if (arg === "--exec-operator-attestation") {
+      return usageError(
+        "--exec-operator-attestation needs an absolute path, as --exec-operator-attestation=<path>",
+      );
+    }
+    if (arg.startsWith("--exec-operator-attestation=")) {
+      const value = arg.slice("--exec-operator-attestation=".length);
+      if (value.length === 0) {
+        return usageError("--exec-operator-attestation was given an empty path");
+      }
+      if (!isAbsolute(value)) {
+        return usageError("--exec-operator-attestation must be an absolute path");
+      }
+      if (operatorAttestationPath !== null) {
+        return usageError("--exec-operator-attestation may be specified only once");
+      }
+      operatorAttestationPath = value;
+      continue;
+    }
     if (arg === "--set-secret") {
       return usageError("--set-secret needs a key, as --set-secret=<key>");
     }
@@ -265,6 +291,12 @@ export function parseExecFlags(
 
   if (keepAlive && (!execRequested || output !== "stream-json")) {
     return usageError("--exec-keep-alive requires --exec with --exec-output=stream-json");
+  }
+  if (operatorAttestationPath !== null && !execRequested) {
+    return usageError("--exec-operator-attestation requires --exec");
+  }
+  if (operatorAttestationPath !== null && secretKey !== null) {
+    return usageError("--exec-operator-attestation cannot be combined with --set-secret");
   }
   if (!execRequested && secretKey === null) return null;
   // Both requests read the WHOLE of stdin, so a run that combines them has to
@@ -291,6 +323,7 @@ export function parseExecFlags(
         ...(keepAlive ? { keepAlive: true } : {}),
       }
       : null,
+    ...(operatorAttestationPath === null ? {} : { operatorAttestationPath }),
   };
 }
 

@@ -352,6 +352,101 @@ Host-owned expiration and rejected-request outcomes propagate through
 directory approval results and audit reasons. Expiration does not grant access,
 change the approval deadline or alter command timeouts and cancellation.
 
+### Headless operator container attestation
+
+A Linux one-shot launch may name an operator-produced attestation with
+`--exec-operator-attestation=<absolute-path>`. An explicit attestation is
+verified before the service graph, model connection, or installed plugins
+start. Absence preserves the ordinary headless behavior. The option is invalid
+without `--exec`, with `--set-secret`, or on a non-Linux host.
+
+The JSON document is limited to 64 KiB, rejects duplicate and unknown members,
+and has these exact top-level fields: `version`, `audience`, `keyId`,
+`issuedAt`, `notBefore`, `expiresAt`, `claims`, and `signature`. Version is
+`lvis-operator-container-attestation/v1`; audience is `lvis-headless-exec`.
+The host opens one regular-file descriptor and bounds the read to 64 KiB plus
+one rejection byte, so a metadata race cannot cause an unbounded read. The
+validity window is at most five minutes. `signature` is an Ed25519 signature
+over the canonical JSON encoding of the other seven fields: object keys are
+sorted recursively by UTF-16 code units, arrays retain their input order,
+strings and the schema's safe integers use `JSON.stringify` encoding, and the
+result is signed as UTF-8 bytes.
+
+`keyId` selects only
+`/etc/lvis/operator-trust.d/<keyId>.pub`. The document cannot carry a public
+key. The trust directory must resolve to that fixed canonical path, be owned by
+root, exclude group and other writes, and reside on a read-only mount. The host
+opens the directory and PEM public-key file without following their final path
+components, resolves the opened descriptors through `/proc/self/fd`, and
+requires both descriptors to identify the same read-only mount. It obtains
+metadata and bytes from that one opened key descriptor. The key must resolve
+within the directory, be root-owned, have no write bits, and contain an Ed25519
+public key. Tests may inject a different root into the non-authoritative
+verifier, but the production issuer cannot select one from the command line or
+environment.
+
+The signed `claims` object contains exact fields for:
+
+- operator-established `disposable`, `noHostMounts`, `noHostNamespaces`, and
+  `noInheritedSecrets` assertions, all set to true;
+- the current mount, PID, network, IPC, UTS, cgroup, and user namespace links;
+- the cgroup v2 membership path and finite `memory.max`, `pids.max`, and
+  `cpu.max` values, read through descriptors on one read-only cgroup v2 mount;
+- a normalized mount-info digest and normalized root-mount tuple;
+- the boot ID, PID, and `/proc/self/stat` start-time ticks;
+- the normalized `uid_map` and `gid_map`, each fixed to the full host identity
+  mapping `0 0 4294967295`;
+- all four real/effective/saved/filesystem user IDs plus `NoNewPrivs`, `Seccomp`,
+  `CapInh`, `CapPrm`, `CapEff`, `CapBnd`, and `CapAmb` from `/proc/self/status`.
+
+The verifier reads those facts from the current process and requires an exact
+match after signature verification. `NoNewPrivs=1`, seccomp filter mode,
+non-root real, effective, saved, and filesystem user IDs, full host identity
+maps, and finite resource limits are mandatory. Every signed capability set
+must exclude
+`CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `SETGID`, `SETUID`, `SYS_ADMIN`,
+`SYS_PTRACE`, `SYS_MODULE`, `SYS_RAWIO`, `NET_ADMIN`, `BPF`, `PERFMON`, and
+`CHECKPOINT_RESTORE`; other signed bits remain visible to later policy rather
+than being rejected implicitly. The membership path is interpreted relative to
+the cgroup namespace root; the host does not compare it with mountinfo's
+host-relative cgroup root. It opens the membership directory and each limit
+file, then rejects any descriptor whose mount ID differs from the selected
+cgroup v2 mount or whose kernel filesystem type is not cgroup v2.
+
+The verifier resolves `/proc/self` once to `/proc/<pid>` and uses only that
+numeric path for process observations. The process files `mountinfo`, `cgroup`,
+`status`, `stat`, `uid_map`, and `gid_map` must be opened on the procfs mount
+covering that numeric directory; namespace and `fdinfo` paths must use that same
+mount rather than a nested proc bind. Independent `statfs` checks require the
+kernel's procfs magic before mount-table contents are trusted. The boot ID may
+reside on another procfs submount. These checks and the host identity maps stop
+an unprivileged user namespace from substituting a namespace-local UID-0 trust
+root. A privileged host administrator remains inside the operator trust
+boundary. The signed mount digest exposes the remaining procfs view to the
+operator.
+
+The signer must run outside the attested process's namespaces, keep its private
+key unavailable to the process, and observe the exact target PID from the host
+side after creation. It must independently establish the no-host-mounts,
+no-host-namespaces, no-inherited-secrets, disposable-lifecycle, and limit
+claims. The signer also owns termination and disposal enforcement. The host
+verifier cannot derive those host-relative properties from inside the
+container.
+
+Successful production verification issues a frozen, host-owned capability
+tracked by weak identity. Injectable verification used by tests returns only
+inert evidence and cannot invoke the private capability issuer. Public and
+audit projections contain only an ID, generation, expiry, fingerprints, the
+four boolean isolation assertions, and resource limits. They contain no
+signature, public-key bytes, process fields, namespace links, paths, or mount
+inventory. A consumer must reacquire the capability through the revalidation
+API, which checks expiry, process identity, namespaces, cgroup, mounts, status,
+and limits again. Production performs that full revalidation and a final expiry
+check immediately before the private issuer publishes the boot capability.
+This capability is evidence for a later router integration;
+it is not a permission, execution grant, shell-policy exception, or active
+disposable backend.
+
 ## Reviewer Failure
 
 Reviewer input separates host-computed policy facts from OS isolation. The host

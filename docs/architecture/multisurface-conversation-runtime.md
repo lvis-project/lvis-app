@@ -437,6 +437,9 @@ lvis --exec="<prompt>"              prompt inline; `--exec` or `--exec=-` reads 
      [--exec-approve=default|allow] permission mode for the run (default: default)
      [--exec-output=stream-json|json]  (default: stream-json)
      [--exec-max-rounds=<n>]        round budget for the turn
+     [--exec-operator-attestation=<absolute-path>]
+                                    verify Linux launcher isolation evidence
+                                    before host services start
      [--exec-keep-alive]            retain a successful streamed session until
                                     SIGTERM or SIGINT from its caller
 lvis --set-secret=<key>             secret VALUE is read from stdin, never argv
@@ -457,6 +460,13 @@ a CLI lifecycle message, not part of the conversation event union or proof of
 process exit. No further model turn runs. The caller owns cancellation and
 eventual termination; SIGTERM or SIGINT releases the request through normal
 shutdown and descendant cleanup. Unsuccessful turns exit without retention.
+
+`--exec-operator-attestation` requires an `--exec` turn and cannot be combined
+with `--set-secret`. It is a fail-closed Linux-only boot input. The
+[permission policy](permission-policy-design.md#headless-operator-container-attestation)
+owns its signature, trust-root, process-fact, capability, and revalidation
+contract. Verification only publishes evidence for a later execution router;
+it does not relax current permission or shell policy.
 
 Exit codes are `0` completed, `1` the turn failed or the secret could not be
 stored, `2` the turn ended asking for input, `64` a malformed command line,

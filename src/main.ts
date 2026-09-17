@@ -149,30 +149,36 @@ async function main() {
     app.quit();
     return;
   }
-  configureNativeWindowCoordinator({
-    showOrCreateMainWindow,
-    refreshNativeChrome: () => {
-      refreshApplicationMenu();
-      refreshTrayMenu();
-    },
-  });
-  // Initialise WindowManager before createWindow so registerMainWindow() can
-  // be called synchronously inside createWindow().
-  const windowManager = new WindowManager();
-  setWindowManager(windowManager);
-
-
-  createWindow({ headless: bootLaunch === "headless" });
-
-  updateSplashStatus(t("be_main.splashCheckingCerts"));
-  const { bootstrap } = await loadMainStartupDependencies(
-    () => import("./desktop-boot.js"),
-    // The settings file is read synchronously here because injection has to
-    // happen before the first outbound request, which is well before
-    // `bootstrap()` constructs SettingsService.
-    () => ensureCorporateCaInjected(readPersistedCorpCaConfigSync(app.getPath("userData"))),
-    () => updateSplashStatus(t("be_main.splashLoadingSettings")),
-  );
+  let windowManager!: WindowManager;
+  const startDesktop = async () => {
+    configureNativeWindowCoordinator({
+      showOrCreateMainWindow,
+      refreshNativeChrome: () => {
+        refreshApplicationMenu();
+        refreshTrayMenu();
+      },
+    });
+    // Initialise WindowManager before createWindow so registerMainWindow()
+    // can be called synchronously inside createWindow().
+    windowManager = new WindowManager();
+    setWindowManager(windowManager);
+    createWindow({ headless: bootLaunch === "headless" });
+    updateSplashStatus(t("be_main.splashCheckingCerts"));
+    return loadMainStartupDependencies(
+      () => import("./desktop-boot.js"),
+      // The settings file is read synchronously here because injection has to
+      // happen before the first outbound request, which is well before
+      // `bootstrap()` constructs SettingsService.
+      () => ensureCorporateCaInjected(readPersistedCorpCaConfigSync(app.getPath("userData"))),
+      () => updateSplashStatus(t("be_main.splashLoadingSettings")),
+    );
+  };
+  const operatorAttestationPath = execRequest?.operatorAttestationPath;
+  const desktopBoot = operatorAttestationPath !== undefined
+    ? await (await import("./main/operator-attestation-boot.js"))
+      .startAfterOperatorAttestation(operatorAttestationPath, startDesktop)
+    : await startDesktop();
+  const { bootstrap } = desktopBoot;
 
   // Drive splash status from the real bootstrap pipeline so the text below
   // the wordmark matches what's actually happening rather than cycling

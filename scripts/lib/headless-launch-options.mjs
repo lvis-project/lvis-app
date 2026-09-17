@@ -2,6 +2,7 @@
 export function headlessLaunchArgs(args) {
   const nativeCommand = args.some((arg) =>
     arg === "--exec" || arg.startsWith("--exec=") ||
+    arg === "--exec-operator-attestation" || arg.startsWith("--exec-operator-attestation=") ||
     arg === "--set-secret" || arg.startsWith("--set-secret=") ||
     arg === "--serve" || arg === "--runtime-check");
   if (!nativeCommand) return null;

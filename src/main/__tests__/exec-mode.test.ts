@@ -232,6 +232,7 @@ describe("execModeRequested", () => {
     ["--exec"],
     ["--exec=say hi"],
     ["--exec=-"],
+    ["--exec-operator-attestation=/run/lvis/attestation.json"],
     ["--set-secret"],
     ["--set-secret=llm.apiKey.claude"],
   ])("is true for %s", (flag) => {
@@ -312,6 +313,15 @@ describe("parseExecFlags", () => {
     }
   });
 
+  it("accepts one absolute operator attestation only for an exec turn", () => {
+    const request = expectRequest(parseExecFlags([
+      "--exec=hi",
+      "--exec-operator-attestation=/run/lvis/attestation.json",
+    ], LAUNCH_CWD));
+    expect(request.operatorAttestationPath).toBe("/run/lvis/attestation.json");
+    expect(request.turn?.prompt).toBe("hi");
+  });
+
   it("resolves a relative --exec-cwd against the launch directory, not the process cwd", async () => {
     const launch = mkdtempSync(join(tmpdir(), "exec-launch-"));
     const sub = join(launch, "project");
@@ -357,6 +367,16 @@ describe("parseExecFlags", () => {
     [["--exec=hi", "--exec-max-rounds=0"], "--exec-max-rounds"],
     [["--exec=hi", "--exec-max-rounds=two"], "--exec-max-rounds"],
     [["--exec=hi", "--exec-quiet"], "unknown flag"],
+    [["--exec-operator-attestation"], "needs an absolute path"],
+    [["--exec-operator-attestation="], "empty path"],
+    [["--exec=hi", "--exec-operator-attestation=relative.json"], "absolute path"],
+    [["--exec-operator-attestation=/run/lvis/attestation.json"], "requires --exec"],
+    [["--exec=hi", "--set-secret=k", "--exec-operator-attestation=/run/lvis/attestation.json"], "cannot be combined"],
+    [[
+      "--exec=hi",
+      "--exec-operator-attestation=/run/lvis/one.json",
+      "--exec-operator-attestation=/run/lvis/two.json",
+    ], "only once"],
     [["--exec="], "empty prompt"],
     [["--set-secret"], "needs a key"],
     [["--set-secret="], "empty key"],
