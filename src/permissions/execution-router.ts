@@ -302,7 +302,7 @@ export function buildHostShellExecutionRouteProjection(input: {
   cwd: string;
   timeoutSeconds: number;
   background: boolean;
-  unresolvedRequirements?: readonly AnalysisUncertainRequirement[];
+  unresolvedRequirementKind?: AnalysisUncertainRequirement["kind"];
 }): ExecutionPlanAuditProjection {
   const capabilityGeneration = getIssuedHostShellExecutionPlanGeneration(input.legacyPlan);
   if (capabilityGeneration === undefined) {
@@ -316,7 +316,11 @@ export function buildHostShellExecutionRouteProjection(input: {
       executionMode: input.legacyPlan.executionRequest,
     },
     cwd: input.cwd,
-    unresolvedRequirements: input.unresolvedRequirements,
+    unresolvedRequirements: input.unresolvedRequirementKind === undefined ? [] : [{
+      classification: "analysis-uncertain",
+      source: "shell-path-policy",
+      kind: input.unresolvedRequirementKind,
+    }],
     runtimeLimits: {
       timeoutSeconds: input.timeoutSeconds,
       background: input.background,

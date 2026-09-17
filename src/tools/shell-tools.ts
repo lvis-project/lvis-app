@@ -33,11 +33,7 @@ import { buildHostShellChildEnv, buildSafeChildEnv, buildSandboxedChildEnv } fro
 import { prepareShellInvocation, matchesPreparedShellInvocation, preparedShellFacts, preparedShellCommand, bindPreparedShellExecutableReadPaths, preparedShellExecutableReadPaths, preparedSandboxBootstrap, preparedSandboxEnvironment, disposePreparedShellInvocation, claimPreparedShellInvocation, transferPreparedShellInvocation, type PreparedShellInvocation } from "./prepared-shell-invocation.js";
 import { POWER_SHELL_AST_PARSER, normalizePowerShellAstSummary, type PowerShellArgument, type PowerShellAstSummary } from "./powershell-ast.js";
 import { resolveShellFilesystemPath } from "../shared/shell-filesystem-path.js";
-import {
-  analysisUncertainShellPathViolation,
-  findResolvedShellPathViolation,
-  type ShellPathPolicyViolation,
-} from "./shell-path-policy.js";
+import { findResolvedShellPathViolation, type ShellPathPolicyViolation } from "./shell-path-policy.js";
 export type { PowerShellAstSummary } from "./powershell-ast.js";
 import { createSandboxProcessHome } from "../permissions/sandbox-process-home.js";
 import {
@@ -1589,13 +1585,13 @@ export function findPowerShellAstPathViolation(
   const cwdError = validateShellWorkingDirectory(cwd, sandboxRoot, extraAllowedDirectories);
   if (cwdError) return { kind: cwdError.startsWith("Sensitive") ? "sensitive-path" : "sandbox-boundary", reason: cwdError, path: cwd };
   const structural = validatePowerShellAst(ast);
-  if (structural) return analysisUncertainShellPathViolation({ kind: "dynamic-path", reason: `PowerShell command blocked: ${structural}` });
+  if (structural) return { kind: "dynamic-path", reason: `PowerShell command blocked: ${structural}` };
   const inspect = (argument: PowerShellArgument, effect: "read" | "write", literalPath = false): ShellPathPolicyViolation | null => {
     if (argument.kind === "parameter") return argument.argument ? inspect(argument.argument, effect, literalPath) : null;
-    if (argument.kind !== "literal") return analysisUncertainShellPathViolation({ kind: "dynamic-path", reason: "PowerShell path argument is unresolved", candidate: argument.text });
+    if (argument.kind !== "literal") return { kind: "dynamic-path", reason: "PowerShell path argument is unresolved", candidate: argument.text };
     const path = argument.value;
     if (path.startsWith("~") || (!literalPath && /[*?\[\]]/.test(path)) || /^[a-z][a-z0-9_-]*:(?![\\/])/i.test(path)) {
-      return analysisUncertainShellPathViolation({ kind: "dynamic-path", reason: "PowerShell provider, home or wildcard path requires an explicit ordinary path", candidate: argument.text });
+      return { kind: "dynamic-path", reason: "PowerShell provider, home or wildcard path requires an explicit ordinary path", candidate: argument.text };
     }
     let absolute: string;
     try { absolute = resolveShellFilesystemPath(path, cwd); }
@@ -1609,7 +1605,7 @@ export function findPowerShellAstPathViolation(
   for (const command of ast.commands) {
     const name = canonicalPowerShellCommandName(command.name!.toLowerCase());
     if (["set-location", "cd", "sl", "push-location", "pushd", "pop-location", "popd", "set-alias", "new-alias", "import-module", "remove-module"].includes(name)) {
-      return analysisUncertainShellPathViolation({ kind: "dynamic-path", reason: "PowerShell location or command-identity changes require a separate invocation", candidate: command.arguments[0]?.text });
+      return { kind: "dynamic-path", reason: "PowerShell location or command-identity changes require a separate invocation", candidate: command.arguments[0]?.text };
     }
     if (["write-output", "echo", "write-host", "write-error", "write-warning", "write-verbose", "write-debug", "write-information", "start-sleep", "select-object", "measure-object", "format-list", "format-table", "out-string"].includes(name)) continue;
     const effect = ["get-content", "get-childitem", "get-item", "get-itemproperty", "test-path"].includes(name) ? "read" : "write";
@@ -1618,7 +1614,7 @@ export function findPowerShellAstPathViolation(
       const argument = command.arguments[index]!;
       if (argument.kind === "parameter" && argument.name.toLowerCase() === "literalpath" && FILESYSTEM_COMMANDS.has(name)) {
         const target = argument.argument ?? command.arguments[++index];
-        if (!target || target.kind === "parameter") return analysisUncertainShellPathViolation({ kind: "dynamic-path", reason: "PowerShell literal path argument is missing", candidate: argument.text });
+        if (!target || target.kind === "parameter") return { kind: "dynamic-path", reason: "PowerShell literal path argument is missing", candidate: argument.text };
         const violation = inspect(target, effect, true); if (violation) return violation;
         continue;
       }

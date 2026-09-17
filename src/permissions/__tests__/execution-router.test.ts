@@ -306,7 +306,7 @@ describe("execution router", () => {
       "dynamic-path",
       "Shell path policy: unresolved command operand",
     ],
-  ] as const)("types the existing denial for %s without changing its materialized reason", (command, kind, expectedReason) => {
+  ] as const)("keeps the existing typed denial for %s and its materialized reason", (command, kind, expectedReason) => {
     const previousLocale = getLocale();
     setLocale("en");
     try {
@@ -317,17 +317,26 @@ describe("execution router", () => {
         [],
         true,
       );
-      expect(violation).toMatchObject({
-        kind,
-        finding: {
-          classification: "analysis-uncertain",
-          source: "shell-path-policy",
-          kind,
-        },
-      });
+      expect(violation).toMatchObject({ kind });
       expect(violation?.reason).toBe(expectedReason);
       expect(validateShellCommandPathPolicy(command, "/workspace", "/workspace", [], true))
         .toBe(expectedReason);
+      expect(buildHostShellExecutionRouteProjection({
+        legacyPlan: issuedPlain(),
+        toolName: "bash",
+        command,
+        cwd: "/workspace",
+        timeoutSeconds: 120,
+        background: false,
+        unresolvedRequirementKind: kind,
+      })).toMatchObject({
+        decision: "analysis-required",
+        unresolvedRequirements: [{
+          classification: "analysis-uncertain",
+          source: "shell-path-policy",
+          kind,
+        }],
+      });
     } finally {
       setLocale(previousLocale);
     }
@@ -352,11 +361,6 @@ describe("execution router", () => {
     expect(violation).toEqual({
       kind: "dynamic-path",
       reason: "PowerShell command blocked: dynamic path argument is not allowed: $HOME/out.txt",
-      finding: {
-        classification: "analysis-uncertain",
-        source: "shell-path-policy",
-        kind: "dynamic-path",
-      },
     });
   });
 });

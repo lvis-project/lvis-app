@@ -62,10 +62,7 @@ import {
   requiresExplicitHostShellApproval,
   type HostShellExecutionPlanAuditProjection,
 } from "../permissions/host-shell-execution-plan.js";
-import type {
-  AnalysisUncertainRequirement,
-  ExecutionPlanAuditProjection,
-} from "../permissions/execution-router.js";
+import type { ExecutionPlanAuditProjection } from "../permissions/execution-router.js";
 import {
   buildHostShellExecutionPermitBinding,
   type HostShellExecutionPermitBinding,
@@ -876,7 +873,7 @@ export async function runToolInvocation(
       meta.executionPlan = hostShellExecutionPlanAudit;
     }
     const updateExecutionRouteShadow = async (
-      unresolvedRequirements: readonly AnalysisUncertainRequirement[] = [],
+      unresolvedRequirementKind?: "dynamic-path" | "recursive-traversal",
     ): Promise<void> => {
       if (
         hostShellExecutionPlan === undefined ||
@@ -893,7 +890,7 @@ export async function runToolInvocation(
         toolName: hostShellToolName,
         command: hostShellInput.command,
         cwd: resolveHostShellWorkingDirectory(executionCwd, hostShellInput.cwd),
-        unresolvedRequirements,
+        unresolvedRequirementKind,
         timeoutSeconds: hostShellInput.timeoutSeconds,
         background: hostShellInput.runInBackground,
       });
@@ -1534,10 +1531,13 @@ export async function runToolInvocation(
         }
         if (!shellPathViolation) break;
 
-        if (shellPathViolation.finding?.classification === "analysis-uncertain") {
+        if (
+          shellPathViolation.kind === "dynamic-path" ||
+          shellPathViolation.kind === "recursive-traversal"
+        ) {
           // Shadow-only in this slice: retain today's exact denial below while
           // recording that the future router must not select host by default.
-          await updateExecutionRouteShadow([shellPathViolation.finding]);
+          await updateExecutionRouteShadow(shellPathViolation.kind);
         }
 
         if (shellPathViolation.kind === "sandbox-boundary" && shellPathViolation.path) {

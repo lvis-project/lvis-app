@@ -58,13 +58,15 @@ const buildOptions = {
   platform: "node",
   target: ["node22"],
   legalComments: "none",
-  // Keep emitted public names stable for runtime diagnostics, while letting
-  // esbuild fold equivalent syntax and eliminate unreachable branches. The
-  // main bundle budget measures shipped bytes, so this is a production-safe
-  // optimization rather than a budget increase.
+  // Keep function/class names stable for runtime diagnostics while allowing
+  // esbuild to shorten private local bindings as well as fold equivalent
+  // syntax. Export/property names remain unchanged. The main bundle budget
+  // measures shipped bytes, so this is a production-safe optimization rather
+  // than a budget increase.
   minifySyntax: true,
-  // Whitespace minification preserves emitted identifiers and runtime behavior.
   minifyWhitespace: true,
+  minifyIdentifiers: true,
+  keepNames: true,
   external: MAIN_BUNDLE_EXTERNALS,
   logLevel: "info",
   // Inlined CommonJS modules reference CJS-only `require` directly; the ESM
