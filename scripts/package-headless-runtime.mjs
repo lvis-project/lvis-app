@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import * as asar from "@electron/asar";
 import { readBuildSourceIdentity } from "./lib/build-source-identity.mjs";
+import { headlessPackagedMarkerPath } from "./lib/headless-packaged-marker.mjs";
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -37,7 +38,7 @@ function binding(path) {
   return { sha256: sha256(path), bytes: stats.size };
 }
 
-function inventory(root, directory = root) {
+export function inventory(root, directory = root) {
   const files = {};
   for (const entry of readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
     const path = join(directory, entry.name);
@@ -84,6 +85,12 @@ export function extractPackagedRuntime(archive, app) {
   const unpacked = `${archive}.unpacked`;
   if (lstatSync(unpacked, { throwIfNoEntry: false })) copyUnpackedPayload(unpacked, app);
   binding(join(app, "dist/src/main/headless.js"));
+}
+
+export function writePackagedRuntimeMarker(app) {
+  const markerPath = headlessPackagedMarkerPath(app);
+  writeFileSync(markerPath, new Uint8Array(), { flag: "wx", mode: 0o444 });
+  return markerPath;
 }
 
 function main() {
@@ -145,7 +152,10 @@ function main() {
   chmodSync(join(options.out, "bin/node"), 0o755);
   mkdirSync(join(options.out, "licenses"));
   cpSync(options["node-license"], join(options.out, "licenses/node-LICENSE"));
+  // Keep NODE_ENV for downstream compatibility; the app-root marker below is
+  // the only input that establishes the native runtime's packaged identity.
   writeFileSync(join(options.out, "lvis"), '#!/bin/sh\nset -eu\nlvis_runtime_root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\nexport NODE_ENV=production\nexport LVIS_RESOURCES_DIR="$lvis_runtime_root/resources"\nexec "$lvis_runtime_root/bin/node" "$lvis_runtime_root/app/dist/src/main/headless.js" "$@"\n', { mode: 0o755 });
+  const packagedMarker = writePackagedRuntimeMarker(app);
 
   const probeProfile = mkdtempSync(join(tmpdir(), "lvis-package-runtime-"));
   let nativeRuntime;
@@ -173,6 +183,7 @@ function main() {
     runtime: { ...runtime, binary: nodeBinding, license: licenseBinding },
     entry: "app/dist/src/main/headless.js",
     launcher: "lvis",
+    packagedMarker: relative(options.out, packagedMarker).split("\\").join("/"),
     boundary,
     nativeRuntime,
     files: inventory(options.out),

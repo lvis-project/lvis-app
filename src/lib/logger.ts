@@ -10,7 +10,7 @@
  * - Production: NODE_ENV=production OR LVIS_LOG_FORMAT=json OR isPackagedElectron
  *   (Electron runtime with process.defaultApp absent) → JSON line output
  * - Otherwise (dev / unpackaged Electron / CI): pino-pretty colorized text
- * - Test (NODE_ENV=test or VITEST): delegates to console.* so vitest spies work
+ * - Unpackaged test (NODE_ENV=test or VITEST): delegates to console.* so vitest spies work
  * - LVIS_LOG_FORMAT=json forces JSON regardless of NODE_ENV (useful in CI pipelines)
  * - Do NOT use for auditable security events — use AuditLogger instead (§4.5.5)
  *
@@ -33,7 +33,9 @@ import { createLogFileSink, type LogFileSink, type LogFileSinkOptions } from "./
 import { isPackagedElectronProcess } from "../boot/dev-flags.js";
 import { execModeRequested } from "../main/exec-mode.js";
 
-const isTest = process.env.VITEST !== undefined || process.env.NODE_ENV === "test";
+const isPackagedElectron = isPackagedElectronProcess(process);
+const isTest = !isPackagedElectron
+  && (process.env.VITEST !== undefined || process.env.NODE_ENV === "test");
 const isProduction = process.env.NODE_ENV === "production";
 // process.defaultApp is set to `true` by the Electron runtime when the app is
 // launched unpackaged (i.e. `electron dist/src/main/main.js`). In a packaged build
@@ -50,10 +52,9 @@ const isProduction = process.env.NODE_ENV === "production";
 // packaged Electron does not set NODE_ENV=production automatically.
 // "Packaged" is dev-flags' answer (`isPackagedElectronProcess`), asked here
 // from process facts because this module loads before boot seeds
-// `setIsPackaged(app.isPackaged)`; a packaged binary with LVIS_DEV=1 in its
-// environment is still packaged. `!isTest` keeps the Electron-hosted vitest
-// runner on the console path.
-const isPackagedElectron = isPackagedElectronProcess(process) && !isTest;
+// `setIsPackaged(app.isPackaged)`; a packaged binary with LVIS_DEV=1, VITEST,
+// or NODE_ENV=test in its environment is still packaged. Electron-hosted
+// Vitest sets process.defaultApp and therefore retains the console path.
 const useJsonFormat =
   process.env.LVIS_LOG_FORMAT === "json" || isProduction || isPackagedElectron;
 
@@ -209,10 +210,12 @@ export function closeFileLogSink(): void {
 /**
  * Create a child logger scoped to a named module.
  *
- * In test environments (VITEST / NODE_ENV=test) the returned logger proxies
- * calls to console.warn/error/info so existing vitest spyOn(console, 'warn')
- * assertions continue to work. The prefix `[module]` is prepended to match
- * the pre-pino console.log("[module] msg") pattern tests relied on.
+ * In unpackaged test environments (VITEST / NODE_ENV=test) the returned logger
+ * proxies calls to console.warn/error/info so existing vitest
+ * spyOn(console, 'warn') assertions continue to work. Packaged Electron always
+ * keeps the production logger even when user-controlled test env is present.
+ * The prefix `[module]` is prepended to match the pre-pino
+ * console.log("[module] msg") pattern tests relied on.
  *
  * In production / development, returns a real pino child logger with
  * structured JSON output.

@@ -138,20 +138,18 @@ describe("logger format selection", () => {
     expect(transport).toBeUndefined();
   });
 
-  it("delegates to console in test environment (VITEST set)", async () => {
-    // VITEST env is always set during test runs; createLogger returns a
-    // console-proxy. Verify the console path by checking the proxy shape.
-    const { createLogger } = await importLogger({
-      VITEST: "1",
-      NODE_ENV: "test",
-    });
-    const log = createLogger("test-module");
-    // The console proxy does not have pino internal properties.
-    // It should have warn/error/info/debug as functions.
-    expect(typeof log.warn).toBe("function");
-    expect(typeof log.error).toBe("function");
-    expect(typeof log.info).toBe("function");
-    expect(typeof log.debug).toBe("function");
+  it("delegates to console in an unpackaged test environment", async () => {
+    const spy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    try {
+      const { createLogger } = await importLogger(
+        { VITEST: "1", NODE_ENV: "test" },
+        { electronVersion: "32.0.0", defaultApp: true },
+      );
+      createLogger("test-module").info("test message");
+      expect(spy).toHaveBeenCalledWith("[test-module] test message");
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("isProduction=false gives debug level by default", async () => {
@@ -228,6 +226,41 @@ describe("logger format selection", () => {
     );
     expect(transport).toBeUndefined();
     expect(logger.level).toBe("info");
+  });
+
+  it("packaged Electron ignores VITEST and NODE_ENV=test for logger path and redaction", async () => {
+    const writes: string[] = [];
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(((chunk: string | Uint8Array) => {
+      writes.push(chunk.toString());
+      return true;
+    }) as typeof process.stdout.write);
+    const consoleLog = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    try {
+      const { createLogger, logger, transport } = await importLogger(
+        {
+          NODE_ENV: "test",
+          VITEST: "1",
+          LVIS_LOG_FORMAT: undefined,
+          LVIS_DEV: "1",
+        },
+        { electronVersion: "32.0.0", defaultApp: null },
+      );
+      createLogger("packaged-test-env").info(
+        { token: "secret-token", retained: "visible" },
+        "packaged logger",
+      );
+      expect(transport).toBeUndefined();
+      expect(logger.level).toBe("info");
+      expect(consoleLog).not.toHaveBeenCalled();
+      const output = writes.join("");
+      expect(output).toContain("packaged logger");
+      expect(output).toContain("[redacted]");
+      expect(output).not.toContain("secret-token");
+      expect(output).toContain("visible");
+    } finally {
+      consoleLog.mockRestore();
+      stdout.mockRestore();
+    }
   });
 
   it("plain Node.js (no process.versions.electron) → isElectronRuntime=false → pino-pretty for dev", async () => {

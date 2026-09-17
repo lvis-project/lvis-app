@@ -5,6 +5,10 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
+import {
+  HEADLESS_PACKAGED_MARKER_NAME,
+  headlessPackagedMarkerPath,
+} from "../../scripts/lib/headless-packaged-marker.mjs";
 import { writeFixtureFile } from "./gate-script-runner.js";
 
 const require = createRequire(import.meta.url);
@@ -50,6 +54,18 @@ function extract(archive: string, app: string) {
     packager, archive, app]);
 }
 
+function writeMarker(app: string) {
+  return runNode(["--input-type=module", "-e",
+    "const { writePackagedRuntimeMarker } = await import(process.argv[1]); writePackagedRuntimeMarker(process.argv[2]);",
+    packager, app]);
+}
+
+function readInventory(root: string) {
+  return runNode(["--input-type=module", "-e",
+    "const { inventory } = await import(process.argv[1]); process.stdout.write(JSON.stringify(inventory(process.argv[2])));",
+    packager, root]);
+}
+
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
@@ -75,10 +91,36 @@ describe("native packaged payload extraction", () => {
     expect(readFileSync(join(app, selectedBinding), "utf8")).toBe("replacement native binding with different bytes");
     expect(readFileSync(join(app, "runtime-assets/added.txt"), "utf8")).toBe("post-pack asset");
     expect(existsSync(join(app, foreignBinding))).toBe(false);
+    expect(existsSync(headlessPackagedMarkerPath(app))).toBe(false);
     if (process.platform !== "win32") {
       expect(statSync(join(app, "dist/src/main/headless.js")).mode & 0o777).toBe(0o755);
       expect(statSync(join(app, selectedBinding)).mode & 0o777).toBe(0o750);
     }
+  });
+
+  it("creates the zero-byte marker once for the qualification phase", () => {
+    const root = mkdtempSync(join(tmpdir(), "native-package-marker-"));
+    roots.push(root);
+    const app = join(root, "app");
+    mkdirSync(app);
+
+    const first = writeMarker(app);
+    expect(first.error).toBeUndefined();
+    expect(first.status, first.stderr).toBe(0);
+    const marker = statSync(headlessPackagedMarkerPath(app));
+    expect(marker.isFile()).toBe(true);
+    expect(marker.size).toBe(0);
+    if (process.platform !== "win32") expect(marker.mode & 0o777).toBe(0o444);
+    const inventory = readInventory(root);
+    expect(inventory.status, inventory.stderr).toBe(0);
+    expect(JSON.parse(inventory.stdout)[`app/${HEADLESS_PACKAGED_MARKER_NAME}`]).toEqual({
+      sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      bytes: 0,
+    });
+
+    const second = writeMarker(app);
+    expect(second.status).toBe(1);
+    expect(second.stderr).toMatch(/EEXIST|already exists/);
   });
 
   it("rejects a sidecar file that would overwrite packed content", () => {
