@@ -223,11 +223,13 @@ describe("TranscriptRenderer — minimal (required-only) contract", () => {
     expect(group.textContent).not.toContain(thought);
   });
 
-  it.each([
+  const terminalStates: Array<[string, Partial<Extract<ChatEntry, { kind: "assistant" }>>]> = [
     ["ordinary error", { terminalError: true }],
     ["stream error", { systemNotice: "stream-error" as const }],
     ["interrupted turn", { interrupted: true }],
-  ])("does not call a settled %s work group complete", (_case, terminalState) => {
+  ];
+
+  it.each(terminalStates)("does not call a settled %s work group complete", (_case, terminalState) => {
     const { getByTestId } = renderCore(
       <TranscriptRenderer
         entries={[userEntry("q"), toolGroup(), assistant("terminal state", terminalState)]}

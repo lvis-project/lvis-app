@@ -163,7 +163,21 @@ export class SubAgentTranscriptAccumulator {
   onLlmStatus(status: FallbackStatus): boolean {
     const message = formatLlmStatusMessage(status);
     if (!message) return false;
-    this.entries = upsertStreamingAssistant(this.entries, message, "status");
+    const next = upsertStreamingAssistant(this.entries, message, "status");
+    if (next === this.entries) return false;
+    this.entries = next;
+    return true;
+  }
+
+  /**
+   * A terminal child result has no next stream frame to supersede a retry or
+   * fallback placeholder. Clear that status-only entry before publishing the
+   * final snapshot so it cannot be persisted as indefinitely streaming work.
+   */
+  finish(): boolean {
+    const next = dropPendingLlmStatusAssistant(this.entries);
+    if (next === this.entries) return false;
+    this.entries = next;
     return true;
   }
 

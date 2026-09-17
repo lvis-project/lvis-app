@@ -475,7 +475,14 @@ describe("SubAgentRunner — provider-status activity", () => {
       .spyOn(ConversationLoop.prototype, "runTurn")
       .mockImplementation(async (_prompt, callbacks) => {
         callbacks?.onLlmStatus?.({ phase: "retry", attempt: 2, maxAttempts: 5 });
-        callbacks?.onAssistantRound?.({ thought: "", text: "recovered child answer" });
+        callbacks?.onAssistantRound?.({
+          roundIndex: 1,
+          thought: "",
+          text: "recovered child answer",
+          stopReason: "end_turn",
+          hasToolCalls: false,
+          messageId: "status-child-answer",
+        });
         return {
           text: "recovered child answer",
           toolCalls: [],
@@ -507,6 +514,46 @@ describe("SubAgentRunner — provider-status activity", () => {
           streaming: false,
         }),
       ]);
+    } finally {
+      runTurnSpy.mockRestore();
+      hasProviderSpy.mockRestore();
+    }
+  });
+
+  it("clears a status-only retry before an errored child result is published", async () => {
+    const toolRegistry = new ToolRegistry();
+    const runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager: fakeSubAgentMemoryManager(),
+    });
+    const hasProviderSpy = vi
+      .spyOn(
+        ConversationLoop.prototype as unknown as { hasProvider: () => boolean },
+        "hasProvider",
+      )
+      .mockReturnValue(true);
+    const runTurnSpy = vi
+      .spyOn(ConversationLoop.prototype, "runTurn")
+      .mockImplementation(async (_prompt, callbacks) => {
+        callbacks?.onLlmStatus?.({ phase: "retry", attempt: 2, maxAttempts: 5 });
+        throw new Error("child failed before producing output");
+      });
+    const onActivity = vi.fn();
+
+    try {
+      const result = await runner.spawn(
+        {
+          toolScope: PARENT_ALL_TOOL_SCOPE,
+          title: "status-only error",
+          instructions: "recover",
+        },
+        { onActivity },
+      );
+
+      expect(result.ok).toBe(false);
+      expect(result.entries).toEqual([]);
+      expect(onActivity.mock.calls.at(-1)?.[0].entries).toEqual([]);
     } finally {
       runTurnSpy.mockRestore();
       hasProviderSpy.mockRestore();

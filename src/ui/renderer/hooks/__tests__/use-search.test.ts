@@ -71,4 +71,21 @@ describe("useSearch processing visibility", () => {
       }
     },
   );
+
+  it("does not index active reasoning or the header-only provider status", () => {
+    const activeEntries: ChatEntry[] = [
+      { kind: "user", text: "question" },
+      { kind: "assistant", text: "retry status", phase: "status", streaming: true },
+      { kind: "reasoning", text: "hidden active thought", streaming: true },
+    ];
+    const { result } = renderHook(() => useSearch(activeEntries, {
+      processingDisplayLevel: "full",
+      streaming: true,
+    }));
+
+    act(() => result.current.changeQuery("status"));
+    expect(result.current.matches).toEqual([]);
+    act(() => result.current.changeQuery("thought"));
+    expect(result.current.matches).toEqual([]);
+  });
 });

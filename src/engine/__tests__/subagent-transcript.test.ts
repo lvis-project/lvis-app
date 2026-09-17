@@ -164,6 +164,7 @@ describe("SubAgentTranscriptAccumulator", () => {
     expect(acc.snapshot()).toEqual([]);
 
     expect(acc.onLlmStatus({ phase: "retry", attempt: 2, maxAttempts: 5 })).toBe(true);
+    expect(acc.onLlmStatus({ phase: "retry", attempt: 2, maxAttempts: 5 })).toBe(false);
     expect(acc.onLlmStatus({ phase: "fallback", to: "backup" })).toBe(true);
     const statusEntries = acc.snapshot().filter(
       (entry): entry is Extract<ChatEntry, { kind: "assistant" }> =>
@@ -205,6 +206,15 @@ describe("SubAgentTranscriptAccumulator", () => {
         streaming: false,
       }),
     ]);
+  });
+
+  it("clears a status-only retry when the child reaches a terminal result", () => {
+    const acc = new SubAgentTranscriptAccumulator();
+    expect(acc.onLlmStatus({ phase: "retry", attempt: 2, maxAttempts: 5 })).toBe(true);
+
+    expect(acc.finish()).toBe(true);
+    expect(acc.snapshot()).toEqual([]);
+    expect(acc.finish()).toBe(false);
   });
 
   it("DLP-masks the ACCUMULATION so a secret split across deltas cannot leak", () => {

@@ -248,7 +248,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     };
   }
 
-  it("publishes a retry-status snapshot while a child resumes", async () => {
+  it("clears a status-only retry before a resumed child reaches its terminal snapshot", async () => {
     const toolRegistry = new ToolRegistry();
     toolRegistry.register(noopTool("noop"));
     const subStore = makeSubStore();
@@ -281,13 +281,11 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
                   attempt?: number;
                   maxAttempts?: number;
                 }) => void;
-                onAssistantRound?: (round: { thought?: string; text: string }) => void;
               }
             | undefined;
           callbacks?.onLlmStatus?.({ phase: "retry", attempt: 2, maxAttempts: 5 });
-          callbacks?.onAssistantRound?.({ text: "resumed after retry" });
           return {
-            text: "resumed after retry",
+            text: "",
             toolCalls: [],
             route: "default",
             stopReason: "end_turn",
@@ -309,13 +307,8 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       expect(snapshots).toContainEqual(expect.arrayContaining([
         expect.objectContaining({ kind: "assistant", phase: "status", streaming: true }),
       ]));
-      expect(snapshots.at(-1)).toEqual([
-        expect.objectContaining({
-          kind: "assistant",
-          text: "resumed after retry",
-          streaming: false,
-        }),
-      ]);
+      expect(resumed.entries).toEqual([]);
+      expect(snapshots.at(-1)).toEqual([]);
     } finally {
       runTurnSpy.mockRestore();
       restore();

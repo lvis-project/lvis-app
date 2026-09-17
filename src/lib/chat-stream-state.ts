@@ -684,8 +684,12 @@ export function upsertStreamingAssistant(
     );
     if (relativeStatusIdx >= 0) {
       const statusIdx = turnStartIdx + 1 + relativeStatusIdx;
+      const current = next[statusIdx] as AssistantEntry;
+      if (current.text === text && current.streaming === true && current.phase === "status") {
+        return entries;
+      }
       next[statusIdx] = {
-        ...(next[statusIdx] as AssistantEntry),
+        ...current,
         text,
         streaming: true,
         phase: "status",

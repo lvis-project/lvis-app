@@ -3444,6 +3444,7 @@ export class SubAgentRunner {
       childStopReason = "interrupted";
       ok = false;
     }
+    if (transcript.finish()) emitActivity();
     const result: SubAgentSpawnResult = {
       summary: lastText,
       toolCallCount: totalToolCalls,
@@ -4454,6 +4455,7 @@ export class SubAgentRunner {
       reasoningStreamEmitter.cancel();
       unregisterResumeChild();
     }
+    if (transcript.finish()) emitActivity();
     let result: SubAgentSpawnResult = {
       summary: lastText,
       toolCallCount: totalToolCalls,

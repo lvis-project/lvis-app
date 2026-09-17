@@ -17,6 +17,7 @@ import {
   upsertStreamingAssistant,
   type ChatEntry,
 } from "../../../lib/chat-stream-state.js";
+import { formatLlmStatusMessage } from "../../../lib/llm-status-message.js";
 import { detectFromStream } from "../../../lib/stream-markers.js";
 import { debugLog, isDebugStreamEnabled } from "../../../lib/debug-stream.js";
 import { isMissingStagedEnvelopeErrorMessage } from "../../../shared/staged-origins.js";
@@ -881,30 +882,4 @@ function visibleAssistantText(text: string): string {
   // decides whether to preserve or splice the entry based on surrounding
   // context (tool_group / checkpoint siblings), not on placeholder text.
   return text.trim().length > 0 ? text : "";
-}
-
-function formatLlmStatusMessage(ev: {
-  phase?: "attempt" | "retry" | "fallback";
-  label?: string;
-  attempt?: number;
-  maxAttempts?: number;
-  from?: string;
-  to?: string;
-}): string {
-  if (ev.phase === "fallback") {
-    const to = ev.to ? ` (${ev.to})` : "";
-    return t("useChatState.llmStatusFallback", { to });
-  }
-  if (ev.phase === "retry") {
-    const attempt = ev.attempt ?? 1;
-    const max = ev.maxAttempts ?? 5;
-    return t("useChatState.llmStatusRetry", { attempt, max });
-  }
-  if (ev.phase === "attempt") {
-    const attempt = ev.attempt ?? 1;
-    const max = ev.maxAttempts ?? 5;
-    if (attempt <= 1) return "";
-    return t("useChatState.llmStatusAttemptRetrying", { attempt, max });
-  }
-  return "";
 }

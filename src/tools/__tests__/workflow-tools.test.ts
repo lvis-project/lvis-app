@@ -1676,6 +1676,32 @@ describe("agent_spawn tool", () => {
     expect(done?.entries).toHaveLength(2);
   });
 
+  it("emits the cleaned child entries snapshot on an error terminal event", async () => {
+    const spawnEvents: Array<{ type: string; entries?: unknown[] }> = [];
+    const tool = createAgentSpawnTool({
+      getRunner: () => ({
+        spawn: async () => ({
+          summary: "child failed",
+          error: "child failed",
+          toolCallCount: 0,
+          turnCount: 0,
+          childSessionId: "child-error",
+          entries: [],
+          ok: false,
+        }),
+      }) as never,
+      emit: (event) => spawnEvents.push({
+        type: event.type,
+        entries: event.entries as unknown[] | undefined,
+      }),
+    });
+
+    const result = await tool.execute({ title: "t", instructions: "do" }, foregroundCtx());
+
+    expect(result.isError).toBe(true);
+    expect(spawnEvents.find((event) => event.type === "error")?.entries).toEqual([]);
+  });
+
   it("loads agent profile instructions and default tools when agentName is provided", async () => {
     const agentDir = mkdtempSync(join(tmpdir(), "lvis-agents-"));
     try {

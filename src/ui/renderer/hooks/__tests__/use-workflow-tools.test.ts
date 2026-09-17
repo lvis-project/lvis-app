@@ -47,6 +47,56 @@ describe("useWorkflowTools", () => {
     ]);
   });
 
+  it("replaces a live status snapshot with cleaned entries when the child errors", () => {
+    let onSpawn: Parameters<LvisApi["onAgentSpawnEvent"]>[0] | undefined;
+    const api = {
+      onAskUserQuestion: vi.fn(() => () => undefined),
+      onAgentSpawnEvent: vi.fn((handler: Parameters<LvisApi["onAgentSpawnEvent"]>[0]) => {
+        onSpawn = handler;
+        return () => undefined;
+      }),
+      onSkillLoaded: vi.fn(() => () => undefined),
+      onAskUserQuestionTimeout: vi.fn(() => () => undefined),
+    } as unknown as LvisApi;
+    const { result } = renderHook(() => useWorkflowTools(api));
+    const statusEntry = {
+      kind: "assistant" as const,
+      text: "retrying",
+      streaming: true,
+      phase: "status" as const,
+    };
+
+    act(() => {
+      onSpawn?.({
+        spawnId: "spawn-error",
+        type: "start",
+        taskState: "TASK_STATE_SUBMITTED",
+        title: "Erroring agent",
+        parentSessionId: "session-solo",
+      });
+      onSpawn?.({
+        spawnId: "spawn-error",
+        type: "activity",
+        taskState: "TASK_STATE_WORKING",
+        entries: [statusEntry],
+        parentSessionId: "session-solo",
+      });
+      onSpawn?.({
+        spawnId: "spawn-error",
+        type: "error",
+        taskState: "TASK_STATE_FAILED",
+        status: "error",
+        message: "child failed",
+        entries: [],
+        parentSessionId: "session-solo",
+      });
+    });
+
+    expect(result.current.subAgentSpawns).toEqual([
+      expect.objectContaining({ status: "error", entries: [] }),
+    ]);
+  });
+
   it("marks rows rebuilt from disk as restored, and a live start as not", () => {
     let onSpawn: Parameters<LvisApi["onAgentSpawnEvent"]>[0] | undefined;
     const api = {

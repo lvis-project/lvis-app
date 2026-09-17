@@ -365,6 +365,7 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
             taskState,
             status,
             message: result.error ?? result.summary,
+            entries: result.entries,
             ...promptPayload,
             ...linkedPayload(),
           });
