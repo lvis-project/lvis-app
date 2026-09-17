@@ -634,6 +634,7 @@ describe("setAssistantError — Issue #911 systemNotice option", () => {
     const out = setAssistantError([{ kind: "user", text: "hi" }], "일반 오류");
     const last = out[out.length - 1] as Extract<ChatEntry, { kind: "assistant" }>;
     expect(last.systemNotice).toBeUndefined();
+    expect(last.terminalError).toBe(true);
   });
 
   it("live error path never stamps restored — the marker is replay-only (Issue #2113)", () => {
@@ -905,6 +906,7 @@ describe("transcript frame reducer (shared by the main and the side chat)", () =
     kind: "assistant",
     text: `${t("useChatState.llmStatusAttemptFirst")} (2/5)`,
     streaming: true,
+    phase: "status",
   });
   const toolStart = frame({ type: "tool_start", groupId: "g1", toolUseId: "t1", name: "web_fetch", displayOrder: 0, input: {} });
 
@@ -937,6 +939,58 @@ describe("transcript frame reducer (shared by the main and the side chat)", () =
   it("keeps a streaming assistant entry that carries real text", () => {
     const base: ChatEntry[] = [...appendUserEntry([], "q"), { kind: "assistant", text: "partial reply", streaming: true }];
     expect(applyTranscriptFrame(base, toolStart).map((e) => e.kind)).toEqual(["user", "assistant", "tool_group"]);
+  });
+
+  it("replaces a tagged provider-status placeholder with real assistant text", () => {
+    let entries = upsertStreamingAssistant(
+      appendUserEntry([], "q"),
+      "모델 응답을 기다리는 중입니다.",
+      "status",
+    );
+    entries = upsertStreamingAssistant(entries, "실제 답변을 작성합니다.");
+
+    expect(entries[1]).toMatchObject({
+      kind: "assistant",
+      text: "실제 답변을 작성합니다.",
+      streaming: true,
+    });
+    expect(entries[1]).not.toHaveProperty("phase", "status");
+  });
+
+  it("does not let a late provider status replace real streaming assistant text", () => {
+    const entries = upsertStreamingAssistant(
+      appendUserEntry([], "q"),
+      "실제 답변을 작성합니다.",
+    );
+
+    const afterLateStatus = upsertStreamingAssistant(
+      entries,
+      "모델 응답을 다시 기다리는 중입니다.",
+      "status",
+    );
+
+    expect(afterLateStatus).toBe(entries);
+    expect(afterLateStatus[1]).toMatchObject({
+      kind: "assistant",
+      text: "실제 답변을 작성합니다.",
+      streaming: true,
+    });
+  });
+
+  it("does not let a late provider status replace active reasoning", () => {
+    const entries = applyReasoningDelta(
+      appendUserEntry([], "q"),
+      "근거를 확인합니다.",
+    );
+
+    const afterLateStatus = upsertStreamingAssistant(
+      entries,
+      "모델 응답을 다시 기다리는 중입니다.",
+      "status",
+    );
+
+    expect(afterLateStatus).toBe(entries);
+    expect(afterLateStatus).toEqual(entries);
   });
 
   it("carries a user stop and the duration through tool_end (the side chat used to drop both)", () => {

@@ -20,6 +20,19 @@
  * at the call site instead of relying on an empty-string return.
  */
 
+/** Labels used by the shared duration rounding rules. */
+export interface DurationFormatUnits {
+  hour: string;
+  minute: string;
+  second: string;
+}
+
+const COMPACT_DURATION_UNITS: DurationFormatUnits = {
+  hour: "h",
+  minute: "m",
+  second: "s",
+};
+
 /**
  * Format a wall-clock duration into a compact label.
  *
@@ -33,12 +46,16 @@
  * Negative or non-finite inputs collapse to `0s`; the function never throws.
  * A caller that wants no label at all for those cases (the tool badges hide
  * rather than print `0s`) checks the input itself.
+ *
+ * Callers may supply localized unit labels. The duration calculation and
+ * rounding stay here so localized turn-completion text cannot drift from the
+ * tool-duration contract.
  */
-export function formatDuration(ms: number): string {
-  if (!Number.isFinite(ms) || ms <= 0) return "0s";
-  if (ms < 100) return "<0.1s";
+export function formatDuration(ms: number, units: DurationFormatUnits = COMPACT_DURATION_UNITS): string {
+  if (!Number.isFinite(ms) || ms <= 0) return `0${units.second}`;
+  if (ms < 100) return `<0.1${units.second}`;
   if (ms < 60_000) {
-    return `${(ms / 1000).toFixed(1)}s`;
+    return `${(ms / 1000).toFixed(1)}${units.second}`;
   }
   if (ms < 3_600_000) {
     const totalSec = ms / 1000;
@@ -47,14 +64,14 @@ export function formatDuration(ms: number): string {
     // Drop the decimal when seconds are effectively integer — produces
     // the cleaner "1m 12s" form expected for whole-second durations.
     if (Math.abs(seconds - Math.round(seconds)) < 0.05) {
-      return `${minutes}m ${Math.round(seconds)}s`;
+      return `${minutes}${units.minute} ${Math.round(seconds)}${units.second}`;
     }
-    return `${minutes}m ${seconds.toFixed(1)}s`;
+    return `${minutes}${units.minute} ${seconds.toFixed(1)}${units.second}`;
   }
   const totalMin = ms / 60_000;
   const hours = Math.floor(totalMin / 60);
   const minutes = Math.round(totalMin - hours * 60);
-  return `${hours}h ${String(minutes).padStart(2, "0")}m`;
+  return `${hours}${units.hour} ${String(minutes).padStart(2, "0")}${units.minute}`;
 }
 
 /**

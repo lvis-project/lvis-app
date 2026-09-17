@@ -67,4 +67,16 @@ describe("WorkGroup memo boundary", () => {
     );
     expect(screen.queryByText("transient review")).toBeNull();
   });
+
+  it("summarizes settled work with a localized completion duration", () => {
+    render(
+      <WorkGroup stepCount={3} streaming={false} revision="completed" turnDurationMs={72_000} completed>
+        <div>completed detail</div>
+      </WorkGroup>,
+    );
+
+    const header = screen.getByRole("button");
+    expect(header.textContent).toContain("작업 완료 1분 12초");
+    expect(header.textContent).not.toContain("단계");
+  });
 });

@@ -68,6 +68,12 @@ export function classifyTurnEntries(
     const hasSubsequentWork = subsequentTurnEntries.some(
       (ne) => ne.kind === "tool_group" || ne.kind === "reasoning" || ne.kind === "permission_review",
     );
+    // A turn summary is authoritative proof that a reasoning-only turn ended
+    // normally. Without it, the tail reasoning remains live so error and abort
+    // paths never masquerade as completed work.
+    const hasTurnSummary = subsequentTurnEntries.some(
+      (ne) => ne.kind === "turn_summary",
+    );
 
     const myTurnStart = turnStart >= 0 ? turnStart : 0;
     entryTurnStartMap.set(i, myTurnStart);
@@ -90,7 +96,7 @@ export function classifyTurnEntries(
       } else {
         entryClassMap.set(i, "live");
       }
-    } else if (hasSubsequent || isActiveTurnEntry) {
+    } else if (hasSubsequent || isActiveTurnEntry || hasTurnSummary) {
       entryClassMap.set(i, "intermediate");
     } else {
       entryClassMap.set(i, "live");

@@ -39,7 +39,7 @@ describe("ChatView message queue (enqueue while streaming → drains after)", ()
     await submitChatMessage(container, "첫 질문");
     await waitFor(() => expect(api.chatSend).toHaveBeenCalledTimes(1));
     await waitFor(() => {
-      expect(container.querySelector('[data-testid="work-group"]')?.textContent).toContain("작업 중...");
+      expect(container.querySelector('[data-testid="work-group"]')?.textContent).toContain("생각 중...");
     });
 
     await waitFor(() => expect(getQueueStore()).toBeDefined());
