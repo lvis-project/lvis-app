@@ -30,6 +30,15 @@ function makeSettings(): AppSettings {
   });
 }
 
+function withProcessingDisplayLevel(
+  settings: AppSettings,
+  processingDisplayLevel: AppSettings["chat"]["processingDisplayLevel"],
+): AppSettings {
+  const updated = structuredClone(settings);
+  updated.chat.processingDisplayLevel = processingDisplayLevel;
+  return updated;
+}
+
 function settingsOrchestrationApi(updateResult: Awaited<ReturnType<LvisApi["updateSettings"]>>): LvisApi {
   const settings = makeSettings();
   const { api } = makeMockLvisApi({
@@ -67,9 +76,10 @@ describe("useSettingsOrchestration", () => {
   it("hydrates and saves the processing detail through the chat patch", async () => {
     const settings = makeSettings();
     settings.chat.processingDisplayLevel = "reasoning";
+    const saved = withProcessingDisplayLevel(settings, "tools");
     const { api } = makeMockLvisApi({ settings });
     Object.assign(api, {
-      updateSettings: vi.fn(async () => ({ ok: true })),
+      updateSettings: vi.fn(async () => saved),
       hasWebApiKey: vi.fn(async () => false),
       hasMarketplaceApiKey: vi.fn(async () => false),
     });
@@ -87,14 +97,16 @@ describe("useSettingsOrchestration", () => {
     expect(api.updateSettings).toHaveBeenCalledWith(expect.objectContaining({
       chat: expect.objectContaining({ processingDisplayLevel: "tools" }),
     }));
+    expect(result.current.processingDisplayLevel).toBe("tools");
   });
 
   it("syncs external processing detail without clobbering a pending local edit", async () => {
     const settings = makeSettings();
     settings.chat.processingDisplayLevel = "full";
+    const saved = withProcessingDisplayLevel(settings, "tools");
     const { api } = makeMockLvisApi({ settings });
     Object.assign(api, {
-      updateSettings: vi.fn(async () => ({ ok: true })),
+      updateSettings: vi.fn(async () => saved),
       hasWebApiKey: vi.fn(async () => false),
       hasMarketplaceApiKey: vi.fn(async () => false),
     });
@@ -126,15 +138,54 @@ describe("useSettingsOrchestration", () => {
     expect(result.current.processingDisplayLevel).toBe("reasoning");
   });
 
+  it("reconciles an authoritative save result after a broadcast arrived while the draft was dirty", async () => {
+    const settings = makeSettings();
+    settings.chat.processingDisplayLevel = "full";
+    const authoritative = withProcessingDisplayLevel(settings, "reasoning");
+    let resolveFirstSave!: (value: AppSettings) => void;
+    const updateSettings = vi.fn(() => new Promise<AppSettings>((resolve) => {
+      resolveFirstSave = resolve;
+    }));
+    const { api } = makeMockLvisApi({ settings });
+    Object.assign(api, {
+      updateSettings,
+      hasWebApiKey: vi.fn(async () => false),
+      hasMarketplaceApiKey: vi.fn(async () => false),
+    });
+    const { result } = renderHook(() =>
+      useSettingsOrchestration(api as unknown as LvisApi, vi.fn()),
+    );
+    await waitFor(() => expect(result.current.settingsLoaded).toBe(true));
+    const broadcast = api.onSettingsUpdated.mock.calls[0]![0] as (next: AppSettings) => void;
+
+    act(() => result.current.setProcessingDisplayLevel("tools"));
+    let firstSave!: Promise<boolean>;
+    act(() => {
+      firstSave = result.current.save("chat");
+    });
+    await waitFor(() => expect(updateSettings).toHaveBeenCalledOnce());
+    act(() => broadcast(authoritative));
+    expect(result.current.processingDisplayLevel).toBe("tools");
+
+    await act(async () => {
+      resolveFirstSave(authoritative);
+      await firstSave;
+    });
+
+    expect(result.current.processingDisplayLevel).toBe("reasoning");
+  });
+
   it("keeps a newer processing detail edit dirty when an older save finishes", async () => {
     const settings = makeSettings();
     settings.chat.processingDisplayLevel = "full";
-    let resolveFirstSave!: (value: { ok: true }) => void;
+    const firstSaveResult = withProcessingDisplayLevel(settings, "tools");
+    const secondSaveResult = withProcessingDisplayLevel(settings, "reasoning");
+    let resolveFirstSave!: (value: AppSettings) => void;
     const updateSettings = vi.fn()
-      .mockImplementationOnce(() => new Promise<{ ok: true }>((resolve) => {
+      .mockImplementationOnce(() => new Promise<AppSettings>((resolve) => {
         resolveFirstSave = resolve;
       }))
-      .mockResolvedValue({ ok: true });
+      .mockResolvedValue(secondSaveResult);
     const { api } = makeMockLvisApi({ settings });
     Object.assign(api, {
       updateSettings,
@@ -155,9 +206,11 @@ describe("useSettingsOrchestration", () => {
     await waitFor(() => expect(updateSettings).toHaveBeenCalledOnce());
     act(() => result.current.setProcessingDisplayLevel("reasoning"));
     await act(async () => {
-      resolveFirstSave({ ok: true });
+      resolveFirstSave(firstSaveResult);
       await firstSave;
     });
+
+    expect(result.current.processingDisplayLevel).toBe("reasoning");
 
     const oldSnapshot = structuredClone(settings);
     oldSnapshot.chat.processingDisplayLevel = "tools";
@@ -184,7 +237,7 @@ describe("useSettingsOrchestration", () => {
     };
     const { api } = makeMockLvisApi({ settings });
     Object.assign(api, {
-      updateSettings: vi.fn(async () => ({ ok: true })),
+      updateSettings: vi.fn(async () => settings),
       hasWebApiKey: vi.fn(async () => false),
       hasMarketplaceApiKey: vi.fn(async () => false),
     });
@@ -281,11 +334,12 @@ describe("useSettingsOrchestration", () => {
     // provider card. The credential save used to return false on the spot and
     // say nothing, leaving the card looking committed with nothing written.
     let releaseFirstSave: (() => void) | undefined;
-    const { api } = makeMockLvisApi({ settings: makeSettings(), hasApiKey: false });
+    const settings = makeSettings();
+    const { api } = makeMockLvisApi({ settings, hasApiKey: false });
     Object.assign(api, {
       updateSettings: vi.fn(async () => {
         await new Promise<void>((resolve) => { releaseFirstSave = resolve; });
-        return { ok: true };
+        return settings;
       }),
       hasWebApiKey: vi.fn(async () => false),
       hasMarketplaceApiKey: vi.fn(async () => false),
@@ -361,7 +415,7 @@ describe("useSettingsOrchestration", () => {
     };
     const { api } = makeMockLvisApi({ settings, hasApiKey: false });
     Object.assign(api, {
-      updateSettings: vi.fn(async () => ({ ok: true })),
+      updateSettings: vi.fn(async () => settings),
       hasWebApiKey: vi.fn(async () => false),
       hasMarketplaceApiKey: vi.fn(async () => false),
       setApiKey: vi.fn(async () => ({ ok: true })),
@@ -438,7 +492,7 @@ describe("useSettingsOrchestration", () => {
     };
     const { api } = makeMockLvisApi({ settings, hasApiKey: false });
     Object.assign(api, {
-      updateSettings: vi.fn(async () => ({ ok: true })),
+      updateSettings: vi.fn(async () => settings),
       hasWebApiKey: vi.fn(async () => false),
       hasMarketplaceApiKey: vi.fn(async () => false),
       setApiKey: vi.fn(async () => ({ ok: true })),
@@ -622,7 +676,7 @@ describe("useSettingsOrchestration", () => {
     };
     const { api } = makeMockLvisApi({ settings, hasApiKey: false });
     Object.assign(api, {
-      updateSettings: vi.fn(async () => ({ ok: true })),
+      updateSettings: vi.fn(async () => settings),
       hasWebApiKey: vi.fn(async () => false),
       hasMarketplaceApiKey: vi.fn(async () => false),
     });

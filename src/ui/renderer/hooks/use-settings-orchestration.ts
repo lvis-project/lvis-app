@@ -33,6 +33,7 @@ import {
 } from "../../../shared/marketplace-package-assets.js";
 import {
   DEFAULT_PROCESSING_DISPLAY_LEVEL,
+  isProcessingDisplayLevel,
   type ProcessingDisplayLevel,
 } from "../../../shared/processing-display-level.js";
 
@@ -559,7 +560,12 @@ export function useSettingsOrchestration(
           throw new Error(formatIpcError(updateResult.error, updateResult.message));
         }
         if (processingDisplayLevelDraftRef.current.revision === processingDisplayLevelRevision) {
+          const authoritativeProcessingDisplayLevel = updateResult.chat.processingDisplayLevel;
+          if (!isProcessingDisplayLevel(authoritativeProcessingDisplayLevel)) {
+            throw new Error("Settings update returned an invalid processing display level.");
+          }
           processingDisplayLevelDraftRef.current.dirty = false;
+          setProcessingDisplayLevelState(authoritativeProcessingDisplayLevel);
         }
       }
       if (tab !== "permissions") onSaved();

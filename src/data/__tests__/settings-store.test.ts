@@ -2772,6 +2772,26 @@ describe("SettingsService chat normalization", () => {
     expect(s.get("chat").processingDisplayLevel).toBe("full");
   });
 
+  it("rejects an invalid live processing detail patch without replacing the saved preference", async () => {
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
+    await s.patch({ chat: { processingDisplayLevel: "tools" } });
+
+    await expect(s.patch({
+      chat: { processingDisplayLevel: "everything" as never },
+    })).rejects.toMatchObject({
+      name: "SettingsPatchValidationError",
+      code: "invalid-processing-display-level",
+    });
+
+    expect(s.get("chat").processingDisplayLevel).toBe("tools");
+    const onDisk = JSON.parse(readFileSync(join(userDataPath, "lvis-settings.json"), "utf-8")) as {
+      chat: { processingDisplayLevel: unknown };
+    };
+    expect(onDisk.chat.processingDisplayLevel).toBe("tools");
+    expect(new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath })
+      .get("chat").processingDisplayLevel).toBe("tools");
+  });
+
   it("keeps the stored processing detail on an unrelated partial chat patch", async () => {
     const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await s.patch({ chat: { processingDisplayLevel: "tools" } });

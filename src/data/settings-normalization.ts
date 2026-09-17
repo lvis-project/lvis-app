@@ -40,6 +40,7 @@ import {
   normalizeLocale,
 } from "../i18n/index.js";
 import { normalizeAppMode } from "../shared/initial-app-mode.js";
+import { isProcessingDisplayLevel } from "../shared/processing-display-level.js";
 import { isSidebarTab } from "../shared/sidebar-tab.js";
 import { isInlineViewKey } from "../shared/view-key.js";
 import { normalizeSettingsTab } from "../shared/settings-tabs.js";
@@ -1372,12 +1373,10 @@ export function normalizeChat(input: unknown): ChatSettings {
   const chat = input as Record<string, unknown>;
   if (typeof chat.systemPrompt === "string") result.systemPrompt = chat.systemPrompt;
   if (typeof chat.autoCompact === "boolean") result.autoCompact = chat.autoCompact;
-  switch (chat.processingDisplayLevel) {
-    case "tools":
-    case "reasoning":
-      result.processingDisplayLevel = chat.processingDisplayLevel;
+  if (isProcessingDisplayLevel(chat.processingDisplayLevel)) {
+    result.processingDisplayLevel = chat.processingDisplayLevel;
   }
-  // `full` and malformed/missing values keep the full-view default above.
+  // Missing or malformed values keep the full-view default above.
   if (typeof chat.subAgentMaxRounds === "number" && Number.isFinite(chat.subAgentMaxRounds)) {
     result.subAgentMaxRounds = Math.max(1, Math.floor(chat.subAgentMaxRounds));
   }
