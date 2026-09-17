@@ -37,6 +37,7 @@ import {
   type TurnFailureSummary,
 } from "./turn-failure-summary.js";
 import type { ExecutionMode } from "../shared/permission-mode.js";
+import type { AuthorizationRequiredState } from "../shared/authorization-required.js";
 
 /** Version of the semantic platform event contract. */
 export const PLATFORM_CONVERSATION_PROTOCOL_VERSION = 1 as const;
@@ -224,7 +225,12 @@ export type PlatformConversationEvent =
    */
   | { readonly kind: "loop.decision"; readonly decision: TurnDecisionEvent }
   | { readonly kind: "suggestions.updated"; readonly reply: string | null }
-  | { readonly kind: "turn.completed"; readonly route?: "command" }
+  | {
+    readonly kind: "turn.completed";
+    readonly route?: "command";
+    /** Owner-safe terminal state for a host with no approval surface. */
+    readonly authorizationRequired?: AuthorizationRequiredState;
+  }
   | {
     readonly kind: "privacy.redacted";
     readonly count: number;

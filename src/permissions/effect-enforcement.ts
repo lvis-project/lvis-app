@@ -68,6 +68,7 @@
 import { randomUUID } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { ApprovalGate, ApprovalChoice } from "./approval-gate.js";
+import type { ApprovalSurface } from "../shared/authorization-required.js";
 import {
   CHOKEPOINT_EFFECT,
   HOSTAPI_EFFECT_BY_PATH,
@@ -165,14 +166,16 @@ export const GATED_EFFECT_PATHS: ReadonlySet<string> = (() => {
 /**
  * Per-invocation enforcement context, bound by the executor around `tool.execute`
  * (next to the effect ledger) and read by the effect-gate through
- * {@link AsyncLocalStorage}. Carries the host-owned FOREGROUND/headless signal
- * (the same `permissionContext.headless` that drives the host's headless lane), the
- * tool name for the modal, and an invocation-scoped `allow-once` grant set so N
- * writes to the same target inside ONE tool call pop at most one modal.
+ * {@link AsyncLocalStorage}. Carries the host-owned routine/headless scope
+ * independently from approval-surface availability, the tool name for the
+ * modal, and an invocation-scoped `allow-once` grant set so N writes to the
+ * same target inside ONE tool call pop at most one modal.
  */
 export interface EffectGateContext {
-  /** True iff this invocation runs in a headless/routine lane (no interactive approver). */
+  /** True iff this invocation runs in a headless/routine policy lane. */
   readonly headless: boolean;
+  /** Whether this host process can present and settle a local approval. */
+  readonly approvalSurface?: ApprovalSurface;
   /** The executing tool's name — surfaced in the approval dock. */
   readonly toolName: string;
   /**
@@ -187,6 +190,7 @@ export interface EffectGateContext {
 }
 
 const gateContextStorage = new AsyncLocalStorage<EffectGateContext>();
+const authorizationRequiredLatch = new WeakMap<EffectGateContext, () => void>();
 
 /**
  * Run `fn` with an effect-gate context bound for the async chain of one tool
@@ -198,9 +202,17 @@ const gateContextStorage = new AsyncLocalStorage<EffectGateContext>();
 export function runWithEffectGateContext<T>(
   context: Omit<EffectGateContext, "onceGrants">,
   fn: () => Promise<T>,
+  onAuthorizationRequired?: () => void,
 ): Promise<T> {
-  return gateContextStorage.run({ ...context, onceGrants: new Set<string>() }, fn,
-  );
+  const frame: EffectGateContext = { ...context, onceGrants: new Set<string>() };
+  if (onAuthorizationRequired) {
+    // Keep the host-owned terminal latch off the context returned by
+    // currentEffectGateContext(). An in-process adapter may inspect that
+    // context, but cannot manufacture a terminal control without reaching an
+    // actual host-classified write chokepoint.
+    authorizationRequiredLatch.set(frame, onAuthorizationRequired);
+  }
+  return gateContextStorage.run(frame, fn);
 }
 
 /** Read the ambient effect-gate context, or `undefined` outside a gated invocation. */
@@ -240,14 +252,16 @@ export class EffectBoundaryDeniedError extends Error {
   readonly pluginId: string;
   readonly methodPath: string;
   readonly target: string | undefined;
-  readonly reason: "denied" | "headless";
-  constructor(pluginId: string, methodPath: string, target: string | undefined, reason: "denied" | "headless",
+  readonly reason: "denied" | "headless" | "approval-unavailable";
+  constructor(pluginId: string, methodPath: string, target: string | undefined, reason: "denied" | "headless" | "approval-unavailable",
   ) {
     const where = target ? `${methodPath} → ${target}` : methodPath;
     const detail =
       reason === "headless"
         ? "no interactive approver in a headless/routine context"
-        : "the user denied the effect approval";
+        : reason === "approval-unavailable"
+          ? "the local approval surface is unavailable"
+          : "the user denied the effect approval";
     super(
       `[effect-gate] plugin '${pluginId}' blocked from ${where}: ${detail}`,
     );
@@ -288,9 +302,11 @@ export interface EffectEnforcementDeps {
  *                                 blessed in the FOREGROUND can NEVER auto-allow the
  *                                 same descriptor in a later UNATTENDED headless run
  *                                 (headless never honours a foreground-obtained grant).
- *   5. existing grant           → honour the remembered decision (allow → return;
+ *   5. approval unavailable     → latch a host-owned terminal and throw. This is
+ *                                 distinct from routine/headless policy scope.
+ *   6. existing grant           → honour the remembered decision (allow → return;
  *                                 deny-always → throw) without a modal. FOREGROUND only.
- *   6. foreground               → await `requestAndWait`; record the grant; allow or throw.
+ *   7. foreground               → await `requestAndWait`; record the grant; allow or throw.
  */
 export async function gateMutatingEffect(params: {
   pluginId: string;
@@ -322,6 +338,20 @@ export async function gateMutatingEffect(params: {
       params.methodPath,
       params.target,
       "headless",
+    );
+  }
+
+  // Native one-shot execution deliberately keeps normal foreground tool scope,
+  // so `headless` is false even though no approval UI exists. Latch the
+  // terminal before throwing. This also runs before remembered grants: a grant
+  // made while a user was present cannot authorize an unattended invocation.
+  if (ctx.approvalSurface === "unavailable") {
+    authorizationRequiredLatch.get(ctx)?.();
+    throw new EffectBoundaryDeniedError(
+      params.pluginId,
+      params.methodPath,
+      params.target,
+      "approval-unavailable",
     );
   }
 

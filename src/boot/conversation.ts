@@ -34,6 +34,7 @@ import { AuditLogger } from "../audit/audit-logger.js";
 import type { NotificationService } from "../main/notification-service.js";
 import type { LLMProvider } from "../engine/llm/types.js";
 import type { SubscriptionChatRuntimeSelection } from "../shared/subscription-runtime.js";
+import type { ApprovalSurface } from "../shared/authorization-required.js";
 import { isDefaultWorkspaceRoot } from "../main/default-workspace-root.js";
 import {
   defaultWorkspaceProject,
@@ -212,6 +213,8 @@ export interface ConversationDeps {
   tracer?: import("@opentelemetry/api").Tracer;
   /** Host-owned capability; defaults false when omitted. */
   supportsA2AParentDelivery?: boolean;
+  /** Whether this host process can present and settle local approvals. */
+  approvalSurface?: ApprovalSurface;
   memoryManager: MemoryManager;
   /** Main-chat explicit saves use the host's common memory-review path. */
   memoryCaptureService?: MemoryCaptureService;
@@ -305,6 +308,7 @@ export type RoutineConversationLoopDeps = Pick<
   | "authorizeProject"
   | "subscriptionProviderFactory"
   | "broadcastPermissionConfigChanged"
+  | "approvalSurface"
 >;
 
 export function createRoutineConversationLoop(
@@ -382,6 +386,7 @@ export function createRoutineConversationLoop(
     additionalDirectories: scope?.directories ?? [],
     subscriptionProviderFactory: deps.subscriptionProviderFactory,
     broadcastPermissionConfigChanged: deps.broadcastPermissionConfigChanged,
+    approvalSurface: deps.approvalSurface,
     headless: true,
     // postTurnHookChain / idleScheduler intentionally omitted — routine loops
     // are isolated from interactive chat side effects. The fallback persistence
@@ -434,6 +439,7 @@ export type SideChatConversationLoopDeps = Pick<
   | "auditLogger"
   | "subscriptionProviderFactory"
   | "broadcastPermissionConfigChanged"
+  | "approvalSurface"
 > & {
   /** Isolated MemoryManager rooted at `~/.lvis/side-chat/`. */
   sideChatMemoryManager: MemoryManager;
@@ -497,6 +503,7 @@ export function createSideChatConversationLoop(
     ...(deps.tracer ? { tracer: deps.tracer } : {}),
     subscriptionProviderFactory: deps.subscriptionProviderFactory,
     broadcastPermissionConfigChanged: deps.broadcastPermissionConfigChanged,
+    approvalSurface: deps.approvalSurface,
     isDefaultProjectRoot: deps.isDefaultProjectRoot ?? isDefaultWorkspaceRoot,
     getDefaultProject: deps.getDefaultProject ?? defaultWorkspaceProject,
     authorizeProject: deps.authorizeProject ?? authorizeWorkspaceProjectRoot,
@@ -517,6 +524,7 @@ export function createConversationLoop(deps: ConversationDeps,
     routeEngine: deps.routeEngine,
     toolRegistry: deps.toolRegistry,
     supportsA2AParentDelivery: deps.supportsA2AParentDelivery === true,
+    approvalSurface: deps.approvalSurface,
     ...(deps.rationaleCoordinatorFactory
       ? { rationaleCoordinatorFactory: deps.rationaleCoordinatorFactory }
       : {}),

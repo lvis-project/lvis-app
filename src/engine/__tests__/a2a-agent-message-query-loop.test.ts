@@ -36,6 +36,8 @@ function createLoop(
   toolRegistry: ToolRegistry,
   withApprovalGate = false,
   approvalChoice: "allow-once" | "deny-once" = "allow-once",
+  approvalSurface?: "interactive" | "unavailable",
+  headless = false,
 ): ConversationLoop {
   const inputClassifier = new InputClassifier();
   const routeEngine = new RouteEngine();
@@ -60,6 +62,8 @@ function createLoop(
     routeEngine,
     toolRegistry,
     approvalGate,
+    approvalSurface,
+    headless,
     memoryManager: {
       saveSession: () => Promise.resolve(),
       listSessions: () => [],
@@ -561,6 +565,116 @@ describe("A2A question control and causal propagation", () => {
       }),
       );
       expect(provider.turnsServed).toBe(2);
+    },
+  );
+
+  it.each(["request_plugin", "tool_search"])(
+    "terminalizes intercepted %s when a foreground host has no approval surface",
+    async (name) => {
+      const toolRegistry = new ToolRegistry();
+      toolRegistry.register(createDynamicTool({
+        name,
+        description: name,
+        source: "builtin",
+        category: "meta",
+        modelVisible: true,
+        decisionOverride: "always-allow-with-audit",
+        jsonSchema: { type: "object", properties: {} },
+        execute: async () => ({ output: "must not execute", isError: false }),
+      }));
+      const provider = new ScriptedProvider([
+        [
+          { type: "tool_call", id: `windowless-${name}`, name, input: {} },
+          { type: "message_complete", stopReason: "tool_use" },
+        ],
+        [
+          { type: "text_delta", text: "unexpected retry" },
+          { type: "message_complete", stopReason: "end_turn" },
+        ],
+      ]);
+      const loop = createLoop(
+        provider,
+        toolRegistry,
+        true,
+        "allow-once",
+        "unavailable",
+      );
+
+      const result = await loop.runTurn("continue", undefined, undefined, {
+        sessionIdOverride: "sub-recipient",
+        spawnDepth: 1,
+        inputOrigin: "agent-message",
+        approvalReasonPrefix: "[Sub-Agent: sender-worker]",
+      });
+
+      const gate = (loop as unknown as {
+        testApprovalRequestAndWait: ReturnType<typeof vi.fn>;
+      }).testApprovalRequestAndWait;
+      expect(gate).not.toHaveBeenCalled();
+      expect(provider.turnsServed).toBe(1);
+      expect(result).toMatchObject({
+        stopReason: "authorization-required",
+        authorizationRequired: {
+          kind: "tool",
+          toolName: name,
+          source: "builtin",
+          category: "meta",
+          reason: "approval-surface-unavailable",
+        },
+      });
+      expect(loop.getHistory().getMessages().filter((message) =>
+        message.role === "tool_result" && message.toolUseId === `windowless-${name}`
+      )).toHaveLength(1);
+    },
+  );
+
+  it.each(["request_plugin", "tool_search"])(
+    "keeps intercepted %s in the existing routine headless denial flow",
+    async (name) => {
+      const toolRegistry = new ToolRegistry();
+      toolRegistry.register(createDynamicTool({
+        name,
+        description: name,
+        source: "builtin",
+        category: "meta",
+        modelVisible: true,
+        decisionOverride: "always-allow-with-audit",
+        jsonSchema: { type: "object", properties: {} },
+        execute: async () => ({ output: "must not execute", isError: false }),
+      }));
+      const provider = new ScriptedProvider([
+        [
+          { type: "tool_call", id: `routine-${name}`, name, input: {} },
+          { type: "message_complete", stopReason: "tool_use" },
+        ],
+        [
+          { type: "text_delta", text: "routine handled denial" },
+          { type: "message_complete", stopReason: "end_turn" },
+        ],
+      ]);
+      const loop = createLoop(
+        provider,
+        toolRegistry,
+        true,
+        "deny-once",
+        "unavailable",
+        true,
+      );
+
+      const result = await loop.runTurn("continue", undefined, undefined, {
+        sessionIdOverride: "routine-recipient",
+        spawnDepth: 1,
+        inputOrigin: "agent-message",
+        approvalReasonPrefix: "[Sub-Agent: routine-worker]",
+      });
+
+      const gate = (loop as unknown as {
+        testApprovalRequestAndWait: ReturnType<typeof vi.fn>;
+      }).testApprovalRequestAndWait;
+      expect(gate).toHaveBeenCalledOnce();
+      expect(provider.turnsServed).toBe(2);
+      expect(result.stopReason).toBe("end_turn");
+      expect(result.authorizationRequired).toBeUndefined();
     },
   );
 });

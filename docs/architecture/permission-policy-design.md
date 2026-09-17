@@ -327,6 +327,16 @@ blocked on an explicit decision. Headless requests must not interrupt the user
 with a surprise foreground surface. Non-low headless requests move to the
 deferred queue and surface through a queue button or history view.
 
+Process-level approval availability is a separate host capability. Native
+`--exec` keeps the normal main-chat tool and egress scope rather than setting
+the routine `headless` flag. When its policy outcome still requires explicit
+authorization, the host emits a typed `authorization-required` terminal and
+does not let the model retry the denied action. Out-of-directory requests may
+still be recorded in the deferred queue, but the one-shot turn terminates with
+the same control outcome because it has no UI in which to settle that request.
+Routine loops keep their existing `headless` deny/defer/reviewer semantics even
+when the containing process also lacks an approval surface.
+
 Closing a deferred modal does not grant permission and does not delete the audit
 record. It leaves the item pending or closed according to the queue state.
 
@@ -357,6 +367,11 @@ returns malformed output, the host fails closed:
 - foreground calls ask the user with explicit reviewer-unavailable context;
 - headless calls defer or deny according to configured failure behavior;
 - audit records include the reviewer failure path.
+
+A windowless host reports `authorization-required` only after a completed
+policy outcome actually needs human consent. Missing reviewer wiring, timeout,
+malformed output, and provider failure remain ordinary failed assessments;
+exit `77` does not claim that approval can repair them.
 
 An unavailable or failed assessment does not prevent the user from remembering
 an ordinary request. The approval gate derives `persistentAllowAllowed` from

@@ -71,10 +71,13 @@ dependency graph excludes desktop runtime imports. `--exec` and `--set-secret`
 construct the ordinary host service graph without a window or renderer; `--serve` keeps
 that host available through the authenticated Local API and any explicitly
 configured Tailnet surface. Desktop event bridges have no subscription when
-their surface is absent. Requests requiring unavailable consent follow the
-existing deny-once path, and UI-only HostApi calls fail before consuming
-proposal state. The [native host guide](../guides/native-server.md) owns launcher,
-profile, key-file, and Linux artifact instructions.
+their surface is absent. Approval availability is a host capability separate
+from the routine `headless` tool-scope flag. A native `--exec` invocation that
+still needs explicit consent ends once with a host-issued
+`authorization-required` result instead of feeding a denial back to the model;
+UI-only HostApi calls fail before consuming proposal state. The
+[native host guide](../guides/native-server.md) owns launcher, profile, key-file,
+and Linux artifact instructions.
 
 `createWindowlessHost` owns one service graph, `ConversationSurfaceRuntime`, and
 `ConversationCommandPort`. Attached clients share the active main conversation,

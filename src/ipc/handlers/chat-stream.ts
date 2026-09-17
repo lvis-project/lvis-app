@@ -20,6 +20,7 @@ import type { ActiveRolePrompt } from "../../data/role-presets.js";
 import type { ConversationLoop, TurnResult } from "../../engine/conversation-loop.js";
 import type { UserContentPart } from "../../engine/llm/types.js";
 import { createDlpSafeUuid } from "../../shared/dlp-safe-id.js";
+import { authorizationRequiredStateForOutput } from "../../shared/authorization-required.js";
 import { parseStagedEnvelope, stagedOriginForInput } from "../../shared/staged-origins.js";
 import {
   countResourceAttachmentFences,
@@ -331,6 +332,15 @@ export async function runStreamedTurn(
   const { trailing, suggestedReply } = suggestedRepliesFilter.finish();
   if (trailing) send({ kind: "assistant.text.delta", text: trailing });
   send({ kind: "suggestions.updated", reply: suggestedReply });
-  send({ kind: "turn.completed", ...(result.route === "command" ? { route: "command" } : {}) });
+  const authorizationRequired = authorizationRequiredStateForOutput(
+    result.authorizationRequired,
+  );
+  send({
+    kind: "turn.completed",
+    ...(result.route === "command" ? { route: "command" } : {}),
+    ...(authorizationRequired
+      ? { authorizationRequired }
+      : {}),
+  });
   return result;
 }

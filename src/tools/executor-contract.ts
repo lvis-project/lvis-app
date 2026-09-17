@@ -1,5 +1,9 @@
 import type { A2AAgentCausalContext } from "../engine/a2a-agent-message-envelope.js";
 import type { RemoteControllerAuthority } from "../shared/chat-origin.js";
+import type {
+  ApprovalSurface,
+  AuthorizationRequiredControl,
+} from "../shared/authorization-required.js";
 import type { McpUiPayload } from "../mcp/types.js";
 import type { HostShellExecutionPlanAuditProjection } from "../permissions/host-shell-execution-plan.js";
 import type { PluginOperationPrincipal } from "../permissions/plugin-operation-grant.js";
@@ -60,6 +64,8 @@ export interface ToolResult {
   image?: ToolResultImage;
   /** Host-issued renderer-safe shell substrate projection. */
   executionPlan?: HostShellExecutionPlanAuditProjection;
+  /** Host-private terminal control. Structural lookalikes are ignored. */
+  authorizationRequired?: AuthorizationRequiredControl;
   /** Wall-clock pipeline duration, including every terminal path. */
   durationMs: number;
 }
@@ -79,6 +85,8 @@ export interface ToolExecutorCallbacks {
 
 export interface ToolPermissionContext {
   headless?: boolean;
+  /** Host-owned UI capability, independent of routine/headless tool scope. */
+  approvalSurface?: ApprovalSurface;
   allowedPluginIds?: ReadonlySet<string>;
   /** Derived only after hooks finalize the invocation arguments. */
   approvalCacheKey?: string;
