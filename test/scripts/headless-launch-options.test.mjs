@@ -7,6 +7,8 @@ test("routes supported native command forms with their values intact", () => {
     ["--exec", "hello"], ["--exec=hello"],
     ["--set-secret", "llm.apiKey.openai"], ["--set-secret=llm.apiKey.openai"],
     ["--serve"], ["--runtime-check"], ["--exec=hello", "--exec-keep-alive"],
+    ["--exec=hello", "--exec-operator-attestation=/run/lvis/attestation.json"],
+    ["--exec-operator-attestation=/run/lvis/attestation.json"],
   ]) {
     assert.deepEqual(headlessLaunchArgs(args), args);
     assert.deepEqual(headlessLaunchArgs(["dist/src/main/main.js", ...args]), args);
