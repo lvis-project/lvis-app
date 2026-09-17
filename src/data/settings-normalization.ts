@@ -1369,20 +1369,26 @@ export function acceptTelemetryText(
 export function normalizeChat(input: unknown): ChatSettings {
   const result: ChatSettings = { ...DEFAULT_SETTINGS.chat };
   if (!input || typeof input !== "object" || Array.isArray(input)) return result;
-  const value = input as Record<string, unknown>;
-  if (typeof value.systemPrompt === "string") result.systemPrompt = value.systemPrompt;
-  if (typeof value.autoCompact === "boolean") result.autoCompact = value.autoCompact;
-  if (typeof value.subAgentMaxRounds === "number" && Number.isFinite(value.subAgentMaxRounds)) {
-    result.subAgentMaxRounds = Math.max(1, Math.floor(value.subAgentMaxRounds));
+  const chat = input as Record<string, unknown>;
+  if (typeof chat.systemPrompt === "string") result.systemPrompt = chat.systemPrompt;
+  if (typeof chat.autoCompact === "boolean") result.autoCompact = chat.autoCompact;
+  switch (chat.processingDisplayLevel) {
+    case "tools":
+    case "reasoning":
+      result.processingDisplayLevel = chat.processingDisplayLevel;
+  }
+  // `full` and malformed/missing values keep the full-view default above.
+  if (typeof chat.subAgentMaxRounds === "number" && Number.isFinite(chat.subAgentMaxRounds)) {
+    result.subAgentMaxRounds = Math.max(1, Math.floor(chat.subAgentMaxRounds));
   }
   // `0` is the OFF value and must survive, so this floors at 0 rather than 1.
   // A fraction or a negative from a hand-edited settings.json reads as "off"
   // instead of firing a notification on every round.
   if (
-    typeof value.progressNudgeRounds === "number"
-    && Number.isFinite(value.progressNudgeRounds)
+    typeof chat.progressNudgeRounds === "number"
+    && Number.isFinite(chat.progressNudgeRounds)
   ) {
-    result.progressNudgeRounds = Math.max(0, Math.floor(value.progressNudgeRounds));
+    result.progressNudgeRounds = Math.max(0, Math.floor(chat.progressNudgeRounds));
   }
   return result;
 }

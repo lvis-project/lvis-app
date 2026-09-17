@@ -20,6 +20,10 @@ import {
 } from "../../../shared/subscription-runtime.js";
 import { selectSubscriptionRuntimeUiPolicy, type SubscriptionRuntimeUiPolicy } from "../utils/subscription-runtime-ui-policy.js";
 import { resolveContextWindowForRoute } from "../../../shared/context-budget.js";
+import {
+  DEFAULT_PROCESSING_DISPLAY_LEVEL,
+  type ProcessingDisplayLevel,
+} from "../../../shared/processing-display-level.js";
 
 function canUseSettingsWithoutApiKey(
   settings: Awaited<ReturnType<LvisApi["getSettings"]>>,
@@ -88,6 +92,8 @@ export interface UseSettingsResult {
   settingsLoaded: boolean;
   /** Cached `enableThinking` flag for the active vendor. */
   enableThinkingChat: boolean;
+  /** User-selected detail shown inside transcript work groups. */
+  processingDisplayLevel: ProcessingDisplayLevel;
   /** True when the active vendor can run with no stored API key. */
   llmReadyWithoutApiKey: boolean;
   /** Single source of truth for selected subscription chat and attachment UX. */
@@ -111,6 +117,9 @@ export function useSettings(api: LvisApi): UseSettingsResult {
   const [llmModel, setLlmModel] = useState<string>("");
   const [llmContextWindow, setLlmContextWindow] = useState<number>(0);
   const [enableThinkingChat, setEnableThinkingChat] = useState<boolean>(true);
+  const [processingDisplayLevel, setProcessingDisplayLevel] = useState<ProcessingDisplayLevel>(
+    DEFAULT_PROCESSING_DISPLAY_LEVEL,
+  );
   const [llmReadyWithoutApiKey, setLlmReadyWithoutApiKey] = useState(false);
   const [activeSubscriptionRuntime, setActiveSubscriptionRuntime] =
     useState<SubscriptionChatRuntimeSelection | null>(null);
@@ -149,6 +158,9 @@ export function useSettings(api: LvisApi): UseSettingsResult {
         ).contextWindow,
       );
       setEnableThinkingChat(block.enableThinking);
+      setProcessingDisplayLevel(
+        settings.chat.processingDisplayLevel ?? DEFAULT_PROCESSING_DISPLAY_LEVEL,
+      );
       setLlmReadyWithoutApiKey(canUseSettingsWithoutApiKey(settings, provider));
       const nextSubscriptionRuntime = activeSubscriptionRuntimeFromSettings(settings);
       const runtimeChanged = !sameSubscriptionRuntime(
@@ -295,6 +307,7 @@ export function useSettings(api: LvisApi): UseSettingsResult {
     llmModel,
     llmContextWindow,
     enableThinkingChat,
+    processingDisplayLevel,
     llmReadyWithoutApiKey,
     subscriptionRuntimePolicy,
     activeSubscriptionRuntime: subscriptionRuntimePolicy.activeSubscriptionRuntime,

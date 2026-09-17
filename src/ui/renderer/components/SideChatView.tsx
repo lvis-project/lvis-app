@@ -51,6 +51,7 @@ import { useWorkflowTools } from "../hooks/use-workflow-tools.js";
 import { ApprovalDock } from "./permissions/ApprovalDock.js";
 import { QuestionOverlay } from "./QuestionOverlay.js";
 import { sessionOwnedBy } from "./chat-group-session-registry.js";
+import { DEFAULT_PROCESSING_DISPLAY_LEVEL } from "../../../shared/processing-display-level.js";
 
 /**
  * A sidebar row asking one tile to show a stored side chat.
@@ -373,6 +374,9 @@ function SideChatSession({
             currentSessionId={sessionId ?? "side-chat"}
             turnSummaryByTurnStart={turnSummaryByTurnStart}
             showTokenCostBadge={chatContext?.usageAvailable !== false}
+            processingDisplayLevel={
+              chatContext?.processingDisplayLevel ?? DEFAULT_PROCESSING_DISPLAY_LEVEL
+            }
           />
         )}
         <div ref={chatEndRef} />

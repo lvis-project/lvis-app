@@ -26,6 +26,16 @@ import {
 } from "../chat-stream-state.js";
 
 describe("chat-stream-state", () => {
+  it("marks provider status explicitly and clears the marker when answer text starts", () => {
+    let entries: ChatEntry[] = appendUserEntry([], "question");
+    entries = upsertStreamingAssistant(entries, "retrying provider", "status");
+    expect(entries.at(-1)).toMatchObject({ kind: "assistant", phase: "status" });
+
+    entries = upsertStreamingAssistant(entries, "answer text");
+    expect(entries.at(-1)).toMatchObject({ kind: "assistant", text: "answer text" });
+    expect(entries.at(-1)).not.toHaveProperty("phase", "status");
+  });
+
   it("merges adjacent tool rounds into a single visual bundle when no assistant output is between them", () => {
     let entries: ChatEntry[] = appendUserEntry([], "질문");
 

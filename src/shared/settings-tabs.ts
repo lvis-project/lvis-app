@@ -64,7 +64,13 @@ export const SETTINGS_TAB_LABEL_KEYS: Record<SettingsTab, string> = {
 export const SETTINGS_SECTIONS: Record<SettingsTab, readonly string[]> = {
   llm: ["llm-providers", "llm-thinking", "llm-fallback", "llm-pricing-overrides"],
   appearance: ["appearance-language", "appearance-theme", "appearance-font"],
-  chat: ["chat-optimization", "chat-stream-smoothing", "chat-experimental", "chat-privacy"],
+  chat: [
+    "chat-optimization",
+    "chat-stream-smoothing",
+    "chat-processing-display",
+    "chat-experimental",
+    "chat-privacy",
+  ],
   web: ["web-search-engine", "web-api-key", "web-view-flow"],
   startup: [
     "startup-shortcut",

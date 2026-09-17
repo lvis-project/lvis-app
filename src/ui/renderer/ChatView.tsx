@@ -180,7 +180,7 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onRet
     tpmLimit, tpmPct,
     rolePresets, activePresetId, setActivePresetId,
     attachments, setAttachments, attachmentNCounter,
-    enableThinkingChat, reasoningAvailable, toggleThinking, usageAvailable, subscriptionRuntimePolicy, subscriptionImageAttachmentProvider, subscriptionFileAttachmentProvider, subscriptionUnavailableProvider, subscriptionPendingProvider,
+    enableThinkingChat, processingDisplayLevel, reasoningAvailable, toggleThinking, usageAvailable, subscriptionRuntimePolicy, subscriptionImageAttachmentProvider, subscriptionFileAttachmentProvider, subscriptionUnavailableProvider, subscriptionPendingProvider,
     costEstimate, costBadgeClass, activeVendor,
     llmVendor, llmModel,
   } = useChatContext();
@@ -701,6 +701,7 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onRet
       activeVendor={activeVendor}
       showTokenCostBadge={usageAvailable !== false}
       debugStreamEnabled={debugStreamEnabled}
+      processingDisplayLevel={processingDisplayLevel}
     />
   );
 

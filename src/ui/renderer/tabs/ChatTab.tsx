@@ -5,6 +5,7 @@ import { Checkbox } from "../../../components/ui/checkbox.js";
 import { Input } from "../../../components/ui/input.js";
 import { Label } from "../../../components/ui/label.js";
 import { RadioGroup, RadioGroupItem } from "../../../components/ui/radio-group.js";
+import { Slider } from "../../../components/ui/slider.js";
 import {
   SUBAGENT_MAX_ROUNDS_DEFAULT,
   SUBAGENT_MAX_ROUNDS_MIN,
@@ -13,6 +14,22 @@ import { SettingsPageHeader, SettingsSection } from "../components/PageShell.js"
 import { useTranslation } from "../../../i18n/react.js";
 
 import type { MemoryCaptureMode } from "../types.js";
+import {
+  PROCESSING_DISPLAY_LEVELS,
+  type ProcessingDisplayLevel,
+} from "../../../shared/processing-display-level.js";
+
+const PROCESSING_DISPLAY_LABEL_KEYS: Record<ProcessingDisplayLevel, string> = {
+  tools: "chatTab.processingDisplayBrief",
+  reasoning: "chatTab.processingDisplayStandard",
+  full: "chatTab.processingDisplayDetailed",
+};
+
+const PROCESSING_DISPLAY_HINT_KEYS: Record<ProcessingDisplayLevel, string> = {
+  tools: "chatTab.processingDisplayBriefHint",
+  reasoning: "chatTab.processingDisplayStandardHint",
+  full: "chatTab.processingDisplayDetailedHint",
+};
 
 const MEMORY_CAPTURE_MODE_OPTIONS: readonly {
   value: MemoryCaptureMode;
@@ -39,6 +56,8 @@ const MEMORY_CAPTURE_MODE_OPTIONS: readonly {
 export interface ChatTabProps {
   autoCompact: boolean;
   setAutoCompact: (updater: boolean | ((prev: boolean) => boolean)) => void;
+  processingDisplayLevel: ProcessingDisplayLevel;
+  setProcessingDisplayLevel: (value: ProcessingDisplayLevel) => void;
   streamSmoothing: "none" | "word" | "char";
   setStreamSmoothing: (v: "none" | "word" | "char") => void;
   idlePreferenceRefresh?: boolean;
@@ -61,6 +80,8 @@ export interface ChatTabProps {
 export function ChatTab({
   autoCompact,
   setAutoCompact,
+  processingDisplayLevel,
+  setProcessingDisplayLevel,
   streamSmoothing,
   setStreamSmoothing,
   idlePreferenceRefresh,
@@ -79,6 +100,7 @@ export function ChatTab({
   onImmediateChange,
 }: ChatTabProps) {
   const { t } = useTranslation();
+  const processingDisplayIndex = PROCESSING_DISPLAY_LEVELS.indexOf(processingDisplayLevel);
   // Memoize the wrapped onToggle so PrivacyTab receives a stable identity
   // across re-renders — if PrivacyTab ever memoizes via React.memo / props
   // comparison, an inline arrow would defeat it.
@@ -138,6 +160,51 @@ export function ChatTab({
             </Label>
           ))}
         </RadioGroup>
+      </SettingsSection>
+
+      <SettingsSection
+        data-settings-section="chat-processing-display"
+        title={t("chatTab.processingDisplayTitle")}
+        description={t("chatTab.processingDisplayDescription")}
+      >
+        <div className="space-y-3 rounded-md border px-3 py-3">
+          <Slider
+            min={0}
+            max={2}
+            step={1}
+            value={[processingDisplayIndex]}
+            disabled={!settingsLoaded}
+            data-testid="processing-display-slider"
+            aria-label={t("chatTab.processingDisplayAriaLabel")}
+            aria-valuetext={t(PROCESSING_DISPLAY_LABEL_KEYS[processingDisplayLevel])}
+            onValueChange={([value]) => {
+              const next = PROCESSING_DISPLAY_LEVELS[value ?? 0];
+              if (!next) return;
+              setProcessingDisplayLevel(next);
+              onImmediateChange?.();
+            }}
+          />
+          <div className="grid grid-cols-3 gap-2 text-[11px] text-muted-foreground">
+            {PROCESSING_DISPLAY_LEVELS.map((level) => (
+              <button
+                key={level}
+                type="button"
+                disabled={!settingsLoaded}
+                aria-pressed={processingDisplayLevel === level}
+                className="rounded px-1 py-1 text-center hover:text-foreground disabled:pointer-events-none"
+                onClick={() => {
+                  setProcessingDisplayLevel(level);
+                  onImmediateChange?.();
+                }}
+              >
+                {t(PROCESSING_DISPLAY_LABEL_KEYS[level])}
+              </button>
+            ))}
+          </div>
+          <p className="text-[11px] text-muted-foreground" data-testid="processing-display-hint">
+            {t(PROCESSING_DISPLAY_HINT_KEYS[processingDisplayLevel])}
+          </p>
+        </div>
       </SettingsSection>
 
       <SettingsSection

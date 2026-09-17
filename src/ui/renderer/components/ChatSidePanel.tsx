@@ -52,6 +52,8 @@ import {
   tabIcon,
 } from "./ChatSidePanelPreview.js";
 import { TEST_IDS, chatSidePanelLauncherTestId } from "../../../shared/test-ids.js";
+import { useOptionalChatContext } from "../context/ChatContext.js";
+import { DEFAULT_PROCESSING_DISPLAY_LEVEL } from "../../../shared/processing-display-level.js";
 
 
 /** Status tone for the sub-agent list row badge. */
@@ -170,6 +172,7 @@ function SubAgentTranscriptDetail({
   spawn: SubAgentSpawn;
 }) {
   const { t } = useTranslation();
+  const chatContext = useOptionalChatContext();
   const hydrationKey = `${parentSessionId ?? ""}\u0001${spawn.childSessionId ?? ""}`;
   const [hydrated, setHydrated] = useState<{ key: string; entries: ChatEntry[] } | null>(null);
   useEffect(() => {
@@ -208,6 +211,9 @@ function SubAgentTranscriptDetail({
           streaming={spawn.status === "running"}
           currentSessionId={sessionId}
           workGroupsForceOpen
+          processingDisplayLevel={
+            chatContext?.processingDisplayLevel ?? DEFAULT_PROCESSING_DISPLAY_LEVEL
+          }
         />
       ) : (
         <div className="py-1 text-xs text-muted-foreground">

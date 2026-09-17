@@ -35,6 +35,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     systemPrompt:
       "You are LVIS, a local knowledge assistant. You provide accurate, helpful answers grounded in the user's documents and context. Respond in the user's language.",
     autoCompact: true,
+    processingDisplayLevel: "full",
     // Tool rounds a sub-agent may run before it hits `round-cap` and suspends.
     // Run as configured — no ceiling narrows it. Exposed because the right
     // budget depends on the work: a deep multi-repo review needs far more

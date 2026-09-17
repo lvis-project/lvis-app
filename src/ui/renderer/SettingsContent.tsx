@@ -624,6 +624,8 @@ export function SettingsContent({
             <ChatTab
               autoCompact={s.autoCompact}
               setAutoCompact={s.setAutoCompact}
+              processingDisplayLevel={s.processingDisplayLevel}
+              setProcessingDisplayLevel={s.setProcessingDisplayLevel}
               streamSmoothing={s.streamSmoothing}
               setStreamSmoothing={s.setStreamSmoothing}
               idlePreferenceRefresh={s.idlePreferenceRefresh}

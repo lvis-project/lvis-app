@@ -8,6 +8,7 @@ import type { LLMVendor } from "../../../shared/llm-vendor-defaults.js";
 import type { Attachment } from "../types/attachments.js";
 import type { SubscriptionRuntimeUiPolicy } from "../utils/subscription-runtime-ui-policy.js";
 import type { SideChatSurface } from "../components/chat-group-session-registry.js";
+import type { ProcessingDisplayLevel } from "../../../shared/processing-display-level.js";
 
 /**
  * Cross-cutting chat-view state bundle. Groups props by concern so ChatView
@@ -101,6 +102,7 @@ export interface ChatContextValue {
 
   // Thinking toggle
   enableThinkingChat: boolean;
+  processingDisplayLevel: ProcessingDisplayLevel;
   /** False when the selected chat runtime does not expose an effort control. */
   reasoningAvailable?: boolean;
   toggleThinking: (v: boolean) => Promise<void> | void;
