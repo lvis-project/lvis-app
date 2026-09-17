@@ -72,6 +72,8 @@ import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 import { endTurnScript } from "./conversation-loop-test-helpers.js";
 import type { PromptMemorySource } from "../../memory/memory-manager.js";
 import { makePromptMemorySource } from "../../prompts/__tests__/test-helpers.js";
+import { PermissionManager } from "../../permissions/permission-manager.js";
+import { authorizationRequiredStateForOutput } from "../../shared/authorization-required.js";
 
 // ─── Test scaffolding ─────────────────────────────────
 
@@ -173,6 +175,77 @@ function buildLoopDeps(toolRegistry: ToolRegistry) {
     },
   } as unknown as ConstructorParameters<typeof ConversationLoop>[0];
 }
+
+describe("SubAgentRunner — authorization terminal propagation", () => {
+  it("lifts a live child authorization terminal into the spawn result", async () => {
+    const toolRegistry = new ToolRegistry();
+    const execute = vi.fn(async () => ({ output: "unexpected execution", isError: false }));
+    toolRegistry.register(createDynamicTool({
+      name: "authorization_probe",
+      description: "Authorization probe",
+      source: "builtin",
+      category: "write",
+      jsonSchema: { type: "object", properties: {} },
+      execute,
+    }));
+    const permissionDirectory = mkdtempSync(join(tmpdir(), "lvis-subagent-auth-"));
+    const permissionManager = new PermissionManager(
+      join(permissionDirectory, "permissions.json"),
+    );
+    permissionManager.checkDetailed = () => ({
+      decision: "ask",
+      reason: "fixture requires local authorization",
+      layer: 3,
+      forceModal: true,
+    });
+    const provider = new ScriptedProvider([[
+      { type: "tool_call", id: "child-auth", name: "authorization_probe", input: {} },
+      { type: "message_complete", stopReason: "tool_use" },
+    ]]);
+    const runner = new SubAgentRunner({
+      parentDeps: {
+        ...buildLoopDeps(toolRegistry),
+        permissionManager,
+        approvalSurface: "unavailable",
+      },
+      toolRegistry,
+      subAgentMemoryManager: fakeSubAgentMemoryManager(),
+    });
+    const hasProviderSpy = vi
+      .spyOn(ConversationLoop.prototype as unknown as { hasProvider: () => boolean }, "hasProvider")
+      .mockReturnValue(true);
+    const refreshProviderSpy = vi
+      .spyOn(
+        ConversationLoop.prototype as unknown as { refreshProvider: () => void },
+        "refreshProvider",
+      )
+      .mockImplementation(function (this: ConversationLoop) {
+        (this as { provider: LLMProvider | null }).provider = provider;
+      });
+
+    try {
+      const result = await runner.spawn({
+        title: "authorization child",
+        instructions: "perform the protected action",
+        toolScope: exactToolScope(["authorization_probe"]),
+        maxRounds: 2,
+        originSessionId: "8f0f47bf-c978-4a4b-948d-eb86cd8f9258",
+      });
+
+      expect(provider.turnsServed).toBe(1);
+      expect(execute).not.toHaveBeenCalled();
+      expect(result.stopReason).toBe("authorization-required");
+      expect(authorizationRequiredStateForOutput(result.authorizationRequired)).toMatchObject({
+        toolName: "authorization_probe",
+        reason: "approval-surface-unavailable",
+      });
+    } finally {
+      hasProviderSpy.mockRestore();
+      refreshProviderSpy.mockRestore();
+      await cleanupTmpDir(permissionDirectory);
+    }
+  });
+});
 
 // ─── 1) maxRounds bound ───────────────────────────────
 

@@ -13,6 +13,7 @@ import { basename, join } from "node:path";
 import { EventEmitter } from "node:events";
 
 import {
+  EXEC_AUTHORIZATION_REQUIRED_EXIT_CODE,
   EXEC_USAGE_EXIT_CODE,
   execModeRequested,
   execTurnRequested,
@@ -31,6 +32,10 @@ import { ApprovalGate } from "../../permissions/approval-gate.js";
 import type { PermissionManager } from "../../permissions/permission-manager.js";
 import type { SettingsService } from "../../data/settings-store.js";
 import type { ConversationLoop, TurnResult } from "../../engine/conversation-loop.js";
+import {
+  issueAuthorizationRequiredControl,
+  type AuthorizationRequiredState,
+} from "../../shared/authorization-required.js";
 
 const COMPLETED_TURN: TurnResult = {
   text: "done",
@@ -157,7 +162,7 @@ describe("retained headless session", () => {
     expect(harness.runTurn).toHaveBeenCalledTimes(1);
   });
 
-  it.each(["stream-error", "input-required"] as const)("does not retain an unsuccessful %s turn", async (stopReason) => {
+  it.each(["stream-error", "input-required", "authorization-required"] as const)("does not retain an unsuccessful %s turn", async (stopReason) => {
     const harness = makeDeps({ turnResult: { ...COMPLETED_TURN, stopReason } });
     const waitForRelease = vi.fn(async () => {});
     const code = await runExecTurn({ ...harness.deps, waitForRelease }, turnRequest({ keepAlive: true }));
@@ -397,6 +402,35 @@ describe("runExecTurn — stream-json output", () => {
     }
   });
 
+  it("publishes a structured authorization terminal without raw tool input", async () => {
+    const authorizationRequired = issueAuthorizationRequiredControl({
+      kind: "tool" as const,
+      toolName: "dangerous_tool",
+      source: "builtin" as const,
+      category: "write" as const,
+      reason: "approval-surface-unavailable" as const,
+      command: "super-secret-command",
+    } as AuthorizationRequiredState & { command: string }).state;
+    const harness = makeDeps({
+      turnResult: {
+        ...COMPLETED_TURN,
+        text: "",
+        stopReason: "authorization-required",
+        authorizationRequired,
+      },
+    });
+
+    const code = await runExecTurn(harness.deps, turnRequest());
+
+    expect(code).toBe(EXEC_AUTHORIZATION_REQUIRED_EXIT_CODE);
+    const events = harness.stdout.lines().map((line) => JSON.parse(line));
+    expect(events.at(-1)).toEqual({
+      kind: "turn.completed",
+      authorizationRequired,
+    });
+    expect(harness.stdout.text()).not.toContain("super-secret-command");
+  });
+
   it("opens the session on the requested project root", async () => {
     const dir = mkdtempSync(join(tmpdir(), "exec-project-"));
     try {
@@ -442,6 +476,73 @@ describe("runExecTurn — json output", () => {
     const lines = harness.stdout.lines();
     expect(lines).toHaveLength(1);
     expect(JSON.parse(lines[0]!)).toEqual(COMPLETED_TURN);
+  });
+
+  it("emits only safe terminal metadata for an authorization-required result", async () => {
+    const authorizationRequired = issueAuthorizationRequiredControl({
+      kind: "host-execution" as const,
+      toolName: "bash",
+      source: "builtin" as const,
+      category: "shell" as const,
+      reason: "host-execution-authorization-required" as const,
+    }).state;
+    const harness = makeDeps({
+      turnResult: {
+        ...COMPLETED_TURN,
+        text: "partial super-secret-command",
+        toolCalls: [{
+          name: "bash",
+          input: { command: "super-secret-command" },
+          result: "not executed",
+        }],
+        stopReason: "authorization-required",
+        authorizationRequired,
+      },
+    });
+
+    const code = await runExecTurn(
+      harness.deps,
+      turnRequest({ output: "json" }),
+    );
+
+    expect(code).toBe(EXEC_AUTHORIZATION_REQUIRED_EXIT_CODE);
+    expect(harness.stdout.lines()).toHaveLength(1);
+    expect(JSON.parse(harness.stdout.lines()[0]!)).toEqual({
+      stopReason: "authorization-required",
+      authorizationRequired,
+    });
+    expect(harness.stdout.text()).not.toContain("super-secret-command");
+  });
+
+  it("still redacts raw tool calls if an authorization terminal is malformed", async () => {
+    const harness = makeDeps({
+      turnResult: {
+        ...COMPLETED_TURN,
+        toolCalls: [{
+          name: "bash",
+          input: { command: "super-secret-command" },
+          result: "not executed",
+        }],
+        stopReason: "authorization-required",
+        authorizationRequired: {
+          kind: "host-execution",
+          toolName: "bash",
+          source: "builtin",
+          category: "shell",
+          reason: "host-execution-authorization-required",
+          command: "super-secret-command",
+        } as never,
+      },
+    });
+
+    expect(await runExecTurn(
+      harness.deps,
+      turnRequest({ output: "json" }),
+    )).toBe(EXEC_AUTHORIZATION_REQUIRED_EXIT_CODE);
+    expect(JSON.parse(harness.stdout.lines()[0]!)).toEqual({
+      stopReason: "authorization-required",
+    });
+    expect(harness.stdout.text()).not.toContain("super-secret-command");
   });
 });
 
@@ -531,6 +632,24 @@ describe("runExecTurn — exit codes", () => {
       },
     });
     expect(await runExecTurn(harness.deps, turnRequest())).toBe(2);
+  });
+
+  it("returns EX_NOPERM when local authorization is required", async () => {
+    const harness = makeDeps({
+      turnResult: {
+        ...COMPLETED_TURN,
+        text: "",
+        stopReason: "authorization-required",
+        authorizationRequired: {
+          kind: "host-execution",
+          toolName: "bash",
+          source: "builtin",
+          category: "shell",
+          reason: "host-execution-authorization-required",
+        },
+      },
+    });
+    expect(await runExecTurn(harness.deps, turnRequest())).toBe(77);
   });
 });
 

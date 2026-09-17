@@ -26,6 +26,7 @@
 import { statSync } from "node:fs";
 import type { EventEmitter } from "node:events";
 import { basename, resolve } from "node:path";
+import { authorizationRequiredStateForOutput } from "../shared/authorization-required.js";
 import { errorMessage } from "../shared/error-message.js";
 import type { ApprovalGate } from "../permissions/approval-gate.js";
 import type { PermissionManager } from "../permissions/permission-manager.js";
@@ -47,6 +48,9 @@ export const EXEC_LOCKED_EXIT_CODE = 75;
 
 /** Exit code for a turn that ended asking the operator a question. */
 const EXEC_INPUT_REQUIRED_EXIT_CODE = 2;
+
+/** Exit code for an unavailable local authorization surface (`EX_NOPERM`). */
+export const EXEC_AUTHORIZATION_REQUIRED_EXIT_CODE = 77;
 
 /** Exit code for a turn that failed, or a boot that never reached the turn. */
 export const EXEC_FAILURE_EXIT_CODE = 1;
@@ -307,6 +311,12 @@ function stripOneTrailingNewline(text: string): string {
 }
 
 function exitCodeForTurnResult(result: TurnResult): number {
+  if (
+    authorizationRequiredStateForOutput(result.authorizationRequired) !== undefined
+    || result.stopReason === "authorization-required"
+  ) {
+    return EXEC_AUTHORIZATION_REQUIRED_EXIT_CODE;
+  }
   if (result.inputRequired !== undefined || result.stopReason === "input-required") {
     return EXEC_INPUT_REQUIRED_EXIT_CODE;
   }
@@ -385,7 +395,24 @@ async function runTurnRequest(deps: ExecDeps, request: ExecTurnRequest): Promise
       ...(request.maxRounds === undefined ? {} : { maxRounds: request.maxRounds }),
     });
     if (request.output === "json") {
-      deps.stdout.write(`${JSON.stringify(result)}\n`);
+      // An authorization terminal is a control response, not a normal model
+      // result. Do not serialize `toolCalls`: they contain raw command/tool
+      // arguments and are unnecessary for an operator to resume safely.
+      const authorizationRequired = authorizationRequiredStateForOutput(
+        result.authorizationRequired,
+      );
+      const authorizationTerminal =
+        result.stopReason === "authorization-required" ||
+        authorizationRequired !== undefined;
+      const output = authorizationTerminal
+        ? {
+            stopReason: "authorization-required" as const,
+            ...(authorizationRequired === undefined
+              ? {}
+              : { authorizationRequired }),
+          }
+        : result;
+      deps.stdout.write(`${JSON.stringify(output)}\n`);
     }
     return exitCodeForTurnResult(result);
   } catch (err) {

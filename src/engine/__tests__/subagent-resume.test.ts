@@ -55,6 +55,8 @@ import {
 import { A2A_AGENT_MAX_TRACKED_TREES } from "../a2a-agent-message-envelope.js";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 import { endTurnScript } from "./conversation-loop-test-helpers.js";
+import { PermissionManager } from "../../permissions/permission-manager.js";
+import { authorizationRequiredStateForOutput } from "../../shared/authorization-required.js";
 
 // ─── Test scaffolding ─────────────────────────────────
 let loopAuditLoggers: AuditLogger[] = [];
@@ -311,6 +313,93 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       expect(snapshots.at(-1)).toEqual([]);
     } finally {
       runTurnSpy.mockRestore();
+      restore();
+    }
+  });
+
+  it("lifts a live authorization terminal from a resumed child", async () => {
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(noopTool("noop"));
+    const writeExecute = vi.fn(async () => ({ output: "unexpected execution", isError: false }));
+    toolRegistry.register(createDynamicTool({
+      name: "resume_authorization_probe",
+      description: "Resume authorization probe",
+      source: "builtin",
+      category: "write",
+      jsonSchema: { type: "object", properties: {} },
+      execute: writeExecute,
+    }));
+    const permissionManager = new PermissionManager(
+      join(tmpHome, "resume-authorization-permissions.json"),
+    );
+    permissionManager.checkDetailed = (toolName) => toolName === "resume_authorization_probe"
+      ? {
+          decision: "ask",
+          reason: "fixture requires local authorization",
+          layer: 3,
+          forceModal: true,
+        }
+      : {
+          decision: "allow",
+          reason: "fixture allows setup read",
+          layer: 3,
+        };
+    const provider = new ScriptedProvider([
+      [
+        { type: "tool_call", id: "spawn-wait", name: "noop", input: {} },
+        { type: "message_complete", stopReason: "tool_use" },
+      ],
+      [
+        {
+          type: "tool_call",
+          id: "resume-auth",
+          name: "resume_authorization_probe",
+          input: {},
+        },
+        { type: "message_complete", stopReason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "unexpected retry" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const runner = new SubAgentRunner({
+      parentDeps: {
+        ...buildLoopDeps(toolRegistry),
+        permissionManager,
+        approvalSurface: "unavailable",
+      },
+      toolRegistry,
+      subAgentMemoryManager: makeSubStore(),
+    });
+    const restore = patchProvider(provider);
+
+    try {
+      const waiting = await runner.spawn({
+        title: "resumable authorization child",
+        instructions: "start the task",
+        toolScope: exactToolScope(["noop", "resume_authorization_probe"]),
+        maxRounds: 1,
+        originSessionId: "088760a9-85c1-47e9-b201-49b9749a55c3",
+      });
+      expect(waiting.incomplete).toBe(true);
+
+      const resumed = await runner.resume(
+        waiting.childSessionId,
+        "continue with the protected action",
+        "resumable authorization child",
+        undefined,
+        "088760a9-85c1-47e9-b201-49b9749a55c3",
+      );
+
+      expect(provider.turnsServed).toBe(2);
+      expect(writeExecute).not.toHaveBeenCalled();
+      expect(resumed.stopReason).toBe("authorization-required");
+      expect(authorizationRequiredStateForOutput(resumed.authorizationRequired)).toMatchObject({
+        toolName: "resume_authorization_probe",
+        reason: "approval-surface-unavailable",
+      });
+    } finally {
       restore();
     }
   });

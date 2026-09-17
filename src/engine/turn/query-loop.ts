@@ -63,6 +63,12 @@ import {
 } from "../a2a-agent-message-envelope.js";
 import { createSubscriptionUsageCollector, recordSubscriptionRoundTelemetry } from "./subscription-usage-telemetry.js";
 import { errorMessage } from "../../shared/error-message.js";
+import {
+  authorizationRequiredStateOf,
+  issueAuthorizationRequiredControl,
+  type AuthorizationRequiredControl,
+  type AuthorizationRequiredState,
+} from "../../shared/authorization-required.js";
 
 const log = createLogger("lvis");
 // No caller-assigned `maxRounds` = PARENT session: unbounded — a turn ends
@@ -185,6 +191,7 @@ export async function queryLoop(
     usage?: TokenUsage;
     stopReason?: TurnStopReason;
     inputRequired?: TurnInputRequired;
+    authorizationRequired?: AuthorizationRequiredState;
     usageByModel: TokenUsageByModel[];
     subscriptionUsage: ReturnType<typeof createSubscriptionUsageCollector>["values"];
     vendorProvider?: LLMVendor;
@@ -258,6 +265,7 @@ export async function queryLoop(
         usage?: TokenUsage;
         stopReason?: TurnStopReason;
         inputRequired?: TurnInputRequired;
+        authorizationRequired?: AuthorizationRequiredState;
       },
     ) => ({
       ...result,
@@ -1558,6 +1566,9 @@ export async function queryLoop(
         effectiveSessionId,
         bounds.remoteControllerAuthority,
       );
+      const interceptedAuthorizationRequired = interceptedMetaGate.denied
+        .map((denied) => authorizationRequiredStateOf(denied.authorizationRequired))
+        .find((state): state is AuthorizationRequiredState => state !== undefined);
       for (const denied of interceptedMetaGate.denied) {
         self.history.append({
           role: "tool_result",
@@ -1754,6 +1765,20 @@ export async function queryLoop(
       // meta-tool (request_plugin / tool_search) 만 있으면 다음 round 로 —
       // 성공 시 round 예산 돌려받기 (C9). 둘 중 하나라도 promote 했으면 환불.
       if (toolUsesForExecutor.length === 0) {
+        if (interceptedAuthorizationRequired) {
+          decide({
+            kind: "early_exit",
+            branch: "authorization-required",
+            reason: interceptedAuthorizationRequired.reason,
+          });
+          return withServingIdentity({
+            text: mergedText,
+            toolCalls: allToolCalls,
+            usage: turnUsage,
+            stopReason: "authorization-required",
+            authorizationRequired: interceptedAuthorizationRequired,
+          });
+        }
         const promotedSomething =
           pluginOutcome.activatedPluginIds.length > 0 || searchPromotedThisRound;
         if (promotedSomething) round--;
@@ -1808,6 +1833,7 @@ export async function queryLoop(
           executionCwd: self.getSessionExecutionCwd(),
           permissionContext: {
             headless: self.deps.headless,
+            approvalSurface: self.deps.approvalSurface,
             allowedPluginIds: new Set(scope.activePluginIds),
             additionalDirectories: self.getTurnAdditionalDirectories(),
             getAdditionalDirectories: () => self.getTurnAdditionalDirectories(),
@@ -1843,6 +1869,9 @@ export async function queryLoop(
                   tool_use_id: toolUse.id,
                   content: denied.content,
                   is_error: true,
+                  ...(denied.authorizationRequired
+                    ? { authorizationRequired: denied.authorizationRequired }
+                    : {}),
                   durationMs: 0,
                 };
               }
@@ -2088,6 +2117,24 @@ export async function queryLoop(
           toolCalls: allToolCalls,
           usage: turnUsage,
           stopReason: "interrupted",
+        });
+      }
+      const authorizationRequired = interceptedAuthorizationRequired
+        ?? toolResults
+          .map((toolResult) => authorizationRequiredStateOf(toolResult.authorizationRequired))
+          .find((state): state is AuthorizationRequiredState => state !== undefined);
+      if (authorizationRequired) {
+        decide({
+          kind: "early_exit",
+          branch: "authorization-required",
+          reason: authorizationRequired.reason,
+        });
+        return withServingIdentity({
+          text: mergedText,
+          toolCalls: allToolCalls,
+          usage: turnUsage,
+          stopReason: "authorization-required",
+          authorizationRequired,
         });
       }
       // Intra-turn micro-compact — mark older tool_results stale before the
@@ -2900,6 +2947,7 @@ interface InterceptedMetaGateResult {
     toolUseId: string;
     toolName: string;
     content: string;
+    authorizationRequired?: AuthorizationRequiredControl;
   }>;
 }
 
@@ -2936,6 +2984,35 @@ export async function gateCrossAgentInterceptedMetaTools(
         toolUseId: toolUse.id,
         toolName: toolUse.name,
         content: `remote-controller-meta-disabled: ${toolUse.name}`,
+      });
+      continue;
+    }
+
+    if (
+      self.deps.headless !== true
+      && self.deps.approvalSurface === "unavailable"
+      && self.currentAbortController?.signal.aborted !== true
+    ) {
+      const content =
+        "Authorization required: this cross-agent meta operation requires local approval, "
+        + "but this host has no approval surface. The turn has stopped and will not retry automatically.";
+      self.auditLogger.log({
+        timestamp: new Date().toISOString(),
+        sessionId,
+        type: "error",
+        input: `cross-agent-meta-authorization-required:${toolUse.name}`,
+      });
+      denied.push({
+        toolUseId: toolUse.id,
+        toolName: toolUse.name,
+        content,
+        authorizationRequired: issueAuthorizationRequiredControl({
+          kind: "tool",
+          toolName: toolUse.name,
+          source: "builtin",
+          category: "meta",
+          reason: "approval-surface-unavailable",
+        }),
       });
       continue;
     }

@@ -142,7 +142,13 @@ paths against it. Streaming JSON lines are the default output;
 `--exec-output=json` emits one final result. `--exec-max-rounds=<n>` sets the
 turn's round budget. `--exec-approve=allow` selects allow mode but preserves
 protected-path checks and directory grants. Requests that still require
-unavailable consent are denied once.
+unavailable consent terminate without another model round. Streaming output
+ends with a structured `turn.completed.authorizationRequired` state; final JSON
+contains only that safe terminal state. Neither form adds raw command arguments,
+paths, prompts, or reviewer prose to the terminal metadata.
+The streaming form remains an owner-detail diagnostic timeline and can contain
+earlier user, assistant, and tool-input events. Use `--exec-output=json` when a
+consumer needs only the bounded terminal response.
 
 `--set-secret=<key>` accepts a valid settings-secret name in `SECRET_NAME` and
 reads its value from stdin, never from an argument. The example uses an
@@ -157,7 +163,9 @@ services until SIGINT or SIGTERM. It emits
 `{"kind":"exec.completed","exitCode":0}` before waiting and starts no further
 model turn. It does not turn the process into a server. Exit codes are `0` for
 completion, `1` for failure, `2` for requested input, `64` for invalid usage, and
-`75` when another host owns the profile. Shutdown failure can produce exit `1`.
+`75` when another host owns the profile. Exit `77` means the turn requires local
+authorization but this process has no approval surface. Shutdown failure can
+produce exit `1`.
 
 `--serve` accepts only an optional `--user-data-dir=<directory>` alongside it;
 it cannot share a launch with `--exec` or `--set-secret`. It enables the

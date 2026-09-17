@@ -853,7 +853,8 @@ async function runTurnInSpan(
     // streamText/onFinish equivalent — see `fullStreamToStreamEvent` in
     // `engine/llm/vercel/adapter.ts` which forwards the values into the
     // round stream's `usage` field). Suppressed for interrupted turns and for
-    // the two error stop reasons below — those are dropped turns, not answers.
+    // the error/authorization stop reasons below — those are dropped turns,
+    // not answers.
     // The "did the turn produce an answer" test reads the turn-final assistant
     // row rather than `result.text` alone: a turn can end with that row holding
     // reasoning and no text (the model reasoned and emitted nothing), which is
@@ -877,6 +878,7 @@ async function runTurnInSpan(
       // under a user-facing failure notice with stats that belong to the
       // PARTIAL (failed) round, not a completed turn. Exclude explicitly.
       result.stopReason !== "stream-error" &&
+      result.stopReason !== "authorization-required" &&
       turnProducedAnswer;
     // Shape attributes are set for EVERY turn, including the ones whose summary
     // is suppressed (interrupted, context error, stream error) — those are
@@ -1024,7 +1026,8 @@ async function runTurnInSpan(
     if (
       result.stopReason !== "context-error" &&
       result.stopReason !== "stream-error" &&
-      result.stopReason !== "interrupted"
+      result.stopReason !== "interrupted" &&
+      result.stopReason !== "authorization-required"
     ) {
       // A genuinely-completed turn (not interrupted/aborted, not a
       // context/stream error) means the structural failure that drove
@@ -1059,6 +1062,7 @@ async function runTurnInSpan(
       result.stopReason !== "interrupted" &&
       result.stopReason !== "context-error" &&
       result.stopReason !== "stream-error" &&
+      result.stopReason !== "authorization-required" &&
       typeof result.text === "string" &&
       result.text.trim().length > 0
     ) {

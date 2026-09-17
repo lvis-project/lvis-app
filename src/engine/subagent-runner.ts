@@ -95,6 +95,10 @@ import type { A2AAgentMailboxEntry } from "./a2a-agent-message-mailbox.js";
 import { sanitizeA2ALabel } from "./a2a-subagent-message-codec.js";
 import { hasControlChars } from "../shared/display-safe-text.js";
 import {
+  authorizationRequiredStateForOutput,
+  type AuthorizationRequiredState,
+} from "../shared/authorization-required.js";
+import {
   formatParentDirective,
   hasUnsafeDirectiveControlChars,
   PARENT_DIRECTIVE_MAX_CHARS,
@@ -344,6 +348,13 @@ export interface SubAgentSpawnResult {
    * (in that case `ok === false` already signals the failure).
    */
   stopReason?: import("./turn/types.js").TurnStopReason;
+  /**
+   * Live, host-issued authorization terminal from the child loop. This field
+   * is intentionally not reconstructed from persisted metadata: process-local
+   * issuer identity is what lets the trusted agent_spawn builtin propagate it
+   * without accepting child text or stored JSON as authority.
+   */
+  authorizationRequired?: AuthorizationRequiredState;
   /**
    * A resumable terminate-and-return wait. Budget and question waits share
    * the same mechanism; the typed reason tells the caller how to continue.
@@ -3313,6 +3324,7 @@ export class SubAgentRunner {
     let failureReason: string | undefined;
     let childStopReason: import("./turn/types.js").TurnStopReason | undefined;
     let childInputRequired: TurnInputRequired | undefined;
+    let childAuthorizationRequired: AuthorizationRequiredState | undefined;
 
     // Prepend the mode preamble (posture + auto-skill recommendation) to the
     // instructions. The preamble is empty for the default mode, leaving the
@@ -3412,6 +3424,9 @@ export class SubAgentRunner {
       lastText = result.text;
       childStopReason = result.stopReason;
       childInputRequired = result.inputRequired;
+      childAuthorizationRequired = authorizationRequiredStateForOutput(
+        result.authorizationRequired,
+      );
       ok = isSuccessfulSubAgentStopReason(childStopReason, childInputRequired);
       if (!ok) {
         failureReason = subAgentStopFailureReason(childStopReason, lastText, "run");
@@ -3461,6 +3476,9 @@ export class SubAgentRunner {
       ok,
       ...(ok ? {} : { error: failureReason ?? lastText }),
       ...(childStopReason ? { stopReason: childStopReason } : {}),
+      ...(childAuthorizationRequired
+        ? { authorizationRequired: childAuthorizationRequired }
+        : {}),
       ...(ok && childStopReason === "round-cap"
         ? {
             suspension: createBudgetSuspension(child.sessionId),
@@ -4380,6 +4398,7 @@ export class SubAgentRunner {
     let ok = false;
     let failureReason: string | undefined;
     let childInputRequired: TurnInputRequired | undefined;
+    let childAuthorizationRequired: AuthorizationRequiredState | undefined;
     let childStopReason: import("./turn/types.js").TurnStopReason | undefined;
 
     try {
@@ -4451,6 +4470,9 @@ export class SubAgentRunner {
       lastText = turnResult.text;
       childInputRequired = turnResult.inputRequired;
       childStopReason = turnResult.stopReason;
+      childAuthorizationRequired = authorizationRequiredStateForOutput(
+        turnResult.authorizationRequired,
+      );
       ok = isSuccessfulSubAgentStopReason(childStopReason, childInputRequired);
       if (!ok) {
         failureReason = subAgentStopFailureReason(childStopReason, lastText, "resume");
@@ -4475,6 +4497,9 @@ export class SubAgentRunner {
       ok,
       ...(ok ? {} : { error: failureReason ?? lastText }),
       ...(childStopReason ? { stopReason: childStopReason } : {}),
+      ...(childAuthorizationRequired
+        ? { authorizationRequired: childAuthorizationRequired }
+        : {}),
       ...(ok && childStopReason === "round-cap"
         ? {
             suspension: createBudgetSuspension(resumeId),

@@ -35,6 +35,10 @@ import { createDlpSafeUuid } from "../shared/dlp-safe-id.js";
 import { resolveSubAgentCeilingMs } from "../shared/tool-timeout-policy.js";
 import { SUBAGENT_MAX_ROUNDS_DEFAULT } from "../shared/subagent-policy.js";
 import { isDeterministicProviderRequestRejection } from "../engine/llm/error-classifier.js";
+import {
+  authorizationRequiredStateForOutput,
+  issueAuthorizationRequiredControl,
+} from "../shared/authorization-required.js";
 
 /**
  * Guidance for a resume that WAS authorized and did run, then failed.
@@ -235,7 +239,12 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
       // the parent. The model's `background` flag is ignored; surfaces without
       // parent delivery fall back to foreground, the only coherent posture
       // there.
-      const background = ctx.metadata?.supportsA2AParentDelivery === true;
+      // A windowless owner cannot settle a child approval after this tool has
+      // already returned its background handle. Keep that child inline so its
+      // host-issued authorization terminal can become this invocation's
+      // terminal control before the parent model receives another round.
+      const background = ctx.metadata?.supportsA2AParentDelivery === true
+        && ctx.metadata?.approvalSurface !== "unavailable";
       const runner = deps.getRunner();
       if (!runner) {
         return {
@@ -547,6 +556,22 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
         // FAILED and REJECTED are errors even when runTurn returned a result,
         // for example a UserPromptSubmit stopReason of blocked.
         const { taskState, status } = emitTerminalFrame(result);
+        const authorizationRequired = authorizationRequiredStateForOutput(
+          result.authorizationRequired,
+        );
+        if (authorizationRequired) {
+          return {
+            output: JSON.stringify({
+              error: "sub-agent requires user authorization",
+              taskState,
+              stopReason: "authorization-required",
+            }),
+            isError: true,
+            authorizationRequired: issueAuthorizationRequiredControl(
+              authorizationRequired,
+            ),
+          };
+        }
         if (status === "error") {
           // A failed RESUME must hand the parent its way back to the SAME
           // child. Observed failure mode without this: a transient provider

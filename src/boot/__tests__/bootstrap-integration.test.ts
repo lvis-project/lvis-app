@@ -167,6 +167,9 @@ vi.mock("../conversation.js", () => ({
   createHookRunner: vi.fn(() => ({})),
   createConversationLoop: vi.fn((deps) => {
     h.rec("conversationLoop");
+    const calls = (h.captured["conversationDepsCalls"] ?? []) as unknown[];
+    calls.push(deps);
+    h.captured["conversationDepsCalls"] = calls;
     h.captured["mainConversationDeps"] = deps;
     return {
       getSessionId: vi.fn(() => undefined),
@@ -965,6 +968,9 @@ describe("bootstrap() integration lock", () => {
     expect(h.captured["discretionaryEgress"]).toBe(true);
     expect(vi.mocked(wireUpdateCheck)).toHaveBeenCalled();
     expect(vi.mocked(wireAnnouncementCheck)).toHaveBeenCalled();
+    expect(
+      (h.captured["mainConversationDeps"] as Record<string, unknown>)["approvalSurface"],
+    ).toBe("interactive");
   });
 });
 
@@ -1038,6 +1044,40 @@ describe("bootstrap() headless launch opens no discretionary service connection"
     expect(h.order).toContain("initPluginRuntime");
     expect(h.order).toContain("startPlugins");
     expect(headlessServices.pluginRuntime.listPluginIds()).toEqual([]);
+  });
+
+  it("marks every windowless conversation lane as lacking a local approval surface", () => {
+    const routineEngineOptions = h.captured["routineEngineOptions"] as {
+      createConversationLoop: (input: { scope: unknown }) => unknown;
+    };
+    routineEngineOptions.createConversationLoop({ scope: {} });
+    const mainDeps = h.captured["mainConversationDeps"] as Record<string, unknown>;
+    expect(mainDeps["approvalSurface"]).toBe("unavailable");
+    // Native --exec keeps the ordinary main-chat tool and egress scope. The
+    // approval capability must never be inferred from the routine-only
+    // `headless` scope switch.
+    expect(mainDeps["headless"]).toBeUndefined();
+    expect(mainDeps["allowedPluginIds"]).toBeUndefined();
+    expect(mainDeps["toolRegistry"]).toBe(headlessServices.toolRegistry);
+    expect(mainDeps["pluginRuntime"]).toBe(headlessServices.pluginRuntime);
+    expect(
+      (h.captured["sideConversationDeps"] as Record<string, unknown>)["approvalSurface"],
+    ).toBe("unavailable");
+    expect(
+      (h.captured["routineLoopDeps"] as Record<string, unknown>)["approvalSurface"],
+    ).toBe("unavailable");
+    expect(
+      (h.captured["subAgentOptions"] as { parentDeps: Record<string, unknown> })
+        .parentDeps["approvalSurface"],
+    ).toBe("unavailable");
+    expect(headlessServices.resolveChatGroupLoop).toBeTypeOf("function");
+    const groupLoop = headlessServices.resolveChatGroupLoop?.("authorization-group");
+    expect(groupLoop).toBeDefined();
+    const conversationDepsCalls = h.captured["conversationDepsCalls"] as Record<
+      string,
+      unknown
+    >[];
+    expect(conversationDepsCalls.at(-1)?.["approvalSurface"]).toBe("unavailable");
   });
 
   it("adds no `before-quit` listener of its own, and Node never reports a leak", () => {

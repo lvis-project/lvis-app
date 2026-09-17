@@ -71,6 +71,11 @@ import {
   type PluginOperationPrincipal,
 } from "../permissions/plugin-operation-grant.js";
 import { errorMessage } from "../shared/error-message.js";
+import {
+  authorizationRequiredStateOf,
+  issueAuthorizationRequiredControl,
+  type AuthorizationRequiredControl,
+} from "../shared/authorization-required.js";
 
 const log = createLogger("executor");
 
@@ -408,6 +413,8 @@ export async function executeAuthorizedToolInvocation(
   let uiPayload: import("../mcp/types.js").McpUiPayload | undefined;
   let rawResult: unknown;
   let image: ToolResultImage | undefined;
+  let authorizationRequired: AuthorizationRequiredControl | undefined;
+  let effectAuthorizationRequired: AuthorizationRequiredControl | undefined;
   let outputArtifact: ToolOutputArtifactInfo | undefined;
   let ownedOutputCapture: ToolOutputCapture | undefined;
   let outputArtifactDelivered = false;
@@ -686,6 +693,9 @@ export async function executeAuthorizedToolInvocation(
       // and refuses when >= 1 (a sub-agent cannot itself spawn).
       spawnDepth: spawnDepth ?? 0,
       supportsA2AParentDelivery: supportsA2AParentDelivery === true,
+      ...(invocationPermissionContext.approvalSurface
+        ? { approvalSurface: invocationPermissionContext.approvalSurface }
+        : {}),
       // Tool 자기 호출의 stable id — 렌더러가 inline UI 카드 (sub-agent 등)
       // 를 ToolGroupCard 옆에 join 할 때 키로 사용. agent_spawn 이 emit 하는
       // 라이프사이클 이벤트에 함께 실어 보냄.
@@ -757,6 +767,7 @@ export async function executeAuthorizedToolInvocation(
           runWithEffectGateContext(
             {
               headless: invocationPermissionContext.headless === true,
+              approvalSurface: invocationPermissionContext.approvalSurface,
               toolName: toolUse.name,
               ...(sessionId === undefined ? {} : { sessionId }),
             },
@@ -795,6 +806,15 @@ export async function executeAuthorizedToolInvocation(
                 throw new Error("remote-controller-revoked");
               }
               return tool.execute(finalInput, ctx);
+            },
+            () => {
+              effectAuthorizationRequired ??= issueAuthorizationRequiredControl({
+                kind: "tool",
+                toolName: toolUse.name,
+                source,
+                category: invocationCategory,
+                reason: "approval-surface-unavailable",
+              });
             },
           ),
         ),
@@ -865,10 +885,23 @@ export async function executeAuthorizedToolInvocation(
     });
     indeterminateAuditPersisted = true;
   }
-  if (outcome.ok) {
+  if (effectAuthorizationRequired) {
+    // The host effect boundary latched this before blocking the mutation. A
+    // plugin may catch that thrown denial, but it cannot clear this outer
+    // invocation state or turn the missing approval UI into a retryable result.
+    authorizationRequired = effectAuthorizationRequired;
+    content =
+      "Authorization required: this plugin effect requires explicit approval, "
+      + "but this host has no approval surface. The turn has stopped and will not retry automatically.";
+    isError = true;
+    terminationReason = "error";
+  } else if (outcome.ok) {
     const result = outcome.value;
     content = result.output;
     isError = result.isError;
+    if (authorizationRequiredStateOf(result.authorizationRequired)) {
+      authorizationRequired = result.authorizationRequired;
+    }
     // MCP Apps §3.2 — propagate uiPayload from tool metadata
     if (result.metadata?.uiPayload) {
       uiPayload = result.metadata.uiPayload as import("../mcp/types.js").McpUiPayload;
@@ -1257,7 +1290,14 @@ export async function executeAuthorizedToolInvocation(
     hookChainFromDispatch("pre", scriptPre),
     hookChainFromDispatch("post", scriptPost),
   );
-  await auditCurrentToolCall(sessionId, toolUse.name, source, trust, finalInput, auditContent, isError, startTime, permissionResult, rateResult.remaining, invocationPermissionContext, invocationCategory, executionCwd, targetFilePath, terminationReason, successHookChain);
+  const auditedPermissionResult = authorizationRequired
+    ? {
+        ...(permissionResult ?? { layer: 6 }),
+        decision: "deny" as const,
+        reason: "authorization required but approval surface unavailable",
+      }
+    : permissionResult;
+  await auditCurrentToolCall(sessionId, toolUse.name, source, trust, finalInput, auditContent, isError, startTime, auditedPermissionResult, rateResult.remaining, invocationPermissionContext, invocationCategory, executionCwd, targetFilePath, terminationReason, successHookChain);
   if (rationaleResumeContext?.started) {
     rationaleResumeContext.terminalizationAttempted = true;
     const terminalCommitted = await finishRationaleResume(
@@ -1304,6 +1344,7 @@ export async function executeAuthorizedToolInvocation(
     ...(uiPayload && { uiPayload }),
     ...(rawResult !== undefined && { rawResult }),
     ...(image && { image }),
+    ...(authorizationRequired ? { authorizationRequired } : {}),
     ...(outputArtifact ? { outputArtifact } : {}),
     durationMs,
   });
