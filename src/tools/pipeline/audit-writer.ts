@@ -146,6 +146,7 @@ export class AuditWriter {
       layer: 1,
       ...(args.audit?.toolUseId !== undefined ? { toolUseId: args.audit.toolUseId } : {}),
       ...(args.audit?.executionPlan !== undefined ? { executionPlan: args.audit.executionPlan } : {}),
+      ...(args.audit?.executionRoute !== undefined ? { executionRoute: args.audit.executionRoute } : {}),
       trustOrigin: auditTrustOrigin(args.permissionContext),
     };
     try {

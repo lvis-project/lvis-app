@@ -110,7 +110,7 @@ let _activeCapability: SandboxCapability | undefined;
 let _sandboxGeneration = 0;
 let _sandboxRequestedAtBoot = false;
 let _bootOutcome: SandboxBootOutcome | null = null;
-const _issuedHostShellExecutionPlans = new WeakSet<HostShellExecutionPlan>();
+const _issuedHostShellExecutionPlans = new WeakMap<HostShellExecutionPlan, string>();
 
 /** Monotonic identity for capability and wrapped-worker membership changes. */
 export function getSandboxGeneration(): string {
@@ -218,13 +218,14 @@ export function detectSandboxCapability(): SandboxCapability {
  * capability as if it confined that child.
  */
 export function getHostShellExecutionPlan(executionMode: HostShellExecutionRequest = "default"): HostShellExecutionPlan {
+  const generation = getSandboxGeneration();
   const plan = buildHostShellExecutionPlan({
     platform: process.platform,
     requestedSandbox: isSandboxRequestedAtBoot(),
     activeCapability: detectSandboxCapability(),
     executionMode,
   });
-  _issuedHostShellExecutionPlans.add(plan);
+  _issuedHostShellExecutionPlans.set(plan, generation);
   return plan;
 }
 
@@ -236,6 +237,13 @@ export function isIssuedHostShellExecutionPlan(
   plan: HostShellExecutionPlan,
 ): boolean {
   return _issuedHostShellExecutionPlans.has(plan);
+}
+
+/** Capability generation captured atomically when the host issued this plan. */
+export function getIssuedHostShellExecutionPlanGeneration(
+  plan: HostShellExecutionPlan,
+): string | undefined {
+  return _issuedHostShellExecutionPlans.get(plan);
 }
 
 

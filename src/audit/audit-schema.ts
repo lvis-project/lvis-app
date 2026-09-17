@@ -20,6 +20,7 @@ import type { ToolCategory, ToolSource } from "../tools/types.js";
 import type { ExecutionMode } from "../shared/permission-mode.js";
 import type { HookTrustOrigin, ScriptHookType } from "../hooks/script-hook-types.js";
 import type { HostShellExecutionPlanAuditProjection } from "../permissions/host-shell-execution-plan.js";
+import type { ExecutionPlanAuditProjection } from "../permissions/execution-router.js";
 import type { DeferredApprovalSource, DeferredGrantScope, RiskLevel } from "../shared/permission-review-status.js";
 
 
@@ -112,6 +113,8 @@ export interface AuditCommon {
    * nonces, HMACs, and capability reasons.
    */
   executionPlan?: HostShellExecutionPlanAuditProjection;
+  /** Route-neutral shadow decision. This does not prove authorization or spawn. */
+  executionRoute?: ExecutionPlanAuditProjection;
   /** Metadata-only lifecycle evidence for one host-issued plugin operation grant. */
   pluginOperation?: {
     pluginId: string;
@@ -143,6 +146,7 @@ export interface AuditCommon {
 export interface ToolExecutionAuditMetadata {
   readonly toolUseId?: string;
   readonly executionPlan?: HostShellExecutionPlanAuditProjection;
+  readonly executionRoute?: ExecutionPlanAuditProjection;
   /**
    * Host-only snapshot of the operation-governance state captured when the
    * invocation resolved its Tool. `null` means the governed discriminant was
