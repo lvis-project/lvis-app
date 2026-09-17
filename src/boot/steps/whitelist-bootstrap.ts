@@ -12,13 +12,15 @@ import type { AuditLogger } from "../../audit/audit-logger.js";
 import { createLogger } from "../../lib/logger.js";
 import { emitEvent } from "../types.js";
 import { t } from "../../i18n/index.js";
-import { isE2eTestRuntime } from "../dev-flags.js";
+import { isE2eTestRuntime, readDevelopmentEnvVar } from "../dev-flags.js";
 
 const log = createLogger("whitelist-bootstrap");
 
 export interface WhitelistBootstrapInput {
   userDataPath: string;
   bootAuditLogger: AuditLogger;
+  /** Authoritative host packaging state; never derived from process.env. */
+  packaged: boolean;
   /** Transport for the document GETs — Chromium's stack, from `ctx.singleHopNetworkFetch`. */
   networkFetch: typeof fetch;
   /** Online toggle — disabled in tests or user-selected offline mode. */
@@ -32,14 +34,15 @@ export interface WhitelistBootstrapInput {
   appShutdownSignal?: AbortSignal;
 }
 
-function isOnlineByDefault(): boolean {
-  // E2E + unit tests set this so they don't hit the public CDN.
-  if (process.env.LVIS_WHITELIST_OFFLINE === "1") return false;
+function isOnlineByDefault(packaged: boolean): boolean {
+  // Source/E2E runs may opt out of the public CDN. Packaged builds ignore the
+  // development-only flag even if early environment scrubbing is bypassed.
+  if (readDevelopmentEnvVar("LVIS_WHITELIST_OFFLINE", process.env, packaged) === "1") return false;
   return true;
 }
 
-function installE2eWhitelistPublicKeyOverride(): void {
-  if (!isE2eTestRuntime()) return;
+function installE2eWhitelistPublicKeyOverride(packaged: boolean): void {
+  if (packaged || !isE2eTestRuntime()) return;
   const publicKey = process.env.LVIS_E2E_WHITELIST_PUBLIC_KEY;
   if (!publicKey) return;
   whitelistRegistry.setPublicKeysForTesting({
@@ -53,9 +56,9 @@ function installE2eWhitelistPublicKeyOverride(): void {
  */
 export async function wireWhitelistRegistry(input: WhitelistBootstrapInput): Promise<void> {
   const { bootAuditLogger } = input;
-  const online = input.online ?? isOnlineByDefault();
+  const online = input.online ?? isOnlineByDefault(input.packaged);
   const userDataDir = input.userDataPath;
-  installE2eWhitelistPublicKeyOverride();
+  installE2eWhitelistPublicKeyOverride(input.packaged);
 
   await whitelistRegistry.init({
     userDataDir,

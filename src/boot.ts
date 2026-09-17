@@ -558,6 +558,7 @@ export async function bootstrap(
     userDataPath: host.userDataPath,
     bootAuditLogger: ctx.bootAuditLogger,
     networkFetch: ctx.singleHopNetworkFetch,
+    packaged: host.isPackaged,
   });
 
   // Load the plugin revocation registry BEFORE initPluginRuntime, same
@@ -573,6 +574,7 @@ export async function bootstrap(
     userDataPath: host.userDataPath,
     bootAuditLogger: ctx.bootAuditLogger,
     networkFetch: ctx.singleHopNetworkFetch,
+    packaged: host.isPackaged,
   });
 
   // Warm the admission catalog. Unlike the two registries above this is not an
@@ -583,6 +585,7 @@ export async function bootstrap(
     userDataPath: host.userDataPath,
     bootAuditLogger: ctx.bootAuditLogger,
     networkFetch: ctx.singleHopNetworkFetch,
+    packaged: host.isPackaged,
     ...admissionOffline,
   });
 

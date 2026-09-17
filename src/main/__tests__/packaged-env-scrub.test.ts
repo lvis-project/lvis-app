@@ -3,6 +3,7 @@ import {
   scrubPackagedProcessEnv,
   shouldScrubPackagedEnvKey,
 } from "../packaged-env-scrub.js";
+import { PACKAGED_DEVELOPMENT_ENV_VARS } from "../../shared/development-env-policy.js";
 
 describe("packaged env scrub", () => {
   it("scrubs dev/test flags before packaged preload inheritance", () => {
@@ -14,6 +15,8 @@ describe("packaged env scrub", () => {
       VITE_DEBUG_STREAM: "1",
       LVIS_WIN_NO_SANDBOX: "1",
       LVIS_PLUGINS_DIR: "/tmp/plugins",
+      LVIS_ADMISSION_OFFLINE: "1",
+      LVIS_REVOCATION_OFFLINE: "1",
       LVIS_WHITELIST_OFFLINE: "1",
       LVIS_DEMO_KEY_OPENAI: "legacy-secret",
       LVIS_DEMO_HOST_MAP: "api.internal=10.0.0.1",
@@ -24,6 +27,7 @@ describe("packaged env scrub", () => {
     const scrubbed = scrubPackagedProcessEnv(env).sort();
 
     expect(scrubbed).toEqual([
+      "LVIS_ADMISSION_OFFLINE",
       "LVIS_DEBUG_STREAM",
       "LVIS_DEMO_HOST_MAP",
       "LVIS_DEMO_KEY_OPENAI",
@@ -31,6 +35,7 @@ describe("packaged env scrub", () => {
       "LVIS_DEV_CONSOLE",
       "LVIS_E2E",
       "LVIS_PLUGINS_DIR",
+      "LVIS_REVOCATION_OFFLINE",
       "LVIS_WHITELIST_OFFLINE",
       "LVIS_WIN_NO_SANDBOX",
       "VITE_DEBUG_STREAM",
@@ -41,11 +46,22 @@ describe("packaged env scrub", () => {
     });
   });
 
+  it("scrubs every exact variable in the canonical development inventory", () => {
+    const env: NodeJS.ProcessEnv = Object.fromEntries(
+      PACKAGED_DEVELOPMENT_ENV_VARS.map((name) => [name, "set"]),
+    );
+
+    expect(scrubPackagedProcessEnv(env).sort()).toEqual([...PACKAGED_DEVELOPMENT_ENV_VARS].sort());
+    expect(env).toEqual({});
+  });
+
   it("keeps the packaged scrub predicate aligned with dev-flags SOT", () => {
     expect(shouldScrubPackagedEnvKey("LVIS_DEV_RELOAD")).toBe(true);
     expect(shouldScrubPackagedEnvKey("LVIS_E2E")).toBe(true);
     expect(shouldScrubPackagedEnvKey("LVIS_DEBUG_STREAM")).toBe(true);
     expect(shouldScrubPackagedEnvKey("VITE_DEBUG_STREAM")).toBe(true);
+    expect(shouldScrubPackagedEnvKey("LVIS_ADMISSION_OFFLINE")).toBe(true);
+    expect(shouldScrubPackagedEnvKey("LVIS_REVOCATION_OFFLINE")).toBe(true);
     expect(shouldScrubPackagedEnvKey("LVIS_WHITELIST_OFFLINE")).toBe(true);
     expect(shouldScrubPackagedEnvKey("LVIS_DEMO_KEY_OPENAI")).toBe(true);
     expect(shouldScrubPackagedEnvKey("LVIS_DEMO_HOST_MAP")).toBe(true);

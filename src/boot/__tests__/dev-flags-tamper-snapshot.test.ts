@@ -24,10 +24,12 @@ import {
   isE2eTestRuntime,
   isPackagedElectronProcess,
   isPackagedForbiddenEnvVar,
+  readDevelopmentEnvVar,
   setIsPackaged,
   shouldWarnPackagedFlagsIgnored,
   tamperedVarsAtBoot,
 } from "../dev-flags.js";
+import { PACKAGED_DEVELOPMENT_ENV_VARS } from "../../shared/development-env-policy.js";
 
 describe("dev-flags tamper snapshot", () => {
   beforeEach(() => {
@@ -92,6 +94,9 @@ describe("dev-flags tamper snapshot", () => {
   });
 
   it("defines the packaged dev/test env scrub predicate", () => {
+    for (const name of PACKAGED_DEVELOPMENT_ENV_VARS) {
+      expect(isPackagedForbiddenEnvVar(name), name).toBe(true);
+    }
     expect(isPackagedForbiddenEnvVar("LVIS_DEV")).toBe(true);
     expect(isPackagedForbiddenEnvVar("LVIS_DEV_CONSOLE")).toBe(true);
     expect(isPackagedForbiddenEnvVar("LVIS_DEV_SOMETHING_NEW")).toBe(true);
@@ -101,9 +106,28 @@ describe("dev-flags tamper snapshot", () => {
     expect(isPackagedForbiddenEnvVar("LVIS_WIN_NO_SANDBOX")).toBe(true);
     expect(isPackagedForbiddenEnvVar("LVIS_PLUGINS_DIR")).toBe(true);
     expect(isPackagedForbiddenEnvVar("LVIS_WHITELIST_OFFLINE")).toBe(true);
+    expect(isPackagedForbiddenEnvVar("LVIS_ADMISSION_OFFLINE")).toBe(true);
+    expect(isPackagedForbiddenEnvVar("LVIS_REVOCATION_OFFLINE")).toBe(true);
 
     expect(isPackagedForbiddenEnvVar("LVIS_HOME")).toBe(false);
     expect(isPackagedForbiddenEnvVar("NODE_ENV")).toBe(false);
+  });
+
+  it("reads offline registry flags only for unpackaged execution", () => {
+    const env: NodeJS.ProcessEnv = {
+      LVIS_WHITELIST_OFFLINE: "1",
+      LVIS_REVOCATION_OFFLINE: "1",
+      LVIS_ADMISSION_OFFLINE: "1",
+    };
+
+    for (const name of [
+      "LVIS_WHITELIST_OFFLINE",
+      "LVIS_REVOCATION_OFFLINE",
+      "LVIS_ADMISSION_OFFLINE",
+    ] as const) {
+      expect(readDevelopmentEnvVar(name, env, false), name).toBe("1");
+      expect(readDevelopmentEnvVar(name, env, true), name).toBeUndefined();
+    }
   });
 
   it("keeps LVIS_WIN_NO_SANDBOX Windows-only and packaged-gated", () => {

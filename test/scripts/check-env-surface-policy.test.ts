@@ -4,10 +4,17 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   BUCKETS,
+  DEVELOPMENT,
   evaluate,
   scanEnvReads,
   scanRendererSettingsPaths,
 } from "../../scripts/check-env-surface-policy.js";
+import {
+  ACTIVE_DEVELOPMENT_ENV_VARS,
+  DEVELOPMENT_ENV_POLICY,
+  DEVELOPMENT_ENV_TOMBSTONES,
+  PACKAGED_DEVELOPMENT_ENV_VARS,
+} from "../../src/shared/development-env-policy.js";
 import { ENV_BACKED_SETTINGS } from "../../src/shared/env-backed-settings.js";
 
 let dir: string;
@@ -45,6 +52,18 @@ describe("env-surface scan", () => {
     ]);
   });
 
+  it("finds literal reads through the packaged-gated development helper", () => {
+    write("gated.ts", `
+      const whitelist = readDevelopmentEnvVar("LVIS_WHITELIST_OFFLINE");
+      const revocation = readDevelopmentEnvVar('LVIS_REVOCATION_OFFLINE');
+    `);
+
+    expect([...scanEnvReads(dir).keys()].sort()).toEqual([
+      "LVIS_REVOCATION_OFFLINE",
+      "LVIS_WHITELIST_OFFLINE",
+    ]);
+  });
+
   it("ignores a name that is a constant rather than an environment read", () => {
     // The reason the scan is not a bare `LVIS_[A-Z_]+` grep: these are ordinary
     // exported constants, and demanding they be classified as configuration
@@ -53,6 +72,17 @@ describe("env-surface scan", () => {
       export const LVIS_TOKEN_NAMES = ["a"];
       import { LVIS_LOGO_PATH } from "./logo.js";
       const label = "LVIS_NOT_AN_ENV_READ";
+    `);
+
+    expect(scanEnvReads(dir).size).toBe(0);
+  });
+
+  it("does not self-satisfy from a policy string or comment", () => {
+    write("policy.ts", `
+      const POLICY = [{ name: "LVIS_POLICY_ONLY", packaged: "scrub" }];
+      // LVIS_COMMENT_ONLY is documentation, not a read.
+      const EXAMPLE = 'readDevelopmentEnvVar("LVIS_HELPER_STRING_ONLY")';
+      // readDevelopmentEnvVar("LVIS_HELPER_COMMENT_ONLY") is documentation.
     `);
 
     expect(scanEnvReads(dir).size).toBe(0);
@@ -142,6 +172,36 @@ describe("env-surface policy", () => {
       ["settings", over["settings"] ?? []],
       ["pending", over["pending"] ?? []],
     ] as ReadonlyArray<readonly [string, readonly string[]]>);
+
+  it("derives the development bucket from the packaged scrub inventory", () => {
+    expect(DEVELOPMENT).toEqual(
+      ACTIVE_DEVELOPMENT_ENV_VARS.filter((name) => name.startsWith("LVIS_")),
+    );
+    expect(DEVELOPMENT).toContain("LVIS_ADMISSION_OFFLINE");
+    expect(DEVELOPMENT).toContain("LVIS_REVOCATION_OFFLINE");
+    expect(ACTIVE_DEVELOPMENT_ENV_VARS).toContain("VITE_DEBUG_STREAM");
+    expect(DEVELOPMENT_ENV_TOMBSTONES).toContain("LVIS_PLUGINS_DIR");
+    expect(DEVELOPMENT).not.toContain("LVIS_PLUGINS_DIR");
+    expect(DEVELOPMENT_ENV_TOMBSTONES).toEqual(expect.arrayContaining([
+      "LVIS_ALLOW_LINKED_PLUGIN_ENTRY",
+      "LVIS_ALLOW_TEST_MARKETPLACE_KEYS",
+      "LVIS_DEV_NO_SANDBOX",
+      "LVIS_PLUGINS_DIR",
+    ]));
+    expect(
+      DEVELOPMENT_ENV_POLICY
+        .filter((entry) => entry.lifecycle === "active")
+        .every((entry) => entry.packaged === "scrub"),
+    ).toBe(true);
+    const tombstoneSet = new Set<string>(DEVELOPMENT_ENV_TOMBSTONES);
+    expect(ACTIVE_DEVELOPMENT_ENV_VARS.filter((name) => tombstoneSet.has(name))).toEqual([]);
+    expect(PACKAGED_DEVELOPMENT_ENV_VARS).toHaveLength(
+      ACTIVE_DEVELOPMENT_ENV_VARS.length + DEVELOPMENT_ENV_TOMBSTONES.length,
+    );
+    for (const preLaunch of ["LVIS_HOME", "LVIS_USER_DATA_DIR", "LVIS_RESOURCES_DIR"]) {
+      expect(PACKAGED_DEVELOPMENT_ENV_VARS).not.toContain(preLaunch);
+    }
+  });
 
   it("fails on a variable the source reads and nobody classified", () => {
     const failures = evaluate(new Map([["LVIS_NEW", "src/main/x.ts"]]), buckets(), [], 0);
