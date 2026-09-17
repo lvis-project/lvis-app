@@ -62,6 +62,10 @@ import {
   requiresExplicitHostShellApproval,
   type HostShellExecutionPlanAuditProjection,
 } from "../permissions/host-shell-execution-plan.js";
+import type {
+  AnalysisUncertainRequirement,
+  ExecutionPlanAuditProjection,
+} from "../permissions/execution-router.js";
 import {
   buildHostShellExecutionPermitBinding,
   type HostShellExecutionPermitBinding,
@@ -312,6 +316,7 @@ export async function runToolInvocation(
     let trust: TrustLevel = "high";
     let preparedShellInvocation: PreparedShellInvocation | undefined;
     let hostShellExecutionPlanAudit: HostShellExecutionPlanAuditProjection | undefined;
+    let executionRouteAudit: ExecutionPlanAuditProjection | undefined;
     let governedTool = false;
     const withHostShellExecutionPlan = (result: ToolResult): ToolResult =>
       hostShellExecutionPlanAudit === undefined
@@ -323,6 +328,9 @@ export async function runToolInvocation(
       toolUseId: toolUse.id,
       ...(hostShellExecutionPlanAudit !== undefined
         ? { executionPlan: hostShellExecutionPlanAudit }
+        : {}),
+      ...(executionRouteAudit !== undefined
+        ? { executionRoute: executionRouteAudit }
         : {}),
       ...(governedTool
         ? {
@@ -867,6 +875,30 @@ export async function runToolInvocation(
       // Reuse the exact immutable safe projection for tool lifecycle events.
       meta.executionPlan = hostShellExecutionPlanAudit;
     }
+    const updateExecutionRouteShadow = async (
+      unresolvedRequirements: readonly AnalysisUncertainRequirement[] = [],
+    ): Promise<void> => {
+      if (
+        hostShellExecutionPlan === undefined ||
+        hostShellInput === undefined ||
+        hostShellToolName === undefined
+      ) {
+        return;
+      }
+      // Keep this observational foundation out of the startup graph. Shell
+      // calls load it on first use; the module remains cached after that.
+      const router = await import("../permissions/execution-router.js");
+      executionRouteAudit = router.buildHostShellExecutionRouteProjection({
+        legacyPlan: hostShellExecutionPlan,
+        toolName: hostShellToolName,
+        command: hostShellInput.command,
+        cwd: resolveHostShellWorkingDirectory(executionCwd, hostShellInput.cwd),
+        unresolvedRequirements,
+        timeoutSeconds: hostShellInput.timeoutSeconds,
+        background: hostShellInput.runInBackground,
+      });
+    };
+    await updateExecutionRouteShadow();
     // The cache key is an authority boundary too: derive it only after the
     // canonical host shell substrate is sealed, then reuse its exact public
     // projection through reviewer, modal, rationale, result, and audit paths.
@@ -1501,6 +1533,12 @@ export async function runToolInvocation(
           );
         }
         if (!shellPathViolation) break;
+
+        if (shellPathViolation.finding?.classification === "analysis-uncertain") {
+          // Shadow-only in this slice: retain today's exact denial below while
+          // recording that the future router must not select host by default.
+          await updateExecutionRouteShadow([shellPathViolation.finding]);
+        }
 
         if (shellPathViolation.kind === "sandbox-boundary" && shellPathViolation.path) {
           const canonicalPath = caseFoldForMatch(canonicalizePathForMatch(shellPathViolation.path));

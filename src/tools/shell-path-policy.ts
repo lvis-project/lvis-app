@@ -11,6 +11,7 @@ import { pathEffectIsConfined, type PathEffect } from "../permissions/allowed-di
 import { parseTarListing } from "../shared/shell-tar-listing.js";
 import { resolveShellFilesystemPath } from "../shared/shell-filesystem-path.js";
 import { classifySqliteArgumentSlots } from "./shell-sqlite-arguments.js";
+import type { AnalysisUncertainRequirement } from "../permissions/execution-router.js";
 
 export type ShellPathPolicyViolationKind =
   | "dynamic-path"
@@ -19,11 +20,40 @@ export type ShellPathPolicyViolationKind =
   | "sandbox-boundary"
   | "sensitive-path";
 
-export interface ShellPathPolicyViolation {
-  kind: ShellPathPolicyViolationKind;
+interface ShellPathPolicyViolationBase {
   reason: string;
   candidate?: string;
   path?: string;
+}
+
+export type ShellPathPolicyViolation =
+  | (ShellPathPolicyViolationBase & {
+      kind: "dynamic-path" | "recursive-traversal";
+      finding: AnalysisUncertainRequirement;
+    })
+  | (ShellPathPolicyViolationBase & {
+      kind: Exclude<ShellPathPolicyViolationKind, "dynamic-path" | "recursive-traversal">;
+      finding?: never;
+    });
+
+/**
+ * Preserve today's fail-closed verdict while exposing why a future router may
+ * choose re-analysis, an isolated container, or explicit user review.
+ */
+export function analysisUncertainShellPathViolation(input: {
+  kind: "dynamic-path" | "recursive-traversal";
+  reason: string;
+  candidate?: string;
+  path?: string;
+}): ShellPathPolicyViolation {
+  return {
+    ...input,
+    finding: Object.freeze({
+      classification: "analysis-uncertain",
+      source: "shell-path-policy",
+      kind: input.kind,
+    }),
+  };
 }
 
 const RECURSIVE_TRAVERSAL_COMMANDS = new Set([
@@ -863,11 +893,11 @@ export function findShellPathPolicyViolation(
       const effect: PathEffect = verb === "cd" ? "write" : isReadOnlyShellLeaf(leaf, {ignoreRedirects:true}) ? "read" : "write";
       if (pathEffectIsConfined(effect, blockReadsOutsideWorkingDirectories)) {
         if (RECURSIVE_TRAVERSAL_COMMANDS.has(verb) && !(verb === "tar" && parseTarListing(knownArgv) && !environment.TAR_OPTIONS)) {
-          throw new PathPolicyError({kind:"recursive-traversal",reason:buildRecursiveBlockMessage(head,verb),candidate:head});
+          throw new PathPolicyError(analysisUncertainShellPathViolation({kind:"recursive-traversal",reason:buildRecursiveBlockMessage(head,verb),candidate:head}));
         }
         const flags=RECURSIVE_FLAG_COMMANDS.get(verb);
         const selected=knownArgv[1] === "--" ? undefined : knownArgv.slice(1).find((argument)=>flags?.some((flag)=>hasShellFlag(argument,flag)));
-        if(selected) throw new PathPolicyError({kind:"recursive-traversal",reason:buildRecursiveBlockMessage(head,verb,selected),candidate:selected});
+        if(selected) throw new PathPolicyError(analysisUncertainShellPathViolation({kind:"recursive-traversal",reason:buildRecursiveBlockMessage(head,verb,selected),candidate:selected}));
       }
       const classified=classifyOperandSlots(knownArgv);
       const slots = event.testExpression ? {
@@ -902,7 +932,7 @@ export function findShellPathPolicyViolation(
     return null;
   }catch(error){
     if(error instanceof PathPolicyError)return error.violation;
-    if(error instanceof ShellExecutionError)return {kind:"dynamic-path",reason:"Shell path policy: "+error.message,...(error.operand?{candidate:error.operand}:{})};
+    if(error instanceof ShellExecutionError)return analysisUncertainShellPathViolation({kind:"dynamic-path",reason:"Shell path policy: "+error.message,...(error.operand?{candidate:error.operand}:{})});
     throw error;
   }
 }
