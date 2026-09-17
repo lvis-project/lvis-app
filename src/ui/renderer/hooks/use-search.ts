@@ -1,5 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
+import {
+  DEFAULT_PROCESSING_DISPLAY_LEVEL,
+  type ProcessingDisplayLevel,
+} from "../../../shared/processing-display-level.js";
+import { classifyTurnEntries } from "../utils/classify-turn-entries.js";
+import { shouldShowAssistantEntry } from "../utils/processing-display-policy.js";
+
+interface SearchVisibility {
+  processingDisplayLevel?: ProcessingDisplayLevel;
+  streaming?: boolean;
+}
 
 /**
  * Unified search hook.
@@ -8,7 +19,13 @@ import type { ChatEntry } from "../../../lib/chat-stream-state.js";
  * match index list, and navigation callbacks. Global keydown listener
  * registers on mount / cleans up on unmount.
  */
-export function useSearch(entries: ChatEntry[]) {
+export function useSearch(
+  entries: ChatEntry[],
+  {
+    processingDisplayLevel = DEFAULT_PROCESSING_DISPLAY_LEVEL,
+    streaming = false,
+  }: SearchVisibility = {},
+) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [caseSensitive, setCaseSensitive] = useState(false);
@@ -30,13 +47,18 @@ export function useSearch(entries: ChatEntry[]) {
     if (!query) return [] as number[];
     const q = caseSensitive ? query : query.toLowerCase();
     const hits: number[] = [];
+    const { entryClassMap } = classifyTurnEntries(entries, streaming);
     entries.forEach((e, i) => {
       if (e.kind !== "user" && e.kind !== "assistant") return;
+      if (
+        e.kind === "assistant"
+        && !shouldShowAssistantEntry(e, entryClassMap.get(i), processingDisplayLevel)
+      ) return;
       const t = caseSensitive ? e.text : e.text.toLowerCase();
       if (t.includes(q)) hits.push(i);
     });
     return hits;
-  }, [entries, query, caseSensitive]);
+  }, [caseSensitive, entries, processingDisplayLevel, query, streaming]);
 
   // O(1) membership check for per-entry highlight in the big render loop.
   const matchSet = useMemo(() => new Set(matches), [matches]);

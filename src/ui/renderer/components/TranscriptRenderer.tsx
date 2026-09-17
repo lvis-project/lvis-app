@@ -27,6 +27,11 @@ import {
   useNativeContextMenu,
   type NativeContextMenuHandlers,
 } from "../hooks/use-native-context-menu.js";
+import {
+  DEFAULT_PROCESSING_DISPLAY_LEVEL,
+  type ProcessingDisplayLevel,
+} from "../../../shared/processing-display-level.js";
+import { shouldShowAssistantEntry } from "../utils/processing-display-policy.js";
 
 type PermissionReviewEntry = Extract<ChatEntry, { kind: "permission_review" }>;
 
@@ -133,6 +138,9 @@ export interface SharedTranscriptProps {
    * immediately after selecting a row.
    */
   workGroupsForceOpen?: boolean;
+
+  /** Controls which model work items are visible inside each WorkGroup. */
+  processingDisplayLevel?: ProcessingDisplayLevel;
 }
 
 const NO_STAR: () => string | null = () => null;
@@ -162,6 +170,7 @@ export function TranscriptRenderer({
   showTokenCostBadge = true,
   debugStreamEnabled = false,
   workGroupsForceOpen = false,
+  processingDisplayLevel = DEFAULT_PROCESSING_DISPLAY_LEVEL,
 }: SharedTranscriptProps): React.ReactElement {
   const { t } = useTranslation();
   const openNativeContextMenu = useNativeContextMenu();
@@ -231,7 +240,9 @@ export function TranscriptRenderer({
   // the entry is the live tail of a turn or an unclassified straggler.
   const pushSideEntry = (entry: (typeof activeEntries)[number], idx: number): boolean => {
     if (entry.kind === "reasoning") {
-      rendered.push(<ReasoningCard key={idx} entry={entry} />);
+      if (processingDisplayLevel !== "tools") {
+        rendered.push(<ReasoningCard key={idx} entry={entry} />);
+      }
       return true;
     }
     if (entry.kind === "permission_review") {
@@ -541,6 +552,7 @@ export function TranscriptRenderer({
       }
       const groupEntries: { idx: number; node: React.ReactNode }[] = [];
       const groupRevisions: string[] = [];
+      let groupEntryCount = 0;
       let groupHasPermissionReview = false;
 
       while (i < activeEntries.length) {
@@ -551,13 +563,17 @@ export function TranscriptRenderer({
         if (cls === "final") break;
         if (e.kind === "reasoning") {
           if (cls === "intermediate") {
+            groupEntryCount++;
             groupRevisions.push(entryRenderRevision({ entry: e, idx: i, searchHighlight, starred: false }));
-            groupEntries.push({ idx: i, node: <ReasoningCard key={i} entry={e} /> });
+            if (processingDisplayLevel !== "tools") {
+              groupEntries.push({ idx: i, node: <ReasoningCard key={i} entry={e} /> });
+            }
           } else {
             break;
           }
         } else if (e.kind === "permission_review") {
           if (cls === "intermediate") {
+            groupEntryCount++;
             // The parent-answered outcomes open the work group for the same
             // reason the automatic ones do, and with more force: no dock ever
             // showed these calls, so a collapsed group would be the user's only
@@ -582,6 +598,7 @@ export function TranscriptRenderer({
           }
         } else if (e.kind === "tool_group") {
           if (cls === "intermediate") {
+            groupEntryCount++;
             groupRevisions.push(entryRenderRevision({ entry: e, idx: i, searchHighlight, starred: false }));
             groupEntries.push({
               idx: i,
@@ -599,19 +616,22 @@ export function TranscriptRenderer({
           }
         } else if (e.kind === "assistant") {
           if (cls === "intermediate") {
+            groupEntryCount++;
             const starred = !!isEntryStarred(i);
             groupRevisions.push(entryRenderRevision({ entry: e, idx: i, searchHighlight, starred }));
-            groupEntries.push({
-              idx: i,
-              node: (
-                <AssistantCard
-                  key={i}
-                  entry={e}
-                  isStarred={starred}
-                  isFinal={false}
-                />
-              ),
-            });
+            if (shouldShowAssistantEntry(e, cls, processingDisplayLevel)) {
+              groupEntries.push({
+                idx: i,
+                node: (
+                  <AssistantCard
+                    key={i}
+                    entry={e}
+                    isStarred={starred}
+                    isFinal={false}
+                  />
+                ),
+              });
+            }
           } else {
             break;
           }
@@ -629,6 +649,7 @@ export function TranscriptRenderer({
             if (isTurnStartEntry(activeEntries[k])) { aaTurnStart = k; break; }
           }
           if (aaTurnStart === groupTurnStart) {
+            groupEntryCount++;
             groupRevisions.push(entryRenderRevision({ entry: e, idx: i, searchHighlight, starred: false }));
             groupEntries.push({
               idx: i,
@@ -643,19 +664,25 @@ export function TranscriptRenderer({
         i++;
       }
 
-      if (groupEntries.length > 0) {
+      if (groupEntryCount > 0) {
         // Prefer the turn_summary's authoritative `toolCount` over
         // groupEntries.length — the latter includes reasoning /
         // assistant bubbles / ask_user_answer and would diverge from the actual
         // tool-call count.
         const groupSummary = summaryByTurnStart?.get(groupTurnStart);
+        // Without a host summary the legacy full view counts every work row.
+        // Filtered views count only rows the user can expand to see, so hidden
+        // reasoning or narration cannot advertise an empty "N steps" body.
+        const fallbackStepCount = processingDisplayLevel === "full"
+          ? groupEntryCount
+          : groupEntries.length;
         rendered.push(
           <WorkGroup
             key={`wg-${currentSessionId}:${groupStart}`}
-            stepCount={groupSummary?.toolCount ?? groupEntries.length}
+            stepCount={groupSummary?.toolCount ?? fallbackStepCount}
             streaming={groupIsActiveTurn}
             turnDurationMs={groupSummary?.turnDurationMs}
-            revision={[currentSessionId, ...groupRevisions].join("||")}
+            revision={[currentSessionId, processingDisplayLevel, ...groupRevisions].join("||")}
             forceOpen={workGroupsForceOpen || groupHasPermissionReview}
           >
             {groupEntries.map((ge) => (
@@ -672,15 +699,21 @@ export function TranscriptRenderer({
     // ── Live: last entry in turn while streaming — no TurnActionBar ──
     if (entryClassMap.get(i) === "live") {
       if (!pushSideEntry(entry, idx) && entry.kind === "assistant") {
-        rendered.push(
-          <div key={idx} data-chat-entry-index={idx} className={`min-w-0 w-full max-w-full overflow-x-hidden rounded-lg${ringCls ? ` ${ringCls}` : ""}`}>
-            <AssistantCard
-              entry={entry}
-              isStarred={!!isEntryStarred(idx)}
-              isFinal={true}
-            />
-          </div>
-        );
+        // Before assistant_round closes, streamed text has no trustworthy
+        // work/final signal. Filtered modes withhold that ambiguous text and
+        // reveal it as soon as the round is stamped `final`; guessing here
+        // would leak intermediate narration in the modes meant to hide it.
+        if (shouldShowAssistantEntry(entry, "live", processingDisplayLevel)) {
+          rendered.push(
+            <div key={idx} data-chat-entry-index={idx} className={`min-w-0 w-full max-w-full overflow-x-hidden rounded-lg${ringCls ? ` ${ringCls}` : ""}`}>
+              <AssistantCard
+                entry={entry}
+                isStarred={!!isEntryStarred(idx)}
+                isFinal={true}
+              />
+            </div>
+          );
+        }
       }
       i++;
       continue;
@@ -769,6 +802,7 @@ export function TranscriptRenderer({
     summaryByTurnStart,
     viewMode,
     workGroupsForceOpen,
+    processingDisplayLevel,
     entries,
   ]);
 

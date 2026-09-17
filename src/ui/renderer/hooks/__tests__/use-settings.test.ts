@@ -33,6 +33,27 @@ function makeSettings(): AppSettings {
 }
 
 describe("useSettings", () => {
+  it("updates processing detail immediately from a settings broadcast", async () => {
+    const initial = makeSettings();
+    initial.chat.processingDisplayLevel = "full";
+    let onSettingsUpdated: ((settings: AppSettings) => void) | undefined;
+    const { api } = makeMockLvisApi({ settings: initial, hasApiKey: false });
+    api.onSettingsUpdated = vi.fn((handler) => {
+      onSettingsUpdated = handler as (settings: AppSettings) => void;
+      return vi.fn();
+    });
+
+    const { result } = renderHook(() => useSettings(api as unknown as LvisApi));
+    await waitFor(() => expect(result.current.settingsLoaded).toBe(true));
+    expect(result.current.processingDisplayLevel).toBe("full");
+
+    const next = structuredClone(initial);
+    next.chat.processingDisplayLevel = "reasoning";
+    act(() => onSettingsUpdated!(next));
+
+    expect(result.current.processingDisplayLevel).toBe("reasoning");
+  });
+
   it("updates the full LLM cache from settings broadcasts", async () => {
     const initial = makeSettings();
     let onSettingsUpdated: ((settings: AppSettings) => void) | undefined;

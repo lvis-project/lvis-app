@@ -64,6 +64,119 @@ function makeSettingsWithVendor(vendor: string): AppSettings {
 }
 
 describe("useSettingsOrchestration", () => {
+  it("hydrates and saves the processing detail through the chat patch", async () => {
+    const settings = makeSettings();
+    settings.chat.processingDisplayLevel = "reasoning";
+    const { api } = makeMockLvisApi({ settings });
+    Object.assign(api, {
+      updateSettings: vi.fn(async () => ({ ok: true })),
+      hasWebApiKey: vi.fn(async () => false),
+      hasMarketplaceApiKey: vi.fn(async () => false),
+    });
+    const { result } = renderHook(() =>
+      useSettingsOrchestration(api as unknown as LvisApi, vi.fn()),
+    );
+    await waitFor(() => expect(result.current.settingsLoaded).toBe(true));
+    expect(result.current.processingDisplayLevel).toBe("reasoning");
+
+    act(() => result.current.setProcessingDisplayLevel("tools"));
+    await act(async () => {
+      await result.current.save("chat");
+    });
+
+    expect(api.updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+      chat: expect.objectContaining({ processingDisplayLevel: "tools" }),
+    }));
+  });
+
+  it("syncs external processing detail without clobbering a pending local edit", async () => {
+    const settings = makeSettings();
+    settings.chat.processingDisplayLevel = "full";
+    const { api } = makeMockLvisApi({ settings });
+    Object.assign(api, {
+      updateSettings: vi.fn(async () => ({ ok: true })),
+      hasWebApiKey: vi.fn(async () => false),
+      hasMarketplaceApiKey: vi.fn(async () => false),
+    });
+    const { result } = renderHook(() =>
+      useSettingsOrchestration(api as unknown as LvisApi, vi.fn()),
+    );
+    await waitFor(() => expect(result.current.settingsLoaded).toBe(true));
+    const broadcast = api.onSettingsUpdated.mock.calls[0]![0] as (next: AppSettings) => void;
+
+    const external = structuredClone(settings);
+    external.chat.processingDisplayLevel = "reasoning";
+    act(() => broadcast(external));
+    expect(result.current.processingDisplayLevel).toBe("reasoning");
+
+    act(() => result.current.setProcessingDisplayLevel("tools"));
+    act(() => broadcast(external));
+    expect(result.current.processingDisplayLevel).toBe("tools");
+
+    await act(async () => {
+      await result.current.save("chat");
+    });
+    expect(api.updateSettings).toHaveBeenLastCalledWith(expect.objectContaining({
+      chat: expect.objectContaining({ processingDisplayLevel: "tools" }),
+    }));
+
+    const afterSave = structuredClone(settings);
+    afterSave.chat.processingDisplayLevel = "reasoning";
+    act(() => broadcast(afterSave));
+    expect(result.current.processingDisplayLevel).toBe("reasoning");
+  });
+
+  it("keeps a newer processing detail edit dirty when an older save finishes", async () => {
+    const settings = makeSettings();
+    settings.chat.processingDisplayLevel = "full";
+    let resolveFirstSave!: (value: { ok: true }) => void;
+    const updateSettings = vi.fn()
+      .mockImplementationOnce(() => new Promise<{ ok: true }>((resolve) => {
+        resolveFirstSave = resolve;
+      }))
+      .mockResolvedValue({ ok: true });
+    const { api } = makeMockLvisApi({ settings });
+    Object.assign(api, {
+      updateSettings,
+      hasWebApiKey: vi.fn(async () => false),
+      hasMarketplaceApiKey: vi.fn(async () => false),
+    });
+    const { result } = renderHook(() =>
+      useSettingsOrchestration(api as unknown as LvisApi, vi.fn()),
+    );
+    await waitFor(() => expect(result.current.settingsLoaded).toBe(true));
+    const broadcast = api.onSettingsUpdated.mock.calls[0]![0] as (next: AppSettings) => void;
+
+    act(() => result.current.setProcessingDisplayLevel("tools"));
+    let firstSave!: Promise<boolean>;
+    act(() => {
+      firstSave = result.current.save("chat");
+    });
+    await waitFor(() => expect(updateSettings).toHaveBeenCalledOnce());
+    act(() => result.current.setProcessingDisplayLevel("reasoning"));
+    await act(async () => {
+      resolveFirstSave({ ok: true });
+      await firstSave;
+    });
+
+    const oldSnapshot = structuredClone(settings);
+    oldSnapshot.chat.processingDisplayLevel = "tools";
+    act(() => broadcast(oldSnapshot));
+    expect(result.current.processingDisplayLevel).toBe("reasoning");
+
+    await act(async () => {
+      await result.current.save("chat");
+    });
+    expect(updateSettings).toHaveBeenLastCalledWith(expect.objectContaining({
+      chat: expect.objectContaining({ processingDisplayLevel: "reasoning" }),
+    }));
+
+    const laterSnapshot = structuredClone(settings);
+    laterSnapshot.chat.processingDisplayLevel = "full";
+    act(() => broadcast(laterSnapshot));
+    expect(result.current.processingDisplayLevel).toBe("full");
+  });
+
   it("updates the budget bound on output broadcasts without overwriting form edits or the output cap", async () => {
     const settings = makeSettings();
     settings.llm.vendors.openai = {

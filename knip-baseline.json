@@ -2834,11 +2834,6 @@
     },
     {
       "type": "types",
-      "file": "src/ui/renderer/utils/classify-turn-entries.ts",
-      "name": "EntryClass"
-    },
-    {
-      "type": "types",
       "file": "src/ui/renderer/utils/file-diff.ts",
       "name": "FileDiffTool"
     },

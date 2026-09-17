@@ -163,6 +163,146 @@ describe("TranscriptRenderer — minimal (required-only) contract", () => {
   });
 });
 
+describe("TranscriptRenderer — processing detail", () => {
+  const processingEntries: ChatEntry[] = [
+    userEntry("question"),
+    { kind: "reasoning", text: "private reasoning", streaming: false },
+    assistant("intermediate narration", { phase: "work" }),
+    toolGroup("matrix-tool"),
+    assistant("final answer", { phase: "final" }),
+  ];
+
+  for (const [level, showsReasoning, showsIntermediate] of [
+    ["tools", false, false],
+    ["reasoning", true, false],
+    ["full", true, true],
+  ] as const) {
+    it(`${level} renders the exact work-item matrix`, () => {
+      const { container, getByTestId } = renderCore(
+        <TranscriptRenderer
+          entries={processingEntries}
+          streaming={false}
+          currentSessionId={`matrix-${level}`}
+          processingDisplayLevel={level}
+          workGroupsForceOpen
+        />,
+      );
+
+      const workGroup = getByTestId("work-group");
+      expect(workGroup.textContent).toContain("x");
+      expect(workGroup.textContent?.includes("생각 완료")).toBe(showsReasoning);
+      expect(workGroup.textContent?.includes("intermediate narration")).toBe(showsIntermediate);
+      expect(container.textContent).toContain("final answer");
+    });
+  }
+
+  it("treats a phase-less persisted assistant before a tool as intermediate work", () => {
+    const entries: ChatEntry[] = [
+      userEntry("question"),
+      assistant("persisted intermediate"),
+      toolGroup("persisted-tool"),
+      assistant("persisted final"),
+    ];
+    const { queryByText, rerender } = renderCore(
+      <TranscriptRenderer
+        entries={entries}
+        streaming={false}
+        currentSessionId="persisted"
+        processingDisplayLevel="reasoning"
+        workGroupsForceOpen
+      />,
+    );
+    expect(queryByText("persisted intermediate")).toBeNull();
+    expect(queryByText("persisted final")).toBeTruthy();
+
+    rerender(
+      <TooltipProvider>
+        <TranscriptRenderer
+          entries={entries}
+          streaming={false}
+          currentSessionId="persisted"
+          processingDisplayLevel="full"
+          workGroupsForceOpen
+        />
+      </TooltipProvider>,
+    );
+    expect(queryByText("persisted intermediate")).toBeTruthy();
+  });
+
+  it("keeps final, error, interrupted, and provider-status assistant rows visible at tools level", () => {
+    const entries: ChatEntry[] = [
+      userEntry("question"),
+      assistant("retrying provider", { phase: "status", streaming: true }),
+      assistant("visible stream error", { phase: "work", systemNotice: "stream-error" }),
+      assistant("visible interrupted work", { phase: "work", interrupted: true }),
+      toolGroup("required-tool"),
+      assistant("always visible final", { phase: "final" }),
+    ];
+    const { container } = renderCore(
+      <TranscriptRenderer
+        entries={entries}
+        streaming={false}
+        currentSessionId="required-status"
+        processingDisplayLevel="tools"
+        workGroupsForceOpen
+      />,
+    );
+
+    expect(container.textContent).toContain("retrying provider");
+    expect(container.textContent).toContain("visible stream error");
+    expect(container.textContent).toContain("visible interrupted work");
+    expect(container.textContent).toContain("always visible final");
+  });
+
+  it("withholds ambiguous live text until assistant_round identifies it as final", () => {
+    const { queryByText, rerender } = renderCore(
+      <TranscriptRenderer
+        entries={[userEntry("question"), assistant("ambiguous stream", { streaming: true })]}
+        streaming
+        currentSessionId="ambiguous"
+        processingDisplayLevel="reasoning"
+      />,
+    );
+    expect(queryByText("ambiguous stream")).toBeNull();
+
+    rerender(
+      <TooltipProvider>
+        <TranscriptRenderer
+          entries={[userEntry("question"), assistant("final stream", { phase: "final" })]}
+          streaming
+          currentSessionId="ambiguous"
+          processingDisplayLevel="reasoning"
+          workGroupsForceOpen
+        />
+      </TooltipProvider>,
+    );
+    expect(queryByText("final stream")).toBeTruthy();
+  });
+
+  it("keeps the work header but disables an empty expander when every work row is hidden", () => {
+    const { getByTestId } = renderCore(
+      <TranscriptRenderer
+        entries={[
+          userEntry("question"),
+          { kind: "reasoning", text: "hidden reasoning", streaming: false },
+          assistant("hidden narration", { phase: "work" }),
+          assistant("final answer", { phase: "final" }),
+        ]}
+        streaming={false}
+        currentSessionId="hidden-only"
+        processingDisplayLevel="tools"
+      />,
+    );
+
+    const workGroup = getByTestId("work-group");
+    const button = workGroup.querySelector("button") as HTMLButtonElement;
+    expect(workGroup.textContent).toContain("작업");
+    expect(workGroup.textContent).not.toMatch(/\d+단계/);
+    expect(button.disabled).toBe(true);
+    expect(button.querySelector("svg")).toBeNull();
+  });
+});
+
 describe("TranscriptRenderer — permission review attaches to its tool row", () => {
   const review = (
     toolUseId: string,

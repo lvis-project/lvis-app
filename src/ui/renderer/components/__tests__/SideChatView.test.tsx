@@ -147,6 +147,29 @@ describe("SideChatView — New button gating during streaming", () => {
   });
 });
 
+describe("SideChatView — processing detail parity", () => {
+  it("uses the shared tools-only policy without hiding the final answer", async () => {
+    const { api, emit } = makeApi();
+    renderView(api, { processingDisplayLevel: "tools" });
+    await startTurn("inspect");
+
+    emit({ type: "reasoning_delta", text: "side reasoning", streamId: 1 });
+    emit({ type: "text_delta", text: "side intermediate", streamId: 1 });
+    emit({ type: "assistant_round", text: "side intermediate", stopReason: "tool_use", hasToolCalls: true, streamId: 1 });
+    emit({ type: "tool_start", groupId: "side-group", toolUseId: "side-tool", name: "inspect", displayOrder: 0, streamId: 1 });
+    emit({ type: "tool_end", groupId: "side-group", toolUseId: "side-tool", name: "inspect", displayOrder: 0, result: "ok", streamId: 1 });
+    emit({ type: "text_delta", text: "side final", streamId: 1 });
+    emit({ type: "assistant_round", text: "side final", stopReason: "end_turn", streamId: 1 });
+    emit({ type: "done", streamId: 1 });
+
+    const view = within(screen.getByTestId("side-chat-view"));
+    expect(view.getByTestId("work-group")).toBeTruthy();
+    expect(view.queryByText("side reasoning")).toBeNull();
+    expect(view.queryByText("side intermediate")).toBeNull();
+    expect(view.getByText("side final")).toBeTruthy();
+  });
+});
+
 describe("SideChatView — the main composer's input system", () => {
   it("renders the shared composer at the side surface, inside the shared frame", () => {
     const { api } = makeApi();

@@ -7,10 +7,14 @@ function renderChatTab(overrides: Partial<Parameters<typeof ChatTab>[0]> = {}) {
   const setSubAgentAutonomousWake = vi.fn();
   const setIdleMemoryConsolidation = vi.fn();
   const setMemoryCaptureMode = vi.fn();
+  const setProcessingDisplayLevel = vi.fn();
+  const onImmediateChange = vi.fn();
   render(
     <ChatTab
       autoCompact
       setAutoCompact={vi.fn()}
+      processingDisplayLevel="full"
+      setProcessingDisplayLevel={setProcessingDisplayLevel}
       streamSmoothing="none"
       setStreamSmoothing={vi.fn()}
       idlePreferenceRefresh
@@ -24,11 +28,47 @@ function renderChatTab(overrides: Partial<Parameters<typeof ChatTab>[0]> = {}) {
       piiRedactEnabled={false}
       onPiiRedactToggle={vi.fn()}
       settingsLoaded
+      onImmediateChange={onImmediateChange}
       {...overrides}
     />,
   );
-  return { setSubAgentAutonomousWake, setIdleMemoryConsolidation, setMemoryCaptureMode };
+  return {
+    setSubAgentAutonomousWake,
+    setIdleMemoryConsolidation,
+    setMemoryCaptureMode,
+    setProcessingDisplayLevel,
+    onImmediateChange,
+  };
 }
+
+describe("ChatTab processing detail", () => {
+  it("exposes the three localized levels as an accessible discrete slider", () => {
+    renderChatTab({ processingDisplayLevel: "reasoning" });
+
+    const slider = screen.getByRole("slider", { name: "처리 과정 표시 수준" });
+    expect(slider.getAttribute("aria-valuemin")).toBe("0");
+    expect(slider.getAttribute("aria-valuemax")).toBe("2");
+    expect(slider.getAttribute("aria-valuenow")).toBe("1");
+    expect(slider.getAttribute("aria-valuetext")).toBe("중간");
+    expect(screen.getByRole("button", { name: "간략히" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "중간" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "자세히" })).toBeTruthy();
+    expect(screen.getByTestId("processing-display-hint").textContent).toContain("도구 호출과 모델이 제공한 생각");
+  });
+
+  it("saves label clicks immediately and disables the control before settings load", () => {
+    const { setProcessingDisplayLevel, onImmediateChange } = renderChatTab();
+    fireEvent.click(screen.getByRole("button", { name: "간략히" }));
+    expect(setProcessingDisplayLevel).toHaveBeenCalledWith("tools");
+    expect(onImmediateChange).toHaveBeenCalledOnce();
+  });
+
+  it("disables the slider and labels until settings finish loading", () => {
+    renderChatTab({ settingsLoaded: false });
+    expect(screen.getByRole("slider", { name: "처리 과정 표시 수준" }).getAttribute("data-disabled")).toBe("");
+    expect((screen.getByRole("button", { name: "간략히" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+});
 
 describe("ChatTab autonomous sub-agent wake", () => {
   it("renders default-off guidance and persists only an explicit opt-in", () => {

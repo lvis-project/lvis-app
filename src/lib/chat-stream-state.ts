@@ -249,7 +249,7 @@ export type ChatEntry =
       text: string;
       streaming?: boolean;
       route?: "command";
-      phase?: "work" | "final";
+      phase?: "status" | "work" | "final";
       /** Durable identity of the assistant row this card was built from. */
       messageId?: string;
       createdAt?: number;
@@ -641,6 +641,7 @@ export function upsertStreamingReasoning(
 export function upsertStreamingAssistant(
   entries: ChatEntry[],
   text: string,
+  phase?: "status",
 ): ChatEntry[] {
   if (!text) {
     return entries;
@@ -656,9 +657,14 @@ export function upsertStreamingAssistant(
   if (assistantIdx >= 0) {
     // Keep what the entry already carries — an interrupted marker set while
     // the stream was still delivering must survive the next delta.
-    next[assistantIdx] = { ...(next[assistantIdx] as AssistantEntry), text, streaming: true };
+    next[assistantIdx] = {
+      ...(next[assistantIdx] as AssistantEntry),
+      text,
+      streaming: true,
+      phase,
+    };
   } else {
-    next.push({ kind: "assistant" as const, text, streaming: true });
+    next.push({ kind: "assistant" as const, text, streaming: true, phase });
   }
   return next;
 }

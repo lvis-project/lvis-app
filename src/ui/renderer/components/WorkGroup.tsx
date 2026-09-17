@@ -98,8 +98,11 @@ function WorkGroupImpl({ stepCount, streaming, children, turnDurationMs, forceOp
     <div className="min-w-0 w-full max-w-full overflow-x-hidden text-xs text-muted-foreground" data-testid="work-group" {...(wgId !== null ? { "data-wg-id": wgId } : {})}>
       <button
         type="button"
-        className="flex max-w-full min-w-0 items-center gap-1.5 px-1 py-1 hover:opacity-80"
+        className="flex max-w-full min-w-0 items-center gap-1.5 px-1 py-1 enabled:hover:opacity-80 disabled:cursor-default"
+        disabled={!hasChildren}
+        aria-expanded={hasChildren ? displayOpen : undefined}
         onClick={() => {
+          if (!hasChildren) return;
           if (debugStreamEnabled) {
             debugLog("WG", "click-toggle", { wgId, prevOpen: open });
           }
@@ -120,11 +123,11 @@ function WorkGroupImpl({ stepCount, streaming, children, turnDurationMs, forceOp
           remove the expand/collapse UI for half the chat history. Reviewed
           in #565; intentional, not a candidate for inline rendering.
         */}
-        {!streaming && <span className="shrink-0 opacity-50">{t("workGroup.stepCount", { count: stepCount })}</span>}
+        {!streaming && stepCount > 0 && <span className="shrink-0 opacity-50">{t("workGroup.stepCount", { count: stepCount })}</span>}
         {!streaming && turnDurationMs !== undefined && turnDurationMs > 0 && (
           <span className="shrink-0 opacity-50 tabular-nums">⏱ {formatDuration(turnDurationMs)}</span>
         )}
-        {!streaming && (
+        {!streaming && hasChildren && (
           displayOpen
             ? <ChevronDown className="h-3 w-3 flex-shrink-0 opacity-50" />
             : <ChevronRight className="h-3 w-3 flex-shrink-0 opacity-50" />

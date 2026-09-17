@@ -46,6 +46,7 @@ import {
   type LlmModelListCache,
 } from "../shared/llm-model-list.js";
 import type { ActiveChatRuntime } from "../shared/subscription-runtime.js";
+import type { ProcessingDisplayLevel } from "../shared/processing-display-level.js";
 import {
   isMarketplaceProviderPresetId,
   marketplaceProviderPresetSecretKey,
@@ -235,6 +236,8 @@ export interface LLMSettingsPatch {
 export interface ChatSettings {
   systemPrompt: string;
   autoCompact: boolean;
+  /** Controls which model work items are visible inside transcript work groups. */
+  processingDisplayLevel: ProcessingDisplayLevel;
   /**
    * Tool rounds a sub-agent may run before `round-cap` suspends it. Any
    * positive integer — no ceiling sits above it. SubAgentRunner runs exactly
@@ -943,10 +946,11 @@ export class SettingsService {
   async patch(
     partial: Partial<Omit<
       AppSettings,
-      "llm" | "marketplace" | "shortcuts" | "telemetry" | "appliedMigrations"
+      "llm" | "chat" | "marketplace" | "shortcuts" | "telemetry" | "appliedMigrations"
     >> & {
       marketplace?: Partial<MarketplaceSettings>;
       llm?: LLMSettingsPatch;
+      chat?: Partial<ChatSettings>;
       shortcuts?: ShortcutSettingsPatch;
       // Field by field, like the blocks above: the telemetry surface writes one
       // switch or one address at a time, and demanding the whole block would

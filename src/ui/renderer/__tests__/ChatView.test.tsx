@@ -1597,6 +1597,51 @@ describe("ChatView", () => {
     });
   });
 
+  it("applies the tools-only processing detail setting on the main transcript", async () => {
+    const { container, emitChatStream } = await renderApp({
+      hasApiKey: true,
+      settings: {
+        ...MOCK_DEFAULT_SETTINGS,
+        chat: { ...MOCK_DEFAULT_SETTINGS.chat, processingDisplayLevel: "tools" },
+      },
+    });
+    await submitChatMessage(container, "표시 수준 확인");
+    await act(async () => {
+      emitChatStream({ type: "reasoning_delta", text: "main reasoning" });
+      emitChatStream({ type: "text_delta", text: "main intermediate" });
+      emitChatStream({
+        type: "assistant_round",
+        text: "main intermediate",
+        thought: "main reasoning",
+        stopReason: "tool_use",
+        hasToolCalls: true,
+      });
+      emitChatStream({ type: "tool_start", name: "inspect", groupId: "detail", toolUseId: "detail-tool" });
+      emitChatStream({ type: "tool_end", name: "inspect", groupId: "detail", toolUseId: "detail-tool", result: "ok", isError: false });
+      emitChatStream({ type: "text_delta", text: "main final" });
+      emitChatStream({
+        type: "assistant_round",
+        text: "main final",
+        thought: "",
+        stopReason: "end_turn",
+        hasToolCalls: false,
+      });
+      emitChatStream({ type: "done" });
+    });
+
+    const workGroupButton = await waitFor(() => {
+      const button = container.querySelector<HTMLButtonElement>('[data-testid="work-group"] button');
+      expect(button).not.toBeNull();
+      return button!;
+    });
+    fireEvent.click(workGroupButton);
+
+    expect(container.textContent).not.toContain("main reasoning");
+    expect(container.textContent).not.toContain("main intermediate");
+    expect(container.textContent).toContain("inspect");
+    expect(container.textContent).toContain("main final");
+  });
+
   it("keeps completed prior turns visible while a new turn is streaming", async () => {
     const { container, api, emitChatStream } = await renderApp({ hasApiKey: true });
     await submitChatMessage(container, "첫 질문");

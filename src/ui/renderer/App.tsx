@@ -245,6 +245,7 @@ export function App() {
   const focusedSession = useChatGroupSession(chatGroupSessions, chatGroups.focusedId);
   const tileSessions = useTileSessions(chatGroupSessions);
   const { entries, streaming, currentSessionId, currentSessionProject } = focusedSession;
+  const settings = useSettings(api);
 
   // Search is window chrome (the panel is an overlay over everything), reading
   // the focused tile's transcript — the one actually on screen.
@@ -254,7 +255,10 @@ export function App() {
     changeQuery: searchChangeQuery, toggleCase: searchToggleCase,
     openOverlay: searchOpenOverlay, toggleOverlay: searchToggleOverlay, closeOverlay: searchCloseOverlay,
     nextMatch: searchNext, prevMatch: searchPrev, jumpToMatch: searchJumpToMatch,
-  } = useSearch(entries as unknown as ChatEntry[]);
+  } = useSearch(entries as unknown as ChatEntry[], {
+    processingDisplayLevel: settings.processingDisplayLevel,
+    streaming,
+  });
 
   const handleExport = useCallback(async (format: "markdown" | "json", sessionId?: string) => {
     try { await api.chatExport(format, sessionId); }
@@ -839,12 +843,13 @@ export function App() {
     llmModel,
     llmContextWindow,
     enableThinkingChat,
+    processingDisplayLevel,
     llmReadyWithoutApiKey,
     subscriptionRuntimePolicy,
     refresh: refreshLlmSettings,
     settingsLoaded,
     toggleThinking,
-  } = useSettings(api);
+  } = settings;
   const {
     activeSubscriptionRuntime,
     subscriptionSelected: subscriptionRuntimeSelected,
@@ -1387,6 +1392,7 @@ export function App() {
     onOpenSettings, maxOutputTokens: MAX_OUTPUT_TOKENS,
     rolePresets, activePreset, activePresetId, setActivePresetId,
     enableThinkingChat, toggleThinking,
+    processingDisplayLevel,
     refreshSessions, sessions, focusChatGroup,
     sideChatOpenRequest,
     isSessionStarred: (sessionId: string) => Boolean(isSessionStarred(sessionId)),
@@ -1417,7 +1423,7 @@ export function App() {
     apiUsageProjectionAvailable, activeSubscriptionRuntime,
     effectiveLlmReady, chatReadyWithoutApiKey, checkApiKey, onOpenSettings,
     rolePresets, activePreset, activePresetId, setActivePresetId,
-    enableThinkingChat, toggleThinking, refreshSessions, focusChatGroup, sessions,
+    enableThinkingChat, toggleThinking, processingDisplayLevel, refreshSessions, focusChatGroup, sessions,
     sideChatOpenRequest,
     isSessionStarred, handleToggleSessionStar, starredIsEntry, starredToggle,
     searchOpen, searchQuery, searchCase, searchMatches, searchMatchSet, searchIdx,

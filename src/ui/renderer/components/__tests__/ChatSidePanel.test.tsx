@@ -21,6 +21,7 @@ import type {
   NativeContextMenuPayload,
 } from "../../../../shared/native-context-menu.js";
 import { TEST_IDS, chatSidePanelLauncherTestId } from "../../../../shared/test-ids.js";
+import { ChatContextProvider, type ChatContextValue } from "../../context/ChatContext.js";
 
 let nativeContextActionHandler: ((action: NativeContextMenuAction) => void) | null = null;
 let previousWindowLvis: unknown;
@@ -1422,6 +1423,41 @@ describe("ChatSidePanel", () => {
     fireEvent.click(buttons[2]!);
     expect(detail.textContent).toContain("weather.example.test");
     expect(detail.textContent).toContain("Seoul weather source content");
+  });
+
+  it("subagent tab: applies the same tools-only processing detail policy", () => {
+    const subAgentSpawns: SubAgentSpawn[] = [
+      {
+        spawnId: "detail-policy",
+        title: "Detail policy agent",
+        status: "done",
+        instructions: "inspect the project",
+        entries: [
+          { kind: "reasoning", text: "subagent reasoning", streaming: false },
+          { kind: "assistant", text: "subagent intermediate", phase: "work", streaming: false },
+          {
+            kind: "tool_group",
+            groupId: "detail-tool-group",
+            groupIds: ["detail-tool-group"],
+            status: "done",
+            tools: [{ toolUseId: "detail-tool", name: "inspect", displayOrder: 0, status: "done" }],
+          },
+          { kind: "assistant", text: "subagent final", phase: "final", streaming: false },
+        ],
+        toolCallCount: 1,
+      },
+    ];
+    renderPanel(
+      <ChatContextProvider value={{ processingDisplayLevel: "tools" } as ChatContextValue}>
+        <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} subAgentSpawns={subAgentSpawns} />
+      </ChatContextProvider>,
+    );
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("subagent")));
+    const detail = screen.getByTestId("chat-side-panel-subagent-detail");
+    expect(within(detail).getByTestId("work-group")).toBeTruthy();
+    expect(detail.textContent).not.toContain("subagent reasoning");
+    expect(detail.textContent).not.toContain("subagent intermediate");
+    expect(detail.textContent).toContain("subagent final");
   });
 
   it("subagent tab: hydrates the persisted child transcript through the shared chat renderer", async () => {

@@ -42,6 +42,7 @@ import type { McpPromptEntry } from "./slash-picker-data.js";
 import type { LLMVendor } from "../../../shared/llm-vendor-defaults.js";
 import type { SubscriptionRuntimeUiPolicy } from "../utils/subscription-runtime-ui-policy.js";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
+import type { ProcessingDisplayLevel } from "../../../shared/processing-display-level.js";
 
 /**
  * Everything a tile needs that is NOT its own conversation.
@@ -84,6 +85,7 @@ export interface ChatGroupEnvironment {
   setActivePresetId: ChatContextValue["setActivePresetId"];
   enableThinkingChat: boolean;
   toggleThinking: ChatContextValue["toggleThinking"];
+  processingDisplayLevel: ProcessingDisplayLevel;
 
   // the window's conversation list and stars
   refreshSessions: () => void | Promise<void>;
@@ -835,6 +837,7 @@ export function ChatGroupSession({
     subscriptionPendingProvider: env.subscriptionPendingProvider,
     attachments, setAttachments, attachmentNCounter,
     enableThinkingChat: env.enableThinkingChat,
+    processingDisplayLevel: env.processingDisplayLevel,
     reasoningAvailable: env.chatReasoningAvailable,
     toggleThinking: env.toggleThinking, costEstimate, costBadgeClass,
     activePricing,

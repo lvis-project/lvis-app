@@ -257,7 +257,7 @@ export function useChatState(
         if (!message) return;
         setEntries((p) => {
           const base = p;
-          return upsertStreamingAssistant(base, message);
+          return upsertStreamingAssistant(base, message, "status");
         });
       } else if (ev.type === "text_delta" && ev.text) {
         if (finalAssistantRoundClosedRef.current) {

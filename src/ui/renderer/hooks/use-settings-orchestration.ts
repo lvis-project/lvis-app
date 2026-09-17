@@ -31,6 +31,10 @@ import {
   marketplaceProviderPresetSecretId,
   type MarketplaceInstalledProviderPreset,
 } from "../../../shared/marketplace-package-assets.js";
+import {
+  DEFAULT_PROCESSING_DISPLAY_LEVEL,
+  type ProcessingDisplayLevel,
+} from "../../../shared/processing-display-level.js";
 
 /** A save that arrived while another was running. See `pendingSaves`. */
 type PendingSave =
@@ -58,6 +62,8 @@ export interface SettingsOrchestrationState {
   setHasKey: (v: boolean) => void;
   autoCompact: boolean;
   setAutoCompact: (updater: boolean | ((prev: boolean) => boolean)) => void;
+  processingDisplayLevel: ProcessingDisplayLevel;
+  setProcessingDisplayLevel: (value: ProcessingDisplayLevel) => void;
   enableThinking: boolean;
   setEnableThinking: (v: boolean) => void;
   thinkingBudget: number;
@@ -153,6 +159,18 @@ export function useSettingsOrchestration(
   const [model, setModel] = useState("");
   const [hasKey, setHasKey] = useState(false);
   const [autoCompact, setAutoCompact] = useState(true);
+  const [processingDisplayLevel, setProcessingDisplayLevelState] = useState<ProcessingDisplayLevel>(
+    DEFAULT_PROCESSING_DISPLAY_LEVEL,
+  );
+  // A cross-window broadcast may arrive during the 200 ms immediate-save
+  // debounce or while a save is in flight. Preserve the newer local edit, and
+  // mark the draft clean only when the save covered its current revision.
+  const processingDisplayLevelDraftRef = useRef({ dirty: false, revision: 0 });
+  const setProcessingDisplayLevel = useCallback((value: ProcessingDisplayLevel) => {
+    processingDisplayLevelDraftRef.current.dirty = true;
+    processingDisplayLevelDraftRef.current.revision++;
+    setProcessingDisplayLevelState(value);
+  }, []);
   const [enableThinking, setEnableThinking] = useState(true);
   const [thinkingBudget, setThinkingBudget] = useState(() => getLlmVendorSettings(undefined, DEFAULT_LLM_VENDOR).thinkingBudgetTokens);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
@@ -229,6 +247,10 @@ export function useSettingsOrchestration(
       hydrateVendorBlock(block, providerPresetId);
       setStreamSmoothing(s.llm.streamSmoothing);
       setAutoCompact(s.chat.autoCompact ?? true);
+      processingDisplayLevelDraftRef.current.dirty = false;
+      setProcessingDisplayLevelState(
+        s.chat.processingDisplayLevel ?? DEFAULT_PROCESSING_DISPLAY_LEVEL,
+      );
       setHasKey(apiKeySet);
       setWebProvider(s.webSearch.provider);
       setHasWebKey(webApiKeySet);
@@ -258,6 +280,11 @@ export function useSettingsOrchestration(
       setMemoryCaptureMode(next.features?.memoryCaptureMode ?? "off");
       setSubAgentAutonomousWake(next.features?.subAgentAutonomousWake ?? false);
       setSubAgentMaxRounds(next.chat?.subAgentMaxRounds ?? SUBAGENT_MAX_ROUNDS_DEFAULT);
+      if (!processingDisplayLevelDraftRef.current.dirty) {
+        setProcessingDisplayLevelState(
+          next.chat.processingDisplayLevel ?? DEFAULT_PROCESSING_DISPLAY_LEVEL,
+        );
+      }
       // The INSTALLED list is external state and tracks the broadcast. Which
       // preset the form is pointed at is not: it belongs to the same set of
       // fields as the vendor, the base URL and the model, which this handler
@@ -460,6 +487,7 @@ export function useSettingsOrchestration(
     }
     savingRef.current = true;
     setSaving(true);
+    const processingDisplayLevelRevision = processingDisplayLevelDraftRef.current.revision;
     let ok = false;
     try {
       if (tab !== "permissions") {
@@ -520,7 +548,7 @@ export function useSettingsOrchestration(
         const updateResult = await api.updateSettings({
           llm: llmPatch,
           webSearch: { provider: webProvider },
-          chat: { autoCompact },
+          chat: { autoCompact, processingDisplayLevel },
           privacy: { piiRedactEnabled },
           marketplace: {
             cloudBaseUrl: marketplaceBaseUrl.trim() || undefined,
@@ -529,6 +557,9 @@ export function useSettingsOrchestration(
         });
         if (isIpcErrorResult(updateResult)) {
           throw new Error(formatIpcError(updateResult.error, updateResult.message));
+        }
+        if (processingDisplayLevelDraftRef.current.revision === processingDisplayLevelRevision) {
+          processingDisplayLevelDraftRef.current.dirty = false;
         }
       }
       if (tab !== "permissions") onSaved();
@@ -722,6 +753,7 @@ export function useSettingsOrchestration(
     model, setModel,
     hasKey, setHasKey,
     autoCompact, setAutoCompact,
+    processingDisplayLevel, setProcessingDisplayLevel,
     enableThinking, setEnableThinking,
     thinkingBudget: effectiveThinkingBudget, setThinkingBudget,
     outputTokenLimit,

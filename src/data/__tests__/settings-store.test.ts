@@ -2748,6 +2748,40 @@ describe("SettingsService chat normalization", () => {
     await cleanupTmpDir(userDataPath);
   });
 
+  it("defaults processing detail to the existing full transcript", () => {
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
+    expect(s.get("chat").processingDisplayLevel).toBe("full");
+  });
+
+  it("persists every valid processing detail level across reload", async () => {
+    for (const level of ["tools", "reasoning", "full"] as const) {
+      const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
+      await s.patch({ chat: { processingDisplayLevel: level } });
+      const reloaded = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
+      expect(reloaded.get("chat").processingDisplayLevel).toBe(level);
+    }
+  });
+
+  it("falls back to full for a malformed processing detail value", () => {
+    writeFileSync(
+      join(userDataPath, "lvis-settings.json"),
+      JSON.stringify({ chat: { processingDisplayLevel: "everything" } }),
+      "utf-8",
+    );
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
+    expect(s.get("chat").processingDisplayLevel).toBe("full");
+  });
+
+  it("keeps the stored processing detail on an unrelated partial chat patch", async () => {
+    const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
+    await s.patch({ chat: { processingDisplayLevel: "tools" } });
+    await s.patch({ chat: { autoCompact: false } });
+    expect(s.get("chat")).toMatchObject({
+      autoCompact: false,
+      processingDisplayLevel: "tools",
+    });
+  });
+
   it("floors a fractional sub-agent round budget and drops mistyped fields", async () => {
     const s = new SettingsService({ encryption: mockedElectron.safeStorage, userDataPath });
     await s.patch({
