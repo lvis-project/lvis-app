@@ -36,7 +36,7 @@ describe("operator attestation boot ordering", () => {
   });
 
   it("wraps native host construction in the attestation gate", () => {
-    const text = source("src/headless.ts");
+    const text = source("src/headless-host.ts");
     const gate = text.indexOf(".startAfterOperatorAttestation(attestationPath, createHost)");
     expect(gate).toBeGreaterThan(-1);
     expect(text.indexOf("const createHost = () => createNodeBootHost({")).toBeLessThan(gate);
