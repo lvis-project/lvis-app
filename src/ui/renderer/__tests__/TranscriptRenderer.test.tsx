@@ -332,6 +332,104 @@ describe("TranscriptRenderer — processing detail", () => {
     });
   }
 
+  it("opens only the completed work group containing the current reasoning search match", () => {
+    const entries: ChatEntry[] = [
+      userEntry("first question"),
+      { kind: "reasoning", text: "first reasoning", streaming: false },
+      assistant("first final", { phase: "final" }),
+      userEntry("second question"),
+      { kind: "reasoning", text: "second reasoning", streaming: false },
+      assistant("second final", { phase: "final" }),
+    ];
+    const { container } = renderCore(
+      <TranscriptRenderer
+        entries={entries}
+        streaming={false}
+        currentSessionId="grouped-reasoning-search"
+        processingDisplayLevel="reasoning"
+        search={{
+          searchOpen: true,
+          searchMatches: [1],
+          searchMatchSet: new Set([1]),
+          searchIdx: 0,
+          searchHighlight: "reasoning",
+        }}
+      />,
+    );
+
+    const target = container.querySelector<HTMLElement>('[data-chat-entry-index="1"]');
+    expect(target).toBeTruthy();
+    expect(target?.className).toContain("ring-2");
+    expect(container.querySelector('[data-chat-entry-index="4"]')).toBeNull();
+  });
+
+  it("moves the current search ring between reasoning entries in the same work group", () => {
+    const entries: ChatEntry[] = [
+      userEntry("question"),
+      { kind: "reasoning", text: "first reasoning", streaming: false },
+      { kind: "reasoning", text: "second reasoning", streaming: false },
+      assistant("final", { phase: "final" }),
+    ];
+    const renderWithSearchIndex = (searchIdx: number) => (
+      <TooltipProvider>
+        <TranscriptRenderer
+          entries={entries}
+          streaming={false}
+          currentSessionId="same-group-reasoning-search"
+          processingDisplayLevel="reasoning"
+          search={{
+            searchOpen: true,
+            searchMatches: [1, 2],
+            searchMatchSet: new Set([1, 2]),
+            searchIdx,
+            searchHighlight: "reasoning",
+          }}
+        />
+      </TooltipProvider>
+    );
+    const { container, rerender } = render(renderWithSearchIndex(0));
+
+    const first = container.querySelector<HTMLElement>('[data-chat-entry-index="1"]');
+    const second = container.querySelector<HTMLElement>('[data-chat-entry-index="2"]');
+    expect(first?.className).toContain("ring-2");
+    expect(second?.className).toContain("ring-1");
+
+    rerender(renderWithSearchIndex(1));
+
+    const updatedFirst = container.querySelector<HTMLElement>('[data-chat-entry-index="1"]');
+    const updatedSecond = container.querySelector<HTMLElement>('[data-chat-entry-index="2"]');
+    expect(updatedFirst?.className).toContain("ring-1");
+    expect(updatedFirst?.className).not.toContain("ring-2");
+    expect(updatedSecond?.className).toContain("ring-2");
+  });
+
+  it.each(["reasoning", "full"] as const)(
+    "exposes standalone reasoning for navigation at %s detail",
+    (processingDisplayLevel) => {
+      const { container } = renderCore(
+        <TranscriptRenderer
+          entries={[
+            { kind: "reasoning", text: "standalone reasoning", streaming: true },
+          ]}
+          streaming
+          currentSessionId={`standalone-reasoning-${processingDisplayLevel}`}
+          processingDisplayLevel={processingDisplayLevel}
+          search={{
+            searchOpen: true,
+            searchMatches: [0],
+            searchMatchSet: new Set([0]),
+            searchIdx: 0,
+            searchHighlight: "reasoning",
+          }}
+        />,
+      );
+
+      const target = container.querySelector<HTMLElement>('[data-chat-entry-index="0"]');
+      expect(target).toBeTruthy();
+      expect(target?.className).toContain("ring-2");
+    },
+  );
+
   it("treats a phase-less persisted assistant before a tool as intermediate work", () => {
     const entries: ChatEntry[] = [
       userEntry("question"),

@@ -49,7 +49,8 @@ export function useSearch(
     const hits: number[] = [];
     const { entryClassMap } = classifyTurnEntries(entries, streaming);
     entries.forEach((e, i) => {
-      if (e.kind !== "user" && e.kind !== "assistant") return;
+      if (e.kind !== "user" && e.kind !== "assistant" && e.kind !== "reasoning") return;
+      if (e.kind === "reasoning" && processingDisplayLevel === "tools") return;
       if (
         e.kind === "assistant"
         && !shouldShowAssistantEntry(e, entryClassMap.get(i), processingDisplayLevel)

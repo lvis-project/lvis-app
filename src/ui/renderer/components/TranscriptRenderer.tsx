@@ -238,10 +238,22 @@ export function TranscriptRenderer({
   const rendered: React.ReactNode[] = [];
   // Reasoning, permission-review and tool-group rows draw the same whether
   // the entry is the live tail of a turn or an unclassified straggler.
-  const pushSideEntry = (entry: (typeof activeEntries)[number], idx: number): boolean => {
+  const pushSideEntry = (
+    entry: (typeof activeEntries)[number],
+    idx: number,
+    ringCls: string,
+  ): boolean => {
     if (entry.kind === "reasoning") {
       if (processingDisplayLevel !== "tools") {
-        rendered.push(<ReasoningCard key={idx} entry={entry} />);
+        rendered.push(
+          <div
+            key={idx}
+            data-chat-entry-index={idx}
+            className={`min-w-0 w-full max-w-full rounded-md${ringCls ? ` ${ringCls}` : ""}`}
+          >
+            <ReasoningCard entry={entry} />
+          </div>,
+        );
       }
       return true;
     }
@@ -710,6 +722,12 @@ export function TranscriptRenderer({
             );
           },
         );
+        const currentSearchMatch = searchOpen ? searchMatches?.[searchIdx] : undefined;
+        const groupHasCurrentSearchMatch =
+          currentSearchMatch !== undefined && groupEntries.some((groupEntry) => groupEntry.idx === currentSearchMatch);
+        const groupSearchRevision = groupEntries
+          .map((groupEntry) => `${groupEntry.idx}:${ringClassFor(groupEntry.idx)}`)
+          .join("|");
         rendered.push(
           <WorkGroup
             key={`wg-${currentSessionId}:${groupStart}`}
@@ -718,11 +736,15 @@ export function TranscriptRenderer({
             turnDurationMs={groupSummary?.turnDurationMs}
             completed={!hasTerminalFailure && (groupSummary !== undefined || hasCleanFinalResponse)}
             progressLabel={groupIsActiveTurn ? progressLabel : undefined}
-            revision={[currentSessionId, processingDisplayLevel, ...groupRevisions].join("||")}
-            forceOpen={workGroupsForceOpen || groupHasPermissionReview}
+            revision={[currentSessionId, processingDisplayLevel, groupSearchRevision, ...groupRevisions].join("||")}
+            forceOpen={workGroupsForceOpen || groupHasPermissionReview || groupHasCurrentSearchMatch}
           >
             {groupEntries.map((ge) => (
-              <div key={ge.idx} data-chat-entry-index={ge.idx}>
+              <div
+                key={ge.idx}
+                data-chat-entry-index={ge.idx}
+                className={ringClassFor(ge.idx) || undefined}
+              >
                 {ge.node}
               </div>
             ))}
@@ -734,7 +756,7 @@ export function TranscriptRenderer({
 
     // ── Live: last entry in turn while streaming — no TurnActionBar ──
     if (entryClassMap.get(i) === "live") {
-      if (!pushSideEntry(entry, idx) && entry.kind === "assistant") {
+      if (!pushSideEntry(entry, idx, ringCls) && entry.kind === "assistant") {
         // Before assistant_round closes, streamed text has no trustworthy
         // work/final signal. Filtered modes withhold that ambiguous text and
         // reveal it as soon as the round is stamped `final`; guessing here
@@ -802,7 +824,7 @@ export function TranscriptRenderer({
     }
 
     // ── Fallback: unclassified edge-case entries ──
-    pushSideEntry(entry, idx);
+    pushSideEntry(entry, idx, ringCls);
     i++;
   }
   return rendered;
