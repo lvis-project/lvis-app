@@ -1969,11 +1969,6 @@
     },
     {
       "type": "types",
-      "file": "src/permissions/host-shell-execution-plan.ts",
-      "name": "HostShellFallbackReason"
-    },
-    {
-      "type": "types",
       "file": "src/permissions/permission-audit-runner.ts",
       "name": "DayVerifyResult"
     },

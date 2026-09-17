@@ -76,13 +76,14 @@ function permissionAuditBase(args: {
   audit?: ToolExecutionAuditMetadata;
 }): Pick<
   Extract<PermissionAuditEntryInput, { decision: "allow" }>,
-  "ts" | "auditId" | "toolUseId" | "executionPlan" | "trustOrigin" | "tool" | "source" | "category"
+  "ts" | "auditId" | "toolUseId" | "executionPlan" | "executionRoute" | "trustOrigin" | "tool" | "source" | "category"
 > {
   return {
     ts: new Date().toISOString(),
     auditId: randomUUID(),
     ...(args.audit?.toolUseId !== undefined ? { toolUseId: args.audit.toolUseId } : {}),
     ...(args.audit?.executionPlan !== undefined ? { executionPlan: args.audit.executionPlan } : {}),
+    ...(args.audit?.executionRoute !== undefined ? { executionRoute: args.audit.executionRoute } : {}),
     trustOrigin: args.trustOrigin,
     tool: args.toolName,
     source: args.source,

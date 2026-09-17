@@ -173,6 +173,51 @@ lifecycle coverage are described in the architecture contract.
 
 ## Shell Execution And Explicit Host Approval
 
+### Route-neutral execution foundation
+
+Shell authorization and execution location are separate decisions. The
+route-neutral contract in
+[execution-router.ts](../../src/permissions/execution-router.ts) defines three
+possible substrates:
+
+| Route | Intended boundary | Current availability |
+| --- | --- | --- |
+| `workspace-sandbox` | OS-enforced workspace-scoped shell | Mapped from a full ASRT shell plan. |
+| `disposable-container` | Per-invocation disposable filesystem/process boundary | **Unavailable.** No backend advertises or consumes this route in this slice. |
+| `host` | Current-user host shell | Mapped from a legacy plain-shell plan. Existing approval rules remain authoritative. |
+
+The Host hashes the normalized request into an immutable `EffectEnvelope`,
+issues a generation-bound `ExecutionCapability`, and produces an immutable
+`ExecutionPlan` with the chosen route, decision and fallback. Raw command text
+does not enter the route projection. Stable identities cover the effect digest,
+cwd, unresolved requirements, runtime limits, capability generation and final
+decision, so a changed request or capability generation cannot reuse the same
+identity. Structural lookalikes are not host-issued capabilities, plans or
+grants.
+
+`workspace-sandbox` requires the issued legacy plan to declare both filesystem
+and process confinement as `true`; an omitted legacy `confines` field is not
+treated as full confinement by the route-neutral layer. The capability
+generation is captured with the legacy plan at issuance and must match the
+route capability. A later sandbox generation cannot be paired with that stale
+plan, and a grant cannot be issued after its generation becomes stale.
+
+This first slice is observational. The legacy `HostShellExecutionPlan`, normal
+permission checks, approvals, permit consumption and spawn path still decide
+whether execution occurs. The route plan is recorded as shadow metadata and
+must not be interpreted as proof that a command was authorized or started.
+`ExecutionGrant` is defined for the later cutover, but the current shell path
+does not consume it.
+
+Shell path results distinguish a hard policy boundary from an
+`analysis-uncertain` requirement. Dynamic paths and recursive traversal retain
+their current exact fail-closed result, while the shadow router records that
+the effect needs another decision. An uncertain default request may not select
+the host route automatically. A future slice may satisfy that requirement by
+improving analysis, routing to a disposable container, or obtaining explicit
+user authorization. Until a disposable backend exists and truthfully advertises
+its generation-bound capability, it is never selected as a fallback.
+
 Execution location, configuration, authentication and OS identity are separate
 properties. ASRT launches processes on the current host with a temporary HOME
 and configuration profile for each invocation. It does not inherit the user's
