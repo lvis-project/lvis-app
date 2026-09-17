@@ -821,6 +821,7 @@ export async function bootstrap(
       ]),
     ],
     isolatedConversationMemoryManagers,
+    headless ? "unavailable" : "interactive",
   );
 
   // §7: RoutinesScheduler v2 execution-branch wiring.

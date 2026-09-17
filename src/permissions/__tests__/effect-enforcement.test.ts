@@ -12,7 +12,7 @@
  *   • A throwing arg getter still triggers the gate (no suppression).
  *   • hostFetch is NOT in the generic gated set (it self-gates inline, verb-derived).
  */
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import type { ApprovalChoice, ApprovalDecision, ApprovalGate, ApprovalRequest,
 } from "../approval-gate.js";
 import {
@@ -23,6 +23,7 @@ import {
   GATED_EFFECT_PATHS,
   ENFORCEMENT_EXCLUSIONS,
   EffectBoundaryDeniedError,
+  type EffectGateContext,
   __resetEffectGrantsForTest,
 } from "../effect-enforcement.js";
 import {
@@ -424,6 +425,79 @@ describe("gateMutatingEffect — direct unit behaviour", () => {
       approvalGate: gate,
       flagEnabled: () => true,
     });
+    expect(requests).toHaveLength(0);
+  });
+
+  it("keeps unavailable routine execution on the existing headless denial lane", async () => {
+    const { gate, requests } = makeGate("allow-once");
+    const onAuthorizationRequired = vi.fn();
+    let caught: unknown;
+
+    await runWithEffectGateContext(
+      {
+        headless: true,
+        approvalSurface: "unavailable",
+        toolName: "routine_tool",
+      },
+      async () => {
+        try {
+          await gateMutatingEffect({
+            pluginId: "routine-plugin",
+            methodPath: "storage.write",
+            effect: "write",
+            target: "routine.txt",
+            approvalGate: gate,
+            flagEnabled: () => true,
+          });
+        } catch (error) {
+          caught = error;
+        }
+      },
+      onAuthorizationRequired,
+    );
+
+    expect(caught).toBeInstanceOf(EffectBoundaryDeniedError);
+    expect((caught as EffectBoundaryDeniedError).reason).toBe("headless");
+    expect(onAuthorizationRequired).not.toHaveBeenCalled();
+    expect(requests).toHaveLength(0);
+  });
+
+  it("keeps the windowless terminal latch private until a write chokepoint trips it", async () => {
+    const { gate, requests } = makeGate("allow-once");
+    const onAuthorizationRequired = vi.fn();
+    let caught: unknown;
+
+    await runWithEffectGateContext(
+      {
+        headless: false,
+        approvalSurface: "unavailable",
+        toolName: "plugin_tool",
+      },
+      async () => {
+        const ambient = currentEffectGateContext() as
+          | (EffectGateContext & { onAuthorizationRequired?: unknown })
+          | undefined;
+        expect(ambient).toBeDefined();
+        expect(ambient).not.toHaveProperty("onAuthorizationRequired");
+        try {
+          await gateMutatingEffect({
+            pluginId: "windowless-plugin",
+            methodPath: "storage.write",
+            effect: "write",
+            target: "windowless.txt",
+            approvalGate: gate,
+            flagEnabled: () => true,
+          });
+        } catch (error) {
+          caught = error;
+        }
+      },
+      onAuthorizationRequired,
+    );
+
+    expect(caught).toBeInstanceOf(EffectBoundaryDeniedError);
+    expect((caught as EffectBoundaryDeniedError).reason).toBe("approval-unavailable");
+    expect(onAuthorizationRequired).toHaveBeenCalledOnce();
     expect(requests).toHaveLength(0);
   });
 });

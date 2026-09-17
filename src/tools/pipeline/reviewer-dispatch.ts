@@ -312,16 +312,22 @@ export async function dispatchReviewerForInteractiveAuto(
     ...resolved,
     reviewer: { route: "foreground-auto", verdict: reviewer.verdict, outcome: reviewer.outcome, approvalBasis: reviewer.approvalBasis },
   };
+  const failedWithoutApprovalSurface =
+    !autoDecisionOutcome && context.approvalSurface === "unavailable";
   // Review-status telemetry derived from the resolved decision so the
   // auto-approve disclosure and the audit decision share one source.
   emitPermissionReview(callbacks, {
-    status: decision.decision === "allow" ? "auto_approved" : "needs_approval",
+    status: failedWithoutApprovalSurface
+      ? "failed"
+      : decision.decision === "allow" ? "auto_approved" : "needs_approval",
     toolName,
     toolCategory: category,
     source,
     ...meta,
     verdictLevel: reviewer.verdict.level,
-    reason: reviewer.verdict.reason,
+    reason: failedWithoutApprovalSurface
+      ? decision.reason
+      : reviewer.verdict.reason,
     ...(approvalPurpose ? { approvalPurpose } : {}),
   });
 

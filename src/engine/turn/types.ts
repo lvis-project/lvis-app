@@ -46,6 +46,10 @@ import type { AuditLogger } from "../../audit/audit-logger.js";
 import type { HookTrustCommandOptions } from "../../hooks/hook-trust-commands.js";
 import type { RationaleCoordinatorFactory } from "./rationale-conversation-orchestration.js";
 import type { ExecutionMode } from "../../shared/permission-mode.js";
+import type {
+  ApprovalSurface,
+  AuthorizationRequiredState,
+} from "../../shared/authorization-required.js";
 
 // ─── Types ──────────────────────────────────────────
 
@@ -335,6 +339,10 @@ export type TurnStopReason =
   // The loop is fully terminated; continuation re-hydrates the persisted
   // session through SubAgentRunner.resume() rather than parking a coroutine.
   | "input-required"
+  // The invocation requires a local authorization, but this host process has
+  // no approval surface. This is a terminal control outcome, not a tool error
+  // the model may repair by retrying or rewriting the command.
+  | "authorization-required"
   // #811 m2 — a trusted UserPromptSubmit hook (or its fail-closed dispatch)
   // REFUSED the prompt before queryLoop ran. The turn never reached the LLM.
   | "blocked";
@@ -356,6 +364,8 @@ export interface TurnResult {
   stopReason?: TurnStopReason;
   /** Structured terminate-and-resume request emitted with input-required. */
   inputRequired?: TurnInputRequired;
+  /** Safe metadata for a host-issued authorization-required termination. */
+  authorizationRequired?: AuthorizationRequiredState;
 }
 
 export interface ConversationLoopDeps {
@@ -492,6 +502,8 @@ export interface ConversationLoopDeps {
   allowedPluginIds?: ReadonlySet<string>;
   /** Background/routine loop: write tools must ask and cannot rely on auto/allow cache. */
   headless?: boolean;
+  /** Approval UI capability, intentionally independent of routine tool scope. */
+  approvalSurface?: ApprovalSurface;
   /** Additional filesystem roots explicitly granted to this loop. */
   additionalDirectories?: readonly string[];
   /** Live reader for foreground settings-backed additional directories. */

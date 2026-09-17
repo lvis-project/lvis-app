@@ -69,6 +69,7 @@ import {
 } from "../permissions/host-shell-execution-permit.js";
 import { createLogger } from "../lib/logger.js";
 import { t } from "../i18n/index.js";
+import { issueAuthorizationRequiredControl } from "../shared/authorization-required.js";
 // ── Pipeline units — behavior-preserving extractions.
 // This runner owns preparation/path policy and composes the extracted
 // LOW/MEDIUM-risk helpers. Authorization and execution/finalization are
@@ -1134,6 +1135,121 @@ export async function runToolInvocation(
         isDirectoryTarget,
       );
 
+      const deferDirectoryAuthorization = async (terminal: boolean): Promise<{
+        permissionResult: PermissionCheckResult;
+        message: string;
+        deferredId?: string;
+      }> => {
+        const deferredQueue = services.permissionManager?.getDeferredQueue();
+        const verdict: RiskVerdict = {
+          level: "high",
+          reason: headless
+            ? "headless out-of-allowed-dir requires manual directory approval"
+            : "out-of-allowed-dir requires manual directory approval",
+        };
+        const deferredGrantPath = suggestedParent ?? outOfAllowedTarget.filePath;
+        const deferredId = deferredQueue
+          ? await deferredQueue.append({
+            ...(sessionId === undefined ? {} : { sessionId }),
+            toolName: toolUse.name,
+            source,
+            category: invocationCategory,
+            inputSummary: summarizeInputForDeferred(auditInput),
+            evaluationContext: makeEvaluationContext({
+              pathFields: reviewerPathFields,
+              targetFilePaths: [outOfAllowedTarget.filePath],
+              sensitivePathsAdjacent: validation.adjacencyWarnings,
+            }),
+            verdict,
+            ...(deferredGrantPath
+              ? { grant: { kind: "directory" as const, path: deferredGrantPath } }
+              : {}),
+          })
+          : undefined;
+        const reason = terminal
+          ? "approval surface unavailable for out-of-allowed-dir request"
+          : "headless out-of-allowed-dir requires manual directory approval";
+        return {
+          permissionResult: {
+            decision: "deny",
+            reason,
+            layer: 1,
+            ...(terminal ? {} : { reviewer: { route: "headless" as const, verdict } }),
+            ...(deferredId
+              ? { deferred: { queueId: deferredId, reviewerVerdict: verdict } }
+              : {}),
+          },
+          message: terminal
+            ? "Authorization required: this tool needs a directory grant, but this host has no approval surface. The turn has stopped and will not retry automatically."
+            : t("be_executor.permHoldHeadlessDirectory", { name: toolUse.name, source })
+              + (deferredId ? ` (deferredId=${deferredId})` : "")
+              + buildPolicyDenialGuidance({
+                rule: "allowed-directories/headless-hold",
+                operand: outOfAllowedTarget.filePath,
+                retry: "grant",
+                alternative: "retarget-under-authorized-directory",
+                allowedDirectories: invocationAllowedScope.directories,
+                readsUnfenced: !blockReadsOutsideWorkingDirectories,
+              }),
+          ...(deferredId ? { deferredId } : {}),
+        };
+      };
+
+      if (
+        !headless
+        && invocationPermissionContext.approvalSurface === "unavailable"
+      ) {
+        const deferred = await deferDirectoryAuthorization(true);
+        const durationMs = Date.now() - startTime;
+        log.warn(deferred.message);
+        emitToolStart(callbacks, toolUse.name, finalInput, meta);
+        callbacks?.onToolEnd?.(
+          toolUse.name,
+          deferred.message,
+          true,
+          meta,
+          undefined,
+          durationMs,
+        );
+        await auditCurrentToolCall(
+          sessionId,
+          toolUse.name,
+          source,
+          trust,
+          finalInput,
+          deferred.message,
+          true,
+          startTime,
+          deferred.permissionResult,
+          Infinity,
+          invocationPermissionContext,
+          invocationCategory,
+          executionCwd,
+        );
+        return {
+          allowed: false,
+          result: withHostShellExecutionPlan({
+            tool_use_id: toolUse.id,
+            content: deferred.message,
+            is_error: true,
+            authorizationRequired: issueAuthorizationRequiredControl({
+              kind: "directory",
+              toolName: toolUse.name,
+              source,
+              category: invocationCategory,
+              reason: "directory-authorization-required",
+              ...(deferred.deferredId
+                ? { deferredRequestId: deferred.deferredId }
+                : {}),
+              ...(hostShellExecutionPlanAudit
+                ? { executionPlan: hostShellExecutionPlanAudit }
+                : {}),
+            }),
+            durationMs,
+          }),
+        };
+      }
+
       if (services.approvalGate && !headless) {
         const approvalRequest = {
           id: randomUUID(),
@@ -1351,53 +1467,9 @@ export async function runToolInvocation(
       }
 
       if (headless) {
-        const deferredQueue = services.permissionManager?.getDeferredQueue();
-        const verdict: RiskVerdict = {
-          level: "high",
-          reason: "headless out-of-allowed-dir requires manual directory approval",
-        };
-        // The grant an eventual approval will apply. Host-derived, and the
-        // same path the interactive `allow-session` branch above uses, so a
-        // deferred approval cannot be broader than the button would have been.
-        // Recording it here is what makes `"approved"` available for this
-        // entry at all — see DeferredGrant.
-        const deferredGrantPath = suggestedParent ?? outOfAllowedTarget.filePath;
-        const deferredId = deferredQueue
-          ? await deferredQueue.append({
-            ...(sessionId === undefined ? {} : { sessionId }),
-            toolName: toolUse.name,
-            source,
-            category: invocationCategory,
-            inputSummary: summarizeInputForDeferred(auditInput),
-            evaluationContext: makeEvaluationContext({
-              pathFields: reviewerPathFields,
-              targetFilePaths: [outOfAllowedTarget.filePath],
-              sensitivePathsAdjacent: validation.adjacencyWarnings,
-            }),
-            verdict,
-            ...(deferredGrantPath
-              ? { grant: { kind: "directory" as const, path: deferredGrantPath } }
-              : {}),
-          })
-          : undefined;
-        const permissionResult: PermissionCheckResult = {
-          decision: "deny",
-          reason: "headless out-of-allowed-dir requires manual directory approval",
-          layer: 1,
-          reviewer: { route: "headless", verdict },
-          ...(deferredId ? { deferred: { queueId: deferredId, reviewerVerdict: verdict } } : {}),
-        };
-        const msg =
-          t("be_executor.permHoldHeadlessDirectory", { name: toolUse.name, source }) +
-          (deferredId ? ` (deferredId=${deferredId})` : "") +
-          buildPolicyDenialGuidance({
-            rule: "allowed-directories/headless-hold",
-            operand: outOfAllowedTarget.filePath,
-            retry: "grant",
-            alternative: "retarget-under-authorized-directory",
-            allowedDirectories: invocationAllowedScope.directories,
-            readsUnfenced: !blockReadsOutsideWorkingDirectories,
-          });
+        const deferred = await deferDirectoryAuthorization(false);
+        const permissionResult = deferred.permissionResult;
+        const msg = deferred.message;
         const durationMs = Date.now() - startTime;
         log.warn(msg);
         emitToolStart(callbacks, toolUse.name, finalInput, meta);

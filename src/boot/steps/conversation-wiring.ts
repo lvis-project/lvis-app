@@ -63,6 +63,7 @@ import type { ConversationLoop } from "../../engine/conversation-loop.js";
 import { captureRationalePolicyEpoch } from "../../tools/pipeline/rationale-policy-epoch.js";
 import { localDateKey } from "../../shared/local-date.js";
 import type { RationaleCoordinatorFactory } from "../../engine/turn/rationale-conversation-orchestration.js";
+import type { ApprovalSurface } from "../../shared/authorization-required.js";
 
 const log = createLogger("lvis");
 
@@ -196,6 +197,7 @@ export async function wireConversation(
   ctx: BootContext,
   removedWorkspaceRoots: readonly string[],
   isolatedMemoryManagers: IsolatedConversationMemoryManagers,
+  approvalSurface: ApprovalSurface,
 ): Promise<void> {
   const {
     settingsService,
@@ -250,6 +252,7 @@ export async function wireConversation(
     memoryReviewer,
     permissionManager,
     approvalGate,
+    approvalSurface,
     hookRunner,
     scriptHookManager,
     bashAstValidator,
@@ -342,6 +345,7 @@ export async function wireConversation(
     sessionGoalStore: ctx.sessionGoalStore,
     bashAstValidator,
     approvalGate,
+    approvalSurface,
     hookRunner,
     scriptHookManager,
     getAdditionalDirectories: () => readPermissionSettings().permissions.additionalDirectories,
@@ -391,6 +395,7 @@ export async function wireConversation(
     permissionManager,
     memoryReviewer,
     approvalGate,
+    approvalSurface,
     hookRunner,
     scriptHookManager,
     bashAstValidator,
@@ -460,6 +465,7 @@ export async function wireConversation(
       sessionGoalStore: ctx.sessionGoalStore,
       bashAstValidator,
       approvalGate,
+      approvalSurface,
       hookRunner,
       scriptHookManager,
       getAdditionalDirectories: () => readPermissionSettings().permissions.additionalDirectories,
@@ -628,6 +634,7 @@ export async function wireConversation(
       memoryReviewer,
       permissionManager,
       approvalGate,
+      approvalSurface,
       bashAstValidator,
       hookRunner,
       scriptHookManager,

@@ -2,7 +2,9 @@ import { randomUUID } from "node:crypto";
 import type { Tool } from "./base.js";
 import type { ToolCategory, ToolSource, TrustLevel } from "./types.js";
 import {
-  isTailnetControllerP1BlockedTool, type PermissionCheckResult,
+  isReviewerAutoDecisionOutcome,
+  isTailnetControllerP1BlockedTool,
+  type PermissionCheckResult,
 } from "../permissions/permission-manager.js";
 import {
   deferredParentEscalationOf,
@@ -62,6 +64,7 @@ import type {
 import type { ResolvedPluginOperation } from "./plugin-operation-governance.js";
 import type { PluginOperationPrincipal } from "../permissions/plugin-operation-grant.js";
 import { errorMessage } from "../shared/error-message.js";
+import { issueAuthorizationRequiredControl } from "../shared/authorization-required.js";
 
 const log = createLogger("executor");
 
@@ -197,6 +200,140 @@ export async function authorizeToolInvocation(
     pluginOperationPrincipal,
   } = context;
   let { permissionResult, hostShellApprovalDecision } = context;
+
+  const returnAuthorizationRequired = async (
+    blockedPermission: PermissionCheckResult,
+    deferredRequestId?: string,
+  ): Promise<ToolResult> => {
+    if (abortSignal?.aborted) {
+      return withHostShellExecutionPlan(
+        await returnUserAbort(abortDeps(finalInput)),
+      );
+    }
+    try {
+      await auditCurrentPermissionAsk(
+        toolUse.name,
+        source,
+        invocationCategory,
+        finalInput,
+        blockedPermission,
+        executionCwd,
+        invocationPermissionContext,
+        targetFilePath,
+      );
+    } catch (error) {
+      log.warn(
+        "authorization-required permission ask audit failed: %s",
+        errorMessage(error),
+      );
+    }
+    const hostExecution = hostShellRequiresExplicitApproval;
+    const message = hostExecution
+      ? hostShellExecutionPlan?.executionRequest === "host"
+        ? "Authorization required: explicit host shell execution requires local approval, but this host has no approval surface. The turn has stopped and will not retry automatically."
+        : "Authorization required: this shell would run without the requested OS isolation, but this host has no approval surface. The turn has stopped and will not retry automatically."
+      : "Authorization required: this tool requires explicit approval, but this host has no approval surface. The turn has stopped and will not retry automatically.";
+    const durationMs = Date.now() - startTime;
+    emitToolStart(callbacks, toolUse.name, finalInput, meta);
+    callbacks?.onToolEnd?.(
+      toolUse.name,
+      message,
+      true,
+      meta,
+      undefined,
+      durationMs,
+    );
+    await auditCurrentToolCall(
+      sessionId,
+      toolUse.name,
+      source,
+      trust,
+      finalInput,
+      message,
+      true,
+      startTime,
+      {
+        ...blockedPermission,
+        decision: "deny",
+        reason: "authorization required but approval surface unavailable",
+      },
+      Infinity,
+      invocationPermissionContext,
+      invocationCategory,
+      executionCwd,
+    );
+    return withHostShellExecutionPlan({
+      tool_use_id: toolUse.id,
+      content: message,
+      is_error: true,
+      authorizationRequired: issueAuthorizationRequiredControl({
+        kind: hostExecution ? "host-execution" : "tool",
+        toolName: toolUse.name,
+        source,
+        category: invocationCategory,
+        reason: hostExecution
+          ? "host-execution-authorization-required"
+          : "approval-surface-unavailable",
+        ...(deferredRequestId ? { deferredRequestId } : {}),
+        ...(hostShellExecutionPlanAudit
+          ? { executionPlan: hostShellExecutionPlanAudit }
+          : {}),
+      }),
+      durationMs,
+    });
+  };
+
+  const returnReviewerInfrastructureFailure = async (
+    blockedPermission: PermissionCheckResult,
+  ): Promise<ToolResult> => {
+    if (abortSignal?.aborted) {
+      return withHostShellExecutionPlan(
+        await returnUserAbort(abortDeps(finalInput)),
+      );
+    }
+    const deniedPermission: PermissionCheckResult = {
+      ...blockedPermission,
+      decision: "deny",
+      reason: `reviewer assessment unavailable: ${blockedPermission.reason}`,
+    };
+    const message = t("be_executor.permBlockDeny", {
+      name: toolUse.name,
+      source,
+      trust,
+      reason: deniedPermission.reason,
+    });
+    const durationMs = Date.now() - startTime;
+    emitToolStart(callbacks, toolUse.name, finalInput, meta);
+    callbacks?.onToolEnd?.(
+      toolUse.name,
+      message,
+      true,
+      meta,
+      undefined,
+      durationMs,
+    );
+    await auditCurrentToolCall(
+      sessionId,
+      toolUse.name,
+      source,
+      trust,
+      finalInput,
+      message,
+      true,
+      startTime,
+      deniedPermission,
+      Infinity,
+      invocationPermissionContext,
+      invocationCategory,
+      executionCwd,
+    );
+    return withHostShellExecutionPlan({
+      tool_use_id: toolUse.id,
+      content: message,
+      is_error: true,
+      durationMs,
+    });
+  };
 
   // ── Step 3: Permission (source-aware) ───────────
   //
@@ -1260,6 +1397,17 @@ export async function authorizeToolInvocation(
           reason: "host-authentic rationale allow-once receipt consumed",
           layer: permissionResult.layer,
         };
+      } else if (invocationPermissionContext.approvalSurface === "unavailable") {
+        const reviewerOutcome = permissionResult.reviewer?.route === "foreground-auto"
+          ? permissionResult.reviewer.outcome
+          : undefined;
+        if (
+          reviewerOutcome !== undefined
+          && !isReviewerAutoDecisionOutcome(reviewerOutcome)
+        ) {
+          return returnReviewerInfrastructureFailure(permissionResult);
+        }
+        return returnAuthorizationRequired(permissionResult);
       } else if (services.approvalGate) {
         // Layer 3: wire target.filePath + isReadOnly + mode so the
         // approval gate can apply sensitive-path and read-only checks to

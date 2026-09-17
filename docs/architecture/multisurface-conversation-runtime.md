@@ -459,25 +459,50 @@ eventual termination; SIGTERM or SIGINT releases the request through normal
 shutdown and descendant cleanup. Unsuccessful turns exit without retention.
 
 Exit codes are `0` completed, `1` the turn failed or the secret could not be
-stored, `2` the turn ended asking for input, `64` a malformed command line, `75` another
-LVIS process holds the single-instance lock (retry once it has quit; that
+stored, `2` the turn ended asking for input, `64` a malformed command line,
+`75` another LVIS process holds the single-instance lock (retry once it has quit; that
 case quits before `whenReady`, so it exits hard with its code and runs no
-cleanup). The branch ends with `app.quit()`, not `app.exit()`, so the
+cleanup), and `77` the turn requires authorization that this process cannot
+present. The branch ends with `app.quit()`, not `app.exit()`, so the
 `before-quit` shutdown cleanup flushes the session transcript and audit rows
 the run produced; the code itself is applied by a `will-quit` handler through
 `app.exit()`, because Electron's `quit()` exits 0 whatever `process.exitCode`
 holds. A cleanup that hits its timeout exits hard with the same chosen code.
 
-An unattended run has nobody to ask, so it registers a pending-approval observer
-that answers every parked request with `deny-once` and notes it on stderr. That
-is the whole of its approval behaviour: it never widens a verdict, and
-`--exec-approve=allow` sets the permission manager's allow mode without removing
-any Layer 0 check. Allow mode does not cover the Layer-1 allowed-directory
-prompt either — that prompt is its own request, so an unattended run turns it
-into a `deny-once` and every path outside the already-granted set is refused,
-which is why a harness has to pre-grant the directories its tasks work in
-through the workspace grant document rather than expecting allow mode to reach
-them. `--set-secret` writes through the app's own secret store so a
+An unattended run has nobody to ask. Bootstrap therefore marks its conversation
+loops with an unavailable approval surface. The native main loop keeps the
+ordinary main-chat tool, plugin, MCP, and egress scope intact; if one of its
+tools still needs explicit authorization after the normal policy and reviewer
+paths, the host appends its single paired error result and terminates the turn
+before another model round. Routine loops remain in their existing `headless`
+policy lane, including its fail-closed and deferred-review behavior; approval
+availability does not turn that scope flag into foreground authority.
+The terminal event carries only the tool identity, category, reason, and safe
+execution-plan projection; it carries no arguments, command, path, prompt, or
+reviewer prose. JSON output similarly omits the partial result and raw tool-call
+array for this outcome. The process exits `77` (`EX_NOPERM`). A host-private
+control identity prevents a plugin, MCP server, or model-shaped result from
+forging this terminal state. A sub-agent started by a windowless owner stays
+inline until its result is known, so a child authorization boundary is
+re-issued by the trusted `agent_spawn` builtin and terminates the parent turn
+before another parent-model round. Persisted child JSON and background result
+text never carry that authority.
+
+The safety statement above is about the terminal control record. `stream-json`
+is still the local owner's detailed live timeline, so events emitted before the
+terminal decision can include owner-only user text, assistant text, and tool
+input under `ownerDetail`. Consumers that need only the bounded terminal state
+use `--exec-output=json`; shared or remote surfaces continue to use the shared
+event projection instead of serializing the owner stream.
+
+`--exec-approve=allow` still sets the permission manager's allow mode without
+removing any Layer 0 check. Allow mode does not cover the Layer-1
+allowed-directory request, so an unattended run stops with
+`authorization-required` for a path outside the already-granted set. A harness
+must pre-grant the directories its tasks work in through the workspace grant
+document rather than expecting allow mode to reach them. The pending-approval
+observer remains a fail-closed backstop for approval producers outside the tool
+invocation path; it never widens a verdict. `--set-secret` writes through the app's own secret store so a
 container never has to produce the platform's ciphertext itself; the store's key
 validation and its refusal to store a secret it cannot encrypt are surfaced as
 exit codes rather than worked around.
@@ -533,6 +558,7 @@ Implementation anchors:
 - `src/main.ts`
 - `src/boot.ts` (`BootLaunch`)
 - `src/boot/services.ts` (`applyBootLocale`)
+- `src/shared/authorization-required.ts`
 - `src/ipc/handlers/chat-stream.ts`
 
 ## Telemetry
