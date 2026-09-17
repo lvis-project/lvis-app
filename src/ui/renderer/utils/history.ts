@@ -204,6 +204,7 @@ export function historyToEntries(
         const subscriptionUsage = normalizeSubscriptionUsageList(m.turnSummary.subscriptionUsage);
         out.push({
           kind: "turn_summary",
+          ...(m.turnSummary.endedByEndTurn === true ? { endedByEndTurn: true as const } : {}),
           turnDurationMs: m.turnSummary.turnDurationMs,
           toolCount: m.turnSummary.toolCount,
           cumulativeToolMs: m.turnSummary.cumulativeToolMs,

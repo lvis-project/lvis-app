@@ -46,7 +46,10 @@ import {
   type LlmModelListCache,
 } from "../shared/llm-model-list.js";
 import type { ActiveChatRuntime } from "../shared/subscription-runtime.js";
-import type { ProcessingDisplayLevel } from "../shared/processing-display-level.js";
+import {
+  isProcessingDisplayLevel,
+  type ProcessingDisplayLevel,
+} from "../shared/processing-display-level.js";
 import {
   isMarketplaceProviderPresetId,
   marketplaceProviderPresetSecretKey,
@@ -267,6 +270,22 @@ export interface ChatSettings {
    * chatting, and a control implies a choice worth making mid-conversation.
    */
   progressNudgeRounds: number;
+}
+
+/**
+ * A renderer patch named a field that is invalid at the live settings boundary.
+ *
+ * Disk recovery is deliberately different: malformed persisted settings retain
+ * the legacy full-display default during `normalizeChat`. A live mutation must
+ * not silently replace a user's current valid preference with that default.
+ */
+class SettingsPatchValidationError extends Error {
+  readonly code = "invalid-processing-display-level";
+
+  constructor() {
+    super("chat.processingDisplayLevel must be one of: tools, reasoning, full.");
+    this.name = "SettingsPatchValidationError";
+  }
 }
 
 export interface A2ARemoteTargetSettings {
@@ -958,6 +977,16 @@ export class SettingsService {
       telemetry?: Partial<TelemetrySettings>;
     },
   ): Promise<AppSettings> {
+    const chatPatch = partial.chat;
+    if (
+      chatPatch
+      && typeof chatPatch === "object"
+      && !Array.isArray(chatPatch)
+      && Object.prototype.hasOwnProperty.call(chatPatch, "processingDisplayLevel")
+      && !isProcessingDisplayLevel(chatPatch.processingDisplayLevel)
+    ) {
+      throw new SettingsPatchValidationError();
+    }
     const previousSettings = this.getAll();
     const nextMarketplace = partial.marketplace
       ? normalizeMarketplace({

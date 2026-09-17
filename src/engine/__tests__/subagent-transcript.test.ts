@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { SubAgentTranscriptAccumulator } from "../subagent-transcript.js";
+import type { ChatEntry } from "../../lib/chat-stream-state.js";
 import type { ToolCallMeta } from "../../tools/executor.js";
 import { resolveMcpUiBackend } from "../../mcp/mcp-ui-backend-resolver.js";
 import type {
@@ -133,7 +134,7 @@ describe("SubAgentTranscriptAccumulator", () => {
 
   it("DLP-masks reasoning + assistant text from a child round", () => {
     const acc = new SubAgentTranscriptAccumulator();
-    acc.onAssistantRound("email me at leak@example.com", "reply to leak2@example.com");
+    acc.onAssistantRound("email me at leak@example.com", "reply to leak2@example.com", "end_turn", false);
     const snap = acc.snapshot();
     const joined = JSON.stringify(snap);
     expect(joined).not.toContain("leak@example.com");
@@ -152,6 +153,68 @@ describe("SubAgentTranscriptAccumulator", () => {
     // renders the "Thinking…" spinner while the child is actually thinking.
     expect(reasoning.text).toBe("Let me check the file");
     expect(reasoning.streaming).toBe(true);
+  });
+
+  it("shows one retry or fallback status until the child starts real reasoning", () => {
+    const acc = new SubAgentTranscriptAccumulator();
+
+    expect(acc.onLlmStatus({ phase: "attempt", attempt: 1, maxAttempts: 5 })).toBe(false);
+    expect(acc.onLlmStatus({ phase: "attempt", attempt: 2, maxAttempts: 5 })).toBe(false);
+    expect(acc.onLlmStatus({ phase: "retry", attempt: 2 })).toBe(false);
+    expect(acc.snapshot()).toEqual([]);
+
+    expect(acc.onLlmStatus({ phase: "retry", attempt: 2, maxAttempts: 5 })).toBe(true);
+    expect(acc.onLlmStatus({ phase: "retry", attempt: 2, maxAttempts: 5 })).toBe(false);
+    expect(acc.onLlmStatus({ phase: "fallback", to: "backup" })).toBe(true);
+    const statusEntries = acc.snapshot().filter(
+      (entry): entry is Extract<ChatEntry, { kind: "assistant" }> =>
+        entry.kind === "assistant" && entry.phase === "status",
+    );
+    expect(statusEntries).toHaveLength(1);
+    expect(statusEntries[0]?.text).toContain("backup");
+
+    acc.onReasoningDelta("checking the new route");
+
+    expect(acc.snapshot().some(
+      (entry) => entry.kind === "assistant" && entry.phase === "status",
+    )).toBe(false);
+    expect(acc.snapshot()).toContainEqual(expect.objectContaining({
+      kind: "reasoning",
+      text: "checking the new route",
+      streaming: true,
+    }));
+  });
+
+  it("clears a provider status when a child starts tool work or completes text", () => {
+    const toolAccumulator = new SubAgentTranscriptAccumulator();
+    toolAccumulator.onLlmStatus({ phase: "retry", attempt: 2, maxAttempts: 5 });
+    toolAccumulator.onToolStart("read_file", { path: "/tmp/x" }, meta());
+
+    expect(toolAccumulator.snapshot().some(
+      (entry) => entry.kind === "assistant" && entry.phase === "status",
+    )).toBe(false);
+    expect(toolAccumulator.snapshot()).toContainEqual(expect.objectContaining({ kind: "tool_group" }));
+
+    const textAccumulator = new SubAgentTranscriptAccumulator();
+    textAccumulator.onLlmStatus({ phase: "fallback", to: "backup" });
+    textAccumulator.onAssistantRound("", "recovered answer", "end_turn", false);
+
+    expect(textAccumulator.snapshot()).toEqual([
+      expect.objectContaining({
+        kind: "assistant",
+        text: "recovered answer",
+        streaming: false,
+      }),
+    ]);
+  });
+
+  it("clears a status-only retry when the child reaches a terminal result", () => {
+    const acc = new SubAgentTranscriptAccumulator();
+    expect(acc.onLlmStatus({ phase: "retry", attempt: 2, maxAttempts: 5 })).toBe(true);
+
+    expect(acc.finish()).toBe(true);
+    expect(acc.snapshot()).toEqual([]);
+    expect(acc.finish()).toBe(false);
   });
 
   it("DLP-masks the ACCUMULATION so a secret split across deltas cannot leak", () => {
@@ -174,10 +237,10 @@ describe("SubAgentTranscriptAccumulator", () => {
       const streamed = new SubAgentTranscriptAccumulator();
       streamed.onReasoningDelta("partial thou");
       streamed.onReasoningDelta("ght");
-      streamed.onAssistantRound("thinking about it", "final answer");
+      streamed.onAssistantRound("thinking about it", "final answer", "end_turn", false);
 
       const folded = new SubAgentTranscriptAccumulator();
-      folded.onAssistantRound("thinking about it", "final answer");
+      folded.onAssistantRound("thinking about it", "final answer", "end_turn", false);
 
       // Persistence is unchanged by this feature: once the round closes, the
       // streamed transcript is byte-identical to the one deltas never touched.
@@ -192,7 +255,7 @@ describe("SubAgentTranscriptAccumulator", () => {
     acc.onReasoningDelta("mid-stream reasoning");
     // A provider that streams reasoning but reports an empty round `thought`
     // must not leave the card spinning forever.
-    acc.onAssistantRound("", "answer");
+    acc.onAssistantRound("", "answer", "end_turn", false);
 
     const reasoning = acc.snapshot().find((e) => e.kind === "reasoning");
     if (reasoning?.kind !== "reasoning") throw new Error("expected reasoning");
@@ -203,7 +266,7 @@ describe("SubAgentTranscriptAccumulator", () => {
   it("starts each round's reasoning fresh", () => {
     const acc = new SubAgentTranscriptAccumulator();
     acc.onReasoningDelta("first round thought");
-    acc.onAssistantRound("first round thought", "first answer");
+    acc.onAssistantRound("first round thought", "first answer", "end_turn", false);
     acc.onReasoningDelta("second round thought");
 
     const live = acc.snapshot().filter((e) => e.kind === "reasoning").at(-1);
@@ -213,7 +276,7 @@ describe("SubAgentTranscriptAccumulator", () => {
 
   it("folds a completed assistant round into reasoning + assistant entries", () => {
     const acc = new SubAgentTranscriptAccumulator();
-    acc.onAssistantRound("thinking about it", "final answer");
+    acc.onAssistantRound("thinking about it", "final answer", "end_turn", false);
     const snap = acc.snapshot();
     const kinds = snap.map((e) => e.kind);
     expect(kinds).toContain("reasoning");
@@ -222,6 +285,20 @@ describe("SubAgentTranscriptAccumulator", () => {
     if (assistant?.kind !== "assistant") throw new Error("expected assistant");
     expect(assistant.text).toBe("final answer");
     expect(assistant.streaming).toBe(false);
+    expect(assistant.phase).toBe("final");
+  });
+
+  it("keeps a truncated child round as work rather than a completed answer", () => {
+    const acc = new SubAgentTranscriptAccumulator();
+    acc.onAssistantRound("working", "partial answer", "max_tokens", false);
+
+    const assistant = acc.snapshot().find((entry) => entry.kind === "assistant");
+    if (assistant?.kind !== "assistant") throw new Error("expected assistant");
+    expect(assistant).toMatchObject({
+      text: "partial answer",
+      streaming: false,
+      phase: "work",
+    });
   });
 
   it("adds a permission_review entry", () => {
@@ -243,7 +320,7 @@ describe("SubAgentTranscriptAccumulator", () => {
     const acc = new SubAgentTranscriptAccumulator();
     acc.onToolStart("read_file", {}, meta());
     const first = acc.snapshot();
-    acc.onAssistantRound("", "done");
+    acc.onAssistantRound("", "done", "end_turn", false);
     const second = acc.snapshot();
     expect(second.length).toBeGreaterThan(first.length);
   });

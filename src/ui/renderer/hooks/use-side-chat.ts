@@ -40,6 +40,7 @@ import { t } from "../../../i18n/runtime.js";
 import {
   applyReasoningDelta,
   applyTranscriptFrame,
+  dropPendingLlmStatusAssistant,
   finalizeStreamingAssistant,
   finalizeStreamingReasoning,
   isTranscriptFrame,
@@ -49,6 +50,7 @@ import {
   type ChatEntry,
   type ChatStreamEvent,
 } from "../../../lib/chat-stream-state.js";
+import { formatLlmStatusMessage } from "../../../lib/llm-status-message.js";
 import { detectFromStream } from "../../../lib/stream-markers.js";
 import type { UserContentPart } from "../../../engine/llm/types.js";
 import { formatIpcError } from "../format-ipc-error.js";
@@ -199,7 +201,14 @@ export function useSideChat(api: LvisApi): UseSideChat {
       if (!isCurrentTurnEvent(event)) return;
 
       const ev = event;
-      if (ev.type === "text_delta" && ev.text) {
+      if (ev.type === "llm_status") {
+        // A terminal frame has closed this stream. Do not let delayed provider
+        // status resurrect a dismissed placeholder after done, error, or abort.
+        if (!isStreamingRef.current || finalAssistantRoundClosedRef.current) return;
+        const message = formatLlmStatusMessage(ev);
+        if (!message) return;
+        setEntries((p) => upsertStreamingAssistant(p, message, "status"));
+      } else if (ev.type === "text_delta" && ev.text) {
         if (finalAssistantRoundClosedRef.current) return;
         const delta = ev.text;
         streamRef.current += delta;
@@ -210,7 +219,7 @@ export function useSideChat(api: LvisApi): UseSideChat {
         const thought = thoughtRef.current;
         setEntries((p) => applyReasoningDelta(p, thought));
       } else if (ev.type === "assistant_round") {
-        const phase = ev.stopReason === "tool_use" || ev.hasToolCalls ? "work" : "final";
+        const phase = ev.stopReason === "end_turn" && ev.hasToolCalls !== true ? "final" : "work";
         if (finalAssistantRoundClosedRef.current) return;
         setEntries((p) => {
           let next = finalizeStreamingReasoning(p, ev.thought ?? thoughtRef.current);
@@ -249,6 +258,8 @@ export function useSideChat(api: LvisApi): UseSideChat {
             next = finalizeStreamingAssistant(next, finalText, { overrideText: finalText });
             return next;
           });
+        } else {
+          setEntries((p) => dropPendingLlmStatusAssistant(p));
         }
         setStreaming(false);
         resetStreamAccumulators();
@@ -299,7 +310,10 @@ export function useSideChat(api: LvisApi): UseSideChat {
     setStreaming(false);
     setEntries((p) =>
       markTurnAssistantInterrupted(
-        finalizeStreamingReasoning(dropPendingStreamingAssistant(p), thought),
+        finalizeStreamingReasoning(
+          dropPendingStreamingAssistant(dropPendingLlmStatusAssistant(p)),
+          thought,
+        ),
       ),
     );
     // Awaited last: an interrupting send goes out immediately after this
@@ -448,6 +462,7 @@ export function useSideChat(api: LvisApi): UseSideChat {
       if (isTurnStartEntry(e)) curTurnStart = i;
       else if (e.kind === "turn_summary" && curTurnStart >= 0) {
         map.set(curTurnStart, {
+          ...(e.endedByEndTurn === true ? { endedByEndTurn: true as const } : {}),
           turnDurationMs: e.turnDurationMs,
           toolCount: e.toolCount,
           cumulativeToolMs: e.cumulativeToolMs,

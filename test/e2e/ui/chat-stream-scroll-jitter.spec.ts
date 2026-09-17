@@ -167,7 +167,7 @@ test.describe("chat stream bottom-follow jitter", () => {
         { type: "text_delta", text: "Intermediate assistant work before tool_use.\n" },
         { type: "assistant_round", stopReason: "tool_use", hasToolCalls: true },
         ...longChunks("final-stream-line", 24).map((text) => ({ type: "text_delta", text })),
-        { type: "assistant_round", stopReason: "end_turn" },
+        { type: "assistant_round", stopReason: "end_turn", hasToolCalls: false },
         {
           type: "turn_summary",
           tokensIn: 6400,

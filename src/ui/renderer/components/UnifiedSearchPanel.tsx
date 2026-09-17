@@ -140,11 +140,20 @@ export function UnifiedSearchPanel({
       conversationMatches
         .map((entryIndex, matchIndex) => {
           const entry = entries[entryIndex];
-          if (!entry || (entry.kind !== "user" && entry.kind !== "assistant")) return null;
+          if (
+            !entry
+            || (entry.kind !== "user" && entry.kind !== "assistant" && entry.kind !== "reasoning")
+          ) return null;
           return {
             entryIndex,
             matchIndex,
-            role: entry.kind === "user" ? t("unifiedSearchPanel.roleUser") : t("unifiedSearchPanel.roleAssistant"),
+            role: entry.kind === "user"
+              ? t("unifiedSearchPanel.roleUser")
+              : entry.kind === "reasoning"
+                ? entry.streaming
+                  ? t("reasoningCard.thinkingTitle")
+                  : t("reasoningCard.thoughtCompleteTitle")
+                : t("unifiedSearchPanel.roleAssistant"),
             text: entry.text,
           } satisfies ConversationMatch;
         })

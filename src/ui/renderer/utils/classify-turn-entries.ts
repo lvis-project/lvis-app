@@ -68,6 +68,13 @@ export function classifyTurnEntries(
     const hasSubsequentWork = subsequentTurnEntries.some(
       (ne) => ne.kind === "tool_group" || ne.kind === "reasoning" || ne.kind === "permission_review",
     );
+    // A turn summary proves that the work settled and has durable usage data.
+    // It does not prove a natural end_turn: input waits and output caps also
+    // carry summaries. Completion labeling is decided separately by the
+    // summary's endedByEndTurn marker.
+    const hasTurnSummary = subsequentTurnEntries.some(
+      (ne) => ne.kind === "turn_summary",
+    );
 
     const myTurnStart = turnStart >= 0 ? turnStart : 0;
     entryTurnStartMap.set(i, myTurnStart);
@@ -90,7 +97,7 @@ export function classifyTurnEntries(
       } else {
         entryClassMap.set(i, "live");
       }
-    } else if (hasSubsequent || isActiveTurnEntry) {
+    } else if (hasSubsequent || isActiveTurnEntry || hasTurnSummary) {
       entryClassMap.set(i, "intermediate");
     } else {
       entryClassMap.set(i, "live");

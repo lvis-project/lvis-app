@@ -602,8 +602,9 @@ describe("ChatView", () => {
       expect(container.textContent).toContain("오류: reviewer failed");
     });
 
-    // The completed turn collapses into a WorkGroup; the verdict is kept, not
-    // erased, so expanding the group shows it again.
+    // A settled error is grouped for inspection, but it is not a completed
+    // turn. The verdict remains available after expanding that group.
+    expect(container.querySelector('[data-testid="work-group"]')?.textContent).not.toContain("작업 완료");
     await act(async () => {
       fireEvent.click(container.querySelector('[data-testid="work-group"] button')!);
     });
@@ -647,7 +648,7 @@ describe("ChatView", () => {
     });
 
     await waitFor(() => {
-      expect(container.textContent).toMatch(/작업\s*1단계/);
+      expect(container.textContent).toContain("작업 완료");
       expect(container.textContent).toContain("권한 확인 후 답변합니다");
       expect(container.textContent).not.toContain("첫 번째 승인 목적");
     });
@@ -745,7 +746,7 @@ describe("ChatView", () => {
 
     await waitFor(() => expect(api.chatSend).toHaveBeenCalled());
     await waitFor(() => {
-      expect(container.querySelector('[data-testid="work-group"]')?.textContent).toContain("작업 중...");
+      expect(container.querySelector('[data-testid="work-group"]')?.textContent).toContain("생각 중...");
     });
     expect(container.querySelectorAll('[data-testid="assistant-message-body"]')).toHaveLength(0);
 
@@ -830,11 +831,7 @@ describe("ChatView", () => {
       emitChatStream({ type: "done" });
     });
     await waitFor(() => {
-      // Tighter than two separate `toContain("작업")` + `toContain("2단계")` —
-      // those would pass even if WorkGroup spans degenerated to `작업단계`
-      // (lost the count). `/작업\s*\d+단계/` requires the count digit between
-      // the label and the suffix, which is what WorkGroup actually renders.
-      expect(container.textContent).toMatch(/작업\s*2단계/);
+      expect(container.textContent).toContain("작업 완료");
       expect(container.textContent).not.toContain("calendar list");
       expect(container.textContent).not.toContain("__calendar_result__");
       expect(container.textContent).toContain("두번째 답변입니다");
@@ -975,7 +972,7 @@ describe("ChatView", () => {
 
     await waitFor(() => {
       expect(container.textContent).toContain("현재 최종");
-      expect(container.textContent).toMatch(/작업\s*2단계/);
+      expect(container.textContent).toContain("작업 완료");
       expect(container.textContent).not.toContain("current session probe");
     });
 
@@ -1399,7 +1396,7 @@ describe("ChatView", () => {
     });
 
     await waitFor(() => {
-      expect(container.textContent).toMatch(/작업\s*1단계/);
+      expect(container.textContent).toContain("작업 완료");
       expect(container.textContent).toContain("후속 안내입니다");
       expect(container.textContent).not.toContain("__meeting_transcript__");
     });
@@ -1574,7 +1571,7 @@ describe("ChatView", () => {
       emitChatStream({ type: "done" });
     });
     await waitFor(() => {
-      expect(container.textContent).toMatch(/작업\s*2단계/);
+      expect(container.textContent).toContain("작업 완료");
       expect(container.textContent).toContain("최종 답변입니다");
       expect(container.textContent).not.toContain("첫번째 답변입니다");
     });
@@ -1672,7 +1669,7 @@ describe("ChatView", () => {
     await waitFor(() => {
       expect(container.textContent).toContain("첫 최종 답변");
       expect(container.textContent).toContain("둘째 답변 작성 중");
-      expect(container.textContent).toContain("작업 중...");
+      expect(container.textContent).toContain("생각 중...");
     });
     await act(async () => {
       pendingSend.resolve({ ok: true });
@@ -1699,7 +1696,7 @@ describe("ChatView", () => {
     await waitFor(() => {
       const workGroup = container.querySelector("[data-testid=\"work-group\"]");
       expect(workGroup).toBeTruthy();
-      expect(workGroup!.textContent).toContain("작업 중...");
+      expect(workGroup!.textContent).toContain("생각 중...");
       expect(workGroup!.textContent).toContain("도구를 바로 호출하겠습니다");
     });
     await act(async () => {
@@ -1873,6 +1870,7 @@ describe("ChatView", () => {
     const { container, emitChatStream } = await renderApp({ hasApiKey: true });
     await submitChatMessage(container, "생각만 확인");
     await act(async () => {
+      emitChatStream({ type: "llm_status", phase: "attempt", attempt: 2, maxAttempts: 5 });
       emitChatStream({ type: "reasoning_delta", text: "완료되면 접혀야 하는 생각" });
     });
 
@@ -1880,6 +1878,7 @@ describe("ChatView", () => {
       // The thinking header shows while streaming, but the reasoning body stays
       // COLLAPSED (no auto-expand) — it reveals only on user click.
       expect(container.textContent).toContain("생각 중...");
+      expect(container.textContent?.match(/생각 중\.\.\./g)).toHaveLength(1);
       expect(container.textContent).not.toContain("완료되면 접혀야 하는 생각");
     });
 
@@ -2284,7 +2283,7 @@ describe("ChatView", () => {
     await waitFor(() => {
       const workGroup = container.querySelector("[data-testid=\"work-group\"]");
       expect(workGroup).toBeTruthy();
-      expect(workGroup!.textContent).toContain("작업 중...");
+      expect(workGroup!.textContent).toContain("생각 중...");
       expect(workGroup!.textContent).toContain("도구를 바로 호출하겠습니다");
     });
     await act(async () => {
@@ -2342,7 +2341,7 @@ describe("ChatView", () => {
       // Final assistant text must be visible
       expect(container.textContent).toContain("오늘 일정 정리해드릴게요");
       // Reasoning and tool results are one completed WorkGroup and collapse together.
-      expect(container.textContent).toMatch(/작업\s*2단계/);
+      expect(container.textContent).toContain("작업 완료");
       expect(container.textContent).not.toContain("calendar list");
       expect(container.textContent).not.toContain("__calendar_result__");
     });
@@ -2401,7 +2400,7 @@ describe("ChatView", () => {
 
     await waitFor(() => {
       const transcriptText = container.textContent ?? "";
-      expect(transcriptText).toContain("5단계");
+      expect(transcriptText).toContain("작업 완료");
       expect(transcriptText).toContain("최종 답변입니다.");
       expect(transcriptText).not.toContain("웹 검색");
       expect(transcriptText).not.toContain("검색 결과");

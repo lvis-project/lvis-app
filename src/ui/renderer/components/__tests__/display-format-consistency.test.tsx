@@ -9,8 +9,8 @@
  * exact strings for the inputs where the old copies disagreed.
  *
  * Duration surfaces: the per-tool badge on `ToolGroupCard` and the turn
- * footer on `WorkGroup`. The footer's number is the sum of the badges above
- * it, so `1h 03m` over rows reading `63m 0.0s` was a visible contradiction.
+ * completion summary on `WorkGroup`. The completion label is localized, but
+ * it must retain the same rounding boundaries as the tool badges above it.
  *
  * Cost surfaces: the per-turn `TokenCostBadge`, the starred-day usage panel,
  * and the pre-flight estimate badge (`formatCostBadge`, rendered by
@@ -55,32 +55,31 @@ function toolBadgeText(durationMs: number | undefined): string | null {
   return badge ? (badge.textContent ?? "").replace("⏱", "").trim() : null;
 }
 
-/** The `⏱ …` text the turn footer shows for the same elapsed milliseconds. */
-function turnFooterText(turnDurationMs: number): string {
+/** The localized completion text the WorkGroup shows for the same elapsed milliseconds. */
+function turnCompletionText(turnDurationMs: number): string {
   render(
-    <WorkGroup stepCount={1} streaming={false} revision="r" turnDurationMs={turnDurationMs}>
+    <WorkGroup stepCount={1} streaming={false} revision="r" turnDurationMs={turnDurationMs} completed>
       <div>work</div>
     </WorkGroup>,
   );
-  const node = screen.getByText(/⏱/);
-  return (node.textContent ?? "").replace("⏱", "").trim();
+  return screen.getByRole("button").textContent ?? "";
 }
 
-describe("duration renders identically on the tool badge and the turn footer", () => {
+describe("duration uses the same rounding on tool badges and turn completion", () => {
   afterEach(() => cleanup());
 
   // Every one of these disagreed between the two copies before consolidation.
   it.each([
-    { ms: 72_000, expected: "1m 12s" },
-    { ms: 72_400, expected: "1m 12.4s" },
-    { ms: 60_000, expected: "1m 0s" },
-    { ms: 3_780_000, expected: "1h 03m" },
-    { ms: 1_400, expected: "1.4s" },
-    { ms: 50, expected: "<0.1s" },
-  ])("$ms ms → $expected on both surfaces", ({ ms, expected }) => {
-    expect(toolBadgeText(ms)).toBe(expected);
+    { ms: 72_000, tool: "1m 12s", completion: "작업 완료 1분 12초" },
+    { ms: 72_400, tool: "1m 12.4s", completion: "작업 완료 1분 12.4초" },
+    { ms: 60_000, tool: "1m 0s", completion: "작업 완료 1분 0초" },
+    { ms: 3_780_000, tool: "1h 03m", completion: "작업 완료 1시간 03분" },
+    { ms: 1_400, tool: "1.4s", completion: "작업 완료 1.4초" },
+    { ms: 50, tool: "<0.1s", completion: "작업 완료 <0.1초" },
+  ])("$ms ms keeps its rounding across both surfaces", ({ ms, tool, completion }) => {
+    expect(toolBadgeText(ms)).toBe(tool);
     cleanup();
-    expect(turnFooterText(ms)).toBe(expected);
+    expect(turnCompletionText(ms)).toContain(completion);
   });
 
   it("hides the tool badge for a missing or nonsensical duration instead of printing 0s", () => {

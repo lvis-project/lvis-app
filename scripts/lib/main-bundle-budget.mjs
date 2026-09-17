@@ -49,11 +49,14 @@ export function isSafeMainBundleManifestPath(path) {
  * trimming, because the growth is functionality reaching main, not weight: the startup
  * numbers still sit ~200 KB and ~240 KB under their own ceilings. Record the new
  * measurement here whenever this line moves, so the next bump argues against a number
- * instead of against a feeling.
+ * instead of against a feeling. The chat-turn progress lifecycle is a main-process
+ * feature for sub-agent transcript snapshots. Its latest measurement is entry 313_848,
+ * initial 5_253_957, total 9_160_964; the initial ceiling therefore moves to 5_255_000
+ * rather than hiding the functionality behind a build-only workaround.
  */
 export const MAIN_BUNDLE_BUDGETS = Object.freeze({
   entryBytes: 1_700_000,
-  initialBytes: 5_250_000,
+  initialBytes: 5_255_000,
   totalBytes: 11_050_000,
 });
 

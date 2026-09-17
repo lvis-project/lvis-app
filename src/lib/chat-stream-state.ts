@@ -69,6 +69,8 @@ export type ChatStreamEvent = {
   approvalPurpose?: ApprovalPurposeSuggestion;
   roundIndex?: number;
   stopReason?: "end_turn" | "tool_use" | "max_tokens";
+  /** True only when the summarized turn naturally reached `end_turn`. */
+  endedByEndTurn?: true;
   hasToolCalls?: boolean;
   removedMessages?: number;
   freedTokens?: number;
@@ -254,6 +256,8 @@ export type ChatEntry =
       messageId?: string;
       createdAt?: number;
       systemNotice?: "context-error" | "stream-error";
+      /** The renderer settled because the turn failed, not because it completed. */
+      terminalError?: true;
       interrupted?: boolean;
       /**
        * Entry was rebuilt from persisted history rather than produced by the
@@ -359,6 +363,8 @@ export type ChatEntry =
   // footer survives chat reloads and historical session rendering.
   | {
       kind: "turn_summary";
+      /** True only for a natural `end_turn`, never inferred from usage. */
+      endedByEndTurn?: true;
       turnDurationMs: number;
       toolCount: number;
       /**
@@ -648,23 +654,70 @@ export function upsertStreamingAssistant(
   }
 
   const next = [...entries];
-  const assistantIdx = findLastIdx(
-    next,
-    (entry): entry is Extract<ChatEntry, { kind: "assistant" }> =>
-      entry.kind === "assistant" && !!entry.streaming,
-  );
+  const turnStartIdx = findLastIdx(next, isTurnStartEntry);
+  const turnEntries = next.slice(turnStartIdx + 1);
 
-  if (assistantIdx >= 0) {
-    // Keep what the entry already carries — an interrupted marker set while
-    // the stream was still delivering must survive the next delta.
+  if (phase === "status") {
+    const hasSettledTerminalState = turnEntries.some(
+      (entry) =>
+        entry.kind === "turn_summary" ||
+        (
+          entry.kind === "assistant" &&
+          entry.streaming !== true &&
+          (
+            entry.phase === "final" ||
+            entry.terminalError === true ||
+            entry.systemNotice !== undefined ||
+            entry.interrupted === true
+          )
+        ),
+    );
+    if (hasSettledTerminalState) return entries;
+
+    const hasLiveModelWork = turnEntries.some(
+      (entry) =>
+        (entry.kind === "assistant" && entry.streaming === true && entry.phase !== "status") ||
+        (entry.kind === "reasoning" && entry.streaming === true),
+    );
+    if (hasLiveModelWork) return entries;
+
+    const relativeStatusIdx = findLastIdx(
+      turnEntries,
+      (entry): entry is AssistantEntry =>
+        entry.kind === "assistant" && entry.streaming === true && entry.phase === "status",
+    );
+    if (relativeStatusIdx >= 0) {
+      const statusIdx = turnStartIdx + 1 + relativeStatusIdx;
+      const current = next[statusIdx] as AssistantEntry;
+      if (current.text === text && current.streaming === true && current.phase === "status") {
+        return entries;
+      }
+      next[statusIdx] = {
+        ...current,
+        text,
+        streaming: true,
+        phase: "status",
+      };
+    } else {
+      next.push({ kind: "assistant" as const, text, streaming: true, phase: "status" });
+    }
+    return next;
+  }
+
+  const relativeAssistantIdx = findLastIdx(
+    turnEntries,
+    (entry): entry is AssistantEntry => entry.kind === "assistant" && entry.streaming === true,
+  );
+  if (relativeAssistantIdx >= 0) {
+    const assistantIdx = turnStartIdx + 1 + relativeAssistantIdx;
     next[assistantIdx] = {
       ...(next[assistantIdx] as AssistantEntry),
       text,
       streaming: true,
-      phase,
+      phase: undefined,
     };
   } else {
-    next.push({ kind: "assistant" as const, text, streaming: true, phase });
+    next.push({ kind: "assistant" as const, text, streaming: true });
   }
   return next;
 }
@@ -777,7 +830,7 @@ export function finalizeStreamingAssistant(
   );
 
   if (assistantIdx >= 0) {
-    const assistant = next[assistantIdx] as AssistantEntry;
+    const assistant = { ...(next[assistantIdx] as AssistantEntry) };
     const text = opts?.overrideText !== undefined ? opts.overrideText : assistant.text || fallbackText;
     if (!text) {
       // Preserve the entry (with empty text) when this turn produced
@@ -912,6 +965,12 @@ export function setAssistantError(
     kind: "assistant" as const,
     text: interrupted ? current?.text ?? "" : message,
     streaming: false,
+    // A user-stopped partial response retains its already-stamped lifecycle
+    // phase; terminalError still prevents it from being presented as a clean
+    // completed turn. A provider-status placeholder, by contrast, must lose
+    // its status identity when the terminal error replaces it.
+    phase: interrupted ? current?.phase : undefined,
+    terminalError: true,
     ...(systemNotice !== undefined ? { systemNotice } : {}),
   };
 
@@ -1244,15 +1303,12 @@ export function dropPendingLlmStatusAssistant(entries: ChatEntry[]): ChatEntry[]
   const idx = findLastIdx(
     entries,
     (entry): entry is AssistantEntry =>
-      entry.kind === "assistant" && entry.streaming === true && isLlmStatusAssistantText(entry.text),
+      entry.kind === "assistant" &&
+      entry.streaming === true &&
+      entry.phase === "status",
   );
   if (idx < 0) return entries;
   return [...entries.slice(0, idx), ...entries.slice(idx + 1)];
-}
-
-function isLlmStatusAssistantText(text: string): boolean {
-  const base = t("useChatState.llmStatusAttemptFirst");
-  return text === base || text.startsWith(base + " ");
 }
 
 /** A reasoning delta: the accumulated thought replaces any pending status line. */
@@ -1303,6 +1359,7 @@ function parseUsageByModel(value: unknown): TurnSummaryEntry["usageByModel"] | u
  */
 export function parseTurnSummaryEvent(ev: ChatStreamEvent): Pick<
   TurnSummaryEntry,
+  | "endedByEndTurn"
   | "turnDurationMs"
   | "toolCount"
   | "cumulativeToolMs"
@@ -1329,6 +1386,7 @@ export function parseTurnSummaryEvent(ev: ChatStreamEvent): Pick<
   const usageByModel = parseUsageByModel(ev.usageByModel);
   const subscriptionUsage = normalizeSubscriptionUsageList(ev.subscriptionUsage);
   return {
+    ...(ev.endedByEndTurn === true ? { endedByEndTurn: true as const } : {}),
     turnDurationMs,
     toolCount,
     cumulativeToolMs,

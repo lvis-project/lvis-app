@@ -17,6 +17,7 @@ export function shouldShowAssistantEntry(
   if (level === "full" || entryClass === "final") return true;
   return entry.phase === "final"
     || entry.phase === "status"
+    || entry.terminalError === true
     || entry.systemNotice !== undefined
     || entry.interrupted === true;
 }

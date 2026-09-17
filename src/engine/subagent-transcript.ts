@@ -24,8 +24,10 @@
  */
 import { maskSensitiveData } from "../audit/dlp-filter.js";
 import {
+  applyReasoningDelta,
   applyToolStart,
   applyToolEnd,
+  dropPendingLlmStatusAssistant,
   upsertStreamingReasoning,
   finalizeStreamingReasoning,
   upsertPermissionReview,
@@ -33,9 +35,14 @@ import {
   finalizeStreamingAssistant,
   type ChatEntry,
 } from "../lib/chat-stream-state.js";
+import { formatLlmStatusMessage } from "../lib/llm-status-message.js";
 import type { ToolCallMeta } from "../tools/executor.js";
 import type { PermissionReviewEvent } from "../shared/permission-review-status.js";
 import type { McpUiPayload } from "../mcp/types.js";
+import type { FallbackStatus } from "./llm/vercel/fallback-chain.js";
+import type { TurnCallbacks } from "./turn/types.js";
+
+type AssistantRound = Parameters<NonNullable<TurnCallbacks["onAssistantRound"]>>[0];
 
 export class SubAgentTranscriptAccumulator {
   private entries: ChatEntry[] = [];
@@ -59,7 +66,7 @@ export class SubAgentTranscriptAccumulator {
   onToolStart(name: string, input: Record<string, unknown>, meta: ToolCallMeta): void {
     // `input` arrives already DLP-masked from the executor (emitToolStart), so
     // we store it verbatim — double-masking would corrupt already-redacted text.
-    this.entries = applyToolStart(this.entries, {
+    this.entries = applyToolStart(dropPendingLlmStatusAssistant(this.entries), {
       groupId: meta.groupId,
       toolUseId: meta.toolUseId,
       name,
@@ -97,7 +104,7 @@ export class SubAgentTranscriptAccumulator {
             : {}),
         }
       : undefined;
-    this.entries = applyToolEnd(this.entries, {
+    this.entries = applyToolEnd(dropPendingLlmStatusAssistant(this.entries), {
       groupId: meta.groupId,
       toolUseId: meta.toolUseId,
       result: maskSensitiveData(result).masked,
@@ -115,7 +122,7 @@ export class SubAgentTranscriptAccumulator {
   }
 
   onPermissionReview(event: PermissionReviewEvent): void {
-    this.entries = upsertPermissionReview(this.entries, {
+    this.entries = upsertPermissionReview(dropPendingLlmStatusAssistant(this.entries), {
       status: event.status,
       toolName: event.toolName,
       groupId: event.groupId,
@@ -148,7 +155,33 @@ export class SubAgentTranscriptAccumulator {
     this.roundReasoning += delta;
     const masked = maskSensitiveData(this.roundReasoning).masked;
     if (!masked) return;
-    this.entries = upsertStreamingReasoning(this.entries, masked);
+    this.entries = applyReasoningDelta(this.entries, masked);
+  }
+
+  /**
+   * Show a retry or fallback while the child has not produced real work. The
+   * shared transcript reducer owns replacement once reasoning, text, tools, or
+   * a permission review arrives.
+   */
+  onLlmStatus(status: FallbackStatus): boolean {
+    const message = formatLlmStatusMessage(status);
+    if (!message) return false;
+    const next = upsertStreamingAssistant(this.entries, message, "status");
+    if (next === this.entries) return false;
+    this.entries = next;
+    return true;
+  }
+
+  /**
+   * A terminal child result has no next stream frame to supersede a retry or
+   * fallback placeholder. Clear that status-only entry before publishing the
+   * final snapshot so it cannot be persisted as indefinitely streaming work.
+   */
+  finish(): boolean {
+    const next = dropPendingLlmStatusAssistant(this.entries);
+    if (next === this.entries) return false;
+    this.entries = next;
+    return true;
   }
 
   /**
@@ -157,8 +190,14 @@ export class SubAgentTranscriptAccumulator {
    * text becomes a finalized assistant entry. Both are DLP-masked. Called once
    * per round boundary from the child loop's `onAssistantRound`.
    */
-  onAssistantRound(thought: string, text: string): void {
+  onAssistantRound(
+    thought: string,
+    text: string,
+    stopReason: AssistantRound["stopReason"],
+    hasToolCalls: AssistantRound["hasToolCalls"],
+  ): void {
     this.roundReasoning = "";
+    this.entries = dropPendingLlmStatusAssistant(this.entries);
     const maskedThought = thought ? maskSensitiveData(thought).masked : "";
     if (maskedThought) {
       this.entries = upsertStreamingReasoning(this.entries, maskedThought);
@@ -171,7 +210,14 @@ export class SubAgentTranscriptAccumulator {
     const maskedText = text ? maskSensitiveData(text).masked : "";
     if (maskedText) {
       this.entries = upsertStreamingAssistant(this.entries, maskedText);
-      this.entries = finalizeStreamingAssistant(this.entries, maskedText);
+      // A child transcript has no turn_summary carrier. Preserve the round's
+      // own completion boundary so the shared renderer cannot mislabel partial
+      // max-token/tool work as a completed response.
+      const phase = stopReason === "end_turn" && !hasToolCalls ? "final" : "work";
+      this.entries = finalizeStreamingAssistant(this.entries, maskedText, {
+        phase,
+        overrideText: maskedText,
+      });
     }
   }
 }

@@ -72,6 +72,7 @@ import {
   type SubscriptionRuntimeService,
 } from "../../main/subscription-runtime-service.js";
 import { errorMessage } from "../../shared/error-message.js";
+import { isProcessingDisplayLevel } from "../../shared/processing-display-level.js";
 
 let subscriptionRuntimeStatusRevision = 0;
 
@@ -765,6 +766,21 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     }
     const llmPatch = (partial as Record<string, unknown> | null | undefined)
       ?.llm as Record<string, unknown> | undefined;
+    const chatPatch = (partial as Record<string, unknown> | null | undefined)
+      ?.chat as Record<string, unknown> | undefined;
+    if (
+      chatPatch
+      && typeof chatPatch === "object"
+      && !Array.isArray(chatPatch)
+      && Object.prototype.hasOwnProperty.call(chatPatch, "processingDisplayLevel")
+      && !isProcessingDisplayLevel(chatPatch.processingDisplayLevel)
+    ) {
+      return {
+        ok: false,
+        error: "invalid-processing-display-level",
+        message: "chat.processingDisplayLevel must be one of: tools, reasoning, full.",
+      };
+    }
     if (llmPatch && Object.prototype.hasOwnProperty.call(llmPatch, "activeChatRuntime")) {
       auditSubscriptionMutation("direct-settings-update", "invalid", "rejected", "subscription-operation-failed");
       return {

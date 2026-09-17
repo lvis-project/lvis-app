@@ -79,7 +79,12 @@ describe("Chat stream sequencing (Phase 3.2 regression net)", () => {
 
     await act(async () => {
       emitChatStream({ type: "text_delta", text: "final text" });
-      emitChatStream({ type: "assistant_round", text: "final text" });
+      emitChatStream({
+        type: "assistant_round",
+        text: "final text",
+        stopReason: "end_turn",
+        hasToolCalls: false,
+      });
       emitChatStream({ type: "done" });
     });
     await waitFor(() => {

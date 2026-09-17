@@ -41,6 +41,8 @@ type PermissionReviewEntry = Extract<ChatEntry, { kind: "permission_review" }>;
  * the WorkGroup step count / duration and the final TurnActionBar cost badge.
  */
 export type TurnSummary = {
+  /** Present only when the engine reached a natural `end_turn`. */
+  endedByEndTurn?: true;
   turnDurationMs: number;
   toolCount: number;
   cumulativeToolMs: number;
@@ -238,10 +240,22 @@ export function TranscriptRenderer({
   const rendered: React.ReactNode[] = [];
   // Reasoning, permission-review and tool-group rows draw the same whether
   // the entry is the live tail of a turn or an unclassified straggler.
-  const pushSideEntry = (entry: (typeof activeEntries)[number], idx: number): boolean => {
+  const pushSideEntry = (
+    entry: (typeof activeEntries)[number],
+    idx: number,
+    ringCls: string,
+  ): boolean => {
     if (entry.kind === "reasoning") {
       if (processingDisplayLevel !== "tools") {
-        rendered.push(<ReasoningCard key={idx} entry={entry} />);
+        rendered.push(
+          <div
+            key={idx}
+            data-chat-entry-index={idx}
+            className={`min-w-0 w-full max-w-full rounded-md${ringCls ? ` ${ringCls}` : ""}`}
+          >
+            <ReasoningCard entry={entry} />
+          </div>,
+        );
       }
       return true;
     }
@@ -552,8 +566,8 @@ export function TranscriptRenderer({
       }
       const groupEntries: { idx: number; node: React.ReactNode }[] = [];
       const groupRevisions: string[] = [];
-      let groupEntryCount = 0;
       let groupHasPermissionReview = false;
+      let progressLabel: string | undefined;
 
       while (i < activeEntries.length) {
         const e = activeEntries[i];
@@ -563,9 +577,11 @@ export function TranscriptRenderer({
         if (cls === "final") break;
         if (e.kind === "reasoning") {
           if (cls === "intermediate") {
-            groupEntryCount++;
             groupRevisions.push(entryRenderRevision({ entry: e, idx: i, searchHighlight, starred: false }));
-            if (processingDisplayLevel !== "tools") {
+            // The active WorkGroup header is the one live thinking status.
+            // Keep its underlying reasoning in the group, but reveal the card
+            // only after the turn settles so the transcript does not repeat it.
+            if (!groupIsActiveTurn && processingDisplayLevel !== "tools") {
               groupEntries.push({ idx: i, node: <ReasoningCard key={i} entry={e} /> });
             }
           } else {
@@ -573,7 +589,6 @@ export function TranscriptRenderer({
           }
         } else if (e.kind === "permission_review") {
           if (cls === "intermediate") {
-            groupEntryCount++;
             // The parent-answered outcomes open the work group for the same
             // reason the automatic ones do, and with more force: no dock ever
             // showed these calls, so a collapsed group would be the user's only
@@ -598,7 +613,6 @@ export function TranscriptRenderer({
           }
         } else if (e.kind === "tool_group") {
           if (cls === "intermediate") {
-            groupEntryCount++;
             groupRevisions.push(entryRenderRevision({ entry: e, idx: i, searchHighlight, starred: false }));
             groupEntries.push({
               idx: i,
@@ -616,10 +630,11 @@ export function TranscriptRenderer({
           }
         } else if (e.kind === "assistant") {
           if (cls === "intermediate") {
-            groupEntryCount++;
             const starred = !!isEntryStarred(i);
             groupRevisions.push(entryRenderRevision({ entry: e, idx: i, searchHighlight, starred }));
-            if (shouldShowAssistantEntry(e, cls, processingDisplayLevel)) {
+            if (e.phase === "status" && groupIsActiveTurn) {
+              progressLabel = e.text;
+            } else if (shouldShowAssistantEntry(e, cls, processingDisplayLevel)) {
               groupEntries.push({
                 idx: i,
                 node: (
@@ -649,7 +664,6 @@ export function TranscriptRenderer({
             if (isTurnStartEntry(activeEntries[k])) { aaTurnStart = k; break; }
           }
           if (aaTurnStart === groupTurnStart) {
-            groupEntryCount++;
             groupRevisions.push(entryRenderRevision({ entry: e, idx: i, searchHighlight, starred: false }));
             groupEntries.push({
               idx: i,
@@ -664,29 +678,86 @@ export function TranscriptRenderer({
         i++;
       }
 
-      if (groupEntryCount > 0) {
+      // A filtered completed turn can have no visible intermediate rows. Do
+      // not leave a collapsed, empty work group behind; an active turn still
+      // needs its single progress header even before a visible row arrives.
+      if (groupEntries.length > 0 || groupIsActiveTurn) {
         // Prefer the turn_summary's authoritative `toolCount` over
         // groupEntries.length — the latter includes reasoning /
         // assistant bubbles / ask_user_answer and would diverge from the actual
         // tool-call count.
-        const groupSummary = summaryByTurnStart?.get(groupTurnStart);
-        // Without a host summary the legacy full view counts every work row.
-        // Filtered views count only rows the user can expand to see, so hidden
-        // reasoning or narration cannot advertise an empty "N steps" body.
-        const fallbackStepCount = processingDisplayLevel === "full"
-          ? groupEntryCount
-          : groupEntries.length;
+        // Without an authoritative host summary, count exactly the rows that
+        // this group renders. In particular, a permission review attached to a
+        // tool row must not be counted once here and again inside that tool.
+        const fallbackStepCount = groupEntries.length;
+        const nextTurnStartIdx = activeEntries.findIndex(
+          (candidate, candidateIdx) =>
+            candidateIdx > groupTurnStart && isTurnStartEntry(candidate),
+        );
+        const turnEntries = activeEntries.slice(
+          groupTurnStart + 1,
+          nextTurnStartIdx === -1 ? activeEntries.length : nextTurnStartIdx,
+        );
+        const transcriptSummary = turnEntries.find(
+          (candidate): candidate is Extract<ChatEntry, { kind: "turn_summary" }> =>
+            candidate.kind === "turn_summary",
+        );
+        // The map is the normal main/side surface path. Falling back to the
+        // carried entry keeps direct read-only transcript consumers from
+        // mistaking an incomplete summary for a completed turn.
+        const groupSummary = summaryByTurnStart?.get(groupTurnStart) ?? transcriptSummary;
+        // A summary carries usage totals, but an error/interrupt can still
+        // settle the renderer after it. Do not turn that terminal state into
+        // a successful-looking completion label.
+        const hasTerminalFailure = turnEntries.some(
+          (candidate) =>
+            candidate.kind === "assistant" &&
+            (
+              candidate.terminalError === true ||
+              candidate.systemNotice !== undefined ||
+              candidate.interrupted === true
+            ),
+        );
+        const hasCleanFinalResponse = turnEntries.some(
+          (candidate, offset) => {
+            const candidateIdx = groupTurnStart + 1 + offset;
+            return (
+              candidate.kind === "assistant" &&
+              entryClassMap.get(candidateIdx) === "final" &&
+              finalTurnStartMap.get(candidateIdx) === groupTurnStart &&
+              candidate.terminalError !== true &&
+              candidate.systemNotice === undefined &&
+              candidate.interrupted !== true
+            );
+          },
+        );
+        const currentSearchMatch = searchOpen ? searchMatches?.[searchIdx] : undefined;
+        const groupHasCurrentSearchMatch =
+          currentSearchMatch !== undefined && groupEntries.some((groupEntry) => groupEntry.idx === currentSearchMatch);
+        const groupSearchRevision = groupEntries
+          .map((groupEntry) => `${groupEntry.idx}:${ringClassFor(groupEntry.idx)}`)
+          .join("|");
         rendered.push(
           <WorkGroup
             key={`wg-${currentSessionId}:${groupStart}`}
             stepCount={groupSummary?.toolCount ?? fallbackStepCount}
             streaming={groupIsActiveTurn}
             turnDurationMs={groupSummary?.turnDurationMs}
-            revision={[currentSessionId, processingDisplayLevel, ...groupRevisions].join("||")}
-            forceOpen={workGroupsForceOpen || groupHasPermissionReview}
+            completed={!hasTerminalFailure && (
+              groupSummary !== undefined
+                ? groupSummary.endedByEndTurn === true
+                : hasCleanFinalResponse
+            )}
+            progressLabel={groupIsActiveTurn ? progressLabel : undefined}
+            revision={[currentSessionId, processingDisplayLevel, groupSearchRevision, ...groupRevisions].join("||")}
+            forceOpen={workGroupsForceOpen || groupHasPermissionReview || groupHasCurrentSearchMatch}
           >
             {groupEntries.map((ge) => (
-              <div key={ge.idx} data-chat-entry-index={ge.idx}>
+              <div
+                key={ge.idx}
+                data-chat-entry-index={ge.idx}
+                className={ringClassFor(ge.idx) || undefined}
+              >
                 {ge.node}
               </div>
             ))}
@@ -698,7 +769,7 @@ export function TranscriptRenderer({
 
     // ── Live: last entry in turn while streaming — no TurnActionBar ──
     if (entryClassMap.get(i) === "live") {
-      if (!pushSideEntry(entry, idx) && entry.kind === "assistant") {
+      if (!pushSideEntry(entry, idx, ringCls) && entry.kind === "assistant") {
         // Before assistant_round closes, streamed text has no trustworthy
         // work/final signal. Filtered modes withhold that ambiguous text and
         // reveal it as soon as the round is stamped `final`; guessing here
@@ -766,7 +837,7 @@ export function TranscriptRenderer({
     }
 
     // ── Fallback: unclassified edge-case entries ──
-    pushSideEntry(entry, idx);
+    pushSideEntry(entry, idx, ringCls);
     i++;
   }
   return rendered;

@@ -417,6 +417,7 @@ describe("historyToEntries", () => {
           content: "a",
           createdAt: 1_700_000_000_000,
           turnSummary: {
+            endedByEndTurn: true,
             turnDurationMs: 3500,
             toolCount: 1,
             cumulativeToolMs: 800,
@@ -432,6 +433,7 @@ describe("historyToEntries", () => {
       const summary = entries.find((e) => e.kind === "turn_summary");
       expect(summary).toBeDefined();
       if (summary?.kind === "turn_summary") {
+        expect(summary.endedByEndTurn).toBe(true);
         expect(summary.turnDurationMs).toBe(3500);
         expect(summary.tokensIn).toBe(1450);
         expect(summary.tokensOut).toBe(250);

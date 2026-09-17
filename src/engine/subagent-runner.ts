@@ -3362,6 +3362,9 @@ export class SubAgentRunner {
             transcript.onReasoningDelta(text);
             reasoningStreamEmitter.schedule();
           },
+          onLlmStatus: (status) => {
+            if (transcript.onLlmStatus(status)) emitActivity();
+          },
           onToolStart: (name, input, meta) => {
             transcript.onToolStart(name, input, meta);
             emitActivity();
@@ -3384,7 +3387,12 @@ export class SubAgentRunner {
             // landing after it would replace the finalized thought with the
             // mid-stream one.
             reasoningStreamEmitter.cancel();
-            transcript.onAssistantRound(round.thought, round.text);
+            transcript.onAssistantRound(
+              round.thought,
+              round.text,
+              round.stopReason,
+              round.hasToolCalls,
+            );
             emitActivity();
           },
           onError: (e) => {
@@ -3456,6 +3464,7 @@ export class SubAgentRunner {
       childStopReason = "interrupted";
       ok = false;
     }
+    if (transcript.finish()) emitActivity();
     const result: SubAgentSpawnResult = {
       summary: lastText,
       toolCallCount: totalToolCalls,
@@ -4400,6 +4409,9 @@ export class SubAgentRunner {
             transcript.onReasoningDelta(text);
             reasoningStreamEmitter.schedule();
           },
+          onLlmStatus: (status) => {
+            if (transcript.onLlmStatus(status)) emitActivity();
+          },
           onToolStart: (name, input, cbMeta) => {
             transcript.onToolStart(name, input, cbMeta);
             emitActivity();
@@ -4422,7 +4434,12 @@ export class SubAgentRunner {
             // landing after it would replace the finalized thought with the
             // mid-stream one.
             reasoningStreamEmitter.cancel();
-            transcript.onAssistantRound(round.thought, round.text);
+            transcript.onAssistantRound(
+              round.thought,
+              round.text,
+              round.stopReason,
+              round.hasToolCalls,
+            );
             emitActivity();
           },
           onError: (message) => {
@@ -4470,6 +4487,7 @@ export class SubAgentRunner {
       reasoningStreamEmitter.cancel();
       unregisterResumeChild();
     }
+    if (transcript.finish()) emitActivity();
     let result: SubAgentSpawnResult = {
       summary: lastText,
       toolCallCount: totalToolCalls,

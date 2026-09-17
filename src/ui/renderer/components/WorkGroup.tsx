@@ -1,8 +1,14 @@
 import { Children, memo, useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, Loader2 } from "lucide-react";
 import { debugLog, isDebugStreamEnabled } from "../../../lib/debug-stream.js";
-import { formatDuration } from "../../../lib/turn-summary-format.js";
+import { formatDuration, type DurationFormatUnits } from "../../../lib/turn-summary-format.js";
 import { useTranslation } from "../../../i18n/react.js";
+
+const KOREAN_DURATION_UNITS: DurationFormatUnits = {
+  hour: "시간",
+  minute: "분",
+  second: "초",
+};
 
 interface WorkGroupProps {
   stepCount: number;
@@ -10,12 +16,17 @@ interface WorkGroupProps {
   children: React.ReactNode;
   /**
    * Optional total wall-clock duration of the turn (ms). When provided and
-   * the group is not streaming, the header shows `⏱ Tm Ts` next to the
-   * step count. Reuses the shared turn-summary `formatDuration` formatter
-   * so this label stays consistent with TurnSummaryFooter and per-tool
-   * duration labels.
+   * the group is not streaming, the completion header names it using the
+   * shared turn-summary rounding rules.
    */
   turnDurationMs?: number;
+  /** True only after a clean final response or an end_turn-confirmed summary. */
+  completed?: boolean;
+  /**
+   * A provider-status detail owned by this active group. It replaces the
+   * generic thinking label instead of becoming a second nested status row.
+   */
+  progressLabel?: string;
   /**
    * Stable content signature for memoization. ChatView can rebuild element
    * children while an active turn streams; unchanged historical groups should
@@ -37,16 +48,30 @@ interface WorkGroupProps {
 // distinguished in the debug logs without relying on React internals.
 let __wgInstanceCounter = 0;
 
-function WorkGroupImpl({ stepCount, streaming, children, turnDurationMs, forceOpen = false }: WorkGroupProps) {
+function WorkGroupImpl({ stepCount, streaming, children, turnDurationMs, completed = false, progressLabel, forceOpen = false }: WorkGroupProps) {
   // Past-turn WorkGroups always receive streaming=false from first render,
   // so they must start closed. Active-turn WorkGroups start open and
   // auto-close when the true→false transition fires in the effect below.
-  const { t } = useTranslation();
+  const { locale, t } = useTranslation();
   const debugStreamEnabled = isDebugStreamEnabled();
   const [open, setOpen] = useState(streaming);
   const prevStreaming = useRef(streaming);
   const hasChildren = Children.count(children) > 0;
   const displayOpen = forceOpen || open;
+  const completedDuration =
+    completed && turnDurationMs !== undefined && turnDurationMs >= 0
+      ? formatDuration(
+          turnDurationMs,
+          locale.startsWith("ko") ? KOREAN_DURATION_UNITS : undefined,
+        )
+      : undefined;
+  const headerLabel = streaming
+    ? progressLabel ?? t("workGroup.working")
+    : completed
+      ? completedDuration
+        ? t("workGroup.completedWithDuration", { duration: completedDuration })
+        : t("workGroup.completed")
+      : t("workGroup.work");
 
   // Diagnostic-only: stable per-instance id (mount-time only). Lets the user
   // correlate "WG[3] mount", "WG[3] render", "WG[3] effect" across logs.
@@ -113,7 +138,7 @@ function WorkGroupImpl({ stepCount, streaming, children, turnDurationMs, forceOp
           ? <Loader2 className="h-3 w-3 animate-spin flex-shrink-0" />
           : null}
         <span className="min-w-0 font-medium text-foreground/(--opacity-near)">
-          {streaming ? t("workGroup.working") : t("workGroup.work")}
+          {headerLabel}
         </span>
         {/*
           Single-step intermediate entries still render the WorkGroup header
@@ -123,9 +148,8 @@ function WorkGroupImpl({ stepCount, streaming, children, turnDurationMs, forceOp
           remove the expand/collapse UI for half the chat history. Reviewed
           in #565; intentional, not a candidate for inline rendering.
         */}
-        {!streaming && stepCount > 0 && <span className="shrink-0 opacity-50">{t("workGroup.stepCount", { count: stepCount })}</span>}
-        {!streaming && turnDurationMs !== undefined && turnDurationMs > 0 && (
-          <span className="shrink-0 opacity-50 tabular-nums">⏱ {formatDuration(turnDurationMs)}</span>
+        {!streaming && !completed && stepCount > 0 && (
+          <span className="shrink-0 opacity-50">{t("workGroup.stepCount", { count: stepCount })}</span>
         )}
         {!streaming && hasChildren && (
           displayOpen
@@ -146,6 +170,8 @@ export const WorkGroup = memo(WorkGroupImpl, (prev, next) => (
   prev.stepCount === next.stepCount &&
   prev.streaming === next.streaming &&
   prev.turnDurationMs === next.turnDurationMs &&
+  prev.completed === next.completed &&
+  prev.progressLabel === next.progressLabel &&
   prev.revision === next.revision &&
   prev.forceOpen === next.forceOpen
 ));

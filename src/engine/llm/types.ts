@@ -421,6 +421,12 @@ export interface TokenUsageByModel {
  * ChatEntry on session reload without re-running the conversation loop.
  */
 export interface TurnSummary {
+  /**
+   * Present only when the turn reached the provider's natural `end_turn`.
+   * A summary can also record useful usage for an input wait or an output cap,
+   * but those incomplete paths must not be displayed as completed work.
+   */
+  endedByEndTurn?: true;
   turnDurationMs: number;
   toolCount: number;
   cumulativeToolMs: number;

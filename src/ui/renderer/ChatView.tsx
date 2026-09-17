@@ -485,6 +485,7 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onRet
       if (isTurnStartEntry(e)) curTurnStart = i;
       else if (e.kind === "turn_summary" && curTurnStart >= 0) {
         map.set(curTurnStart, {
+          ...(e.endedByEndTurn === true ? { endedByEndTurn: true as const } : {}),
           turnDurationMs: e.turnDurationMs,
           toolCount: e.toolCount,
           cumulativeToolMs: e.cumulativeToolMs,

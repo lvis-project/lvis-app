@@ -47,9 +47,19 @@ export function useSearch(
     if (!query) return [] as number[];
     const q = caseSensitive ? query : query.toLowerCase();
     const hits: number[] = [];
-    const { entryClassMap } = classifyTurnEntries(entries, streaming);
+    const { entryClassMap, entryTurnStartMap, lastTurnStartIdx } = classifyTurnEntries(entries, streaming);
     entries.forEach((e, i) => {
-      if (e.kind !== "user" && e.kind !== "assistant") return;
+      if (e.kind !== "user" && e.kind !== "assistant" && e.kind !== "reasoning") return;
+      if (e.kind === "reasoning" && processingDisplayLevel === "tools") return;
+      // Active reasoning and the transient provider-status row intentionally
+      // render only through the WorkGroup header, which has no entry-index
+      // navigation target. Do not offer search results that cannot be focused.
+      if (
+        streaming
+        && entryClassMap.get(i) === "intermediate"
+        && entryTurnStartMap.get(i) === lastTurnStartIdx
+        && (e.kind === "reasoning" || (e.kind === "assistant" && e.phase === "status"))
+      ) return;
       if (
         e.kind === "assistant"
         && !shouldShowAssistantEntry(e, entryClassMap.get(i), processingDisplayLevel)

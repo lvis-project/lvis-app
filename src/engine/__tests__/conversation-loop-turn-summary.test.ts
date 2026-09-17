@@ -225,7 +225,7 @@ describe("ConversationLoop onTurnSummary", () => {
     }
     const loop = createLoopWithRegistry(new AlwaysReasoningProvider(), toolRegistry);
 
-    const summaries: { tokensOut: number }[] = [];
+    const summaries: { tokensOut: number; endedByEndTurn?: true }[] = [];
     const result = await loop.runTurn("질문", {
       onTurnSummary: (s) => {
         summaries.push(s);
@@ -330,7 +330,7 @@ describe("ConversationLoop onTurnSummary", () => {
     ]);
     const loop = createLoopWithRegistry(provider, toolRegistry);
 
-    const summaries: { tokensOut: number }[] = [];
+    const summaries: { tokensOut: number; endedByEndTurn?: true }[] = [];
     const result = await loop.runTurn("질문", {
       onTurnSummary: (s) => {
         summaries.push(s);
@@ -341,6 +341,7 @@ describe("ConversationLoop onTurnSummary", () => {
     expect(result.stopReason).toBe("input-required");
     expect(summaries).toHaveLength(1);
     expect(summaries[0]!.tokensOut).toBe(4);
+    expect(summaries[0]!.endedByEndTurn).toBeUndefined();
   });
 
   it("persists turnSummary on the final post-summary save", async () => {
@@ -367,6 +368,7 @@ describe("ConversationLoop onTurnSummary", () => {
     const savedMessages = lastCall?.[1] as GenericMessage[] | undefined;
     const finalAssistant = savedMessages?.slice().reverse().find((message) => message.role === "assistant");
     expect(finalAssistant?.meta?.turnSummary).toMatchObject({
+      endedByEndTurn: true,
       tokensIn: expect.any(Number),
       tokensOut: 7,
       freshInputTokens: 42,

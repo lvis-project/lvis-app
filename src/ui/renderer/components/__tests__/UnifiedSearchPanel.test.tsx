@@ -99,6 +99,31 @@ describe("UnifiedSearchPanel", () => {
     expect(onPrevConversationMatch).toHaveBeenCalledTimes(1);
   });
 
+  it("shows a reasoning match and preserves its navigation position", () => {
+    const onJumpToConversationMatch = vi.fn();
+    render(
+      <UnifiedSearchPanel
+        {...defaultProps({
+          query: "reasoning",
+          entries: [
+            { kind: "user", text: "question" },
+            { kind: "assistant", text: "answer" },
+            { kind: "reasoning", text: "reasoning result", streaming: true },
+          ],
+          conversationMatches: [2],
+          currentConversationMatch: 0,
+          onJumpToConversationMatch,
+        })}
+      />,
+    );
+
+    expect(screen.getByText("생각 중... · #3")).toBeTruthy();
+    const result = screen.getByText("reasoning").closest("button");
+    expect(result).toBeTruthy();
+    fireEvent.click(result!);
+    expect(onJumpToConversationMatch).toHaveBeenCalledWith(0);
+  });
+
   it("loads a selected session result and closes the panel", async () => {
     const onLoadSession = vi.fn();
     const onClose = vi.fn();

@@ -15,6 +15,7 @@ import {
 import { DEFAULT_BUNDLE_ID } from "../shared/theme-bundles.js";
 import { DEFAULT_LOCALE } from "../i18n/index.js";
 import { DEFAULT_APP_MODE } from "../shared/initial-app-mode.js";
+import { DEFAULT_PROCESSING_DISPLAY_LEVEL } from "../shared/processing-display-level.js";
 import { DEFAULT_SIDEBAR_TAB } from "../shared/sidebar-tab.js";
 import { normalizeSettingsTab } from "../shared/settings-tabs.js";
 import { LOG_RETENTION_DAYS } from "../shared/log-retention.js";
@@ -35,7 +36,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     systemPrompt:
       "You are LVIS, a local knowledge assistant. You provide accurate, helpful answers grounded in the user's documents and context. Respond in the user's language.",
     autoCompact: true,
-    processingDisplayLevel: "full",
+    processingDisplayLevel: DEFAULT_PROCESSING_DISPLAY_LEVEL,
     // Tool rounds a sub-agent may run before it hits `round-cap` and suspends.
     // Run as configured — no ceiling narrows it. Exposed because the right
     // budget depends on the work: a deep multi-repo review needs far more

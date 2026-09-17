@@ -57,6 +57,7 @@ const RETURN_HERE_TITLE = "여기로 되돌아가기"; // chatView.returnHereBut
 const completedTurnSummary = (): Map<number, TurnSummary> => new Map([[
   0,
   {
+    endedByEndTurn: true,
     turnDurationMs: 250,
     toolCount: 0,
     cumulativeToolMs: 0,
@@ -101,6 +102,170 @@ describe("TranscriptRenderer — minimal (required-only) contract", () => {
     // final assistant renders outside it. This is the heart of the unified
     // render and must survive extraction unchanged.
     expect(getAllByTestId("work-group").length).toBe(1);
+  });
+
+  it("keeps a clean final answer's completion label when invisible metadata precedes it", () => {
+    const { getByTestId, getByText } = renderCore(
+      <TranscriptRenderer
+        entries={[
+          userEntry("q"),
+          toolGroup(),
+          { kind: "context_usage", tokensIn: 120, source: "compact-estimate" },
+          assistant("final answer"),
+        ]}
+        streaming={false}
+        currentSessionId="s1"
+      />,
+    );
+
+    expect(getByTestId("work-group").textContent).toContain("작업 완료");
+    expect(getByText("final answer")).toBeTruthy();
+  });
+
+  it("keeps one live thinking status, then folds non-final work under the completed-turn summary", () => {
+    const thought = "답변 전에 필요한 정보를 확인합니다.";
+    const liveEntries: ChatEntry[] = [
+      userEntry("q"),
+      { kind: "reasoning", text: thought, streaming: true },
+    ];
+    const view = renderCore(
+      <TranscriptRenderer entries={liveEntries} streaming currentSessionId="s1" />,
+    );
+
+    const liveGroup = view.getByTestId("work-group");
+    expect(liveGroup.textContent).toContain("생각 중...");
+    expect(liveGroup.textContent).not.toContain(thought);
+    expect(view.getAllByText("생각 중...")).toHaveLength(1);
+
+    const summary = completedTurnSummary();
+    const completed = summary.get(0);
+    if (!completed) throw new Error("test turn summary missing");
+    completed.turnDurationMs = 72_000;
+    const completedEntries: ChatEntry[] = [
+      userEntry("q"),
+      { kind: "reasoning", text: thought },
+      toolGroup("completed-tool"),
+      assistant("final answer"),
+    ];
+    view.rerender(
+      <TooltipProvider>
+        <TranscriptRenderer
+          entries={completedEntries}
+          streaming={false}
+          currentSessionId="s1"
+          turnSummaryByTurnStart={summary}
+        />
+      </TooltipProvider>,
+    );
+
+    const completedGroup = view.getByTestId("work-group");
+    expect(completedGroup.textContent).toContain("작업 완료 1분 12초");
+    expect(completedGroup.textContent).not.toContain(thought);
+    expect(view.getByText("final answer")).toBeTruthy();
+
+    fireEvent.click(completedGroup.querySelector("button")!);
+    expect(completedGroup.textContent).toContain("생각 완료");
+    expect(completedGroup.textContent).toContain("x");
+    const reasoningButton = Array.from(completedGroup.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes("생각 완료"),
+    );
+    expect(reasoningButton).toBeTruthy();
+    fireEvent.click(reasoningButton!);
+    expect(completedGroup.textContent).toContain(thought);
+  });
+
+  it("uses the WorkGroup header for a provider-status placeholder", () => {
+    const status = "생각 중... 모델 응답을 다시 기다리는 중입니다. (2/5)";
+    const { getByTestId, queryByTestId } = renderCore(
+      <TranscriptRenderer
+        entries={[
+          userEntry("q"),
+          { kind: "assistant", text: status, streaming: true, phase: "status" },
+        ]}
+        streaming
+        currentSessionId="s1"
+      />,
+    );
+
+    expect(getByTestId("work-group").textContent).toContain(status);
+    expect(queryByTestId("assistant-message-body")).toBeNull();
+  });
+
+  it("folds a reasoning-only turn after its authoritative summary arrives", () => {
+    const thought = "결과를 확인합니다.";
+    const summary = completedTurnSummary();
+    const current = summary.get(0);
+    if (!current) throw new Error("test turn summary missing");
+    current.turnDurationMs = 0;
+
+    const { getByTestId } = renderCore(
+      <TranscriptRenderer
+        entries={[
+          userEntry("q"),
+          { kind: "reasoning", text: thought },
+          {
+            kind: "turn_summary",
+            endedByEndTurn: true,
+            turnDurationMs: 0,
+            toolCount: 0,
+            cumulativeToolMs: 0,
+            tokensIn: 120,
+            freshInputTokens: 100,
+            tokensOut: 20,
+          },
+        ]}
+        streaming={false}
+        currentSessionId="s1"
+        turnSummaryByTurnStart={summary}
+      />,
+    );
+
+    const group = getByTestId("work-group");
+    expect(group.textContent).toContain("작업 완료 0초");
+    expect(group.textContent).not.toContain(thought);
+  });
+
+  const terminalStates: Array<[string, Partial<Extract<ChatEntry, { kind: "assistant" }>>]> = [
+    ["ordinary error", { terminalError: true }],
+    ["stream error", { systemNotice: "stream-error" as const }],
+    ["interrupted turn", { interrupted: true }],
+  ];
+
+  it.each(terminalStates)("does not call a settled %s work group complete", (_case, terminalState) => {
+    const { getByTestId } = renderCore(
+      <TranscriptRenderer
+        entries={[userEntry("q"), toolGroup(), assistant("terminal state", terminalState)]}
+        streaming={false}
+        currentSessionId="s1"
+      />,
+    );
+
+    expect(getByTestId("work-group").textContent).not.toContain("작업 완료");
+  });
+
+  it("does not call an input-required summary completed work", () => {
+    const { getByTestId } = renderCore(
+      <TranscriptRenderer
+        entries={[
+          userEntry("q"),
+          { kind: "reasoning", text: "추가 정보를 기다립니다." },
+          assistant("질문을 보냈습니다.", { phase: "work" }),
+          {
+            kind: "turn_summary",
+            turnDurationMs: 1250,
+            toolCount: 1,
+            cumulativeToolMs: 400,
+            tokensIn: 120,
+            freshInputTokens: 100,
+            tokensOut: 20,
+          },
+        ]}
+        streaming={false}
+        currentSessionId="s1"
+      />,
+    );
+
+    expect(getByTestId("work-group").textContent).not.toContain("작업 완료");
   });
 
   it("can force historical WorkGroups open for read-only companion surfaces", () => {
@@ -196,6 +361,104 @@ describe("TranscriptRenderer — processing detail", () => {
     });
   }
 
+  it("opens only the completed work group containing the current reasoning search match", () => {
+    const entries: ChatEntry[] = [
+      userEntry("first question"),
+      { kind: "reasoning", text: "first reasoning", streaming: false },
+      assistant("first final", { phase: "final" }),
+      userEntry("second question"),
+      { kind: "reasoning", text: "second reasoning", streaming: false },
+      assistant("second final", { phase: "final" }),
+    ];
+    const { container } = renderCore(
+      <TranscriptRenderer
+        entries={entries}
+        streaming={false}
+        currentSessionId="grouped-reasoning-search"
+        processingDisplayLevel="reasoning"
+        search={{
+          searchOpen: true,
+          searchMatches: [1],
+          searchMatchSet: new Set([1]),
+          searchIdx: 0,
+          searchHighlight: "reasoning",
+        }}
+      />,
+    );
+
+    const target = container.querySelector<HTMLElement>('[data-chat-entry-index="1"]');
+    expect(target).toBeTruthy();
+    expect(target?.className).toContain("ring-2");
+    expect(container.querySelector('[data-chat-entry-index="4"]')).toBeNull();
+  });
+
+  it("moves the current search ring between reasoning entries in the same work group", () => {
+    const entries: ChatEntry[] = [
+      userEntry("question"),
+      { kind: "reasoning", text: "first reasoning", streaming: false },
+      { kind: "reasoning", text: "second reasoning", streaming: false },
+      assistant("final", { phase: "final" }),
+    ];
+    const renderWithSearchIndex = (searchIdx: number) => (
+      <TooltipProvider>
+        <TranscriptRenderer
+          entries={entries}
+          streaming={false}
+          currentSessionId="same-group-reasoning-search"
+          processingDisplayLevel="reasoning"
+          search={{
+            searchOpen: true,
+            searchMatches: [1, 2],
+            searchMatchSet: new Set([1, 2]),
+            searchIdx,
+            searchHighlight: "reasoning",
+          }}
+        />
+      </TooltipProvider>
+    );
+    const { container, rerender } = render(renderWithSearchIndex(0));
+
+    const first = container.querySelector<HTMLElement>('[data-chat-entry-index="1"]');
+    const second = container.querySelector<HTMLElement>('[data-chat-entry-index="2"]');
+    expect(first?.className).toContain("ring-2");
+    expect(second?.className).toContain("ring-1");
+
+    rerender(renderWithSearchIndex(1));
+
+    const updatedFirst = container.querySelector<HTMLElement>('[data-chat-entry-index="1"]');
+    const updatedSecond = container.querySelector<HTMLElement>('[data-chat-entry-index="2"]');
+    expect(updatedFirst?.className).toContain("ring-1");
+    expect(updatedFirst?.className).not.toContain("ring-2");
+    expect(updatedSecond?.className).toContain("ring-2");
+  });
+
+  it.each(["reasoning", "full"] as const)(
+    "exposes standalone reasoning for navigation at %s detail",
+    (processingDisplayLevel) => {
+      const { container } = renderCore(
+        <TranscriptRenderer
+          entries={[
+            { kind: "reasoning", text: "standalone reasoning", streaming: true },
+          ]}
+          streaming
+          currentSessionId={`standalone-reasoning-${processingDisplayLevel}`}
+          processingDisplayLevel={processingDisplayLevel}
+          search={{
+            searchOpen: true,
+            searchMatches: [0],
+            searchMatchSet: new Set([0]),
+            searchIdx: 0,
+            searchHighlight: "reasoning",
+          }}
+        />,
+      );
+
+      const target = container.querySelector<HTMLElement>('[data-chat-entry-index="0"]');
+      expect(target).toBeTruthy();
+      expect(target?.className).toContain("ring-2");
+    },
+  );
+
   it("treats a phase-less persisted assistant before a tool as intermediate work", () => {
     const entries: ChatEntry[] = [
       userEntry("question"),
@@ -233,6 +496,7 @@ describe("TranscriptRenderer — processing detail", () => {
     const entries: ChatEntry[] = [
       userEntry("question"),
       assistant("retrying provider", { phase: "status", streaming: true }),
+      assistant("visible ordinary error", { phase: "work", terminalError: true }),
       assistant("visible stream error", { phase: "work", systemNotice: "stream-error" }),
       assistant("visible interrupted work", { phase: "work", interrupted: true }),
       toolGroup("required-tool"),
@@ -249,6 +513,7 @@ describe("TranscriptRenderer — processing detail", () => {
     );
 
     expect(container.textContent).toContain("retrying provider");
+    expect(container.textContent).toContain("visible ordinary error");
     expect(container.textContent).toContain("visible stream error");
     expect(container.textContent).toContain("visible interrupted work");
     expect(container.textContent).toContain("always visible final");
@@ -279,8 +544,8 @@ describe("TranscriptRenderer — processing detail", () => {
     expect(queryByText("final stream")).toBeTruthy();
   });
 
-  it("keeps the work header but disables an empty expander when every work row is hidden", () => {
-    const { getByTestId } = renderCore(
+  it("omits a completed WorkGroup when every intermediate row is hidden", () => {
+    const { queryByTestId, getByText } = renderCore(
       <TranscriptRenderer
         entries={[
           userEntry("question"),
@@ -294,12 +559,8 @@ describe("TranscriptRenderer — processing detail", () => {
       />,
     );
 
-    const workGroup = getByTestId("work-group");
-    const button = workGroup.querySelector("button") as HTMLButtonElement;
-    expect(workGroup.textContent).toContain("작업");
-    expect(workGroup.textContent).not.toMatch(/\d+단계/);
-    expect(button.disabled).toBe(true);
-    expect(button.querySelector("svg")).toBeNull();
+    expect(queryByTestId("work-group")).toBeNull();
+    expect(getByText("final answer")).toBeTruthy();
   });
 });
 

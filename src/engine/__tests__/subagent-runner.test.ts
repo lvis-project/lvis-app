@@ -530,6 +530,110 @@ describe("SubAgentRunner — maxRounds bound", () => {
 
 // ─── 2) sourceTools allowlist ─────────────────────────
 
+describe("SubAgentRunner — provider-status activity", () => {
+  it("publishes a retry status snapshot before the child completes its answer", async () => {
+    const toolRegistry = new ToolRegistry();
+    const runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager: fakeSubAgentMemoryManager(),
+    });
+    const hasProviderSpy = vi
+      .spyOn(
+        ConversationLoop.prototype as unknown as { hasProvider: () => boolean },
+        "hasProvider",
+      )
+      .mockReturnValue(true);
+    const runTurnSpy = vi
+      .spyOn(ConversationLoop.prototype, "runTurn")
+      .mockImplementation(async (_prompt, callbacks) => {
+        callbacks?.onLlmStatus?.({ phase: "retry", attempt: 2, maxAttempts: 5 });
+        callbacks?.onAssistantRound?.({
+          roundIndex: 1,
+          thought: "",
+          text: "recovered child answer",
+          stopReason: "end_turn",
+          hasToolCalls: false,
+          messageId: "status-child-answer",
+        });
+        return {
+          text: "recovered child answer",
+          toolCalls: [],
+          route: "default",
+          stopReason: "end_turn",
+        };
+      });
+    const onActivity = vi.fn();
+
+    try {
+      const result = await runner.spawn(
+        {
+          toolScope: PARENT_ALL_TOOL_SCOPE,
+          title: "status child",
+          instructions: "recover",
+        },
+        { onActivity },
+      );
+
+      expect(result.ok).toBe(true);
+      const snapshots = onActivity.mock.calls.map(([update]) => update.entries);
+      expect(snapshots).toContainEqual(expect.arrayContaining([
+        expect.objectContaining({ kind: "assistant", phase: "status", streaming: true }),
+      ]));
+      expect(snapshots.at(-1)).toEqual([
+        expect.objectContaining({
+          kind: "assistant",
+          text: "recovered child answer",
+          streaming: false,
+        }),
+      ]);
+    } finally {
+      runTurnSpy.mockRestore();
+      hasProviderSpy.mockRestore();
+    }
+  });
+
+  it("clears a status-only retry before an errored child result is published", async () => {
+    const toolRegistry = new ToolRegistry();
+    const runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager: fakeSubAgentMemoryManager(),
+    });
+    const hasProviderSpy = vi
+      .spyOn(
+        ConversationLoop.prototype as unknown as { hasProvider: () => boolean },
+        "hasProvider",
+      )
+      .mockReturnValue(true);
+    const runTurnSpy = vi
+      .spyOn(ConversationLoop.prototype, "runTurn")
+      .mockImplementation(async (_prompt, callbacks) => {
+        callbacks?.onLlmStatus?.({ phase: "retry", attempt: 2, maxAttempts: 5 });
+        throw new Error("child failed before producing output");
+      });
+    const onActivity = vi.fn();
+
+    try {
+      const result = await runner.spawn(
+        {
+          toolScope: PARENT_ALL_TOOL_SCOPE,
+          title: "status-only error",
+          instructions: "recover",
+        },
+        { onActivity },
+      );
+
+      expect(result.ok).toBe(false);
+      expect(result.entries).toEqual([]);
+      expect(onActivity.mock.calls.at(-1)?.[0].entries).toEqual([]);
+    } finally {
+      runTurnSpy.mockRestore();
+      hasProviderSpy.mockRestore();
+    }
+  });
+});
+
 describe("SubAgentRunner — cross-agent DLP boundary", () => {
   it("masks a child success across returned, tracked, and activity callback surfaces", async () => {
     const secret = "ghp_" + "s".repeat(24);

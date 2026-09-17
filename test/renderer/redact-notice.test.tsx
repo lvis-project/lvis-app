@@ -41,7 +41,12 @@ describe("Redact notice (Phase 3 regression net)", () => {
 
     await act(async () => {
       emitChatStream({ type: "text_delta", text: "ok" });
-      emitChatStream({ type: "assistant_round", text: "ok" });
+      emitChatStream({
+        type: "assistant_round",
+        text: "ok",
+        stopReason: "end_turn",
+        hasToolCalls: false,
+      });
       emitChatStream({ type: "done" });
     });
     await waitFor(() => {
