@@ -3350,6 +3350,9 @@ export class SubAgentRunner {
             transcript.onReasoningDelta(text);
             reasoningStreamEmitter.schedule();
           },
+          onLlmStatus: (status) => {
+            if (transcript.onLlmStatus(status)) emitActivity();
+          },
           onToolStart: (name, input, meta) => {
             transcript.onToolStart(name, input, meta);
             emitActivity();
@@ -4380,6 +4383,9 @@ export class SubAgentRunner {
           onReasoningDelta: (text) => {
             transcript.onReasoningDelta(text);
             reasoningStreamEmitter.schedule();
+          },
+          onLlmStatus: (status) => {
+            if (transcript.onLlmStatus(status)) emitActivity();
           },
           onToolStart: (name, input, cbMeta) => {
             transcript.onToolStart(name, input, cbMeta);

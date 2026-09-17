@@ -248,6 +248,80 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     };
   }
 
+  it("publishes a retry-status snapshot while a child resumes", async () => {
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(noopTool("noop"));
+    const subStore = makeSubStore();
+    const runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager: subStore,
+    });
+
+    let restore = patchProvider(waitingSpawnProvider());
+    const spawn = await runner.spawn({
+      title: "resuming status child",
+      instructions: "wait for a continuation",
+      toolScope: exactToolScope(["noop"]),
+      maxRounds: 1,
+    });
+    restore();
+    expect(spawn.incomplete).toBe(true);
+
+    const originalRunTurn = ConversationLoop.prototype.runTurn;
+    restore = patchProvider(cleanSpawnProvider());
+    const runTurnSpy = vi
+      .spyOn(ConversationLoop.prototype, "runTurn")
+      .mockImplementation(
+        async (...args: Parameters<typeof originalRunTurn>) => {
+          const callbacks = args[1] as
+            | {
+                onLlmStatus?: (status: {
+                  phase: "attempt" | "retry" | "fallback";
+                  attempt?: number;
+                  maxAttempts?: number;
+                }) => void;
+                onAssistantRound?: (round: { thought?: string; text: string }) => void;
+              }
+            | undefined;
+          callbacks?.onLlmStatus?.({ phase: "retry", attempt: 2, maxAttempts: 5 });
+          callbacks?.onAssistantRound?.({ text: "resumed after retry" });
+          return {
+            text: "resumed after retry",
+            toolCalls: [],
+            route: "default",
+            stopReason: "end_turn",
+          } as unknown as Awaited<ReturnType<typeof originalRunTurn>>;
+        },
+      );
+    const onActivity = vi.fn();
+
+    try {
+      const resumed = await runner.resume(
+        spawn.childSessionId,
+        "continue",
+        "resuming status child",
+        { onActivity },
+      );
+
+      expect(resumed.ok).toBe(true);
+      const snapshots = onActivity.mock.calls.map(([update]) => update.entries);
+      expect(snapshots).toContainEqual(expect.arrayContaining([
+        expect.objectContaining({ kind: "assistant", phase: "status", streaming: true }),
+      ]));
+      expect(snapshots.at(-1)).toEqual([
+        expect.objectContaining({
+          kind: "assistant",
+          text: "resumed after retry",
+          streaming: false,
+        }),
+      ]);
+    } finally {
+      runTurnSpy.mockRestore();
+      restore();
+    }
+  });
+
   it("persists and re-authorizes an explicit project cwd for fresh and resumed children", async () => {
     const explicitRoot = join(tmpHome, "agent-connector");
     const defaultRoot = join(tmpHome, "workspace");

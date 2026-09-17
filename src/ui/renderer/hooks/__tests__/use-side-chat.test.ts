@@ -139,6 +139,113 @@ describe("useSideChat stale-frame guard", () => {
 });
 
 describe("useSideChat unified-transcript rendering (tool / thinking / permission)", () => {
+  it("renders retry and fallback status frames, then replaces them with real reasoning", async () => {
+    const { api, emit } = makeApi();
+    const { result } = renderHook(() => useSideChat(api));
+
+    await act(async () => {
+      await result.current.send("recover the answer");
+    });
+    emit({ type: "llm_status", streamId: 1, phase: "retry", attempt: 2, maxAttempts: 5 });
+    emit({ type: "llm_status", streamId: 1, phase: "fallback", to: "backup" });
+
+    const statusEntries = result.current.entries.filter(
+      (entry): entry is Extract<ChatEntry, { kind: "assistant" }> =>
+        entry.kind === "assistant" && entry.phase === "status",
+    );
+    expect(statusEntries).toHaveLength(1);
+    expect(statusEntries[0]?.text).toContain("backup");
+
+    emit({ type: "reasoning_delta", streamId: 1, text: "checking the new route" });
+
+    expect(result.current.entries.some(
+      (entry) => entry.kind === "assistant" && entry.phase === "status",
+    )).toBe(false);
+    expect(result.current.entries).toContainEqual(expect.objectContaining({
+      kind: "reasoning",
+      text: "checking the new route",
+      streaming: true,
+    }));
+  });
+
+  it("drops a stale retry-status frame before it reaches the side transcript", async () => {
+    const { api, emit } = makeApi();
+    const { result } = renderHook(() => useSideChat(api));
+
+    await act(async () => {
+      await result.current.send("first");
+    });
+    emit({ type: "text_delta", streamId: 1, text: "first answer" });
+    emit({ type: "done", streamId: 1 });
+
+    await act(async () => {
+      await result.current.send("second");
+    });
+    emit({ type: "llm_status", streamId: 1, phase: "retry", attempt: 2, maxAttempts: 5 });
+    emit({ type: "text_delta", streamId: 2, text: "second answer" });
+
+    expect(result.current.entries.some(
+      (entry) => entry.kind === "assistant" && entry.phase === "status",
+    )).toBe(false);
+    expect(lastAssistant(result.current.entries)?.text).toBe("second answer");
+  });
+
+  it("removes a status-only placeholder when the side turn closes", async () => {
+    const { api, emit } = makeApi();
+    const { result } = renderHook(() => useSideChat(api));
+
+    await act(async () => {
+      await result.current.send("recover without output");
+    });
+    emit({ type: "llm_status", streamId: 1, phase: "retry", attempt: 2, maxAttempts: 5 });
+    emit({ type: "done", streamId: 1 });
+
+    expect(result.current.isStreaming).toBe(false);
+    expect(result.current.entries.some(
+      (entry) => entry.kind === "assistant" && entry.phase === "status",
+    )).toBe(false);
+  });
+
+  it("drops a late retry-status frame after the side turn has closed", async () => {
+    const { api, emit } = makeApi();
+    const { result } = renderHook(() => useSideChat(api));
+
+    await act(async () => {
+      await result.current.send("recover then close");
+    });
+    emit({ type: "text_delta", streamId: 1, text: "completed answer" });
+    emit({ type: "done", streamId: 1 });
+    emit({ type: "llm_status", streamId: 1, phase: "retry", attempt: 2, maxAttempts: 5 });
+
+    expect(lastAssistant(result.current.entries)?.text).toBe("completed answer");
+    expect(result.current.entries.some(
+      (entry) => entry.kind === "assistant" && entry.phase === "status",
+    )).toBe(false);
+  });
+
+  it("keeps real partial text visibly interrupted after a retry status", async () => {
+    const { api, emit } = makeApi();
+    const { result } = renderHook(() => useSideChat(api));
+
+    await act(async () => {
+      await result.current.send("recover then stop");
+    });
+    emit({ type: "llm_status", streamId: 1, phase: "retry", attempt: 2, maxAttempts: 5 });
+    emit({ type: "text_delta", streamId: 1, text: "partial answer" });
+
+    await act(async () => {
+      await result.current.abort();
+    });
+
+    expect(lastAssistant(result.current.entries)).toMatchObject({
+      text: "partial answer",
+      interrupted: true,
+    });
+    expect(result.current.entries.some(
+      (entry) => entry.kind === "assistant" && entry.phase === "status",
+    )).toBe(false);
+  });
+
   it("renders a tool_start/tool_end pair as a tool_group entry (parity with main)", async () => {
     const { api, emit } = makeApi();
     const { result } = renderHook(() => useSideChat(api));

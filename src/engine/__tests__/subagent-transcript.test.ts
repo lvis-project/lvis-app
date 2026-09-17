@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { SubAgentTranscriptAccumulator } from "../subagent-transcript.js";
+import type { ChatEntry } from "../../lib/chat-stream-state.js";
 import type { ToolCallMeta } from "../../tools/executor.js";
 import { resolveMcpUiBackend } from "../../mcp/mcp-ui-backend-resolver.js";
 import type {
@@ -152,6 +153,58 @@ describe("SubAgentTranscriptAccumulator", () => {
     // renders the "Thinking…" spinner while the child is actually thinking.
     expect(reasoning.text).toBe("Let me check the file");
     expect(reasoning.streaming).toBe(true);
+  });
+
+  it("shows one retry or fallback status until the child starts real reasoning", () => {
+    const acc = new SubAgentTranscriptAccumulator();
+
+    expect(acc.onLlmStatus({ phase: "attempt", attempt: 1, maxAttempts: 5 })).toBe(false);
+    expect(acc.onLlmStatus({ phase: "attempt", attempt: 2, maxAttempts: 5 })).toBe(false);
+    expect(acc.onLlmStatus({ phase: "retry", attempt: 2 })).toBe(false);
+    expect(acc.snapshot()).toEqual([]);
+
+    expect(acc.onLlmStatus({ phase: "retry", attempt: 2, maxAttempts: 5 })).toBe(true);
+    expect(acc.onLlmStatus({ phase: "fallback", to: "backup" })).toBe(true);
+    const statusEntries = acc.snapshot().filter(
+      (entry): entry is Extract<ChatEntry, { kind: "assistant" }> =>
+        entry.kind === "assistant" && entry.phase === "status",
+    );
+    expect(statusEntries).toHaveLength(1);
+    expect(statusEntries[0]?.text).toContain("backup");
+
+    acc.onReasoningDelta("checking the new route");
+
+    expect(acc.snapshot().some(
+      (entry) => entry.kind === "assistant" && entry.phase === "status",
+    )).toBe(false);
+    expect(acc.snapshot()).toContainEqual(expect.objectContaining({
+      kind: "reasoning",
+      text: "checking the new route",
+      streaming: true,
+    }));
+  });
+
+  it("clears a provider status when a child starts tool work or completes text", () => {
+    const toolAccumulator = new SubAgentTranscriptAccumulator();
+    toolAccumulator.onLlmStatus({ phase: "retry", attempt: 2, maxAttempts: 5 });
+    toolAccumulator.onToolStart("read_file", { path: "/tmp/x" }, meta());
+
+    expect(toolAccumulator.snapshot().some(
+      (entry) => entry.kind === "assistant" && entry.phase === "status",
+    )).toBe(false);
+    expect(toolAccumulator.snapshot()).toContainEqual(expect.objectContaining({ kind: "tool_group" }));
+
+    const textAccumulator = new SubAgentTranscriptAccumulator();
+    textAccumulator.onLlmStatus({ phase: "fallback", to: "backup" });
+    textAccumulator.onAssistantRound("", "recovered answer");
+
+    expect(textAccumulator.snapshot()).toEqual([
+      expect.objectContaining({
+        kind: "assistant",
+        text: "recovered answer",
+        streaming: false,
+      }),
+    ]);
   });
 
   it("DLP-masks the ACCUMULATION so a secret split across deltas cannot leak", () => {
