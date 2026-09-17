@@ -41,6 +41,8 @@ type PermissionReviewEntry = Extract<ChatEntry, { kind: "permission_review" }>;
  * the WorkGroup step count / duration and the final TurnActionBar cost badge.
  */
 export type TurnSummary = {
+  /** Present only when the engine reached a natural `end_turn`. */
+  endedByEndTurn?: true;
   turnDurationMs: number;
   toolCount: number;
   cumulativeToolMs: number;
@@ -684,7 +686,6 @@ export function TranscriptRenderer({
         // groupEntries.length — the latter includes reasoning /
         // assistant bubbles / ask_user_answer and would diverge from the actual
         // tool-call count.
-        const groupSummary = summaryByTurnStart?.get(groupTurnStart);
         // Without an authoritative host summary, count exactly the rows that
         // this group renders. In particular, a permission review attached to a
         // tool row must not be counted once here and again inside that tool.
@@ -697,6 +698,14 @@ export function TranscriptRenderer({
           groupTurnStart + 1,
           nextTurnStartIdx === -1 ? activeEntries.length : nextTurnStartIdx,
         );
+        const transcriptSummary = turnEntries.find(
+          (candidate): candidate is Extract<ChatEntry, { kind: "turn_summary" }> =>
+            candidate.kind === "turn_summary",
+        );
+        // The map is the normal main/side surface path. Falling back to the
+        // carried entry keeps direct read-only transcript consumers from
+        // mistaking an incomplete summary for a completed turn.
+        const groupSummary = summaryByTurnStart?.get(groupTurnStart) ?? transcriptSummary;
         // A summary carries usage totals, but an error/interrupt can still
         // settle the renderer after it. Do not turn that terminal state into
         // a successful-looking completion label.
@@ -734,7 +743,11 @@ export function TranscriptRenderer({
             stepCount={groupSummary?.toolCount ?? fallbackStepCount}
             streaming={groupIsActiveTurn}
             turnDurationMs={groupSummary?.turnDurationMs}
-            completed={!hasTerminalFailure && (groupSummary !== undefined || hasCleanFinalResponse)}
+            completed={!hasTerminalFailure && (
+              groupSummary !== undefined
+                ? groupSummary.endedByEndTurn === true
+                : hasCleanFinalResponse
+            )}
             progressLabel={groupIsActiveTurn ? progressLabel : undefined}
             revision={[currentSessionId, processingDisplayLevel, groupSearchRevision, ...groupRevisions].join("||")}
             forceOpen={workGroupsForceOpen || groupHasPermissionReview || groupHasCurrentSearchMatch}

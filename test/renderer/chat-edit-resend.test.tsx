@@ -214,7 +214,12 @@ describe("Chat edit & resend (Phase 3.2 regression net)", () => {
     await waitFor(() => expect(api.chatSend).toHaveBeenCalled());
     await act(async () => {
       emitChatStream({ type: "text_delta", text: "existing assistant reply" });
-      emitChatStream({ type: "assistant_round", text: "existing assistant reply" });
+      emitChatStream({
+        type: "assistant_round",
+        text: "existing assistant reply",
+        stopReason: "end_turn",
+        hasToolCalls: false,
+      });
       emitChatStream({ type: "done" });
     });
 

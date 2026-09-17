@@ -219,7 +219,7 @@ export function useSideChat(api: LvisApi): UseSideChat {
         const thought = thoughtRef.current;
         setEntries((p) => applyReasoningDelta(p, thought));
       } else if (ev.type === "assistant_round") {
-        const phase = ev.stopReason === "tool_use" || ev.hasToolCalls ? "work" : "final";
+        const phase = ev.stopReason === "end_turn" && ev.hasToolCalls !== true ? "final" : "work";
         if (finalAssistantRoundClosedRef.current) return;
         setEntries((p) => {
           let next = finalizeStreamingReasoning(p, ev.thought ?? thoughtRef.current);
@@ -462,6 +462,7 @@ export function useSideChat(api: LvisApi): UseSideChat {
       if (isTurnStartEntry(e)) curTurnStart = i;
       else if (e.kind === "turn_summary" && curTurnStart >= 0) {
         map.set(curTurnStart, {
+          ...(e.endedByEndTurn === true ? { endedByEndTurn: true as const } : {}),
           turnDurationMs: e.turnDurationMs,
           toolCount: e.toolCount,
           cumulativeToolMs: e.cumulativeToolMs,

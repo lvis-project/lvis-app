@@ -130,7 +130,7 @@ describe("SideChatView — New button gating during streaming", () => {
     renderView(api, { hasApiKey: true, usageAvailable: false });
 
     await startTurn();
-    emit({ type: "assistant_round", text: "answer", stopReason: "end_turn", streamId: 1 } as ChatStreamEvent);
+    emit({ type: "assistant_round", text: "answer", stopReason: "end_turn", hasToolCalls: false, streamId: 1 } as ChatStreamEvent);
     emit({
       type: "turn_summary",
       turnDurationMs: 20,
@@ -159,7 +159,7 @@ describe("SideChatView — processing detail parity", () => {
     emit({ type: "tool_start", groupId: "side-group", toolUseId: "side-tool", name: "inspect", displayOrder: 0, streamId: 1 });
     emit({ type: "tool_end", groupId: "side-group", toolUseId: "side-tool", name: "inspect", displayOrder: 0, result: "ok", streamId: 1 });
     emit({ type: "text_delta", text: "side final", streamId: 1 });
-    emit({ type: "assistant_round", text: "side final", stopReason: "end_turn", streamId: 1 });
+    emit({ type: "assistant_round", text: "side final", stopReason: "end_turn", hasToolCalls: false, streamId: 1 });
     emit({ type: "done", streamId: 1 });
 
     const view = within(screen.getByTestId("side-chat-view"));

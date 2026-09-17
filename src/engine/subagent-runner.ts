@@ -3375,7 +3375,12 @@ export class SubAgentRunner {
             // landing after it would replace the finalized thought with the
             // mid-stream one.
             reasoningStreamEmitter.cancel();
-            transcript.onAssistantRound(round.thought, round.text);
+            transcript.onAssistantRound(
+              round.thought,
+              round.text,
+              round.stopReason,
+              round.hasToolCalls,
+            );
             emitActivity();
           },
           onError: (e) => {
@@ -4410,7 +4415,12 @@ export class SubAgentRunner {
             // landing after it would replace the finalized thought with the
             // mid-stream one.
             reasoningStreamEmitter.cancel();
-            transcript.onAssistantRound(round.thought, round.text);
+            transcript.onAssistantRound(
+              round.thought,
+              round.text,
+              round.stopReason,
+              round.hasToolCalls,
+            );
             emitActivity();
           },
           onError: (message) => {

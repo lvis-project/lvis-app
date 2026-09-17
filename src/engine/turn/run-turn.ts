@@ -947,6 +947,7 @@ async function runTurnInSpan(
           ? billableUsageByModel[0]
           : undefined;
       const turnSummaryPayload = {
+        ...(result.stopReason === "end_turn" ? { endedByEndTurn: true as const } : {}),
         turnDurationMs: Math.max(0, Date.now() - turnStartedAt),
         toolCount: turnToolCount,
         cumulativeToolMs: turnCumulativeToolMs,

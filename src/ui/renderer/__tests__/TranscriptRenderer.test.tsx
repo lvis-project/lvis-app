@@ -57,6 +57,7 @@ const RETURN_HERE_TITLE = "여기로 되돌아가기"; // chatView.returnHereBut
 const completedTurnSummary = (): Map<number, TurnSummary> => new Map([[
   0,
   {
+    endedByEndTurn: true,
     turnDurationMs: 250,
     toolCount: 0,
     cumulativeToolMs: 0,
@@ -204,6 +205,7 @@ describe("TranscriptRenderer — minimal (required-only) contract", () => {
           { kind: "reasoning", text: thought },
           {
             kind: "turn_summary",
+            endedByEndTurn: true,
             turnDurationMs: 0,
             toolCount: 0,
             cumulativeToolMs: 0,
@@ -233,6 +235,31 @@ describe("TranscriptRenderer — minimal (required-only) contract", () => {
     const { getByTestId } = renderCore(
       <TranscriptRenderer
         entries={[userEntry("q"), toolGroup(), assistant("terminal state", terminalState)]}
+        streaming={false}
+        currentSessionId="s1"
+      />,
+    );
+
+    expect(getByTestId("work-group").textContent).not.toContain("작업 완료");
+  });
+
+  it("does not call an input-required summary completed work", () => {
+    const { getByTestId } = renderCore(
+      <TranscriptRenderer
+        entries={[
+          userEntry("q"),
+          { kind: "reasoning", text: "추가 정보를 기다립니다." },
+          assistant("질문을 보냈습니다.", { phase: "work" }),
+          {
+            kind: "turn_summary",
+            turnDurationMs: 1250,
+            toolCount: 1,
+            cumulativeToolMs: 400,
+            tokensIn: 120,
+            freshInputTokens: 100,
+            tokensOut: 20,
+          },
+        ]}
         streaming={false}
         currentSessionId="s1"
       />,

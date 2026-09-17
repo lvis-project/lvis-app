@@ -23,7 +23,12 @@ async function seedAssistantEntry(
   await waitFor(() => expect((api as any).chatSend).toHaveBeenCalled());
   await act(async () => {
     emit({ type: "text_delta", text: "Hello from LVIS" });
-    emit({ type: "assistant_round", text: "Hello from LVIS" });
+    emit({
+      type: "assistant_round",
+      text: "Hello from LVIS",
+      stopReason: "end_turn",
+      hasToolCalls: false,
+    });
     emit({ type: "done" });
   });
 }
@@ -68,7 +73,12 @@ describe("Chat retry (Phase 3.2 regression net)", () => {
     await waitFor(() => expect(api.chatRetryEffort).toHaveBeenCalled());
     await act(async () => {
       emitChatStream({ type: "text_delta", text: "Retried response" });
-      emitChatStream({ type: "assistant_round", text: "Retried response" });
+      emitChatStream({
+        type: "assistant_round",
+        text: "Retried response",
+        stopReason: "end_turn",
+        hasToolCalls: false,
+      });
       emitChatStream({ type: "done" });
     });
     await waitFor(() => {

@@ -90,16 +90,20 @@ export function useChatState(
 // never come (the turn can reject instead of settling), so the first frame
 // of a newer stream closes it here and takes its place.
   const supersededStreamIdRef = useRef<number | null>(null);
-  // A superseded stream that was closed here. Its stragglers must not be
-  // adopted as a fresh stream once the newer one has finished.
+  // Stream ids climb within a transcript. Keep the highest closed id so any
+  // older straggler cannot be adopted as a fresh stream after its successor
+  // has finished. A late tool_end remains useful: it closes its old card.
   const retiredStreamIdRef = useRef<number | null>(null);
   // A stream closing lets go of the active id and any supersede in flight;
   // the retired id outlives it, since the retired stream's stragglers can
-  // still land after its successor has finished. Only a transcript boundary
-  // — new chat, load, edit, truncate, fresh turn — forgets all three.
+  // still land after its successor has finished. Only a transcript replacement
+  // — new chat, loaded session, or seeded routine — forgets all three.
   const releaseActiveStream = useCallback(() => {
     if (activeStreamIdRef.current !== null) {
-      retiredStreamIdRef.current = activeStreamIdRef.current;
+      retiredStreamIdRef.current = Math.max(
+        retiredStreamIdRef.current ?? activeStreamIdRef.current,
+        activeStreamIdRef.current,
+      );
     }
     activeStreamIdRef.current = null;
     supersededStreamIdRef.current = null;
@@ -201,9 +205,11 @@ export function useChatState(
       if (streamId !== null) {
         // A retired stream's tool results still close their cards; nothing
         // else it says is taken up again.
-        const retiredToolEnd = retiredStreamIdRef.current === streamId && ev.type === "tool_end";
+        const retiredToolEnd = retiredStreamIdRef.current !== null
+          && streamId <= retiredStreamIdRef.current
+          && ev.type === "tool_end";
         if (activeStreamIdRef.current === null) {
-          if (retiredStreamIdRef.current === streamId) {
+          if (retiredStreamIdRef.current !== null && streamId <= retiredStreamIdRef.current) {
             if (!retiredToolEnd) return;
           } else {
             activeStreamIdRef.current = streamId;
@@ -233,7 +239,10 @@ export function useChatState(
             streamRef.current = "";
             thoughtRef.current = "";
             finalAssistantRoundClosedRef.current = false;
-            retiredStreamIdRef.current = activeStreamIdRef.current;
+            retiredStreamIdRef.current = Math.max(
+              retiredStreamIdRef.current ?? activeStreamIdRef.current,
+              activeStreamIdRef.current,
+            );
             supersededStreamIdRef.current = null;
             activeStreamIdRef.current = streamId;
             if (debugStreamEnabled) debugLog("stream", "activeStreamId:supersede", { streamId });
@@ -305,7 +314,7 @@ export function useChatState(
             stopReason: ev.stopReason,
           });
         }
-        const phase = ev.stopReason === "tool_use" || ev.hasToolCalls ? "work" : "final";
+        const phase = ev.stopReason === "end_turn" && ev.hasToolCalls !== true ? "final" : "work";
         if (finalAssistantRoundClosedRef.current) {
           if (debugStreamEnabled) {
             debugLog("stream", "assistant_round:ignored-after-final-round", {
@@ -620,7 +629,7 @@ export function useChatState(
         setEntries((p) => [...p.slice(0, entryIdx), { kind: "user", text: newText, createdAt: Date.now() }]);
         streamRef.current = "";
         thoughtRef.current = "";
-        resetStreamTracking();
+        releaseActiveStream();
         finalAssistantRoundClosedRef.current = false;
         const res = await api.chatEditResend(messageId, newText);
         if (!res?.ok) {
@@ -650,7 +659,7 @@ export function useChatState(
         if (!failed) setEditingEntryIdx(null);
       }
     },
-    [api, entries, beginStreamingRequest, finishStreamingRequest],
+    [api, entries, beginStreamingRequest, finishStreamingRequest, releaseActiveStream],
   );
 
   const handleRetryEffort = useCallback(async () => {
@@ -670,7 +679,7 @@ export function useChatState(
     });
     streamRef.current = "";
     thoughtRef.current = "";
-    resetStreamTracking();
+    releaseActiveStream();
     finalAssistantRoundClosedRef.current = false;
     try {
       const res = await api.chatRetryEffort({
@@ -698,15 +707,18 @@ export function useChatState(
     } finally {
       finishStreamingRequest(requestId);
     }
-  }, [api, entries, beginStreamingRequest, finishStreamingRequest]);
+  }, [api, entries, beginStreamingRequest, finishStreamingRequest, releaseActiveStream]);
 
   // Used by handleAsk in App.tsx to reset stream accumulators before chatSend.
   const resetStreamAccumulators = useCallback(() => {
     streamRef.current = "";
     thoughtRef.current = "";
-    resetStreamTracking();
+    // A fresh send belongs to the same session, so retain the retired stream
+    // high-watermark. Otherwise a late frame from the prior turn can arrive
+    // before the new stream and be adopted as its response.
+    releaseActiveStream();
     finalAssistantRoundClosedRef.current = false;
-  }, []);
+  }, [releaseActiveStream]);
 
   // Used by handleAsk error path to show an error bubble with the current thought.
   const setErrorWithThought = useCallback((message: string) => {
@@ -715,7 +727,7 @@ export function useChatState(
     thoughtRef.current = "";
     releaseActiveStream();
     finalAssistantRoundClosedRef.current = false;
-  }, []);
+  }, [releaseActiveStream]);
 
   // ── Intent methods (replace raw setEntries) ──
   const seedRoutineEntries = useCallback((seeded: ChatEntry[]) => {
@@ -723,8 +735,9 @@ export function useChatState(
     // Same class as applyLoadedSession: the transcript on screen is replaced,
     // so the previous conversation's suggestions no longer follow from it.
     resetSuggestedReplies();
+    resetStreamTracking();
     setEntries(seeded);
-  }, []);
+  }, [resetStreamTracking]);
 
   const clearForNewChat = useCallback(() => {
     setEntries([]);
@@ -742,7 +755,7 @@ export function useChatState(
     setIsCompacting(false);
     setCompactTriggerSource(null);
     setIsRecoveryExhausted(false);
-  }, []);
+  }, [resetStreamTracking]);
 
   const appendUserMessage = useCallback((content: string, injectHint?: "queue" | "interrupt"): void => {
     setEntries((p) => appendUserEntry(p, content, injectHint));
@@ -760,7 +773,7 @@ export function useChatState(
     const requestId = beginStreamingRequest();
     streamRef.current = "";
     thoughtRef.current = "";
-    resetStreamTracking();
+    releaseActiveStream();
     finalAssistantRoundClosedRef.current = false;
     appendAssistantStatus(t("useChatState.continueFromLastUserStatus"));
     try {
@@ -773,7 +786,7 @@ export function useChatState(
     } finally {
       finishStreamingRequest(requestId);
     }
-  }, [api, beginStreamingRequest, finishStreamingRequest, appendAssistantStatus, setErrorWithThought]);
+  }, [api, beginStreamingRequest, finishStreamingRequest, appendAssistantStatus, setErrorWithThought, releaseActiveStream]);
 
   const appendSystemEntry = useCallback((text: string): void => {
     if (text.length === 0) return;
@@ -793,7 +806,7 @@ export function useChatState(
     // user was reading before is gone from the transcript.
     resetSuggestedReplies();
     setEntries(loaded);
-  }, []);
+  }, [resetStreamTracking]);
 
   const applyInitialSession = useCallback((loaded: ChatEntry[]) => {
     finalAssistantRoundClosedRef.current = false;
@@ -807,14 +820,17 @@ export function useChatState(
     // the indicator here too — same class as applyLoadedSession / clearForNewChat.
     streamRef.current = "";
     thoughtRef.current = "";
-    resetStreamTracking();
+    // This rewinds the current session rather than replacing it. Stream ids
+    // remain monotonic on its IPC channel, so retain the retired high-watermark
+    // and reject any old frame that arrives after the rewind.
+    releaseActiveStream();
     finalAssistantRoundClosedRef.current = false;
     setIsCompacting(false);
     // The rewind drops the assistant turn the suggestions were generated from,
     // so they no longer describe any reply the user can see.
     resetSuggestedReplies();
     setEntries((p) => p.slice(0, entryIndex + 1));
-  }, []);
+  }, [releaseActiveStream]);
 
   /**
    * B1 — /compact manual command handler.

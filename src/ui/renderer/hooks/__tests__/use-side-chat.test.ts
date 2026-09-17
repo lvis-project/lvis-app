@@ -75,6 +75,29 @@ describe("useSideChat stale-frame guard", () => {
     });
   });
 
+  it("keeps a max-token assistant round as work instead of a final answer", async () => {
+    const { api, emit } = makeApi();
+    const { result } = renderHook(() => useSideChat(api));
+
+    await act(async () => {
+      await result.current.send("continue");
+    });
+    emit({ type: "text_delta", text: "truncated", streamId: 1 });
+    emit({
+      type: "assistant_round",
+      text: "truncated",
+      stopReason: "max_tokens",
+      hasToolCalls: false,
+      streamId: 1,
+    });
+
+    expect(lastAssistant(result.current.entries)).toMatchObject({
+      kind: "assistant",
+      phase: "work",
+      streaming: false,
+    });
+  });
+
   it("drops frames from a superseded turn (different streamId)", async () => {
     const { api, emit } = makeApi();
     const { result } = renderHook(() => useSideChat(api));

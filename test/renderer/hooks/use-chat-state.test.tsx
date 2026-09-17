@@ -305,6 +305,29 @@ describe("useChatState", () => {
     });
   });
 
+  it("keeps a max-token assistant round as work instead of a final answer", async () => {
+    const { api, emitChatStream } = makeMockLvisApi();
+    const { result } = renderHook(() => useChatState(api as unknown as LvisApi, () => {}));
+
+    act(() => {
+      emitChatStream({ type: "text_delta", text: "잘린 중간 답변" });
+      emitChatStream({
+        type: "assistant_round",
+        text: "잘린 중간 답변",
+        stopReason: "max_tokens",
+        hasToolCalls: false,
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.entries.findLast((entry) => entry.kind === "assistant")).toMatchObject({
+        kind: "assistant",
+        phase: "work",
+        streaming: false,
+      });
+    });
+  });
+
   it("splices marker-only done events when no tool/checkpoint sibling exists (#619)", async () => {
     const { api, emitChatStream } = makeMockLvisApi();
     const { result } = renderHook(() => useChatState(api as unknown as LvisApi, () => {}));
@@ -1293,6 +1316,26 @@ describe("useChatState — a turn interrupted by the next send", () => {
     act(() => result.current.appendUserEntry("third"));
     dispatch({ type: "text_delta", streamId: 3, text: "next" });
     expect(result.current.entries[5]).toMatchObject({ text: "next", streaming: true });
+  });
+
+  it("retains the retired stream high-watermark across a fresh send", () => {
+    const { result, dispatch } = mount();
+    act(() => result.current.appendUserEntry("first"));
+    dispatch({ type: "text_delta", streamId: 1, text: "first answer" });
+    dispatch({ type: "done", streamId: 1 });
+
+    // handleAsk uses this reset immediately before it appends and sends a new
+    // question. The previous stream can still have a late frame in flight.
+    act(() => result.current.resetStreamAccumulators());
+    act(() => result.current.appendUserEntry("second"));
+    dispatch({ type: "text_delta", streamId: 1, text: " late" });
+    dispatch({ type: "text_delta", streamId: 2, text: "fresh answer" });
+
+    expect(result.current.entries.map((entry) => entry.kind)).toEqual([
+      "user", "assistant", "user", "assistant",
+    ]);
+    expect(result.current.entries[1]).toMatchObject({ text: "first answer", streaming: false });
+    expect(result.current.entries[3]).toMatchObject({ text: "fresh answer", streaming: true });
   });
 
   it("forgets the retired stream on a new chat, so the id can be reused", () => {

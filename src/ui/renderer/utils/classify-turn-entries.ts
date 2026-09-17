@@ -68,9 +68,10 @@ export function classifyTurnEntries(
     const hasSubsequentWork = subsequentTurnEntries.some(
       (ne) => ne.kind === "tool_group" || ne.kind === "reasoning" || ne.kind === "permission_review",
     );
-    // A turn summary is authoritative proof that a reasoning-only turn ended
-    // normally. Without it, the tail reasoning remains live so error and abort
-    // paths never masquerade as completed work.
+    // A turn summary proves that the work settled and has durable usage data.
+    // It does not prove a natural end_turn: input waits and output caps also
+    // carry summaries. Completion labeling is decided separately by the
+    // summary's endedByEndTurn marker.
     const hasTurnSummary = subsequentTurnEntries.some(
       (ne) => ne.kind === "turn_summary",
     );

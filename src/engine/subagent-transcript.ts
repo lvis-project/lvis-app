@@ -40,6 +40,9 @@ import type { ToolCallMeta } from "../tools/executor.js";
 import type { PermissionReviewEvent } from "../shared/permission-review-status.js";
 import type { McpUiPayload } from "../mcp/types.js";
 import type { FallbackStatus } from "./llm/vercel/fallback-chain.js";
+import type { TurnCallbacks } from "./turn/types.js";
+
+type AssistantRound = Parameters<NonNullable<TurnCallbacks["onAssistantRound"]>>[0];
 
 export class SubAgentTranscriptAccumulator {
   private entries: ChatEntry[] = [];
@@ -187,7 +190,12 @@ export class SubAgentTranscriptAccumulator {
    * text becomes a finalized assistant entry. Both are DLP-masked. Called once
    * per round boundary from the child loop's `onAssistantRound`.
    */
-  onAssistantRound(thought: string, text: string): void {
+  onAssistantRound(
+    thought: string,
+    text: string,
+    stopReason: AssistantRound["stopReason"],
+    hasToolCalls: AssistantRound["hasToolCalls"],
+  ): void {
     this.roundReasoning = "";
     this.entries = dropPendingLlmStatusAssistant(this.entries);
     const maskedThought = thought ? maskSensitiveData(thought).masked : "";
@@ -202,7 +210,14 @@ export class SubAgentTranscriptAccumulator {
     const maskedText = text ? maskSensitiveData(text).masked : "";
     if (maskedText) {
       this.entries = upsertStreamingAssistant(this.entries, maskedText);
-      this.entries = finalizeStreamingAssistant(this.entries, maskedText);
+      // A child transcript has no turn_summary carrier. Preserve the round's
+      // own completion boundary so the shared renderer cannot mislabel partial
+      // max-token/tool work as a completed response.
+      const phase = stopReason === "end_turn" && !hasToolCalls ? "final" : "work";
+      this.entries = finalizeStreamingAssistant(this.entries, maskedText, {
+        phase,
+        overrideText: maskedText,
+      });
     }
   }
 }

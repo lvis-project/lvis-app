@@ -271,10 +271,11 @@ export async function runStreamedTurn(
             ...(truncatedDir === undefined ? {} : { truncatedDir }),
           },
         }),
-      onTurnSummary: ({ turnDurationMs, toolCount, cumulativeToolMs, tokensIn, freshInputTokens, tokensOut, cacheReadTokens, cacheWriteTokens, vendorProvider, vendorModel, usageByModel, subscriptionUsage, decisionCounts, breakdown }) =>
+      onTurnSummary: ({ endedByEndTurn, turnDurationMs, toolCount, cumulativeToolMs, tokensIn, freshInputTokens, tokensOut, cacheReadTokens, cacheWriteTokens, vendorProvider, vendorModel, usageByModel, subscriptionUsage, decisionCounts, breakdown }) =>
         send({
           kind: "usage.reported",
           ownerDetail: {
+            ...(endedByEndTurn === true ? { endedByEndTurn: true as const } : {}),
             turnDurationMs,
             toolCount,
             cumulativeToolMs,

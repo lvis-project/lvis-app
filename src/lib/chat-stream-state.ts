@@ -69,6 +69,8 @@ export type ChatStreamEvent = {
   approvalPurpose?: ApprovalPurposeSuggestion;
   roundIndex?: number;
   stopReason?: "end_turn" | "tool_use" | "max_tokens";
+  /** True only when the summarized turn naturally reached `end_turn`. */
+  endedByEndTurn?: true;
   hasToolCalls?: boolean;
   removedMessages?: number;
   freedTokens?: number;
@@ -361,6 +363,8 @@ export type ChatEntry =
   // footer survives chat reloads and historical session rendering.
   | {
       kind: "turn_summary";
+      /** True only for a natural `end_turn`, never inferred from usage. */
+      endedByEndTurn?: true;
       turnDurationMs: number;
       toolCount: number;
       /**
@@ -1355,6 +1359,7 @@ function parseUsageByModel(value: unknown): TurnSummaryEntry["usageByModel"] | u
  */
 export function parseTurnSummaryEvent(ev: ChatStreamEvent): Pick<
   TurnSummaryEntry,
+  | "endedByEndTurn"
   | "turnDurationMs"
   | "toolCount"
   | "cumulativeToolMs"
@@ -1381,6 +1386,7 @@ export function parseTurnSummaryEvent(ev: ChatStreamEvent): Pick<
   const usageByModel = parseUsageByModel(ev.usageByModel);
   const subscriptionUsage = normalizeSubscriptionUsageList(ev.subscriptionUsage);
   return {
+    ...(ev.endedByEndTurn === true ? { endedByEndTurn: true as const } : {}),
     turnDurationMs,
     toolCount,
     cumulativeToolMs,

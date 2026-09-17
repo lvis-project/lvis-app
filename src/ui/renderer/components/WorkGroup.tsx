@@ -20,7 +20,7 @@ interface WorkGroupProps {
    * shared turn-summary rounding rules.
    */
   turnDurationMs?: number;
-  /** True only after the turn has a clean final response or an authoritative summary. */
+  /** True only after a clean final response or an end_turn-confirmed summary. */
   completed?: boolean;
   /**
    * A provider-status detail owned by this active group. It replaces the

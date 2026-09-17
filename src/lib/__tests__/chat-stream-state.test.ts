@@ -1034,9 +1034,9 @@ describe("transcript frame reducer (shared by the main and the side chat)", () =
     const base = appendUserEntry([], "q");
     const totals = { turnDurationMs: 1200, toolCount: 1, cumulativeToolMs: 300, tokensIn: 50, freshInputTokens: 40, tokensOut: 20 };
     const next = applyTranscriptFrame(base, frame({
-      type: "turn_summary", ...totals, cacheReadTokens: 7, breakdown: { web_fetch: { count: 1, ms: 300 } }, vendorModel: "m",
+      type: "turn_summary", ...totals, endedByEndTurn: true, cacheReadTokens: 7, breakdown: { web_fetch: { count: 1, ms: 300 } }, vendorModel: "m",
     }));
-    expect(next[next.length - 1]).toMatchObject({ kind: "turn_summary", ...totals, cacheReadTokens: 7, breakdown: { web_fetch: { count: 1, ms: 300 } }, vendorModel: "m" });
+    expect(next[next.length - 1]).toMatchObject({ kind: "turn_summary", ...totals, endedByEndTurn: true, cacheReadTokens: 7, breakdown: { web_fetch: { count: 1, ms: 300 } }, vendorModel: "m" });
     expect(parseTurnSummaryEvent(frame({ type: "turn_summary", ...totals, tokensOut: -1 }))).toBeNull();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
