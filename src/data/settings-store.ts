@@ -279,7 +279,7 @@ export interface ChatSettings {
  * the legacy full-display default during `normalizeChat`. A live mutation must
  * not silently replace a user's current valid preference with that default.
  */
-export class SettingsPatchValidationError extends Error {
+class SettingsPatchValidationError extends Error {
   readonly code = "invalid-processing-display-level";
 
   constructor() {
