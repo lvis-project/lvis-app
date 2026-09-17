@@ -1050,6 +1050,260 @@ describe("shell-path-policy", () => {
       });
     });
 
+    describe("uv run child operand roles", () => {
+      it.each([
+        `uv run python3 -c "w,h=2400,1800; print((w*h) // 512)"`,
+        `uv run -- python3 -c "w,h=2400,1800; print((w*h) // 512)"`,
+        `uv run curl https://example.test/a/b`,
+        `uv run sh -c 'printf ok'`,
+        `uv run bash -c '[[ 1 == 1 ]]'`,
+      ])("reuses fixed child semantics in %s", (command) => {
+        withRoot((root) => {
+          expect(validateShellCommandPathPolicy(command, root, root, [])).toBeNull();
+        });
+      });
+
+      it.each([
+        ["python script", "uv run python3 /etc/shadow"],
+        ["shell payload", "uv run sh -c 'cat /etc/shadow'"],
+        ["bash payload", "uv run bash -c '[[ -f /etc/shadow ]]'"],
+        ["dd input", "uv run dd if=/etc/shadow of=./copy"],
+        ["curl file URL", "uv run curl file:///etc/shadow"],
+        ["explicit child path", "uv run /etc/shadow"],
+      ])("checks child path semantics for %s", (_label, command) => {
+        withRoot((root) => {
+          expect(validateShellCommandPathPolicy(command, root, root, []))
+            .toContain("Sensitive path:");
+        });
+      });
+
+      it.each([
+        "uv run",
+        "uv run --",
+        "uv run --isolated python3 -c 'print(1)'",
+        "uv run -m package.module",
+        'uv run "$UNKNOWN_CHILD"',
+        'sed -e "$PROGRAM" ./x',
+        'uv run sed -e "$PROGRAM" ./x',
+        'uv run uv run sed -e "$PROGRAM" ./x',
+        'bash -lc "$PROGRAM"',
+        'uv run bash -lc "$PROGRAM"',
+        'uv run uv run bash -lc "$PROGRAM"',
+        'curl -o"$DEST" https://example.test',
+        'uv run curl -o"$DEST" https://example.test',
+        'uv run uv run curl -o"$DEST" https://example.test',
+      ])("fails closed when the child boundary is not fixed: %s", (command) => {
+        withRoot((root) => {
+          expect(validateShellCommandPathPolicy(command, root, root, []))
+            .toContain("Shell path policy:");
+        });
+      });
+
+      it("leaves other uv subcommands under the existing path scan", () => {
+        withRoot((root) => {
+          expect(validateShellCommandPathPolicy("uv pip /etc/shadow", root, root, []))
+            .toContain("Sensitive path:");
+        });
+      });
+
+      it("applies child shell stdin rules to wrapper pipes and heredocs", () => {
+        withRoot((root) => {
+          expect(validateShellCommandPathPolicy("printf 'cat /etc/shadow' | uv run sh", root, root, []))
+            .toContain("unresolved shell program from a pipe");
+          expect(validateShellCommandPathPolicy("uv run sh <<'EOF'\ncat /etc/shadow\nEOF", root, root, []))
+            .toContain("Sensitive path:");
+          expect(validateShellCommandPathPolicy("uv run uv run bash <<'EOF'\ncat /etc/shadow\nEOF", root, root, []))
+            .toContain("Sensitive path:");
+        });
+      });
+
+      it.each([
+        "find . -name x",
+        "uv run find . -name x",
+        "uv run uv run find . -name x",
+        "cp -r ./a ./b",
+        "uv run cp -r ./a ./b",
+        "uv run uv run cp -r ./a ./b",
+      ])("applies traversal policy to the projected child: %s", (command) => {
+        withRoot((root) => {
+          expect(validateShellCommandPathPolicy(command, root, root, [], true))
+            .toContain("recursive");
+        });
+      });
+
+      it.each([
+        "sudo id", "uv run sudo id", "uv run uv run sudo id",
+        "su root", "uv run su root", "uv run uv run su root",
+        "doas id", "uv run doas id", "uv run uv run doas id",
+      ])("keeps non-path privileged heads path-neutral: %s", (command) => {
+        withRoot((root) => {
+          expect(validateShellCommandPathPolicy(command, root, root, [])).toBeNull();
+        });
+      });
+
+      it("checks explicit executable paths at every projected wrapper layer", () => {
+        withRoot((root) => {
+          const sensitiveUv = join(homedir(), ".ssh", "uv");
+          for (const command of [
+            `${sensitiveUv} run python3 -c 'print(1)'`,
+            `uv run ${sensitiveUv} run python3 -c 'print(1)'`,
+            `uv run uv run ${sensitiveUv} run python3 -c 'print(1)'`,
+          ]) {
+            expect(validateShellCommandPathPolicy(command, root, root, []), command)
+              .toContain("Sensitive path:");
+          }
+        });
+      });
+
+      it.each([
+        "env timeout 1 sh -c 'cat /etc/shadow'",
+        "uv run env timeout 1 sh -c 'cat /etc/shadow'",
+        "uv run uv run env timeout 1 sh -c 'cat /etc/shadow'",
+      ])("projects nested execution wrappers into shell program policy: %s", (command) => {
+        withRoot((root) => {
+          expect(validateShellCommandPathPolicy(command, root, root, []))
+            .toContain("Sensitive path:");
+        });
+      });
+
+      it.each([
+        "nohup find . -name x",
+        "uv run nohup find . -name x",
+        "uv run uv run nohup find . -name x",
+        "stdbuf -o0 cp -r ./a ./b",
+        "uv run stdbuf -o0 cp -r ./a ./b",
+        "uv run uv run stdbuf -o0 cp -r ./a ./b",
+      ])("projects nested execution wrappers into traversal policy: %s", (command) => {
+        withRoot((root) => {
+          expect(validateShellCommandPathPolicy(command, root, root, [], true))
+            .toContain("recursive");
+        });
+      });
+
+      it.each([
+        "env --unknown-wrapper-option echo ok",
+        "uv run env --unknown-wrapper-option echo ok",
+        "uv run uv run env --unknown-wrapper-option echo ok",
+      ])("fails closed on the canonical wrapper parser result: %s", (command) => {
+        withRoot((root) => {
+          expect(validateShellCommandPathPolicy(command, root, root, []))
+            .toContain("Unsupported env wrapper option");
+        });
+      });
+
+      it.each([
+        "env BASH_ENV=/etc/shadow bash -c 'printf ok'",
+        "uv run env BASH_ENV=/etc/shadow bash -c 'printf ok'",
+        "uv run uv run env BASH_ENV=/etc/shadow bash -c 'printf ok'",
+        "env PWD=/etc cat passwd",
+        "uv run env PWD=/etc cat passwd",
+        "uv run uv run env PWD=/etc cat passwd",
+      ])("rejects execution-altering projected environments: %s", (command) => {
+        withRoot((root) => {
+          expect(validateShellCommandPathPolicy(command, root, root, []))
+            .toContain("execution-altering shell environment is unsupported");
+        });
+      });
+
+      it.each([
+        "export TARGET=./safe; env TARGET=/etc/shadow sh -c 'cat \"$TARGET\"'",
+        "export TARGET=./safe; uv run env TARGET=/etc/shadow sh -c 'cat \"$TARGET\"'",
+        "export TARGET=./safe; uv run uv run env TARGET=/etc/shadow sh -c 'cat \"$TARGET\"'",
+      ])("passes projected exported environments into nested shells: %s", (command) => {
+        withRoot((root) => {
+          expect(validateShellCommandPathPolicy(command, root, root, [], true))
+            .toContain("Sensitive path:");
+        });
+      });
+
+      it.each([
+        "TARGET=./safe; unset TARGET; env TARGET=/etc/shadow sh -c 'cat \"$TARGET\"'",
+        "TARGET=./safe; unset TARGET; uv run env TARGET=/etc/shadow sh -c 'cat \"$TARGET\"'",
+        "TARGET=./safe; unset TARGET; uv run uv run env TARGET=/etc/shadow sh -c 'cat \"$TARGET\"'",
+      ])("clears known-unset state when a projected env assigns the variable: %s", (command) => {
+        withRoot((root) => {
+          expect(validateShellCommandPathPolicy(command, root, root, [], true))
+            .toContain("Sensitive path:");
+        });
+      });
+
+      it.each([
+        "TARGET=/etc/shadow; sh -c 'cat \"$TARGET\"'",
+        "TARGET=/etc/shadow; uv run sh -c 'cat \"$TARGET\"'",
+        "TARGET=/etc/shadow; uv run uv run sh -c 'cat \"$TARGET\"'",
+      ])("does not export an unexported outer shell variable: %s", (command) => {
+        withRoot((root) => {
+          expect(validateShellCommandPathPolicy(command, root, root, [], true))
+            .toContain("unresolved command operand");
+        });
+      });
+
+      it.each([
+        "env -C /tmp sh -c 'cat .ssh/id_rsa'",
+        "uv run env -C /tmp sh -c 'cat .ssh/id_rsa'",
+        "uv run uv run env -C /tmp sh -c 'cat .ssh/id_rsa'",
+      ])("passes projected wrapper cwd into relative nested shell paths: %s", (command) => {
+        withRoot((root) => {
+          expect(validateShellCommandPathPolicy(command, root, root, ["/tmp"], true))
+            .toContain("Sensitive path:");
+        });
+      });
+
+      it.each([
+        "env -C /tmp env -C . sh -c 'touch lvis-review-probe'",
+        "uv run env -C /tmp env -C . sh -c 'touch lvis-review-probe'",
+        "uv run uv run env -C /tmp env -C . sh -c 'touch lvis-review-probe'",
+      ])("applies ordered wrapper cwd transitions: %s", (command) => {
+        withRoot((root) => {
+          expect(validateShellCommandPathPolicy(command, root, root, []))
+            .toContain("Sandbox:");
+        });
+      });
+
+      it.each([
+        "env -C src/shared -C ../.. sh -c 'touch lvis-review-probe'",
+        "uv run env -C src/shared -C ../.. sh -c 'touch lvis-review-probe'",
+        "uv run uv run env -C src/shared -C ../.. sh -c 'touch lvis-review-probe'",
+      ])("fails closed on duplicate cwd options in one env process: %s", (command) => {
+        withRoot((root) => {
+          expect(validateShellCommandPathPolicy(command, root, root, []))
+            .toContain("Multiple env working-directory options are unsupported");
+        });
+      });
+
+      it.each([
+        "env TARGET=./safe env -i sh -c 'cat \"${TARGET:-/etc/shadow}\"'",
+        "uv run env TARGET=./safe env -i sh -c 'cat \"${TARGET:-/etc/shadow}\"'",
+        "uv run uv run env TARGET=./safe env -i sh -c 'cat \"${TARGET:-/etc/shadow}\"'",
+      ])("does not retain assignments across an ordered env reset: %s", (command) => {
+        withRoot((root) => {
+          expect(validateShellCommandPathPolicy(command, root, root, [], true)).not.toBeNull();
+        });
+      });
+
+      it.each([
+        "env TARGET=./safe env -u TARGET sh -c 'cat \"${TARGET:-/etc/shadow}\"'",
+        "uv run env TARGET=./safe env -u TARGET sh -c 'cat \"${TARGET:-/etc/shadow}\"'",
+        "uv run uv run env TARGET=./safe env -u TARGET sh -c 'cat \"${TARGET:-/etc/shadow}\"'",
+      ])("applies ordered env unsets after assignments: %s", (command) => {
+        withRoot((root) => {
+          expect(validateShellCommandPathPolicy(command, root, root, [], true))
+            .toContain("Sensitive path:");
+        });
+      });
+
+      it.each([
+        "env -C /etc cat passwd",
+        "uv run env -C /etc cat passwd",
+        "uv run uv run env -C /etc cat passwd",
+      ])("retains nested wrapper cwd path effects: %s", (command) => {
+        withRoot((root) => {
+          expect(validateShellCommandPathPolicy(command, root, root, []))
+            .toContain("Sandbox:");
+        });
+      });
+    });
+
     it("reads a shell -c payload as a command instead of exempting it", () => {
       withRoot((root) => {
         // The payload is a command line this policy can parse, so the operand

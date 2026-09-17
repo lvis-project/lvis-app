@@ -2,8 +2,8 @@ import { fileURLToPath } from "node:url";
 import { isAbsolute } from "node:path";
 import { t } from "../i18n/index.js";
 import { displayShellWord, shellWordHasSingleField, staticShellWord, type ShellWord } from "../shared/shell-analysis.js";
-import { commandLeaf, stripCommandPath } from "../shared/shell-effective-command.js";
-import { inspectShellExecution, ShellExecutionError, type ShellExecutionFacts, type ShellCommandEvent } from "../shared/shell-execution.js";
+import { commandLeaf, effectiveShellWords, stripCommandPath } from "../shared/shell-effective-command.js";
+import { assertStableShellEnvironmentVariable, inspectShellExecution, ShellExecutionError, type ShellExecutionFacts, type ShellCommandEvent } from "../shared/shell-execution.js";
 import { validateSandboxPath } from "../sandbox/path-validator.js";
 import { canonicalizePathForMatch, caseFoldForMatch, isConfiguredSessionReadPath, isSensitivePath } from "../permissions/sensitive-paths.js";
 import { inspectSedScriptFileAccess, isReadOnlyShellLeaf } from "../permissions/reviewer/host-risk-inspector.js";
@@ -274,6 +274,8 @@ interface OperandSlotClassification {
   nonPathIndices: ReadonlySet<number>;
   /** Program roles that require exact expansion even when they contain no literal file effect. */
   programIndices?: ReadonlySet<number>;
+  /** Fixed child command boundary owned by an execution wrapper. */
+  childCommandIndex?: number;
   /**
    * Paths recovered from INSIDE an operand that is otherwise not one. A sed
    * script is a single token, so the filename in `1r /etc/shadow` is reachable
@@ -593,6 +595,88 @@ function classifyFindOperandSlots(argv: readonly string[], verbIndex: number): O
 }
 
 /**
+ * `uv run` is an execution wrapper: after its fixed `run [--]` prefix, the
+ * child owns every remaining operand role. Keep the accepted wrapper grammar
+ * deliberately small. An option before the child can change where the command
+ * begins or how it is resolved, so an unmodelled form fails closed instead of
+ * granting path roles from a guessed argv boundary.
+ */
+function classifyUvRunOperandSlots(argv: readonly string[]): OperandSlotClassification | null {
+  if (argv[1] !== "run") return null;
+
+  const nonPathIndices = new Set<number>([1]);
+  const extraCandidates: { value: string; index: number }[] = [];
+  const nestedCommands: { value: string; index: number }[] = [];
+  let childIndex = 2;
+  if (argv[childIndex] === "--") {
+    nonPathIndices.add(childIndex);
+    childIndex += 1;
+  } else if (argv[childIndex]?.startsWith("-")) {
+    return {
+      nonPathIndices,
+      extraCandidates,
+      nestedCommands,
+      dynamicExecution: "unsupported uv run option before child command",
+    };
+  }
+
+  const childHead = argv[childIndex];
+  if (childHead === undefined || childHead.length === 0 || childHead.startsWith("-")) {
+    return {
+      nonPathIndices,
+      extraCandidates,
+      nestedCommands,
+      dynamicExecution: "missing or unsupported uv run child command",
+      programIndices: new Set([childIndex]),
+    };
+  }
+
+  const childArgv = argv.slice(childIndex);
+  const childVerb = stripCommandPath(childHead).toLowerCase();
+  const childSlots = classifyOperandSlots(childArgv);
+  const programIndices = new Set<number>([childIndex]);
+
+  // A bare executable name is resolved through PATH rather than opened as a
+  // cwd-relative file. An explicit executable path remains a checked operand.
+  nonPathIndices.add(childIndex);
+  if (childHead.includes("/")) extraCandidates.push({ value: childHead, index: childIndex });
+
+  for (const index of childSlots.nonPathIndices) nonPathIndices.add(childIndex + index);
+  for (const index of childSlots.programIndices ?? []) programIndices.add(childIndex + index);
+  extraCandidates.push(...childSlots.extraCandidates.map((candidate) => ({
+    value: candidate.value,
+    index: childIndex + candidate.index,
+  })));
+
+  // Reify every remaining child operand with the CHILD verb's semantics, then
+  // exempt the original wrapper operand from the outer `uv` scan. This keeps
+  // roles such as `dd if=...` and `curl file://...` identical to direct use.
+  let optionsEnded = false;
+  for (let index = 1; index < childArgv.length; index += 1) {
+    const absoluteIndex = childIndex + index;
+    const argument = childArgv[index]!;
+    if (!optionsEnded && argument === "--") {
+      optionsEnded = true;
+      nonPathIndices.add(absoluteIndex);
+      continue;
+    }
+    if (childSlots.nonPathIndices.has(index)) continue;
+    nonPathIndices.add(absoluteIndex);
+    extraCandidates.push(...operandPaths(argument, !optionsEnded, childVerb)
+      .map((value) => ({ value, index: absoluteIndex })));
+  }
+
+  return {
+    nonPathIndices,
+    programIndices,
+    childCommandIndex: childIndex,
+    extraCandidates,
+    nestedCommands,
+    dynamicExecution: childSlots.dynamicExecution,
+  };
+}
+
+/**
  * Read `argv` (`argv[0]` is the head verb) and say which slots are not paths,
  * plus any path recovered from inside one that is not.
  *
@@ -603,12 +687,17 @@ function classifyOperandSlots(argv: readonly string[]): OperandSlotClassificatio
   const skip = new Set<number>();
   const extraCandidates: { value: string; index: number }[] = [];
   const nestedCommands: { value: string; index: number }[] = [];
+  const programIndices = new Set<number>();
   let dynamicExecution: string | null = null;
-  const empty = { nonPathIndices: skip, extraCandidates, nestedCommands, dynamicExecution };
+  const empty = { nonPathIndices: skip, programIndices, extraCandidates, nestedCommands, dynamicExecution };
   const verbIndex = 0;
   const head = argv[verbIndex];
   if (head === undefined) return empty;
   const verb = stripCommandPath(head).toLowerCase();
+  if (verb === "uv") {
+    const uvRun = classifyUvRunOperandSlots(argv);
+    if (uvRun) return uvRun;
+  }
   if (verb === "git") return classifyGitCommitOperandSlots(argv);
   if (verb === "sqlite3") return classifySqliteArgumentSlots(argv);
   if (verb === "find") return classifyFindOperandSlots(argv, verbIndex);
@@ -657,6 +746,7 @@ function classifyOperandSlots(argv: readonly string[]): OperandSlotClassificatio
     // yielded the token `w/tmp/x`, which resolves cwd-relative and stays inside
     // any boundary.
     if (isSed) {
+      programIndices.add(index);
       const sedAccess = inspectSedScriptFileAccess(value);
       // `e COMMAND` runs a command line this policy can read, so it is
       // re-entered rather than exempted — the same treatment `sh -c` gets.
@@ -701,6 +791,18 @@ function classifyOperandSlots(argv: readonly string[]): OperandSlotClassificatio
           continue;
         }
       }
+      const embeddedProgramOptions = isSed ? spec.valueOptions : spec.nestedCommandOptions;
+      if (embeddedProgramOptions) {
+        const carried = readOptionValue(argv, i, embeddedProgramOptions);
+        if (carried) {
+          if (isSed) programTaken = true;
+          const index = carried.consumedNext ? i + 1 : i;
+          programIndices.add(index);
+          if (exempts(carried.value, index)) skip.add(index);
+          if (carried.consumedNext) i += 1;
+          continue;
+        }
+      }
       const equals = token.indexOf("=");
       const name = equals > 0 ? token.slice(0, equals) : token;
       if (spec.programSuppliedBy?.has(name)) programTaken = true;
@@ -734,7 +836,124 @@ function classifyOperandSlots(argv: readonly string[]): OperandSlotClassificatio
       programTaken = true;
     }
   }
-  return { nonPathIndices: skip, extraCandidates, nestedCommands, dynamicExecution };
+  return { nonPathIndices: skip, programIndices, extraCandidates, nestedCommands, dynamicExecution };
+}
+
+interface CommandPolicyView {
+  argv: readonly (string | undefined)[];
+  words: readonly ShellWord[];
+  knownArgv: readonly string[];
+  slots: OperandSlotClassification;
+  offset: number;
+  executableHeads: readonly { value: string; word: ShellWord; cwd: string | null }[];
+  wrapperPaths: readonly { value: string; word: ShellWord; cwd: string | null }[];
+  wrapperCwds: readonly { value: string; word: ShellWord; cwd: string | null }[];
+  environment: Readonly<Record<string, string | undefined>>;
+  unsetVariables: readonly string[];
+  cwd: string | null;
+  unsupported?: { reason: string; word?: ShellWord };
+}
+
+/** Follow only wrapper boundaries whose complete child position is proven. */
+function projectCommandPolicyView(
+  event: ShellCommandEvent,
+  initialSlots?: OperandSlotClassification,
+): CommandPolicyView {
+  let projectedArgv = event.argv;
+  let projectedWords = event.effective.words;
+  let offset = 0;
+  const executableHeads: { value: string; word: ShellWord; cwd: string | null }[] = [];
+  const wrapperPaths: { value: string; word: ShellWord; cwd: string | null }[] = [];
+  const wrapperCwds: { value: string; word: ShellWord; cwd: string | null }[] = [];
+  // A projected child crosses the `uv` process boundary. Seed nested programs
+  // from the variables the outer shell actually exports, then apply canonical
+  // `env` wrapper changes below.
+  let environment: Record<string, string | undefined> = { ...event.exportedEnvironment };
+  const unsetVariables = new Set(event.unsetVariables);
+  let cwd = event.cwd;
+  let unsupported: { reason: string; word?: ShellWord } | undefined;
+  const captureExecutableHead = (): void => {
+    const head = projectedArgv[0];
+    const word = projectedWords[0];
+    if (head?.includes("/") && word) executableHeads.push({ value: head, word, cwd });
+  };
+  let knownArgv: readonly string[] = [];
+  let slots = initialSlots ?? classifyOperandSlots([]);
+  for (;;) {
+    const effective = effectiveShellWords(projectedWords);
+    for (const path of effective.wrapperPaths) {
+      const value = staticShellWord(path);
+      if (value === undefined) {
+        unsupported = { reason: "unresolved projected wrapper path", word: path };
+        break;
+      }
+      wrapperPaths.push({ value, word: path, cwd });
+    }
+    if (unsupported) break;
+    for (const transition of effective.environmentTransitions) {
+      if (transition.kind === "reset") {
+        environment = {};
+        unsetVariables.clear();
+      } else if (transition.kind === "unset") {
+        delete environment[transition.name];
+        unsetVariables.add(transition.name);
+      } else if (transition.kind === "set") {
+        const assignment = transition.assignment;
+        assertStableShellEnvironmentVariable(assignment.name, assignment.value, "environment");
+        environment[assignment.name] = staticShellWord(assignment.value);
+        unsetVariables.delete(assignment.name);
+      } else {
+        const value = staticShellWord(transition.path);
+        if (value === undefined) {
+          unsupported = { reason: "unresolved projected wrapper working directory", word: transition.path };
+          break;
+        }
+        wrapperCwds.push({ value, word: transition.path, cwd });
+        cwd = cwd === null ? null : resolveShellFilesystemPath(value, cwd);
+      }
+    }
+    if (unsupported) break;
+    projectedWords = effective.words;
+    projectedArgv = projectedWords.map((word) => staticShellWord(word));
+    if (effective.unsupported) {
+      unsupported = { reason: effective.unsupported, word: projectedWords[0] };
+      break;
+    }
+    captureExecutableHead();
+    knownArgv = projectedArgv.map((argument, index) =>
+      argument ?? displayShellWord(projectedWords[index]!));
+    slots = offset === 0 && initialSlots ? initialSlots : classifyOperandSlots(knownArgv);
+    if (slots.childCommandIndex === undefined) break;
+    const childIndex = slots.childCommandIndex;
+    offset += childIndex;
+    projectedArgv = projectedArgv.slice(childIndex);
+    projectedWords = projectedWords.slice(childIndex);
+  }
+  return {
+    argv: projectedArgv, words: projectedWords, knownArgv, slots, offset,
+    executableHeads, wrapperPaths, wrapperCwds, environment, unsetVariables: [...unsetVariables], cwd,
+    ...(unsupported ? { unsupported } : {}),
+  };
+}
+
+export interface ProjectedShellCommand {
+  argv: readonly (string | undefined)[];
+  words: readonly ShellWord[];
+  environment: Readonly<Record<string, string | undefined>>;
+  unsetVariables: readonly string[];
+  cwd: string | null;
+}
+
+/** Structural consumers apply command-head rules to the same proven child. */
+export function projectFixedChildShellCommand(event: ShellCommandEvent): ProjectedShellCommand {
+  const view = projectCommandPolicyView(event);
+  return {
+    argv: view.argv,
+    words: view.words,
+    environment: view.environment,
+    unsetVariables: view.unsetVariables,
+    cwd: view.cwd,
+  };
 }
 
 function readOptionValue(
@@ -809,10 +1028,13 @@ function decline(reason: string, word?: ShellWord): never {
  * word or produce more fields. The state owner already expands known arrays
  * and removes known empty unquoted scalars before producing these words.
  */
-function assertOperandCardinality(event: ShellCommandEvent): void {
-  const unknown = event.argv.findIndex((argument, index) => argument === undefined
-    && !shellWordHasSingleField(event.effective.words[index]!));
-  if (unknown >= 0) decline("unresolved command argument count", event.effective.words[unknown]);
+function assertProjectedOperandCardinality(
+  argv: readonly (string | undefined)[],
+  words: readonly ShellWord[],
+): void {
+  const unknown = argv.findIndex((argument, index) => argument === undefined
+    && !shellWordHasSingleField(words[index]!));
+  if (unknown >= 0) decline("unresolved command argument count", words[unknown]);
 }
 
 export function findShellPathPolicyViolation(
@@ -838,8 +1060,20 @@ export function findShellPathPolicyViolation(
   };
   try {
     inspectShellExecution(command, cwd, facts, { path: checkPath, command(event) {
-      const {node, effective, argv, cwd: commandCwd, environment} = event;
-      const head = argv[0]!;
+      const {node, effective} = event;
+      const outerKnownArgv = event.argv.map((argument,index) => argument ?? displayShellWord(effective.words[index]!));
+      const outerSlots = classifyOperandSlots(outerKnownArgv);
+      const view = projectCommandPolicyView(event, outerSlots);
+      const {
+        argv, words, knownArgv, slots, offset, executableHeads,
+        wrapperPaths, wrapperCwds, environment: projectedEnvironment, cwd: projectedCwd,
+      } = view;
+      if (view.unsupported) decline(view.unsupported.reason, view.unsupported.word);
+      const head = argv[0];
+      if (head === undefined) {
+        inspectEmbeddedShellPrograms(event, outerSlots);
+        return;
+      }
       const verb = stripCommandPath(head);
       if (event.functionCall) return;
       // The state owner checks cd's destination using its -L/-P semantics.
@@ -847,57 +1081,64 @@ export function findShellPathPolicyViolation(
       // Expansion effects and redirects were inspected separately. External
       // executables and functions named exit keep their own operand checks.
       // No numeric result is inferred; the conservative statement scan remains.
-      const dataOnly = ["echo", "printf", "tr", "true", "false", ":", "pwd", "export", "readonly", "unset", "read", "cd"].includes(verb)
-        || (event.builtin && (verb === "exit" || verb === "break"));
+      const dataOnly = ["echo", "printf", "tr", "true", "false", ":", "pwd"].includes(verb)
+        || (offset === 0 && event.builtin
+          && ["export", "readonly", "unset", "read", "cd", "exit", "break"].includes(verb));
       // This role contract mixes option data with executable program values.
       // Establish its argv shape before consuming any option's value count.
-      if (verb === "sqlite3") assertOperandCardinality(event);
+      if (verb === "sqlite3") assertProjectedOperandCardinality(argv, words);
       // Do not infer option positions from unknown values that could be flags.
       // Literal/bound message values are sufficient; substitutions stay checked.
       if (verb.toLowerCase() === "git") {
         const unknown = argv.findIndex((argument) => argument === undefined);
-        if (unknown >= 0) decline("unresolved command operand", effective.words[unknown]);
+        if (unknown >= 0) decline("unresolved command operand", words[unknown]);
       }
-      const knownArgv = argv.map((argument,index) => argument ?? displayShellWord(effective.words[index]!));
       const leaf = commandLeaf(node, effective);
       const effect: PathEffect = verb === "cd" ? "write" : isReadOnlyShellLeaf(leaf, {ignoreRedirects:true}) ? "read" : "write";
       if (pathEffectIsConfined(effect, blockReadsOutsideWorkingDirectories)) {
-        if (RECURSIVE_TRAVERSAL_COMMANDS.has(verb) && !(verb === "tar" && parseTarListing(knownArgv) && !environment.TAR_OPTIONS)) {
+        if (RECURSIVE_TRAVERSAL_COMMANDS.has(verb) && !(verb === "tar" && parseTarListing(knownArgv) && !projectedEnvironment.TAR_OPTIONS)) {
           throw new PathPolicyError({kind:"recursive-traversal",reason:buildRecursiveBlockMessage(head,verb),candidate:head});
         }
         const flags=RECURSIVE_FLAG_COMMANDS.get(verb);
         const selected=knownArgv[1] === "--" ? undefined : knownArgv.slice(1).find((argument)=>flags?.some((flag)=>hasShellFlag(argument,flag)));
         if(selected) throw new PathPolicyError({kind:"recursive-traversal",reason:buildRecursiveBlockMessage(head,verb,selected),candidate:selected});
       }
-      const classified=classifyOperandSlots(knownArgv);
-      const slots = event.testExpression ? {
-        ...classified,
-        nonPathIndices: new Set([...classified.nonPathIndices, ...event.testExpression.dataIndices]),
-      } : classified;
-      if(slots.dynamicExecution) decline(slots.dynamicExecution);
+      const projectedSlots = offset === 0 && event.testExpression ? {
+        ...slots,
+        nonPathIndices: new Set([...slots.nonPathIndices, ...event.testExpression.dataIndices]),
+      } : slots;
+      if(projectedSlots.dynamicExecution) decline(projectedSlots.dynamicExecution);
       const unknown = argv.findIndex((argument, index) => argument === undefined && !dataOnly
-        && !(["curl", "wget"].includes(verb) && isQuotedRemoteUrl(effective.words[index]!))
-        && (verb === "curl" || slots.programIndices?.has(index) || !slots.nonPathIndices.has(index) || slots.extraCandidates.some((path) => path.index === index)));
-      if (unknown >= 0) decline("unresolved command operand", effective.words[unknown]);
+        && !(["curl", "wget"].includes(verb) && isQuotedRemoteUrl(words[index]!))
+        && (verb === "curl" || projectedSlots.programIndices?.has(index) || !projectedSlots.nonPathIndices.has(index) || projectedSlots.extraCandidates.some((path) => path.index === index)));
+      if (unknown >= 0) decline("unresolved command operand", words[unknown]);
       // Command-path operands carry the same proven effect as the command.
       // An unknown executable has no read-only proof merely because its bytes
       // could be read from outside the working directories.
-      if(head.includes("/")) checkPath(head,effective.words[0]!.source.raw,commandCwd,effect);
+      for (const executable of executableHeads) {
+        checkPath(executable.value, executable.word.source.raw, executable.cwd, effect);
+      }
+      for (const wrapperPath of wrapperPaths) {
+        checkPath(wrapperPath.value, wrapperPath.word.source.raw, wrapperPath.cwd, "read");
+      }
+      for (const wrapperCwd of wrapperCwds) {
+        checkPath(wrapperCwd.value, wrapperCwd.word.source.raw, wrapperCwd.cwd, "write");
+      }
       if(!dataOnly){
         let optionsEnded=false;
         for(let index=1;index<knownArgv.length;index++){
           const argument=knownArgv[index]!;
           if(!optionsEnded && argument === "--"){optionsEnded=true;continue;}
-          if(event.testExpression?.pathIndices.has(index)){
-            checkPath(argument,effective.words[index]!.source.raw,commandCwd,effect);
+          if(offset === 0 && event.testExpression?.pathIndices.has(index)){
+            checkPath(argument,words[index]!.source.raw,projectedCwd,effect);
             continue;
           }
-          if(slots.nonPathIndices.has(index))continue;
-          for(const path of operandPaths(argument,!optionsEnded,verb))checkPath(path,effective.words[index]!.source.raw,commandCwd,effect);
+          if(projectedSlots.nonPathIndices.has(index))continue;
+          for(const path of operandPaths(argument,!optionsEnded,verb))checkPath(path,words[index]!.source.raw,projectedCwd,effect);
         }
-        for(const path of slots.extraCandidates)checkPath(path.value,effective.words[path.index]!.source.raw,commandCwd,effect);
+        for(const path of projectedSlots.extraCandidates)checkPath(path.value,words[path.index]!.source.raw,projectedCwd,effect);
       }
-      inspectEmbeddedShellPrograms(event,slots);
+      inspectEmbeddedShellPrograms(event,outerSlots);
     }});
     return null;
   }catch(error){
@@ -943,36 +1184,57 @@ export function validateShellCommandPathPolicy(
 
 /** Program roles and recursive admission are shared by structural and path checks. */
 export function inspectEmbeddedShellPrograms(event: ShellCommandEvent, suppliedSlots?: OperandSlotClassification): void {
-  const { node, effective } = event;
-  const verb=stripCommandPath(event.argv[0]!);
-  if (event.argv.some((argument)=>argument === undefined) && verb !== "sqlite3") {
-    if(NON_PATH_OPERAND_SPECS.get(verb)?.nestedCommandOptions || verb === "sed") {
-      const index=event.argv.findIndex((argument)=>argument === undefined);
-      decline("unresolved embedded program",effective.words[index]);
+  const { node } = event;
+  const view = projectCommandPolicyView(event, suppliedSlots);
+  if (view.unsupported) decline(view.unsupported.reason, view.unsupported.word);
+  const nestedContext = {
+    cwd: view.cwd,
+    environment: view.environment,
+    unsetVariables: view.unsetVariables,
+  };
+  const inspectProgramView = (
+    argv: readonly (string | undefined)[],
+    words: readonly ShellWord[],
+    slots: OperandSlotClassification,
+  ): void => {
+    if (slots.dynamicExecution) decline(slots.dynamicExecution);
+    const unknownProgram = argv.findIndex((argument, index) =>
+      argument === undefined && slots.programIndices?.has(index));
+    if (unknownProgram >= 0) decline("unresolved embedded program", words[unknownProgram]);
+    // Other unresolved operands are not embedded programs. The path gate owns
+    // them, and historically this structural pass returns without guessing
+    // their arity or role.
+    if (argv.some((argument) => argument === undefined)) {
+      if (stripCommandPath(argv[0]!) === "sqlite3") assertProjectedOperandCardinality(argv, words);
+      return;
     }
-    return;
-  }
-  assertOperandCardinality(event);
-  const knownArgv=event.argv.map((argument,index) => argument ?? displayShellWord(effective.words[index]!));
-  const slots=suppliedSlots ?? classifyOperandSlots(knownArgv);
-  if(slots.dynamicExecution)decline(slots.dynamicExecution);
-  const unknownProgram = event.argv.findIndex((argument, index) => argument === undefined && slots.programIndices?.has(index));
-  if (unknownProgram >= 0) decline("unresolved embedded program", effective.words[unknownProgram]);
-      for(const program of slots.nestedCommands)event.inspectNested(program.value,"posix");
-      const shellOptions=NON_PATH_OPERAND_SPECS.get(verb)?.nestedCommandOptions;
-      if(shellOptions){
-        if (!["sh", "dash", "bash"].includes(verb)) decline("nested shell dialect is not supported", effective.words[0]);
-        const dialect = verb === "bash" ? "bash" : "posix";
-        let carriesCommand=false;
-        for(let index=1;index<knownArgv.length;index++){
-          const carried=readOptionValue(knownArgv,index,shellOptions);
-          if(carried){event.inspectNested(carried.value,dialect);carriesCommand=true;if(carried.consumedNext)index++;}
-        }
-        if(!carriesCommand)for(const redirect of node.redirects)if(redirect.data){
-          const program=staticShellWord(redirect.data);
-          if(program === undefined)decline("unresolved shell input program",redirect.data);
-          event.inspectNested(program,dialect);
-        }
-        if(!carriesCommand && event.fromPipe)decline("unresolved shell program from a pipe",effective.words[0]);
+    assertProjectedOperandCardinality(argv, words);
+    const knownArgv = argv as readonly string[];
+
+    for (const program of slots.nestedCommands) event.inspectNested(program.value, "posix", nestedContext);
+    const verb = stripCommandPath(knownArgv[0]!);
+    const shellOptions = NON_PATH_OPERAND_SPECS.get(verb)?.nestedCommandOptions;
+    if (!shellOptions) return;
+    if (!["sh", "dash", "bash"].includes(verb)) decline("nested shell dialect is not supported", words[0]);
+    const dialect = verb === "bash" ? "bash" : "posix";
+    let carriesCommand = false;
+    for (let index = 1; index < knownArgv.length; index += 1) {
+      const carried = readOptionValue(knownArgv, index, shellOptions);
+      if (!carried) continue;
+      event.inspectNested(carried.value, dialect, nestedContext);
+      carriesCommand = true;
+      if (carried.consumedNext) index += 1;
+    }
+    if (!carriesCommand) {
+      for (const redirect of node.redirects) {
+        if (!redirect.data) continue;
+        const program = staticShellWord(redirect.data);
+        if (program === undefined) decline("unresolved shell input program", redirect.data);
+        event.inspectNested(program, dialect, nestedContext);
       }
+      if (event.fromPipe) decline("unresolved shell program from a pipe", words[0]);
+    }
+  };
+
+  inspectProgramView(view.argv, view.words, view.slots);
 }

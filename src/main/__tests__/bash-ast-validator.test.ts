@@ -233,6 +233,86 @@ describe("BashAstValidator — 정상 명령어 allow", () => {
   });
 });
 
+describe("BashAstValidator — uv run fixed child programs", () => {
+  const validator = new BashAstValidator();
+
+  it.each([
+    "sed -e \"$PROGRAM\" ./x",
+    "uv run sed -e \"$PROGRAM\" ./x",
+    "uv run uv run sed -e \"$PROGRAM\" ./x",
+    'uv run "$UNKNOWN_CHILD"',
+    "printf 'echo dynamic' | uv run sh",
+    "uv run sh <<'EOF'\nsudo id\nEOF",
+    "uv run uv run bash <<'EOF'\nsudo id\nEOF",
+    "uv run sh -c 'sudo id'",
+    "uv run bash -c 'sudo id'",
+    "bash -lc \"$PROGRAM\"",
+    "uv run bash -lc \"$PROGRAM\"",
+    "uv run uv run bash -lc \"$PROGRAM\"",
+    "sudo id",
+    "uv run sudo id",
+    "uv run uv run sudo id",
+    "su root",
+    "uv run su root",
+    "uv run uv run su root",
+    "doas id",
+    "uv run doas id",
+    "uv run uv run doas id",
+  ])("denies unresolved or unsafe projected child program: %s", (command) => {
+    assert.equal(validator.validate("bash", makeInput(command)).decision, "deny");
+  });
+
+  it.each([
+    "uv run sh -c 'printf ok'",
+    "uv run bash -c '[[ 1 == 1 ]]'",
+  ])("keeps the child shell dialect for safe fixed programs: %s", (command) => {
+    assert.equal(validator.validate("bash", makeInput(command)).decision, "allow");
+  });
+
+  it.each([
+    "curl -o\"$DEST\" https://example.test",
+    "uv run curl -o\"$DEST\" https://example.test",
+    "uv run uv run curl -o\"$DEST\" https://example.test",
+    "find . -name x",
+    "uv run find . -name x",
+    "uv run uv run find . -name x",
+    "cp -r ./a ./b",
+    "uv run cp -r ./a ./b",
+    "uv run uv run cp -r ./a ./b",
+    "nohup find . -name x",
+    "uv run nohup find . -name x",
+    "uv run uv run nohup find . -name x",
+    "stdbuf -o0 cp -r ./a ./b",
+    "uv run stdbuf -o0 cp -r ./a ./b",
+    "uv run uv run stdbuf -o0 cp -r ./a ./b",
+  ])("leaves projected path-only policy to the path gate: %s", (command) => {
+    assert.equal(validator.validate("bash", makeInput(command)).decision, "allow");
+  });
+
+  it.each([
+    "env sudo id",
+    "uv run env sudo id",
+    "uv run uv run env sudo id",
+    "env timeout 1 sh -c 'sudo id'",
+    "uv run env timeout 1 sh -c 'sudo id'",
+    "uv run uv run env timeout 1 sh -c 'sudo id'",
+    "env --unknown-wrapper-option echo ok",
+    "uv run env --unknown-wrapper-option echo ok",
+    "uv run uv run env --unknown-wrapper-option echo ok",
+    "env BASH_ENV=/etc/shadow bash -c 'printf ok'",
+    "uv run env BASH_ENV=/etc/shadow bash -c 'printf ok'",
+    "uv run uv run env BASH_ENV=/etc/shadow bash -c 'printf ok'",
+    "env PWD=/etc cat passwd",
+    "uv run env PWD=/etc cat passwd",
+    "uv run uv run env PWD=/etc cat passwd",
+    "env -C src/shared -C ../.. sh -c 'printf ok'",
+    "uv run env -C src/shared -C ../.. sh -c 'printf ok'",
+    "uv run uv run env -C src/shared -C ../.. sh -c 'printf ok'",
+  ])("applies canonical child wrapper structure or refusal: %s", (command) => {
+    assert.equal(validator.validate("bash", makeInput(command)).decision, "deny");
+  });
+});
+
 // ─── warn 모드 분기 ──────────────────────────────────
 
 describe("BashAstValidator — warn 모드", () => {

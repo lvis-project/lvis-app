@@ -6,34 +6,51 @@ export interface EffectiveShellCommand {
   environment: readonly ShellAssignment[];
   unsetEnvironment: readonly string[];
   resetEnvironment: boolean;
+  environmentTransitions: readonly ShellEnvironmentTransition[];
   cwd?: ShellWord;
   wrappers: readonly string[];
   wrapperPaths: readonly ShellWord[];
   unsupported?: string;
 }
+export type ShellEnvironmentTransition =
+  | { kind: "reset" }
+  | { kind: "unset"; name: string }
+  | { kind: "set"; assignment: ShellAssignment }
+  | { kind: "cwd"; path: ShellWord };
 export function stripCommandPath(word: string): string { return word.slice(word.lastIndexOf("/") + 1); }
 
+/** Wrappers whose option grammar changes the effective executed command. */
+export const SHELL_EXECUTION_WRAPPERS: ReadonlySet<string> = new Set([
+  "command", "env", "timeout", "nice", "ionice", "nohup", "stdbuf", "time", "watch", "xargs",
+]);
+
 /** Wrapper option arity belongs to the same command view all consumers use. */
-export function effectiveShellCommand(command: ShellCommand): EffectiveShellCommand {
-  let words = [...command.words];
+export function effectiveShellWords(
+  inputWords: readonly ShellWord[],
+  assignments: readonly ShellAssignment[] = [],
+): EffectiveShellCommand {
+  let words = [...inputWords];
   const wrappers: string[] = [];
   const environment: ShellAssignment[] = [];
   const unsetEnvironment: string[] = [];
   const wrapperPaths: ShellWord[] = [];
+  const environmentTransitions: ShellEnvironmentTransition[] = [];
   let resetEnvironment = false;
   let cwd: ShellWord | undefined;
-  const result = (unsupported?: string): EffectiveShellCommand => ({ words, assignments: command.assignments,
-    environment, unsetEnvironment, resetEnvironment, wrappers, wrapperPaths, ...(cwd ? { cwd } : {}), ...(unsupported ? { unsupported } : {}) });
+  const result = (unsupported?: string): EffectiveShellCommand => ({ words, assignments,
+    environment, unsetEnvironment, resetEnvironment, environmentTransitions, wrappers, wrapperPaths,
+    ...(cwd ? { cwd } : {}), ...(unsupported ? { unsupported } : {}) });
   for (;;) {
     const head = words[0] && staticShellWord(words[0]);
     if (head === undefined) return result(words.length ? "Unresolved executed command" : undefined);
     const verb = stripCommandPath(head);
-    if (!["command", "env", "timeout", "nice", "ionice", "nohup", "stdbuf", "time", "watch", "xargs"].includes(verb)) return result();
+    if (!SHELL_EXECUTION_WRAPPERS.has(verb)) return result();
     if (verb === "xargs" || verb === "watch") return result(`Unsupported stream or string execution wrapper: ${verb}`);
     if (head.includes("/")) wrapperPaths.push(words[0]!);
     wrappers.push(verb);
     let index = 1;
     let needsDuration = verb === "timeout";
+    let envCwdSeen = false;
     while (index < words.length) {
       const word = words[index]!;
       const value = staticShellWord(word);
@@ -48,10 +65,16 @@ export function effectiveShellCommand(command: ShellCommand): EffectiveShellComm
         break;
       }
       if (verb === "env") {
-        if (value === "-i" || value === "--ignore-environment" || value === "-") { resetEnvironment = true; index += 1; continue; }
+        if (value === "-i" || value === "--ignore-environment" || value === "-") {
+          resetEnvironment = true;
+          environmentTransitions.push({ kind: "reset" });
+          index += 1; continue;
+        }
         const assignment = /^([A-Za-z_][A-Za-z0-9_]*)=/.exec(value);
         if (assignment) {
-          environment.push({ name: assignment[1]!, value: literalWord(value.slice(assignment[0].length), word.source), append: false, source: word.source });
+          const parsed = { name: assignment[1]!, value: literalWord(value.slice(assignment[0].length), word.source), append: false, source: word.source };
+          environment.push(parsed);
+          environmentTransitions.push({ kind: "set", assignment: parsed });
           index += 1; continue;
         }
         const option = value.split("=", 1)[0]!;
@@ -59,8 +82,17 @@ export function effectiveShellCommand(command: ShellCommand): EffectiveShellComm
           const equals = value.indexOf("=");
           const argument = equals >= 0 ? literalWord(value.slice(equals + 1), word.source) : words[index + 1];
           if (!argument || staticShellWord(argument) === undefined) return result("Unresolved environment wrapper option");
-          if (option === "-u" || option === "--unset") unsetEnvironment.push(staticShellWord(argument)!);
-          else { cwd = argument; wrapperPaths.push(argument); }
+          if (option === "-u" || option === "--unset") {
+            const name = staticShellWord(argument)!;
+            unsetEnvironment.push(name);
+            environmentTransitions.push({ kind: "unset", name });
+          } else {
+            if (envCwdSeen) return result("Multiple env working-directory options are unsupported");
+            envCwdSeen = true;
+            cwd = argument;
+            wrapperPaths.push(argument);
+            environmentTransitions.push({ kind: "cwd", path: argument });
+          }
           index += equals >= 0 ? 1 : 2; continue;
         }
       }
@@ -93,6 +125,10 @@ export function effectiveShellCommand(command: ShellCommand): EffectiveShellComm
     words = words.slice(index);
     if (words.length === 0) return result();
   }
+}
+
+export function effectiveShellCommand(command: ShellCommand): EffectiveShellCommand {
+  return effectiveShellWords(command.words, command.assignments);
 }
 
 export interface ShellLeaf {
