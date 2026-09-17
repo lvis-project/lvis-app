@@ -19,10 +19,13 @@
  */
 import { admissionRegistry } from "../../plugins/admission/admission-registry.js";
 import type { AuditLogger } from "../../audit/audit-logger.js";
+import { readDevelopmentEnvVar } from "../dev-flags.js";
 
 export interface AdmissionBootstrapInput {
   userDataPath: string;
   bootAuditLogger: AuditLogger;
+  /** Authoritative host packaging state; never derived from process.env. */
+  packaged: boolean;
   /** Transport for the document GETs — Chromium's stack, from `ctx.singleHopNetworkFetch`. */
   networkFetch: typeof fetch;
   /** Online toggle — disabled in tests or user-selected offline mode. */
@@ -31,11 +34,12 @@ export interface AdmissionBootstrapInput {
   appShutdownSignal?: AbortSignal;
 }
 
-function isOnlineByDefault(): boolean {
-  // E2E + unit runs set this so they do not reach the public CDN. Offline here
-  // does not admit anything: it means the registry has only its disk cache,
-  // and an install with no valid cached document is refused.
-  if (process.env.LVIS_ADMISSION_OFFLINE === "1") return false;
+function isOnlineByDefault(packaged: boolean): boolean {
+  // Source/E2E runs may opt out of the public CDN. Offline here does not admit
+  // anything: it means the registry has only its disk cache, and an install
+  // with no valid cached document is refused. Packaged builds ignore the flag
+  // even if early environment scrubbing is bypassed.
+  if (readDevelopmentEnvVar("LVIS_ADMISSION_OFFLINE", process.env, packaged) === "1") return false;
   return true;
 }
 
@@ -45,7 +49,7 @@ function isOnlineByDefault(): boolean {
  */
 export async function wireAdmissionRegistry(input: AdmissionBootstrapInput): Promise<void> {
   const { bootAuditLogger } = input;
-  const online = input.online ?? isOnlineByDefault();
+  const online = input.online ?? isOnlineByDefault(input.packaged);
   const userDataDir = input.userDataPath;
 
   await admissionRegistry.init({

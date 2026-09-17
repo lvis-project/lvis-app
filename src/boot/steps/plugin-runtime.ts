@@ -389,7 +389,7 @@ export async function initPluginRuntime(
     // specific names lets operators distinguish a stale launcher
     // (`LVIS_PLUGINS_DIR`) from an active dev tamper (`LVIS_DEV=1`).
     const names = tamperedVarsAtBoot();
-    log.error(`LVIS_DEV* ignored in packaged build: ${names.join(", ")}`);
+    log.error(`Forbidden development/test env ignored in packaged build: ${names.join(", ")}`);
   }
 
   // Plugin-owned OAuth removed host-owned provider auth APIs. The related

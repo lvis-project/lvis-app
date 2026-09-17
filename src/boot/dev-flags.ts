@@ -1,10 +1,11 @@
 /**
  * Dev-mode flag gate (§Step 4).
  *
- * Single source of truth for every `LVIS_DEV*` env var read in main-process
- * code. Each helper hard-gates on `!app.isPackaged` so a packaged production
- * binary launched with these env vars in its environment cannot silently
- * weaken trust (env vars are user-controllable on every desktop OS).
+ * Packaged-state gate for development-only environment variables read in
+ * main-process code. The canonical inventory lives in
+ * `shared/development-env-policy.ts`; helpers here combine it with the cached
+ * `app.isPackaged` decision so a packaged binary cannot silently weaken trust
+ * through user-controlled environment variables.
  *
  * Default behaviour: until `setIsPackaged()` is called by boot, helpers
  * report packaged-mode (i.e. flags are IGNORED). This keeps the failure
@@ -35,6 +36,12 @@
  *    check is unconditional.
  */
 
+import {
+  isDevelopmentOnlyEnvVar,
+  readDevelopmentOnlyEnvVar,
+  type DevelopmentEnvVar,
+} from "../shared/development-env-policy.js";
+
 let isPackagedCached = true;
 let configured = false;
 
@@ -56,23 +63,8 @@ let configured = false;
  * The snapshot is intentionally a frozen `Set<string>` so neither the helper
  * nor a malicious caller can mutate it after capture.
  */
-const PACKAGED_FORBIDDEN_EXACT_VARS = [
-  "LVIS_E2E",
-  "LVIS_DEBUG_STREAM",
-  "VITE_DEBUG_STREAM",
-  "LVIS_WIN_NO_SANDBOX",
-  "LVIS_PLUGINS_DIR",
-  "LVIS_WHITELIST_OFFLINE",
-] as const;
-
-const PACKAGED_FORBIDDEN_PREFIXES = ["LVIS_DEV"] as const;
-
-export function isPackagedForbiddenEnvVar(name: string): boolean {
-  return (
-    PACKAGED_FORBIDDEN_EXACT_VARS.some((exact) => name === exact) ||
-    PACKAGED_FORBIDDEN_PREFIXES.some((prefix) => name.startsWith(prefix))
-  );
-}
+/** Backward-compatible name for packaged boot's shared development-env predicate. */
+export const isPackagedForbiddenEnvVar = isDevelopmentOnlyEnvVar;
 
 const tamperedAtBoot: ReadonlySet<string> = Object.freeze(
   new Set(Object.keys(process.env).filter(isPackagedForbiddenEnvVar)),
@@ -107,8 +99,22 @@ export function _resetForTest(): void {
   tamperedOverrideForTest = null;
 }
 
-function envEquals(name: string, value: string): boolean {
-  return process.env[name] === value;
+function envEquals(actual: string | undefined, expected: string): boolean {
+  return actual === expected;
+}
+
+/**
+ * Read a canonical development-only variable only for unpackaged execution.
+ *
+ * The default packaged state is fail-safe before boot seeds the cache. An
+ * explicit env argument keeps tests deterministic without mutating process.env.
+ */
+export function readDevelopmentEnvVar(
+  name: DevelopmentEnvVar,
+  env: NodeJS.ProcessEnv = process.env,
+  packaged: boolean = isPackagedCached,
+): string | undefined {
+  return readDevelopmentOnlyEnvVar(name, env, packaged);
 }
 
 /**
@@ -119,8 +125,8 @@ function envEquals(name: string, value: string): boolean {
 export function isDevModeUnlocked(packaged: boolean = isPackagedCached): boolean {
   if (packaged) return false;
   return (
-    envEquals("LVIS_DEV", "1")
-    || envEquals("LVIS_DEV_RELOAD", "1")
+    envEquals(process.env.LVIS_DEV, "1")
+    || envEquals(process.env.LVIS_DEV_RELOAD, "1")
   );
 }
 
@@ -129,7 +135,7 @@ export function isDevModeUnlocked(packaged: boolean = isPackagedCached): boolean
  */
 export function devPluginReloadEnabled(packaged: boolean = isPackagedCached): boolean {
   if (packaged) return false;
-  return envEquals("LVIS_DEV_RELOAD", "1");
+  return envEquals(process.env.LVIS_DEV_RELOAD, "1");
 }
 
 /**
@@ -150,7 +156,7 @@ export function devNoSandboxAllowed(
 ): boolean {
   if (packaged) return false;
   if (platform !== "win32") return false;
-  return envEquals("LVIS_WIN_NO_SANDBOX", "1");
+  return envEquals(process.env.LVIS_WIN_NO_SANDBOX, "1");
 }
 
 /**

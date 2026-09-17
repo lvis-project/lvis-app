@@ -78,7 +78,6 @@
     "src/main/__tests__/reconcile-os-integration.test.ts": 1,
     "src/main/__tests__/remote-a2a-action-controller.test.ts": 2,
     "src/main/__tests__/routines-scheduler.test.ts": 1,
-    "src/main/__tests__/seed-lvis-home-docs.test.ts": 1,
     "src/main/__tests__/skill-store.test.ts": 2,
     "src/main/__tests__/startup-launch.test.ts": 1,
     "src/main/__tests__/telemetry-endpoint-validation.test.ts": 4,

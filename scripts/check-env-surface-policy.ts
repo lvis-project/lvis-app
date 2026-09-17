@@ -32,44 +32,26 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  ACTIVE_DEVELOPMENT_ENV_VARS,
+  DEVELOPMENT_ENV_TOMBSTONES,
+} from "../src/shared/development-env-policy.js";
 import { ENV_BACKED_SETTINGS } from "../src/shared/env-backed-settings.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SRC = join(ROOT, "src");
 const RENDERER = join(SRC, "ui", "renderer");
 
-/** Only meaningful outside a packaged build. */
-const DEVELOPMENT: readonly string[] = [
-  "LVIS_ADMISSION_OFFLINE",
-  "LVIS_ALLOW_LINKED_PLUGIN_ENTRY",
-  "LVIS_ALLOW_TEST_MARKETPLACE_KEYS",
-  "LVIS_ASRT_TEST_HOME",
-  "LVIS_DEBUG_STREAM",
-  "LVIS_DEV",
-  "LVIS_DEV_CONSOLE",
-  "LVIS_DEV_NO_SANDBOX",
-  "LVIS_DEV_PREFLIGHT_OVERRIDE",
-  "LVIS_DEV_PROMPT_SOURCE_DUMP",
-  "LVIS_DEV_RELOAD",
-  "LVIS_E2E",
-  "LVIS_E2E_WHITELIST_PUBLIC_KEY",
-  "LVIS_LOG_FILE",
-  // Sibling of LVIS_LOG_FILE, and development for the same reason: a packaged
-  // build already resolves the JSON format from `isPackagedElectron`, and the
-  // three sources are OR-ed, so setting this in a packaged app cannot change
-  // what it does. It is a lever for a dev run and a CI pipeline only.
-  "LVIS_LOG_FORMAT",
-  "LVIS_PLUGINS_DIR",
-  "LVIS_REQUIRE_SANDBOX_CASES",
-  "LVIS_RESOURCE_ROOT",
-  "LVIS_REVOCATION_OFFLINE",
-  "LVIS_RUN_PROBES",
-  "LVIS_SECRET_PROBE",
-  "LVIS_TEST_NODE_EXEC_PATH",
-  "LVIS_TRACE",
-  "LVIS_WHITELIST_OFFLINE",
-  "LVIS_WIN_NO_SANDBOX",
-];
+/**
+ * Only meaningful outside a packaged build. The shared policy also contains
+ * non-LVIS development variables such as VITE_DEBUG_STREAM; this gate scans
+ * and classifies the LVIS namespace only.
+ */
+export const DEVELOPMENT: readonly string[] = ACTIVE_DEVELOPMENT_ENV_VARS.filter(
+  (name) => name.startsWith("LVIS_"),
+);
+
+const DEVELOPMENT_TOMBSTONE_SET: ReadonlySet<string> = new Set(DEVELOPMENT_ENV_TOMBSTONES);
 
 /** The app sets these for something it launched; they are not configuration. */
 const INTERNAL: readonly string[] = [
@@ -178,6 +160,68 @@ const READ_RE =
   /(?:process\.)?env\s*(?:\.\s*(LVIS_[A-Z0-9_]+)|\[\s*["'`](LVIS_[A-Z0-9_]+)["'`]\s*\])/g;
 
 /**
+ * Literal reads through the packaged-gated helper. Parse calls rather than
+ * matching text so a policy comment or example string cannot satisfy the
+ * environment-surface gate.
+ */
+function developmentHelperReads(text: string): string[] {
+  const variables: string[] = [];
+  const helper = "readDevelopmentEnvVar";
+  let index = 0;
+  const skipQuoted = (quote: string): void => {
+    index += 1;
+    while (index < text.length) {
+      if (text[index] === "\\") {
+        index += 2;
+        continue;
+      }
+      const current = text[index++];
+      if (current === quote) return;
+    }
+  };
+
+  while (index < text.length) {
+    if (text.startsWith("//", index)) {
+      const newline = text.indexOf("\n", index + 2);
+      index = newline === -1 ? text.length : newline + 1;
+      continue;
+    }
+    if (text.startsWith("/*", index)) {
+      const end = text.indexOf("*/", index + 2);
+      index = end === -1 ? text.length : end + 2;
+      continue;
+    }
+    const current = text[index]!;
+    if (current === '"' || current === "'" || current === "`") {
+      skipQuoted(current);
+      continue;
+    }
+    if (text.startsWith(helper, index)) {
+      const before = index === 0 ? "" : text[index - 1]!;
+      const after = text[index + helper.length] ?? "";
+      if (!/[A-Za-z0-9_$]/.test(before) && !/[A-Za-z0-9_$]/.test(after)) {
+        let cursor = index + helper.length;
+        while (/\s/.test(text[cursor] ?? "")) cursor += 1;
+        if (text[cursor] === "(") {
+          cursor += 1;
+          while (/\s/.test(text[cursor] ?? "")) cursor += 1;
+          const quote = text[cursor];
+          if (quote === '"' || quote === "'" || quote === "`") {
+            const end = text.indexOf(quote, cursor + 1);
+            const variable = end === -1 ? "" : text.slice(cursor + 1, end);
+            if (/^LVIS_[A-Z0-9_]+$/.test(variable)) variables.push(variable);
+          }
+        }
+      }
+      index += helper.length;
+      continue;
+    }
+    index += 1;
+  }
+  return variables;
+}
+
+/**
  * An env lookup whose key is an expression rather than a literal — `env[KEY[k]]`,
  * `env[name]`. The resolvers that carry the most configuration are written this
  * way (one table of key→variable, one loop), and {@link READ_RE} cannot see a
@@ -215,6 +259,10 @@ function scan(dir: string, found: Map<string, string>): void {
     if (!/\.(ts|tsx|mts|cts)$/.test(name)) continue;
     const text = readFileSync(path, "utf-8");
     const where = relative(ROOT, path).replaceAll("\\", "/");
+    for (const variable of developmentHelperReads(text)) {
+      if (TEST_FILE_RE.test(where) && DEVELOPMENT_TOMBSTONE_SET.has(variable)) continue;
+      if (!found.has(variable)) found.set(variable, where);
+    }
     const patterns = [READ_RE];
     if (!TEST_FILE_RE.test(where) && DYNAMIC_LOOKUP_RE.test(text)) {
       patterns.push(TABLE_ENTRY_RE);
@@ -222,6 +270,7 @@ function scan(dir: string, found: Map<string, string>): void {
     for (const pattern of patterns) {
       for (const match of text.matchAll(pattern)) {
         const variable = match[1] ?? match[2]!;
+        if (TEST_FILE_RE.test(where) && DEVELOPMENT_TOMBSTONE_SET.has(variable)) continue;
         if (!found.has(variable)) found.set(variable, where);
       }
     }
