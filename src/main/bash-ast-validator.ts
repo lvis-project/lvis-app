@@ -5,7 +5,7 @@ import { extractShellCommands } from "../shared/shell-command-fields.js";
 import { effectiveShellCommand, stripCommandPath } from "../shared/shell-effective-command.js";
 import { inspectShellExecution, ShellExecutionError, type ShellExecutionFacts } from "../shared/shell-execution.js";
 import { buildSafeChildEnv } from "../tools/safe-env.js";
-import { inspectEmbeddedShellPrograms } from "../tools/shell-path-policy.js";
+import { inspectEmbeddedShellPrograms, projectFixedChildShellCommand } from "../tools/shell-path-policy.js";
 
 export type ValidationDecision = "allow" | "warn" | "deny";
 export interface BashAstValidationResult {
@@ -44,9 +44,15 @@ export class BashAstValidator {
             }
           },
           command(event) {
-            const { argv, effective } = event;
-            const verb = stripCommandPath(argv[0]!);
-            const first = effective.words[0];
+            const projected = projectFixedChildShellCommand(event);
+            const { argv, words, environment, cwd: projectedCwd } = projected;
+            const projectedHead = argv[0];
+            if (projectedHead === undefined) {
+              inspectEmbeddedShellPrograms(event);
+              return;
+            }
+            const verb = stripCommandPath(projectedHead);
+            const first = words[0];
             if (event.recursiveFunction) refuse("fork-bomb", "Recursive shell function execution is unsupported", first);
             if (event.functionCall) return;
             if (["sudo", "su", "doas"].includes(verb)) refuse("sudo-escalation", t("be_bashAstValidator.sudoEscalation"), first);
@@ -64,9 +70,9 @@ export class BashAstValidator {
               const force = flags.some((flag) => flag === "--force" || /^-[A-Za-z]*f/.test(flag));
               const dangerous = targets.find((index) => {
                 const target = argv[index];
-                const word = effective.words[index]!;
+                const word = words[index]!;
                 return target !== undefined && /^\/+$/u.test(target)
-                  || target !== undefined && event.environment.HOME !== undefined && resolvePath(event.cwd ?? cwd, target) === resolvePath(event.environment.HOME)
+                  || target !== undefined && environment.HOME !== undefined && resolvePath(projectedCwd ?? cwd, target) === resolvePath(environment.HOME)
                   || word.parts.some((part) => part.kind === "pattern" && part.value === "*");
               });
               if (recursive && force && (dangerous !== undefined || event.backquote)) {
@@ -74,7 +80,7 @@ export class BashAstValidator {
                 const indirect = origin?.parts.some((part) => part.kind === "parameter");
                 const id = event.backquote ? "backtick-command-substitution" : indirect ? "variable-expansion-exec"
                   : event.original.source.start === 0 ? "rm-rf-root" : "rm-rf-compound";
-                refuse(id, t("be_bashAstValidator.rmRfRoot"), dangerous === undefined ? first : effective.words[dangerous]);
+                refuse(id, t("be_bashAstValidator.rmRfRoot"), dangerous === undefined ? first : words[dangerous]);
               }
             }
             if (verb === "echo" && argv.slice(1).some((argument) => argument !== undefined && /^-[ne]+$/.test(argument))

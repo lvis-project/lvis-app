@@ -22,9 +22,18 @@ export interface ShellCommandEvent {
   fromPipe: boolean;
   activeFunctions: readonly string[];
   definedFunctions: readonly string[];
+  unsetVariables: readonly string[];
   dialect: "bash" | "posix";
   testExpression?: ShellTestExpression;
-  inspectNested(text: string, dialect: "bash" | "posix"): void;
+  inspectNested(
+    text: string,
+    dialect: "bash" | "posix",
+    context?: {
+      cwd: string | null;
+      environment: Readonly<Record<string, string | undefined>>;
+      unsetVariables: readonly string[];
+    },
+  ): void;
 }
 export interface ShellExecutionInspector {
   word?(word: ShellWord): void;
@@ -63,6 +72,15 @@ interface StateResult { state: ShellState; status: ExitStatus; control?: BreakCo
 interface ExecutionContext { boundary: number; loopDepth: number }
 interface WordEvaluation { lastSubstitutionStatus?: ExitStatus; mayFail?: boolean }
 const EXECUTION_ALTERING_VARIABLES = new Set(["IFS", "BASH_ENV", "ENV", "SHELLOPTS", "BASHOPTS", "CDPATH", "PWD"]);
+export function assertStableShellEnvironmentVariable(
+  name: string,
+  word: ShellWord,
+  role: "assignment" | "environment",
+): void {
+  if (EXECUTION_ALTERING_VARIABLES.has(name)) {
+    decline(`execution-altering shell ${role} is unsupported`, word);
+  }
+}
 function stateKey(state: ShellState): string {
   return JSON.stringify([state.cwd, state.dialect, state.unicodeEscapes, state.prefixAssignmentRhs, [...state.variables].sort(), [...state.arrays].sort(), [...state.exported].sort(), [...state.readonlyVariables].sort(), [...state.unsetVariables].sort(), [...state.functions].map(([name, body]) => [name, body.source])]);
 }
@@ -210,7 +228,7 @@ export function inspectShellExecution(command: string, cwd: string, facts: Shell
         continue;
       }
       if (state.readonlyVariables.has(name)) decline("assignment to a readonly variable", assignment.value);
-      if (EXECUTION_ALTERING_VARIABLES.has(name)) decline("execution-altering shell assignment is unsupported", assignment.value);
+      assertStableShellEnvironmentVariable(name, assignment.value, "assignment");
       if (assignment.elements) {
         const elements = resolveWords(assignment.elements, state, depth, evaluation).map((word) => staticShellWord(word));
         const existing = state.arrays.get(name);
@@ -269,22 +287,25 @@ export function inspectShellExecution(command: string, cwd: string, facts: Shell
     const verb = stripCommandPath(head);
     const shellBuiltin = !head.includes("/") && effective.wrappers.every((wrapper) => wrapper === "command" || wrapper === "time");
     const commandState = cloneState(assigned);
-    if (effective.resetEnvironment) {
-      commandState.variables.clear(); commandState.arrays.clear(); commandState.exported.clear(); commandState.unsetVariables.clear();
-    }
-    for (const name of effective.unsetEnvironment) { commandState.variables.delete(name); commandState.arrays.delete(name); commandState.exported.delete(name); commandState.unsetVariables.add(name); }
     for (const assignment of node.assignments) commandState.exported.add(assignment.name);
-    for (const assignment of effective.environment) {
-      if (EXECUTION_ALTERING_VARIABLES.has(assignment.name)) decline("execution-altering shell environment is unsupported", assignment.value);
-      commandState.variables.set(assignment.name, staticShellWord(assignment.value)); commandState.exported.add(assignment.name);
-      commandState.unsetVariables.delete(assignment.name);
-    }
-    if (effective.cwd) {
-      const target = staticShellWord(effective.cwd);
-      if (target === undefined) decline("unresolved wrapper working directory", effective.cwd);
-      checkPath(target, effective.cwd.source.raw, commandState, "write");
-      commandState.cwd = resolveShellFilesystemPath(target, commandState.cwd!);
-      commandState.variables.set("PWD", commandState.cwd);
+    for (const transition of effective.environmentTransitions) {
+      if (transition.kind === "reset") {
+        commandState.variables.clear(); commandState.arrays.clear(); commandState.exported.clear(); commandState.unsetVariables.clear();
+      } else if (transition.kind === "unset") {
+        commandState.variables.delete(transition.name); commandState.arrays.delete(transition.name);
+        commandState.exported.delete(transition.name); commandState.unsetVariables.add(transition.name);
+      } else if (transition.kind === "set") {
+        const assignment = transition.assignment;
+        assertStableShellEnvironmentVariable(assignment.name, assignment.value, "environment");
+        commandState.variables.set(assignment.name, staticShellWord(assignment.value)); commandState.exported.add(assignment.name);
+        commandState.unsetVariables.delete(assignment.name);
+      } else {
+        const target = staticShellWord(transition.path);
+        if (target === undefined) decline("unresolved wrapper working directory", transition.path);
+        checkPath(target, transition.path.source.raw, commandState, "write");
+        commandState.cwd = resolveShellFilesystemPath(target, commandState.cwd!);
+        commandState.variables.set("PWD", commandState.cwd);
+      }
     }
     for (const path of effective.wrapperPaths) {
       const target = staticShellWord(path);
@@ -321,14 +342,21 @@ export function inspectShellExecution(command: string, cwd: string, facts: Shell
       exportedEnvironment: Object.freeze(Object.fromEntries([...commandState.variables].filter(([name]) => commandState.exported.has(name) && !commandState.arrays.has(name)))),
       functionCall: !!functionBody, recursiveFunction: !!functionBody && state.activeFunctions.includes(head), backquote: state.backquote, pipeline: state.pipeline, fromPipe: state.fromPipe, activeFunctions: state.activeFunctions,
       definedFunctions: Object.freeze([...state.functions.keys()]),
+      unsetVariables: Object.freeze([...commandState.unsetVariables]),
       dialect: state.dialect,
       ...(testAnalysis?.ok ? { testExpression: testAnalysis.expression } : {}),
-      inspectNested(text, dialect) {
+      inspectNested(text, dialect, nestedContext) {
         const child = cloneState(commandState);
         child.dialect = dialect;
         child.unicodeEscapes = undefined; child.prefixAssignmentRhs = undefined;
         child.variables = new Map([...child.variables].filter(([name]) => child.exported.has(name) && !child.arrays.has(name)));
         child.arrays.clear(); child.functions.clear(); child.readonlyVariables.clear();
+        if (nestedContext) {
+          child.cwd = nestedContext.cwd;
+          child.variables = new Map(Object.entries(nestedContext.environment));
+          child.exported = new Set(Object.keys(nestedContext.environment));
+          child.unsetVariables = new Set(nestedContext.unsetVariables);
+        }
         child.variables.set("PWD", child.cwd ?? undefined);
         inspectNested(text, child, depth);
       },
