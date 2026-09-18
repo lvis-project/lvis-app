@@ -22,6 +22,15 @@ export interface ConversationActivityCoordinator {
   /** The current session-mutation lease, when one exists. */
   activeMutation(): Promise<unknown> | null;
   /**
+   * Bind the synchronous session-transition admission guard for this runtime.
+   *
+   * ConversationLoop owns the generation boundary while this coordinator
+   * owns surface turns and mutations. Binding the loop's transition state
+   * here gives both paths one admission decision: once a transition begins,
+   * every surface observes busy before any cleanup await can yield.
+   */
+  bindSessionTransitionGuard(guard: () => boolean): () => void;
+  /**
    * Acquire the exclusive turn lease before running `factory`.
    *
    * The factory is deferred so the lease is observable before any synchronous
@@ -62,13 +71,16 @@ export function createConversationActivityCoordinator(
   let nextStreamId = 0;
   let activeTurn: Promise<unknown> | null = null;
   let activeMutation: Promise<unknown> | null = null;
+  let sessionTransitionGuard: (() => boolean) | null = null;
   const turnSettledListeners = new Set<() => void>();
 
   const notifyTurnSettled = (): void => {
     for (const listener of turnSettledListeners) listener();
   };
 
-  const isBusy = () => activeTurn !== null || activeMutation !== null;
+  const isSessionTransitioning = (): boolean => sessionTransitionGuard?.() ?? false;
+
+  const isBusy = () => isSessionTransitioning() || activeTurn !== null || activeMutation !== null;
 
   const allocateStreamId = () => {
     if (nextStreamId >= Number.MAX_SAFE_INTEGER) {
@@ -105,6 +117,12 @@ export function createConversationActivityCoordinator(
     isBusy,
     activeTurn: () => activeTurn,
     activeMutation: () => activeMutation,
+    bindSessionTransitionGuard: (guard: () => boolean) => {
+      sessionTransitionGuard = guard;
+      return () => {
+        if (sessionTransitionGuard === guard) sessionTransitionGuard = null;
+      };
+    },
     trackTurn,
     tryTrackTurn,
     trackMutation,

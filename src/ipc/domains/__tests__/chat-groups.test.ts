@@ -11,6 +11,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { sessionUuid } from "../../../__tests__/support/session-uuid.js";
 import { CHANNELS, MAIN_CHAT_GROUP_ID } from "../../../contract/app-contract.js";
 import { fakeLlmSettings } from "../../../shared/__tests__/fake-llm-settings.js";
+import { SessionGoalStore } from "../../../main/session-goal-store.js";
+import type { SessionGoal } from "../../../shared/session-goal.js";
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
 
@@ -132,7 +134,10 @@ function fakeLoop(id: string, seed: unknown[] = []): FakeLoop {
 type RendererEvents = Record<string, ((...args: unknown[]) => void)[]>;
 
 async function registerWithGroups(
-  window?: { webContents: { on: (name: string, fn: (...args: unknown[]) => void) => void } },
+  window?: {
+    isDestroyed: () => boolean;
+    webContents: { on: (name: string, fn: (...args: unknown[]) => void) => void };
+  },
   groupSeed?: unknown[],
 ) {
   const { createConversationSurfaceRuntime } = await import("../../../engine/conversation-surface-runtime.js");
@@ -159,6 +164,11 @@ async function registerWithGroups(
     saveSession: vi.fn(async () => undefined),
     pruneCheckpointsDiscardedByRewind: vi.fn(async () => undefined),
   };
+  const goalDisk = new Map<string, SessionGoal | null>();
+  const sessionGoalStore = new SessionGoalStore({
+    load: (sessionId) => goalDisk.get(sessionId) ?? null,
+    save: async (sessionId, goal) => { goalDisk.set(sessionId, goal); },
+  });
   registerChatHandlers({
     conversationLoop: main,
     conversationSurfaceRuntime: createConversationSurfaceRuntime(),
@@ -169,17 +179,24 @@ async function registerWithGroups(
       patch: vi.fn(async () => undefined),
     },
     memoryManager,
+    sessionGoalStore,
     auditLogger: { log: vi.fn() },
     getMainWindow: vi.fn(() => window ?? null),
   } as unknown as Parameters<typeof registerChatHandlers>[0]);
   const invoke = (channel: string, ...args: unknown[]) => handlers.get(channel)!(RENDERER_EVENT, ...args);
-  return { main, groups, resolveChatGroupLoop, releaseChatGroupLoop, invoke, memoryManager };
+  return { main, groups, resolveChatGroupLoop, releaseChatGroupLoop, invoke, memoryManager, sessionGoalStore };
 }
 
-function fakeRenderer(): { window: { webContents: { on: (name: string, fn: (...args: unknown[]) => void) => void } }; events: RendererEvents } {
+function fakeRenderer(): {
+  window: {
+    isDestroyed: () => boolean;
+    webContents: { on: (name: string, fn: (...args: unknown[]) => void) => void };
+  };
+  events: RendererEvents;
+} {
   const events: RendererEvents = {};
   const on = (name: string, fn: (...args: unknown[]) => void) => { (events[name] ??= []).push(fn); };
-  return { window: { webContents: { on } }, events };
+  return { window: { isDestroyed: () => false, webContents: { on } }, events };
 }
 
 describe("lvis:chat:* with chat groups", () => {
@@ -353,7 +370,10 @@ describe("lvis:chat:* with chat groups", () => {
   });
 
   it("release lets go of the group's frames, and waits for a turn that is still running", async () => {
-    const { invoke, groups } = await registerWithGroups();
+    const { window } = fakeRenderer();
+    const { invoke, groups, memoryManager, sessionGoalStore } = await registerWithGroups(window, [
+      { role: "user", content: "tile question", meta: { messageId: "tile-q1" } },
+    ]);
     invoke(CHANNELS.chat.hasProvider, "group-2");
     expect(unsubscribes).toHaveLength(2); // the primary's, then group-2's
     const groupRuntime = runtimes[1]!;
@@ -375,10 +395,50 @@ describe("lvis:chat:* with chat groups", () => {
       expect(groups.get("group-2")!.cleanupSession).toHaveBeenCalledTimes(1);
     });
     expect(settled).toBe(false); // cleanup proof is also part of release
+
+    // The loop transition and the surface coordinator share one admission
+    // decision. While cleanup is pending, no turn or history mutation may
+    // enter and a goal-change trigger must not spend a revival round.
+    expect(await invoke(CHANNELS.chat.compact, "group-2")).toEqual({ error: "streaming-active" });
+    expect(await invoke(CHANNELS.chat.rewindTo, "tile-q1", "group-2")).toEqual({ ok: false, error: "streaming-active" });
+    expect(await invoke(CHANNELS.chat.send, {
+      input: "race cleanup",
+      inputOrigin: "user-keyboard",
+      userActivation: true,
+    }, "group-2")).toEqual({ error: "streaming-active" });
+    await expect(invoke(CHANNELS.chat.groupRelease, "group-2")).rejects.toThrow(
+      "conversation-loop:session-transition-in-progress",
+    );
+    await sessionGoalStore.set(sessionUuid("session-of-group-2"), "finish safely");
+    await Promise.resolve();
+    expect(sessionGoalStore.get(sessionUuid("session-of-group-2"))?.round).toBe(0);
+    expect(memoryManager.saveSession).not.toHaveBeenCalled();
+
     finishCleanup();
     expect(await release).toEqual({ ok: true, released: true });
     expect(unsubscribes[1]).toHaveBeenCalledTimes(1);
     expect(unsubscribes[0]).not.toHaveBeenCalled(); // the primary keeps its frames
+  });
+
+  it("seals admission synchronously and waits for an existing session mutation before cleanup", async () => {
+    const { invoke, groups } = await registerWithGroups();
+    invoke(CHANNELS.chat.hasProvider, "group-2");
+    const groupRuntime = runtimes[1]!;
+    let finishMutation!: () => void;
+    const mutation = groupRuntime.activity.trackMutation(
+      () => new Promise<void>((resolve) => { finishMutation = resolve; }),
+    );
+    expect(mutation).not.toBeNull();
+
+    const release = invoke(CHANNELS.chat.groupRelease, "group-2") as Promise<unknown>;
+    expect(groups.get("group-2")!.isSessionTransitioning()).toBe(true);
+    expect(groupRuntime.activity.isBusy()).toBe(true);
+    await Promise.resolve();
+    expect(groups.get("group-2")!.cleanupSession).not.toHaveBeenCalled();
+
+    finishMutation();
+    await expect(release).resolves.toEqual({ ok: true, released: true });
+    expect(groups.get("group-2")).toBeUndefined();
   });
 
   it("lets every group go when the renderer navigates — a reload numbers its tiles from the start", async () => {
