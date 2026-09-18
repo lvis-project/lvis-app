@@ -110,7 +110,15 @@ export function extractPackagedRuntime(archive, app) {
 export function writePackagedRuntimeMarker(app) {
   const markerPath = headlessPackagedMarkerPath(app);
   writeFileSync(markerPath, new Uint8Array(), { flag: "wx", mode: 0o444 });
+  chmodSync(markerPath, 0o444);
   return markerPath;
+}
+
+export function writeHeadlessLauncher(root) {
+  const launcherPath = join(root, "lvis");
+  writeFileSync(launcherPath, HEADLESS_LAUNCHER, { flag: "wx", mode: 0o755 });
+  chmodSync(launcherPath, 0o755);
+  return launcherPath;
 }
 
 function main() {
@@ -175,7 +183,7 @@ function main() {
   cpSync(options["node-license"], join(options.out, "licenses/node-LICENSE"));
   // Keep NODE_ENV for downstream compatibility; the app-root marker below is
   // the only input that establishes the native runtime's packaged identity.
-  writeFileSync(join(options.out, "lvis"), HEADLESS_LAUNCHER, { mode: 0o755 });
+  writeHeadlessLauncher(options.out);
   const packagedMarker = writePackagedRuntimeMarker(app);
 
   const probeProfile = mkdtempSync(join(tmpdir(), "lvis-package-runtime-"));

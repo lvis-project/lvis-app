@@ -140,6 +140,20 @@ function writeMarker(app: string) {
     packager, app]);
 }
 
+function writeLauncherAndMarkerWithUmask(root: string) {
+  return runNode(["--input-type=module", "-e", `
+    const { mkdirSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { writeHeadlessLauncher, writePackagedRuntimeMarker } = await import(process.argv[1]);
+    process.umask(0o077);
+    const root = process.argv[2];
+    const app = join(root, "app");
+    mkdirSync(app, { recursive: true });
+    writeHeadlessLauncher(root);
+    writePackagedRuntimeMarker(app);
+  `, packager, root]);
+}
+
 function readInventory(root: string) {
   return runNode(["--input-type=module", "-e",
     "const { inventory } = await import(process.argv[1]); process.stdout.write(JSON.stringify(inventory(process.argv[2])));",
@@ -199,6 +213,21 @@ describe("native packaged payload extraction", () => {
     });
 
     const second = writeMarker(app);
+    expect(second.status).toBe(1);
+    expect(second.stderr).toMatch(/EEXIST|already exists/);
+  });
+
+  it.skipIf(process.platform === "win32")("sets deterministic launcher and marker modes under a restrictive umask", () => {
+    const root = mkdtempSync(join(tmpdir(), "native-package-modes-"));
+    roots.push(root);
+
+    const result = writeLauncherAndMarkerWithUmask(root);
+    expect(result.error).toBeUndefined();
+    expect(result.status, result.stderr).toBe(0);
+    expect(statSync(join(root, "lvis")).mode & 0o777).toBe(0o755);
+    expect(statSync(headlessPackagedMarkerPath(join(root, "app"))).mode & 0o777).toBe(0o444);
+
+    const second = writeLauncherAndMarkerWithUmask(root);
     expect(second.status).toBe(1);
     expect(second.stderr).toMatch(/EEXIST|already exists/);
   });
