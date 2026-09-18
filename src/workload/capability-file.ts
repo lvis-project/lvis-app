@@ -65,6 +65,21 @@ function assertCapabilityDirectory(stats: Stats, uid: number): void {
   if ((stats.mode & 0o7777) !== 0o700) fail("capability-directory-mode-invalid");
 }
 
+function openCapabilityDirectory(path: string): number {
+  try {
+    return openSync(
+      path,
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_DIRECTORY,
+    );
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ELOOP" || code === "ENOTDIR") {
+      fail("capability-directory-invalid");
+    }
+    throw error;
+  }
+}
+
 function readWholeFile(fd: number, size: number): Buffer {
   const bytes = Buffer.allocUnsafe(size);
   let offset = 0;
@@ -114,18 +129,15 @@ export function loadWorkloadBrokerCapabilityFile(
   let fd: number | undefined;
   let bytes: Buffer | undefined;
   try {
-    const initialParentPath = lstatSync(parentPath);
-    assertCapabilityDirectory(initialParentPath, uid);
+    parentFd = openCapabilityDirectory(parentPath);
+    const openedParent = fstatSync(parentFd);
+    assertCapabilityDirectory(openedParent, uid);
+    const openedParentPath = lstatSync(parentPath);
+    assertCapabilityDirectory(openedParentPath, uid);
     if (realpathSync.native(parentPath) !== parentPath) {
       fail("capability-directory-symlink-invalid");
     }
-    parentFd = openSync(
-      parentPath,
-      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_DIRECTORY,
-    );
-    const openedParent = fstatSync(parentFd);
-    assertCapabilityDirectory(openedParent, uid);
-    if (!sameFile(initialParentPath, openedParent)) {
+    if (!sameFile(openedParent, openedParentPath)) {
       fail("capability-directory-changed");
     }
     fd = openSync(

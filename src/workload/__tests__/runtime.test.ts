@@ -407,6 +407,33 @@ describe("brokered workload runtime", () => {
       .toThrow(new WorkloadBrokerConfigurationError("capability-directory-symlink-invalid"));
   });
 
+  it("rejects regular capability parent replacement during validation", () => {
+    const socketPath = join(root, "workload.sock");
+    const secureParent = join(root, "regular-parent-to-replace");
+    const originalParent = join(root, "regular-original-parent");
+    const replacementParent = join(root, "regular-replacement-parent");
+    mkdirSync(secureParent, { mode: 0o700 });
+    mkdirSync(replacementParent, { mode: 0o700 });
+    const capabilityPath = join(secureParent, "capability.json");
+    writeFileSync(capabilityPath, JSON.stringify(capability(socketPath)), { mode: 0o400 });
+    writeFileSync(join(replacementParent, "capability.json"), JSON.stringify(capability(socketPath)), {
+      mode: 0o400,
+    });
+
+    const nativeRealpath = realpathSync.native;
+    let replaced = false;
+    vi.spyOn(realpathSync, "native").mockImplementation((path) => {
+      if (path === secureParent && !replaced) {
+        replaced = true;
+        renameSync(secureParent, originalParent);
+        renameSync(replacementParent, secureParent);
+      }
+      return nativeRealpath(path);
+    });
+    expect(() => loadWorkloadBrokerCapabilityFile(capabilityPath, socketPath))
+      .toThrow(new WorkloadBrokerConfigurationError("capability-directory-changed"));
+  });
+
   it("rejects capability path replacement during validation", () => {
     const socketPath = join(root, "workload.sock");
     const secureParent = join(root, "replace-parent");
