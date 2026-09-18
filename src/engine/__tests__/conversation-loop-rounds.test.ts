@@ -1194,7 +1194,7 @@ describe("ConversationLoop queryLoop", () => {
       } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
       (loop as { provider: LLMProvider | null }).provider = provider;
 
-      expect(loop.loadSession(sessionId)).toBe(true);
+      expect(await loop.loadSession(sessionId)).toBe(true);
       const persistedUnknown = memoryManager.loadSession(sessionId);
       expect(persistedUnknown).not.toBeNull();
       const persisted = persistedUnknown as GenericMessage[];

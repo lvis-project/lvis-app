@@ -52,6 +52,7 @@ import { buildToolExposureMetrics, buildProviderRequestDiagnostics } from "./tur
 import { handleCommand, handlePermissionCommand } from "./turn/commands.js";
 import {
   newConversation,
+  initializeConversation,
   loadSession,
   resetAndResume,
   branchFromCheckpoint,
@@ -537,8 +538,13 @@ export class ConversationLoop {
   }
 
 
-  newConversation(kind: SessionKind = "main", project?: SessionProjectContext): void {
-    newConversation(this, kind, project ?? (kind === "main" ? this.deps.getDefaultProject?.() : undefined));
+  newConversation(kind: SessionKind = "main", project?: SessionProjectContext): Promise<void> {
+    return newConversation(this, kind, project ?? (kind === "main" ? this.deps.getDefaultProject?.() : undefined));
+  }
+
+  /** Initialize a newly constructed loop without an outgoing session to clean. */
+  initializeConversation(kind: SessionKind = "main", project?: SessionProjectContext): void {
+    initializeConversation(this, kind, project ?? (kind === "main" ? this.deps.getDefaultProject?.() : undefined));
   }
 
   revokeWorkspaceRoot(
@@ -592,12 +598,17 @@ export class ConversationLoop {
    * `clearSessionActivated(this.sessionId)` — this method covers the
    * routine-fire path where the loop is discarded without a resetSession.
    */
-  cleanupSession(): void {
+  async cleanupSession(): Promise<void> {
+    const sessionId = this.sessionId;
+    backgroundShellManager.disposeSession(sessionId);
+    const report = await backgroundShellManager.settleSessionCleanup(sessionId);
+    if (report?.state === "cleanup-unproven") {
+      throw new Error("workload-broker:session-cleanup-unproven");
+    }
     this.deps.closeRationaleSession?.(this.sessionId);
     this.deps.pluginRuntime?.clearSessionActivated?.(this.sessionId);
     // Kill + drop any background shells this session started (bash
     // run_in_background) so they do not outlive the session.
-    backgroundShellManager.disposeSession(this.sessionId);
   }
 
   readToolResultForChunk(toolUseId: string): ReadableToolResult | null {
@@ -826,7 +837,7 @@ export class ConversationLoop {
   }
 
 
-  loadSession(sessionId: string): boolean {
+  loadSession(sessionId: string): Promise<boolean> {
     return loadSession(this, sessionId);
   }
 
@@ -838,12 +849,12 @@ export class ConversationLoop {
    * §4.5.2 B1 — Session resume with full state reset.
    * Unlike loadSession (raw swap), also triggers auto-compact check.
    */
-  resetAndResume(sessionId: string): {
+  resetAndResume(sessionId: string): Promise<{
     ok: boolean;
     compacted: boolean;
     compactedAt: string | null;
     removedMessageCount: number;
-  } {
+  }> {
     return resetAndResume(this, sessionId);
   }
 

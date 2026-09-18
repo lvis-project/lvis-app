@@ -55,7 +55,7 @@ describe("preflight reasoning projection", () => {
         memoryManager: makeConversationLoopMemoryManager(history, sessionId),
         memoryReviewer: makeConversationLoopMemoryReviewer(),
       }));
-      loop.resetAndResume(sessionId);
+      await loop.resetAndResume(sessionId);
       const steps: Array<{ name: TraceStepName; meta?: Record<string, unknown> }> = [];
       const tracer: ConversationTracer = {
         enabled: true,

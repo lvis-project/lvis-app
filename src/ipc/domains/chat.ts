@@ -908,6 +908,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
     const context = groupContexts.get(id);
     if (!context) return false;
     await quiesce(context, reason);
+    await context.loop.cleanupSession();
     context.unsubscribeStream();
     groupContexts.delete(id);
     deps.releaseChatGroupLoop?.(id);
@@ -961,7 +962,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
       // closed conversation back — so no other tile is refused that session
       // by a tile that no longer exists.
       await quiesce(mainGroup, "tile closed");
-      mainGroup.loop.newConversation();
+      await mainGroup.loop.newConversation();
       await memoryManager.markMainActiveFresh();
       return { ok: true, released: true };
     }
@@ -1186,7 +1187,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
       const resolved = resolveAuthorizedWorkspaceProject(parsed.projectRoot, parsed.projectName);
       if (!resolved.authorized || !resolved.project) return PROJECT_NOT_ALLOWED;
       const { project } = resolved;
-      conversationLoop.newConversation("main", project);
+      await conversationLoop.newConversation("main", project);
       // Persist the resolved project identity to the new session's metadata at
       // creation — mirroring startRoutineConversation — but ONLY when the user
       // explicitly selected a real (non-default) project. A session created
@@ -1277,7 +1278,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
       };
     }
     const mutation = group.turns.trackSessionMutation(async () => {
-      const result = conversationLoop.resetAndResume(sessionId);
+      const result = await conversationLoop.resetAndResume(sessionId);
       if (result.ok && conversationLoop.getSessionKind() === "main" && isPrimaryGroup(group)) {
         await memoryManager.markMainActiveResume(sessionId).catch((err: unknown) => {
           log.warn("session-resume markMainActiveResume failed: %s", (err as Error).message);
@@ -1453,7 +1454,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
         ...(currentMeta?.projectName ? { projectName: currentMeta.projectName } : {}),
         ...(currentMeta?.summaryPreamble ? { summaryPreamble: currentMeta.summaryPreamble } : {}),
       });
-      const loaded = conversationLoop.loadSession(newId);
+      const loaded = await conversationLoop.loadSession(newId);
       if (loaded && conversationLoop.getSessionKind() === "main" && isPrimaryGroup(group)) {
         await memoryManager.markMainActiveResume(newId).catch((err: unknown) => {
           log.warn("chat:fork markMainActiveResume failed: %s", (err as Error).message);

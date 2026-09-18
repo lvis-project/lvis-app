@@ -73,6 +73,7 @@ type FakeLoop = {
   hasProvider: ReturnType<typeof vi.fn>;
   abortCurrentTurn: ReturnType<typeof vi.fn>;
   newConversation: ReturnType<typeof vi.fn>;
+  cleanupSession: ReturnType<typeof vi.fn>;
   getSessionId: () => string;
   getSessionKind: () => "main";
   hasActiveTurn: () => boolean;
@@ -95,7 +96,8 @@ function fakeLoop(id: string, seed: unknown[] = []): FakeLoop {
     sessionId: sessionUuid(`session-of-${id}`),
     hasProvider: vi.fn(() => id !== MAIN_CHAT_GROUP_ID),
     abortCurrentTurn: vi.fn(),
-    newConversation: vi.fn(),
+    newConversation: vi.fn(async () => undefined),
+    cleanupSession: vi.fn(async () => undefined),
     getSessionId: () => loop.sessionId,
     getSessionKind: () => "main",
     hasActiveTurn: () => false,
@@ -106,7 +108,7 @@ function fakeLoop(id: string, seed: unknown[] = []): FakeLoop {
       restore: () => {},
     }),
     refreshProvider: () => {},
-    resetAndResume: vi.fn((sessionId: string) => {
+    resetAndResume: vi.fn(async (sessionId: string) => {
       loop.sessionId = sessionId;
       return { ok: true, compacted: false, compactedAt: null, removedMessageCount: 0 };
     }),
@@ -342,6 +344,10 @@ describe("lvis:chat:* with chat groups", () => {
     invoke(CHANNELS.chat.hasProvider, "group-2");
     expect(unsubscribes).toHaveLength(2); // the primary's, then group-2's
     const groupRuntime = runtimes[1]!;
+    let finishCleanup!: () => void;
+    groups.get("group-2")!.cleanupSession.mockImplementationOnce(
+      () => new Promise<void>((resolve) => { finishCleanup = resolve; }),
+    );
     let finishTurn!: () => void;
     const lease = groupRuntime.activity.tryTrackTurn(() => new Promise<void>((resolve) => { finishTurn = resolve; }));
     expect(lease).not.toBeNull();
@@ -351,6 +357,11 @@ describe("lvis:chat:* with chat groups", () => {
     expect(groups.get("group-2")!.abortCurrentTurn).toHaveBeenCalledTimes(1);
     expect(settled).toBe(false); // still waiting on the turn's lease
     finishTurn();
+    await vi.waitFor(() => {
+      expect(groups.get("group-2")!.cleanupSession).toHaveBeenCalledTimes(1);
+    });
+    expect(settled).toBe(false); // cleanup proof is also part of release
+    finishCleanup();
     expect(await release).toEqual({ ok: true, released: true });
     expect(unsubscribes[1]).toHaveBeenCalledTimes(1);
     expect(unsubscribes[0]).not.toHaveBeenCalled(); // the primary keeps its frames
@@ -367,8 +378,9 @@ describe("lvis:chat:* with chat groups", () => {
     events["did-start-navigation"]![0]!({ isMainFrame: true, isSameDocument: true });
     expect(releaseChatGroupLoop).not.toHaveBeenCalled();
     events["did-start-navigation"]![0]!({ isMainFrame: true, isSameDocument: false });
-    await Promise.resolve();
-    expect(releaseChatGroupLoop.mock.calls.map((call) => call[0]).sort()).toEqual(["group-2", "group-3"]);
+    await vi.waitFor(() => {
+      expect(releaseChatGroupLoop.mock.calls.map((call) => call[0]).sort()).toEqual(["group-2", "group-3"]);
+    });
     // The reloaded renderer's first extra tile is "group-2" again — and gets a new loop.
     invoke(CHANNELS.chat.hasProvider, "group-2");
     expect(resolveChatGroupLoop).toHaveBeenCalledTimes(3);
@@ -376,7 +388,7 @@ describe("lvis:chat:* with chat groups", () => {
     // A dead render process is the same story.
     invoke(CHANNELS.chat.hasProvider, "group-4");
     events["render-process-gone"]![0]!();
-    await Promise.resolve();
+    await vi.waitFor(() => expect(releaseChatGroupLoop).toHaveBeenLastCalledWith("group-4"));
     expect(releaseChatGroupLoop).toHaveBeenLastCalledWith("group-4");
   });
 

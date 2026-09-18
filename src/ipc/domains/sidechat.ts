@@ -189,7 +189,7 @@ export function registerSideChatHandlers(deps: IpcDeps): void {
     // Abort any in-flight turn first so its remaining frames never leak into the
     // fresh session (mirrors abort handler; contrast the prior unguarded call).
     await abortActiveSideTurn();
-    loop.newConversation();
+    await loop.newConversation();
     return { ok: true as const, sessionId: loop.getSessionId() };
   });
 
@@ -201,7 +201,7 @@ export function registerSideChatHandlers(deps: IpcDeps): void {
     // Abort any in-flight turn first so its remaining frames never leak into the
     // loaded session's transcript (same concurrency hazard as `new`).
     await abortActiveSideTurn();
-    const loaded = loop.loadSession(sessionId);
+    const loaded = await loop.loadSession(sessionId);
     if (!loaded) {
       return { ok: false as const, error: "session-not-found", messages: [] };
     }

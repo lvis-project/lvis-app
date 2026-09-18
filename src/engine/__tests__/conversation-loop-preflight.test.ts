@@ -102,7 +102,7 @@ describe("runPreflightGuard — estimate-based trigger", () => {
     const loop = new ConversationLoop(
       makeDeps({ settingsService: settings, memoryManager: mem, memoryReviewer }),
     );
-    loop.resetAndResume("abe633f3-a47a-4758-874e-abe9160daf36");
+    await loop.resetAndResume("abe633f3-a47a-4758-874e-abe9160daf36");
 
     const fakeProvider = makeTurnProvider();
     (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
@@ -137,7 +137,7 @@ describe("runPreflightGuard — estimate-based trigger", () => {
     const history: GenericMessage[] = [{ role: "user", content: "short history" }];
     const mem = makeMemoryManager(history);
     const loop = new ConversationLoop(makeDeps({ settingsService: settings, memoryManager: mem }));
-    loop.resetAndResume("600d7495-e531-406e-8c73-da41ce614754");
+    await loop.resetAndResume("600d7495-e531-406e-8c73-da41ce614754");
     const projection = {
       totalTokens: threshold + 1,
       systemPromptTokens: 0,
@@ -206,7 +206,7 @@ describe("runPreflightGuard — estimate-based trigger", () => {
         setActiveRolePrompt: vi.fn(),
       } as never,
     }));
-    loop.resetAndResume("abe633f3-a47a-4758-874e-abe9160daf36");
+    await loop.resetAndResume("abe633f3-a47a-4758-874e-abe9160daf36");
 
     const fakeProvider = makeTurnProvider();
     (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
@@ -246,7 +246,7 @@ describe("runPreflightGuard — estimate-based trigger", () => {
     const history = makeHistoryExceedingEstimateThreshold(threshold);
     const mem = makeMemoryManager(history);
     const loop = new ConversationLoop(makeDeps({ settingsService: settings, memoryManager: mem }));
-    loop.resetAndResume("abe633f3-a47a-4758-874e-abe9160daf36");
+    await loop.resetAndResume("abe633f3-a47a-4758-874e-abe9160daf36");
 
     const fakeProvider = makeTurnProvider();
     (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
@@ -290,7 +290,7 @@ describe("runPreflightGuard — context-token secondary trigger", () => {
 
     const mem = makeMemoryManager(shortHistory);
     const loop = new ConversationLoop(makeDeps({ settingsService: settings, memoryManager: mem }));
-    loop.resetAndResume("abe633f3-a47a-4758-874e-abe9160daf36");
+    await loop.resetAndResume("abe633f3-a47a-4758-874e-abe9160daf36");
 
     const fakeProvider = makeTurnProvider();
     (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
@@ -328,7 +328,7 @@ describe("runPreflightGuard — context-token secondary trigger", () => {
 
     const mem = makeMemoryManager(shortHistory);
     const loop = new ConversationLoop(makeDeps({ settingsService: settings, memoryManager: mem }));
-    loop.resetAndResume("abe633f3-a47a-4758-874e-abe9160daf36");
+    await loop.resetAndResume("abe633f3-a47a-4758-874e-abe9160daf36");
 
     const fakeProvider = makeTurnProvider();
     (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
@@ -367,7 +367,7 @@ describe("runPreflightGuard — context-token secondary trigger", () => {
 
     const mem = makeMemoryManager(shortHistory);
     const loop = new ConversationLoop(makeDeps({ settingsService: settings, memoryManager: mem }));
-    loop.resetAndResume("abe633f3-a47a-4758-874e-abe9160daf36");
+    await loop.resetAndResume("abe633f3-a47a-4758-874e-abe9160daf36");
 
     const fakeProvider = makeTurnProvider();
     (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
@@ -400,7 +400,7 @@ describe("queryLoop — rate-limit reactive compact", () => {
     ];
     const mem = makeMemoryManager(history);
     const loop = new ConversationLoop(makeDeps({ settingsService: settings, memoryManager: mem }));
-    loop.resetAndResume("3db55c54-315c-4806-83d0-954cb477fc3f");
+    await loop.resetAndResume("3db55c54-315c-4806-83d0-954cb477fc3f");
 
     const message =
       "Rate limit reached for gpt-5.4-mini on tokens per min (TPM): Limit 200000, Used 161755, Requested 45096. Please try again in 2.055s.";
@@ -465,7 +465,7 @@ describe("queryLoop — rate-limit reactive compact", () => {
   it("does not compact for request-per-minute rate limits", async () => {
     const settings = makeSettings(true, "gpt-5.4-mini", "openai");
     const loop = new ConversationLoop(makeDeps({ settingsService: settings }));
-    loop.resetAndResume("976a47ca-22a3-466f-89cf-d23575553788");
+    await loop.resetAndResume("976a47ca-22a3-466f-89cf-d23575553788");
 
     const message = "Rate limit reached on requests per minute (RPM): Limit 100, Used 100, Requested 1.";
     const provider = new ScriptedProvider([
@@ -502,7 +502,7 @@ describe("queryLoop — rate-limit reactive compact", () => {
   it("does not repeat TPM reactive compact before a clean turn re-arms recovery", async () => {
     const settings = makeSettings(true, "gpt-5.4-mini", "openai");
     const loop = new ConversationLoop(makeDeps({ settingsService: settings }));
-    loop.resetAndResume("963e666f-23d2-4eae-86eb-c025879ef0c9");
+    await loop.resetAndResume("963e666f-23d2-4eae-86eb-c025879ef0c9");
 
     const message =
       "Rate limit reached for gpt-5.4-mini on tokens per min (TPM): Limit 200000, Used 161755, Requested 45096. Please try again in 2.055s.";
@@ -574,7 +574,7 @@ describe("runPreflightGuard — request projection source", () => {
         setActiveRolePrompt: vi.fn(),
       } as never,
     }));
-    loop.resetAndResume("abe633f3-a47a-4758-874e-abe9160daf36");
+    await loop.resetAndResume("abe633f3-a47a-4758-874e-abe9160daf36");
 
     const fakeProvider = makeTurnProvider();
     (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
@@ -607,7 +607,7 @@ describe("runPreflightGuard — message count is not a trigger", () => {
 
     const mem = makeMemoryManager(history);
     const loop = new ConversationLoop(makeDeps({ settingsService: settings, memoryManager: mem }));
-    loop.resetAndResume("abe633f3-a47a-4758-874e-abe9160daf36");
+    await loop.resetAndResume("abe633f3-a47a-4758-874e-abe9160daf36");
 
     const fakeProvider = makeTurnProvider();
     (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
@@ -637,7 +637,7 @@ describe("runPreflightGuard — skip conditions", () => {
     const history = makeHistoryExceedingEstimateThreshold(threshold);
     const mem = makeMemoryManager(history);
     const loop = new ConversationLoop(makeDeps({ settingsService: settings, memoryManager: mem }));
-    loop.resetAndResume("abe633f3-a47a-4758-874e-abe9160daf36");
+    await loop.resetAndResume("abe633f3-a47a-4758-874e-abe9160daf36");
 
     const fakeProvider = makeTurnProvider();
     (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
@@ -665,7 +665,7 @@ describe("runPreflightGuard — skip conditions", () => {
     const loop = new ConversationLoop(
       makeDeps({ settingsService: settings, memoryManager: mem, disableSessionPersistence: true }),
     );
-    loop.resetAndResume("abe633f3-a47a-4758-874e-abe9160daf36");
+    await loop.resetAndResume("abe633f3-a47a-4758-874e-abe9160daf36");
 
     const fakeProvider = makeTurnProvider();
     (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
@@ -693,7 +693,7 @@ describe("runPreflightGuard — force-recover hard-cap (#917)", () => {
     const history = makeHistoryExceedingEstimateThreshold(threshold);
     const mem = makeMemoryManager(history);
     const loop = new ConversationLoop(makeDeps({ settingsService: settings, memoryManager: mem }));
-    loop.resetAndResume("ce88811d-036a-41cb-8b23-b1f47019842f");
+    await loop.resetAndResume("ce88811d-036a-41cb-8b23-b1f47019842f");
 
     const fakeProvider = makeTurnProvider();
     (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
@@ -728,7 +728,7 @@ describe("runPreflightGuard — force-recover hard-cap (#917)", () => {
     const history = makeHistoryExceedingEstimateThreshold(threshold);
     const mem = makeMemoryManager(history);
     const loop = new ConversationLoop(makeDeps({ settingsService: settings, memoryManager: mem }));
-    loop.resetAndResume("22c2d4bb-b1aa-4a8e-8cf6-2b448106ba8d");
+    await loop.resetAndResume("22c2d4bb-b1aa-4a8e-8cf6-2b448106ba8d");
 
     const fakeProvider = makeTurnProvider();
     (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
@@ -772,12 +772,12 @@ describe("runPreflightGuard — force-recover hard-cap (#917)", () => {
 });
 
 describe("getPreflightThreshold — 80% usable-context trigger", () => {
-  it("200K context threshold is 80% of 160K usable = 128K", () => {
+  it("200K context threshold is 80% of 160K usable = 128K", async () => {
     const threshold = getModelPreflightThreshold("claude", "claude-sonnet-4-5");
     expect(threshold).toBe(128_000);
   });
 
-  it("128K context threshold is 80% of 98K usable = 78.4K", () => {
+  it("128K context threshold is 80% of 98K usable = 78.4K", async () => {
     const threshold = getModelPreflightThreshold("openai", "gpt-4o");
     expect(threshold).toBe(78_400);
   });
@@ -855,7 +855,7 @@ function makeProbeRegistry(resultChars: number) {
   return registry;
 }
 
-function makeToolLoopSetup(resultChars: number, toolRounds: number) {
+async function makeToolLoopSetup(resultChars: number, toolRounds: number) {
   const sessionId = "5c1f0f6d-0f0a-4a1e-9a3f-0b7cb6f2b1de";
   const provider = new ToolLoopProvider(toolRounds);
   const loop = new ConversationLoop(
@@ -866,7 +866,7 @@ function makeToolLoopSetup(resultChars: number, toolRounds: number) {
       toolRegistry: makeProbeRegistry(resultChars) as unknown as ReturnType<typeof makeDeps>["toolRegistry"],
     }),
   );
-  loop.resetAndResume(sessionId);
+  await loop.resetAndResume(sessionId);
   (loop as unknown as { provider: LLMProvider }).provider = provider;
   return { loop, provider };
 }
@@ -889,7 +889,7 @@ describe("round-loop token preflight — a turn that grows its own context", () 
     // ~1,500 tokens of tool result per round (kept under MAX_TOOL_RESULT_TOKENS
     // so the result reaches the wire whole) against a 5,000-token threshold:
     // the turn starts well under and crosses partway through.
-    const { loop, provider } = makeToolLoopSetup(6_000, 8);
+    const { loop, provider } = await makeToolLoopSetup(6_000, 8);
     const decisions: TurnDecisionEvent[] = [];
     const roundsWhenCompacted: number[] = [];
     vi.mocked(compactWithBoundary).mockImplementation(async ({ messages }) => {
@@ -942,7 +942,7 @@ describe("round-loop token preflight — a turn that grows its own context", () 
     deps.systemPromptBuilder.build = () => ["system", summaryPreamble].filter(Boolean).join("\n");
     deps.systemPromptBuilder.setSummaryPreamble = (preamble) => { summaryPreamble = preamble; };
     const loop = new ConversationLoop(deps);
-    loop.resetAndResume(sessionId);
+    await loop.resetAndResume(sessionId);
     (loop as unknown as { provider: LLMProvider }).provider = provider;
     const decisions: TurnDecisionEvent[] = [];
 
@@ -1003,7 +1003,7 @@ describe("round-loop token preflight — a turn that grows its own context", () 
         memoryReviewer: makeMemoryReviewer(),
       }),
     );
-    loop.resetAndResume(sessionId);
+    await loop.resetAndResume(sessionId);
     (loop as unknown as { provider: LLMProvider }).provider = new ToolLoopProvider(0);
 
     await loop.runTurn("one more question", undefined, undefined, {
@@ -1034,7 +1034,7 @@ describe("round-loop token preflight — a turn that grows its own context", () 
         memoryReviewer: makeMemoryReviewer(),
       }),
     );
-    loop.resetAndResume(sessionId);
+    await loop.resetAndResume(sessionId);
     (loop as unknown as { provider: LLMProvider }).provider = provider;
     const decisions: TurnDecisionEvent[] = [];
 
@@ -1050,7 +1050,7 @@ describe("round-loop token preflight — a turn that grows its own context", () 
   });
 
   it("leaves a turn that stays under the threshold alone", async () => {
-    const { loop } = makeToolLoopSetup(200, 6);
+    const { loop } = await makeToolLoopSetup(200, 6);
     const decisions: TurnDecisionEvent[] = [];
 
     await loop.runTurn(
@@ -1067,7 +1067,7 @@ describe("round-loop token preflight — a turn that grows its own context", () 
   it("does not fire again on the next round when a compaction left the projection over the threshold", async () => {
     // A compaction that reduced the history but not below the threshold used
     // to re-arm at zero, so the very next round crossed and compacted again.
-    const { loop } = makeToolLoopSetup(1_200, 40);
+    const { loop } = await makeToolLoopSetup(1_200, 40);
     const decisions: TurnDecisionEvent[] = [];
     // Reduces by one message — real progress, still far over the threshold.
     vi.mocked(compactWithBoundary).mockImplementation(async ({ messages }) => ({
@@ -1097,7 +1097,7 @@ describe("round-loop token preflight — a turn that grows its own context", () 
     // NOOP is the shape of "there was nothing left to summarize": the
     // projection stays over the threshold, so an ungated gate would spend an
     // LLM compaction on every remaining round of the turn.
-    const { loop } = makeToolLoopSetup(1_200, 40);
+    const { loop } = await makeToolLoopSetup(1_200, 40);
     const decisions: TurnDecisionEvent[] = [];
     vi.mocked(compactWithBoundary).mockImplementation(
       async ({ messages }) => makeSyntheticNoopResult(messages),

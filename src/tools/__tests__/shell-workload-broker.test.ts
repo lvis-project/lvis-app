@@ -683,6 +683,13 @@ describe("brokered workload shell execution", () => {
       settled: 0,
       pending: 1,
     });
+    let settled = false;
+    const settling = backgroundShellManager.settleSessionCleanup(SESSION_ID).then((report) => {
+      settled = true;
+      return report;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
 
     finishKill({
       executionId: "exec_dispose",
@@ -699,7 +706,7 @@ describe("brokered workload shell execution", () => {
       ownedResourcesZero: true,
       receiptDigest: RECEIPT_DIGEST,
     });
-    const report = await backgroundShellManager.waitForBrokerCleanup(SESSION_ID);
+    const report = await settling;
     expect(report).toMatchObject({
       state: "complete",
       requested: 1,
@@ -713,9 +720,8 @@ describe("brokered workload shell execution", () => {
         requiresExternalRelease: false,
       }],
     });
-    await expect(backgroundShellManager.waitForAllBrokerCleanup()).resolves.toEqual([
-      report,
-    ]);
+    expect(backgroundShellManager.getBrokerCleanupReport(SESSION_ID)).toBeUndefined();
+    await expect(backgroundShellManager.waitForAllBrokerCleanup()).resolves.toEqual([]);
     expect(broker.execute.mock.calls.map((call) => call[1])).toEqual([
       "shell.start",
       "shell.kill",
@@ -753,7 +759,7 @@ describe("brokered workload shell execution", () => {
     now.mockReturnValue(expiresAt + 1);
 
     expect(backgroundShellManager.disposeSession(SESSION_ID)).toBe(1);
-    const report = await backgroundShellManager.waitForBrokerCleanup(SESSION_ID);
+    const report = await backgroundShellManager.settleSessionCleanup(SESSION_ID);
     expect(report).toMatchObject({
       state: "cleanup-unproven",
       requested: 1,
@@ -768,6 +774,7 @@ describe("brokered workload shell execution", () => {
         failure: "workload-broker:capability-expired",
       }],
     });
+    expect(backgroundShellManager.getBrokerCleanupReport(SESSION_ID)).toEqual(report);
     expect(spawnSpy).not.toHaveBeenCalled();
   });
 

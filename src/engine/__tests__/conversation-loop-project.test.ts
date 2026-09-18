@@ -48,11 +48,11 @@ function makeRevocableProjectLoop(defaultRoot: string, authorizedRoots: Set<stri
 }
 
 describe("ConversationLoop project identity", () => {
-  it("treats the app-managed workspace root as the default project without persisting a scope flag", () => {
+  it("treats the app-managed workspace root as the default project without persisting a scope flag", async () => {
     const defaultRoot = "C:\\Users\\example\\.lvis\\workspace";
     const { loop, setProjectContext } = makeProjectLoop(defaultRoot);
 
-    loop.newConversation("main", {
+    await loop.newConversation("main", {
       projectRoot: defaultRoot,
       projectName: "workspace",
     });
@@ -79,11 +79,11 @@ describe("ConversationLoop project identity", () => {
     expect(loop.getSessionExecutionCwd()).toBe(defaultRoot);
   });
 
-  it("does not include legacy unscoped memory for explicit non-default projects", () => {
+  it("does not include legacy unscoped memory for explicit non-default projects", async () => {
     const defaultRoot = "C:\\Users\\example\\.lvis\\workspace";
     const { loop, setProjectContext } = makeProjectLoop(defaultRoot);
 
-    loop.newConversation("main", {
+    await loop.newConversation("main", {
       projectRoot: "C:\\workspace\\alpha",
       projectName: "alpha",
     });
@@ -100,7 +100,7 @@ describe("ConversationLoop project identity", () => {
     expect(loop.getSessionExecutionCwd()).toBe("C:\\workspace\\alpha");
   });
 
-  it("rebinds a resumed session without project metadata to the default workspace", () => {
+  it("rebinds a resumed session without project metadata to the default workspace", async () => {
     const defaultRoot = "C:\\Users\\example\\.lvis\\workspace";
     const memoryManager = makeConversationLoopMemoryManager([
       { role: "user", content: "hello" },
@@ -118,12 +118,12 @@ describe("ConversationLoop project identity", () => {
       isDefaultProjectRoot: (projectRoot) => projectRoot === defaultRoot,
     }));
 
-    expect(loop.loadSession("67b72cc9-5409-43e4-8eab-c69e635362b9")).toBe(true);
+    expect(await loop.loadSession("67b72cc9-5409-43e4-8eab-c69e635362b9")).toBe(true);
     expect(loop.getSessionExecutionCwd()).toBe(defaultRoot);
     expect(loop.getTurnAdditionalDirectories()).toContain(defaultRoot);
   });
 
-  it("re-authorizes stored project roots on session resume before granting tool directories", () => {
+  it("re-authorizes stored project roots on session resume before granting tool directories", async () => {
     const defaultRoot = "C:\\Users\\example\\.lvis\\workspace";
     const deniedRoot = "C:\\private\\denied";
     const setProjectContext = vi.fn();
@@ -158,7 +158,7 @@ describe("ConversationLoop project identity", () => {
           : null,
     }));
 
-    expect(loop.loadSession("d50f8c3f-2fe2-4183-8ed0-1e1e442767b1")).toBe(true);
+    expect(await loop.loadSession("d50f8c3f-2fe2-4183-8ed0-1e1e442767b1")).toBe(true);
     expect(loop.getSessionProjectContext()).toEqual({
       projectRoot: defaultRoot,
       projectName: "workspace",
@@ -172,7 +172,7 @@ describe("ConversationLoop project identity", () => {
     });
   });
 
-  it("revokes removed-root directories and rebinds the active project to default", () => {
+  it("revokes removed-root directories and rebinds the active project to default", async () => {
     const defaultRoot = "C:\\Users\\example\\.lvis\\workspace";
     const removedRoot = "C:\\workspace\\alpha";
     const authorizedRoots = new Set([removedRoot]);
@@ -180,7 +180,7 @@ describe("ConversationLoop project identity", () => {
       defaultRoot,
       authorizedRoots,
     );
-    loop.newConversation("main", { projectRoot: removedRoot, projectName: "alpha" });
+    await loop.newConversation("main", { projectRoot: removedRoot, projectName: "alpha" });
     loop.addSessionAdditionalDirectory(`${removedRoot}\\docs`);
     loop.addSessionAdditionalDirectory("D:\\shared");
     loop.addTurnAdditionalDirectory(`${removedRoot}\\scratch`);
@@ -199,12 +199,12 @@ describe("ConversationLoop project identity", () => {
     expect(broadcastPermissionConfigChanged).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps an independently authorized child project when its former parent is removed", () => {
+  it("keeps an independently authorized child project when its former parent is removed", async () => {
     const defaultRoot = "C:\\Users\\example\\.lvis\\workspace";
     const parentRoot = "C:\\workspace";
     const childRoot = `${parentRoot}\\child`;
     const { loop } = makeRevocableProjectLoop(defaultRoot, new Set([childRoot]));
-    loop.newConversation("main", { projectRoot: childRoot, projectName: "child" });
+    await loop.newConversation("main", { projectRoot: childRoot, projectName: "child" });
     loop.addSessionAdditionalDirectory(`${childRoot}\\session-scope`);
     loop.addTurnAdditionalDirectory(`${childRoot}\\turn-scope`);
     const controller = new AbortController();
@@ -220,12 +220,12 @@ describe("ConversationLoop project identity", () => {
     expect(controller.signal.aborted).toBe(false);
   });
 
-  it("does not revoke a segment-prefix sibling", () => {
+  it("does not revoke a segment-prefix sibling", async () => {
     const defaultRoot = "C:\\Users\\example\\.lvis\\workspace";
     const removedRoot = "C:\\workspace\\app";
     const siblingRoot = "C:\\workspace\\app-old";
     const { loop } = makeRevocableProjectLoop(defaultRoot, new Set([siblingRoot]));
-    loop.newConversation("main", { projectRoot: siblingRoot, projectName: "app-old" });
+    await loop.newConversation("main", { projectRoot: siblingRoot, projectName: "app-old" });
 
     const result = loop.revokeWorkspaceRoot(removedRoot);
 
@@ -237,12 +237,12 @@ describe("ConversationLoop project identity", () => {
     expect(loop.getSessionExecutionCwd()).toBe(siblingRoot);
   });
 
-  it("aborts an affected active turn with the workspace-removal reason", () => {
+  it("aborts an affected active turn with the workspace-removal reason", async () => {
     const defaultRoot = "C:\\Users\\example\\.lvis\\workspace";
     const removedRoot = "C:\\workspace\\alpha";
     const authorizedRoots = new Set([removedRoot]);
     const { loop } = makeRevocableProjectLoop(defaultRoot, authorizedRoots);
-    loop.newConversation("main", { projectRoot: removedRoot, projectName: "alpha" });
+    await loop.newConversation("main", { projectRoot: removedRoot, projectName: "alpha" });
     const controller = new AbortController();
     loop.currentAbortController = controller;
     authorizedRoots.delete(removedRoot);
@@ -254,12 +254,12 @@ describe("ConversationLoop project identity", () => {
     expect((controller.signal.reason as Error).message).toBe("workspace-removal");
   });
 
-  it("does not abort an unrelated active turn", () => {
+  it("does not abort an unrelated active turn", async () => {
     const defaultRoot = "C:\\Users\\example\\.lvis\\workspace";
     const removedRoot = "C:\\workspace\\alpha";
     const unrelatedRoot = "D:\\workspace\\beta";
     const { loop } = makeRevocableProjectLoop(defaultRoot, new Set([unrelatedRoot]));
-    loop.newConversation("main", { projectRoot: unrelatedRoot, projectName: "beta" });
+    await loop.newConversation("main", { projectRoot: unrelatedRoot, projectName: "beta" });
     const controller = new AbortController();
     loop.currentAbortController = controller;
 
@@ -268,12 +268,12 @@ describe("ConversationLoop project identity", () => {
     expect(controller.signal.aborted).toBe(false);
   });
 
-  it("aborts an unrelated project turn when the removed root was in global scope", () => {
+  it("aborts an unrelated project turn when the removed root was in global scope", async () => {
     const defaultRoot = "C:\\Users\\example\\.lvis\\workspace";
     const removedRoot = "C:\\workspace\\alpha";
     const unrelatedRoot = "D:\\workspace\\beta";
     const { loop } = makeRevocableProjectLoop(defaultRoot, new Set([unrelatedRoot]));
-    loop.newConversation("main", { projectRoot: unrelatedRoot, projectName: "beta" });
+    await loop.newConversation("main", { projectRoot: unrelatedRoot, projectName: "beta" });
     const controller = new AbortController();
     loop.currentAbortController = controller;
 

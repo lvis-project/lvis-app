@@ -277,7 +277,7 @@ describe("transcript durability", () => {
       // Reload the way the app does: engine load (which repairs the unpaired
       // tool_use tail) then the renderer's persisted-history projection.
       const reloadLoop = buildLoop(memoryManager, new ToolRegistry(), provider);
-      expect(reloadLoop.loadSession(SESSION_ID)).toBe(true);
+      expect(await reloadLoop.loadSession(SESSION_ID)).toBe(true);
       const entries = historyToEntries(
         reloadLoop
           .getHistory()
@@ -334,7 +334,7 @@ describe("transcript durability", () => {
       // Reload through an EMPTY registry: whatever the panel can still say about
       // these calls has to have come off disk, not from a live lookup.
       const reloadLoop = buildLoop(memoryManager, new ToolRegistry(), provider);
-      expect(reloadLoop.loadSession(SESSION_ID)).toBe(true);
+      expect(await reloadLoop.loadSession(SESSION_ID)).toBe(true);
       const serialized = reloadLoop
         .getHistory()
         .getMessages()

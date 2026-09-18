@@ -56,7 +56,7 @@ describe("conversation background completion delivery", () => {
         ? { projectRoot, projectName: "project", isDefault: true }
         : null,
     }));
-    loop.newConversation("main", { projectRoot });
+    await loop.newConversation("main", { projectRoot });
     const sessionId = loop.getSessionId();
     sessions.push(sessionId);
 

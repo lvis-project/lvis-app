@@ -13,7 +13,7 @@ function makeLoop(opts: { text?: string; throws?: boolean } = {}) {
       if (opts.throws) throw new Error("loop crashed");
       return { text: opts.text ?? "루틴 완료 메시지", toolCalls: [], route: "llm" };
     }),
-    cleanupSession: vi.fn(),
+    cleanupSession: vi.fn(async (): Promise<void> => {}),
     dispose: vi.fn(),
   };
 }
@@ -64,7 +64,7 @@ describe("RoutineEngine.runRoutine", () => {
       getSessionId: vi.fn(() => "test-session-id"),
       startRoutineConversation: vi.fn(async () => "test-session-id"),
       runTurn: vi.fn(async () => ({ text: "", toolCalls: [], route: "llm" })),
-      cleanupSession: vi.fn(),
+      cleanupSession: vi.fn(async (): Promise<void> => {}),
       dispose: vi.fn(),
     };
     const engine = new RoutineEngine({ createConversationLoop: () => loop as any });
@@ -81,6 +81,29 @@ describe("RoutineEngine.runRoutine", () => {
     const result = await engine.runRoutine({ id: "shutdown-daily", trigger: "shutdown", prePrompt: "" });
 
     expect(result.summary).toContain("loop crashed");
+  });
+
+  it("does not resolve a routine until session cleanup is proven", async () => {
+    let finishCleanup!: () => void;
+    const loop = makeLoop({ text: "<summary>done</summary>" });
+    loop.cleanupSession.mockImplementationOnce(
+      () => new Promise<void>((resolve) => { finishCleanup = resolve; }),
+    );
+    const engine = new RoutineEngine({ createConversationLoop: () => loop as any });
+    let settled = false;
+    const pending = engine.runRoutine({
+      id: "cleanup-order",
+      trigger: "schedule",
+      prePrompt: "run",
+    }).then((result) => {
+      settled = true;
+      return result;
+    });
+
+    await vi.waitFor(() => expect(loop.cleanupSession).toHaveBeenCalledTimes(1));
+    expect(settled).toBe(false);
+    finishCleanup();
+    await expect(pending).resolves.toMatchObject({ routineId: "cleanup-order" });
   });
 });
 

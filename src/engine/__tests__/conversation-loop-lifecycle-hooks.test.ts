@@ -132,7 +132,7 @@ describe("ConversationLoop — #811 m2 lifecycle events", () => {
 
     await loop.runTurn("first", undefined, undefined, { inputOrigin: "user-keyboard",
     });
-    loop.newConversation(); // resets sessionStartFiredFor → the next turn re-announces.
+    await loop.newConversation(); // resets sessionStartFiredFor → the next turn re-announces.
     await loop.runTurn("second", undefined, undefined, { inputOrigin: "user-keyboard",
     });
 

@@ -79,7 +79,7 @@ describe("conversation shell project context", () => {
         : null,
     }));
     loop.provider = provider;
-    loop.newConversation("main", { projectRoot: requestedRoot });
+    await loop.newConversation("main", { projectRoot: requestedRoot });
     // An additional directory grant cannot make host-owned runtime state accessible.
     loop.addSessionAdditionalDirectory(privateWorkspace);
 

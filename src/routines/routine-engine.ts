@@ -261,7 +261,7 @@ export class RoutineEngine {
       // The routine loop is discarded after runTurn completes and never calls
       // resetSession, so without this call the per-session Map entry would
       // accumulate as a stale entry in the PluginRuntime singleton.
-      loop.cleanupSession();
+      await loop.cleanupSession();
     }
   }
 }

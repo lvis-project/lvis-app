@@ -474,6 +474,12 @@ export interface BackgroundShellManager {
   getBrokerCleanupReport(sessionId: string): BrokerSessionCleanupReport | undefined;
   /** Resolve once every broker cleanup request for this session has settled. */
   waitForBrokerCleanup(sessionId: string): Promise<BrokerSessionCleanupReport | undefined>;
+  /**
+   * Wait for the current cleanup generation and consume its evidence only when
+   * cleanup is proven complete. Unproven evidence remains available for
+   * shutdown diagnostics and prevents a later transition from forgetting it.
+   */
+  settleSessionCleanup(sessionId: string): Promise<BrokerSessionCleanupReport | undefined>;
   /** Wait for every tracked broker cleanup and return its final release proof. */
   waitForAllBrokerCleanup(): Promise<readonly BrokerSessionCleanupReport[]>;
   /** Test-only reset. */
@@ -1133,6 +1139,21 @@ function createManager(): BackgroundShellManager {
         await Promise.all([...cleanup.pending.values()]);
       }
       return cleanupReport(cleanup);
+    },
+
+    async settleSessionCleanup(sessionId): Promise<BrokerSessionCleanupReport | undefined> {
+      const cleanup = brokerCleanup.get(sessionId);
+      if (cleanup === undefined) return undefined;
+      while (cleanup.pending.size > 0) {
+        await Promise.all([...cleanup.pending.values()]);
+      }
+      const report = cleanupReport(cleanup);
+      // Object identity is the cleanup-generation binding. A late waiter must
+      // never consume a newer generation installed under the same session id.
+      if (report.state === "complete" && brokerCleanup.get(sessionId) === cleanup) {
+        brokerCleanup.delete(sessionId);
+      }
+      return report;
     },
 
     async waitForAllBrokerCleanup(): Promise<readonly BrokerSessionCleanupReport[]> {

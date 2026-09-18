@@ -489,7 +489,7 @@ async function runTurnRequest(deps: ExecDeps, request: ExecTurnRequest): Promise
   }
   if (request.approveMode === "allow") permissionManager.setMode("allow");
   try {
-    deps.conversationLoop.newConversation("main", {
+    await deps.conversationLoop.newConversation("main", {
       projectRoot: request.cwd,
       projectName: basename(request.cwd),
     });

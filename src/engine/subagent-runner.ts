@@ -2991,7 +2991,7 @@ export class SubAgentRunner {
         });
 
         const child = new ConversationLoop(childDeps);
-        child.newConversation(
+        child.initializeConversation(
           "subagent",
           input.projectRoot
             ? {
@@ -4217,7 +4217,7 @@ export class SubAgentRunner {
         "sub-agent resume: LLM provider not configured",
       );
     }
-    if (!child.loadSession(resumeId)) {
+    if (!await child.loadSession(resumeId)) {
       return await finishAuthorizedFailure(
         'sub-agent resume: failed to load session history for "' + resumeId + '"',
       );
