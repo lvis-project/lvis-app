@@ -25,8 +25,10 @@ import {
 } from "./hmac-chain.js";
 
 export const PERMISSION_AUDIT_PROOF_SCHEMA = "lvis-permission-audit-proof/v1";
-const PROOF_FLAG = "--verify-permission-audit=";
-const SELF_TEST_FLAG = "--create-permission-audit-self-test=";
+const PROOF_FLAG = "--verify-permission-audit";
+const PROOF_VALUE_FLAG = `${PROOF_FLAG}=`;
+const SELF_TEST_FLAG = "--create-permission-audit-self-test";
+const SELF_TEST_VALUE_FLAG = `${SELF_TEST_FLAG}=`;
 const USER_DATA_FLAG = "--user-data-dir=";
 const CHALLENGE = /^[a-f0-9]{64}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
@@ -70,10 +72,11 @@ export function parsePermissionAuditProofCommand(
   if (proofArgs.length === 0) return null;
   const permitted = argv.every((arg) => arg.startsWith(PROOF_FLAG) || arg.startsWith(USER_DATA_FLAG));
   const userDataArgs = argv.filter((arg) => arg.startsWith(USER_DATA_FLAG));
-  if (!permitted || proofArgs.length !== 1 || userDataArgs.length > 1 || userDataArgs.some((arg) => arg.length === USER_DATA_FLAG.length)) {
+  if (!permitted || proofArgs.length !== 1 || !proofArgs[0]!.startsWith(PROOF_VALUE_FLAG) ||
+      userDataArgs.length > 1 || userDataArgs.some((arg) => arg.length === USER_DATA_FLAG.length)) {
     throw new Error("--verify-permission-audit must be used alone except for one non-empty --user-data-dir");
   }
-  const challenge = proofArgs[0]!.slice(PROOF_FLAG.length);
+  const challenge = proofArgs[0]!.slice(PROOF_VALUE_FLAG.length);
   if (!CHALLENGE.test(challenge)) {
     throw new Error("permission audit proof challenge must be 64 lowercase hexadecimal characters");
   }
@@ -87,10 +90,11 @@ export function parsePermissionAuditSelfTestCommand(
   if (selfTestArgs.length === 0) return null;
   const permitted = argv.every((arg) => arg.startsWith(SELF_TEST_FLAG) || arg.startsWith(USER_DATA_FLAG));
   const userDataArgs = argv.filter((arg) => arg.startsWith(USER_DATA_FLAG));
-  if (!permitted || selfTestArgs.length !== 1 || userDataArgs.length > 1 || userDataArgs.some((arg) => arg.length === USER_DATA_FLAG.length)) {
+  if (!permitted || selfTestArgs.length !== 1 || !selfTestArgs[0]!.startsWith(SELF_TEST_VALUE_FLAG) ||
+      userDataArgs.length > 1 || userDataArgs.some((arg) => arg.length === USER_DATA_FLAG.length)) {
     throw new Error("--create-permission-audit-self-test must be used alone except for one non-empty --user-data-dir");
   }
-  const challenge = selfTestArgs[0]!.slice(SELF_TEST_FLAG.length);
+  const challenge = selfTestArgs[0]!.slice(SELF_TEST_VALUE_FLAG.length);
   if (!CHALLENGE.test(challenge)) {
     throw new Error("permission audit self-test challenge must be 64 lowercase hexadecimal characters");
   }

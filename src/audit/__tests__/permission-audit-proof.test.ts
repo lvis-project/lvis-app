@@ -170,6 +170,8 @@ describe("permission audit proof CLI contract", () => {
   });
 
   it.each([
+    { argv: ["--verify-permission-audit"] },
+    { argv: [`--verify-permission-auditor=${CHALLENGE}`] },
     { argv: [`--verify-permission-audit=${"A".repeat(64)}`] },
     { argv: [`--verify-permission-audit=${CHALLENGE}`, "--runtime-check"] },
     { argv: [`--verify-permission-audit=${CHALLENGE}`, `--verify-permission-audit=${CHALLENGE}`] },
@@ -227,6 +229,9 @@ describe("packaged permission audit self-test", () => {
     ])).toThrow();
     expect(() => parsePermissionAuditSelfTestCommand([
       `--create-permission-audit-self-test=${"A".repeat(64)}`,
+    ])).toThrow();
+    expect(() => parsePermissionAuditSelfTestCommand([
+      "--create-permission-audit-self-test",
     ])).toThrow();
   });
 });

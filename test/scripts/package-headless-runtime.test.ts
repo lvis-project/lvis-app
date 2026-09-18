@@ -43,29 +43,39 @@ it("advertises the packaged permission-audit contracts", async () => {
   expect(module.HEADLESS_LAUNCHER).toContain('"$@"');
 });
 
-it.skipIf(process.platform === "win32")("scrubs preload and process-role environment before native execution", async () => {
+it.skipIf(process.platform === "win32")("blocks an inherited preload before every native command", async () => {
   const module = await import(packager) as { HEADLESS_LAUNCHER: string };
   const root = mkdtempSync(join(tmpdir(), "native-launch-environment-"));
   roots.push(root);
   writeFixtureFile(root, "lvis", module.HEADLESS_LAUNCHER);
   chmodSync(join(root, "lvis"), 0o755);
-  writeFixtureFile(root, "app/dist/src/main/headless.js", "fixture");
-  writeFixtureFile(root, "bin/node", `#!/bin/sh
-set -eu
-test -z "\${ELECTRON_NO_ASAR+x}"
-test -z "\${ELECTRON_RUN_AS_NODE+x}"
-test -z "\${NODE_CHANNEL_FD+x}"
-test -z "\${NODE_CHANNEL_SERIALIZATION_MODE+x}"
-test -z "\${NODE_OPTIONS+x}"
-test -z "\${NODE_PATH+x}"
-test -z "\${NODE_UNIQUE_ID+x}"
-test "\${LVIS_HOME}" = "/preserved/lvis-home"
-printf '%s\\n' "$*"
+  const preloadMarker = join(root, "preload-executed");
+  writeFixtureFile(root, "malicious-preload.cjs", `
+require("node:fs").writeFileSync(${JSON.stringify(preloadMarker)}, "executed");
+process.stdout.write("forged-output\\n");
 `);
-  chmodSync(join(root, "bin/node"), 0o755);
+  writeFixtureFile(root, "app/dist/src/main/headless.js", `
+const forbidden = ${JSON.stringify([
+    "ELECTRON_NO_ASAR",
+    "ELECTRON_RUN_AS_NODE",
+    "NODE_CHANNEL_FD",
+    "NODE_CHANNEL_SERIALIZATION_MODE",
+    "NODE_OPTIONS",
+    "NODE_PATH",
+    "NODE_UNIQUE_ID",
+  ])};
+for (const name of forbidden) {
+  if (Object.hasOwn(process.env, name)) throw new Error("inherited:" + name);
+}
+if (process.env.LVIS_HOME !== "/preserved/lvis-home") throw new Error("missing preserved env");
+process.stdout.write(JSON.stringify({ args: process.argv.slice(2) }) + "\\n");
+`);
+  mkdirSync(join(root, "bin"));
+  symlinkSync(node, join(root, "bin/node"));
   for (const command of [
     `--verify-permission-audit=${"a".repeat(64)}`,
     `--create-permission-audit-self-test=${"b".repeat(64)}`,
+    "--runtime-check",
   ]) {
     const result = spawnSync(join(root, "lvis"), [command], {
       encoding: "utf8",
@@ -75,15 +85,16 @@ printf '%s\\n' "$*"
         ELECTRON_RUN_AS_NODE: "1",
         NODE_CHANNEL_FD: "9",
         NODE_CHANNEL_SERIALIZATION_MODE: "advanced",
-        NODE_OPTIONS: "--require=/untrusted/preload.cjs",
+        NODE_OPTIONS: `--require=${join(root, "malicious-preload.cjs")}`,
         NODE_PATH: "/untrusted/modules",
         NODE_UNIQUE_ID: "worker-role",
         LVIS_HOME: "/preserved/lvis-home",
       },
     });
     expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toContain("--disable-warning=UNDICI-EHPA");
-    expect(result.stdout).toContain(command);
+    expect(result.stdout).not.toContain("forged-output");
+    expect(JSON.parse(result.stdout)).toEqual({ args: [command] });
+    expect(existsSync(preloadMarker)).toBe(false);
   }
 });
 
