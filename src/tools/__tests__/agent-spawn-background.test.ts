@@ -40,7 +40,19 @@ describe("agent_spawn background routing", () => {
     const spawnPending = new Promise<never>(() => undefined);
     const resumePending = new Promise<never>(() => undefined);
     const spawn = vi.fn(() => spawnPending);
-    const resume = vi.fn(() => resumePending);
+    const resume = vi.fn((
+      _resumeId: string,
+      _instructions: string,
+      _title: string,
+      callbacks: {
+        onLinked?: (input: { childSessionId: string }) => void;
+        onReady?: (input: { childSessionId: string }) => void;
+      },
+    ) => {
+      callbacks.onLinked?.({ childSessionId: "sub-resume" });
+      callbacks.onReady?.({ childSessionId: "sub-resume" });
+      return resumePending;
+    });
     const tool = createAgentSpawnTool({
       getRunner: () => ({ spawn, resume }) as never,
       emit: () => undefined,

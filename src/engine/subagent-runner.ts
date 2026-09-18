@@ -421,6 +421,8 @@ export interface SubAgentSpawnCallbacks {
    * activity against the same persisted session.
    */
   onLinked?: (link: { childSessionId: string }) => void;
+  /** Resume setup reached a durable WORKING state and its active lease exists. */
+  onReady?: (link: { childSessionId: string }) => void;
   /**
    * Fired whenever the child loop produces new transcript content (tool
    * start/end, permission review, completed assistant round). Carries the full
@@ -594,12 +596,14 @@ function normalizeA2AWireSpawnCallbacks(value: unknown): A2AWireSpawnCallbacks |
     const candidate = value as Partial<A2AWireSpawnCallbacks>;
     const onDurablyLinked = candidate.onDurablyLinked;
     const onLinked = candidate.onLinked;
+    const onReady = candidate.onReady;
     const onActivity = candidate.onActivity;
     const onError = candidate.onError;
     const onTerminal = candidate.onTerminal;
     if (
       typeof onDurablyLinked !== "function"
       || (onLinked !== undefined && typeof onLinked !== "function")
+      || (onReady !== undefined && typeof onReady !== "function")
       || (onActivity !== undefined && typeof onActivity !== "function")
       || (onError !== undefined && typeof onError !== "function")
       || (onTerminal !== undefined && typeof onTerminal !== "function")
@@ -613,6 +617,9 @@ function normalizeA2AWireSpawnCallbacks(value: unknown): A2AWireSpawnCallbacks |
         : {}),
       ...(onActivity
         ? { onActivity: (update) => notifyA2AWireObserver(onActivity, update, "on-activity") }
+        : {}),
+      ...(onReady
+        ? { onReady: (link) => notifyA2AWireObserver(onReady, link, "on-ready") }
         : {}),
       ...(onError
         ? { onError: (message) => notifyA2AWireObserver(onError, message, "on-error") }
@@ -4373,6 +4380,7 @@ export class SubAgentRunner {
     if (cancellation.signal.aborted) {
       return await finishAuthorizedFailure("sub-agent run interrupted");
     }
+    callbacks?.onReady?.({ childSessionId: resumeId });
 
     let totalToolCalls = 0;
     let lastText = "";

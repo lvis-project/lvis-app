@@ -907,12 +907,14 @@ export function registerChatHandlers(deps: IpcDeps): void {
   const releaseGroup = async (id: string, reason: string): Promise<boolean> => {
     const context = groupContexts.get(id);
     if (!context) return false;
-    await quiesce(context, reason);
-    await context.loop.cleanupSession();
-    context.unsubscribeStream();
-    groupContexts.delete(id);
-    deps.releaseChatGroupLoop?.(id);
-    return true;
+    return context.loop.runSessionTransition("chat-group-release", async (lease) => {
+      await quiesce(context, reason);
+      await context.loop.cleanupSession(lease);
+      context.unsubscribeStream();
+      groupContexts.delete(id);
+      deps.releaseChatGroupLoop?.(id);
+      return true;
+    });
   };
 
   /**
@@ -931,7 +933,11 @@ export function registerChatHandlers(deps: IpcDeps): void {
     watchedRenderers.add(contents);
     const releaseAll = (reason: string) => {
       for (const id of [...groupContexts.keys()]) {
-        if (id !== MAIN_CHAT_GROUP_ID) void releaseGroup(id, reason);
+        if (id !== MAIN_CHAT_GROUP_ID) {
+          void releaseGroup(id, reason).catch((error: unknown) => {
+            log.warn("chat group release failed (%s): %s", id, (error as Error).message);
+          });
+        }
       }
     };
     contents.on("did-start-navigation", (event) => {
@@ -961,10 +967,12 @@ export function registerChatHandlers(deps: IpcDeps): void {
       // window-active pointer cleared so the next launch does not bring the
       // closed conversation back — so no other tile is refused that session
       // by a tile that no longer exists.
-      await quiesce(mainGroup, "tile closed");
-      await mainGroup.loop.newConversation();
-      await memoryManager.markMainActiveFresh();
-      return { ok: true, released: true };
+      return mainGroup.loop.runSessionTransition("primary-chat-group-release", async (lease) => {
+        await quiesce(mainGroup, "tile closed");
+        await mainGroup.loop.newConversation("main", undefined, lease);
+        await memoryManager.markMainActiveFresh();
+        return { ok: true, released: true };
+      });
     }
     return { ok: true, released: await releaseGroup(id, "tile closed") };
   });

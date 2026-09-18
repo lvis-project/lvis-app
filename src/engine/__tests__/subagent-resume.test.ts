@@ -2665,9 +2665,24 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
         supportsA2AParentDelivery: true,
       },
     };
+    const originalLoadSession = ConversationLoop.prototype.loadSession;
+    let markLoadStarted!: () => void;
+    const loadStarted = new Promise<void>((resolve) => { markLoadStarted = resolve; });
+    let releaseLoad!: () => void;
+    const loadGate = new Promise<void>((resolve) => { releaseLoad = resolve; });
+    const loadSession = vi.spyOn(ConversationLoop.prototype, "loadSession")
+      .mockImplementationOnce(async function (
+        this: ConversationLoop,
+        ...args: Parameters<typeof originalLoadSession>
+      ) {
+        markLoadStarted();
+        await loadGate;
+        return originalLoadSession.apply(this, args);
+      });
 
     try {
-      const winnerResult = await tool.execute(
+      let handleReturned = false;
+      const winnerRequest = tool.execute(
         {
           title: "background-resume",
           instructions: "continue",
@@ -2675,7 +2690,14 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
           background: true,
         },
         toolContext,
-      );
+      ).then((result) => {
+        handleReturned = true;
+        return result;
+      });
+      await loadStarted;
+      expect(handleReturned).toBe(false);
+      releaseLoad();
+      const winnerResult = await winnerRequest;
       const winner = JSON.parse(winnerResult.output);
       await started;
       expect(winnerResult.isError).toBe(false);
@@ -2767,6 +2789,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       });
     } finally {
       releaseWinner();
+      loadSession.mockRestore();
       restore();
     }
   });

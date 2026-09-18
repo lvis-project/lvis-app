@@ -6,7 +6,7 @@
  * lists live TOGETHER here so the two hand-maintained lists cannot drift.
  * Free functions over a `self: ConversationLoop` this-shaped param.
  */
-import type { ConversationLoop } from "../conversation-loop.js";
+import type { ConversationLoop, SessionTransitionLease } from "../conversation-loop.js";
 import { isValidSessionId, type SessionKind } from "../../memory/memory-manager.js";
 import type { GenericMessage } from "../llm/types.js";
 import type { WorkspaceRootRevocationOptions } from "./types.js";
@@ -78,10 +78,14 @@ export interface WorkspaceRootRevocationResult {
   projectRebound: boolean;
 }
 
-async function settleOutgoingSession(self: ConversationLoop): Promise<void> {
-  const outgoingSessionId = self.sessionId;
-  backgroundShellManager.disposeSession(outgoingSessionId);
-  const report = await backgroundShellManager.settleSessionCleanup(outgoingSessionId);
+async function settleOutgoingSession(
+  self: ConversationLoop,
+  lease: SessionTransitionLease,
+): Promise<void> {
+  self.assertSessionTransitionLease(lease);
+  backgroundShellManager.disposeSession(lease.sessionId);
+  const report = await backgroundShellManager.settleSessionCleanup(lease.sessionId);
+  self.assertSessionTransitionLease(lease);
   if (report?.state === "cleanup-unproven") {
     throw new Error("workload-broker:session-cleanup-unproven");
   }
@@ -208,38 +212,52 @@ export async function newConversation(
   self: ConversationLoop,
   kind: SessionKind = "main",
   project?: SessionProjectContext,
+  lease?: SessionTransitionLease,
 ): Promise<void> {
+    if (lease === undefined) throw new Error("conversation-loop:session-transition-lease-required");
+    self.assertSessionTransitionLease(lease);
+    const outgoingSessionId = lease.sessionId;
+    const leavingStartFiredFor = self.sessionStartFiredFor;
+    const leavingSessionMeta = self.sessionMetaForLifecycle();
     // SessionEnd (#811) — the outgoing session is being left for a new one.
-    // Observe-only + fire-and-forget; the override pins it
-    // to the leaving session id, and the guard skips startup (no session has run
-    // a turn yet, so no symmetric SessionStart fired).
-    if (self.sessionStartFiredFor !== null) {
-      void self.fireLifecycleEvent(
-        "SessionEnd",
-        { reason: "new-conversation", sessionMeta: self.sessionMetaForLifecycle() },
-        self.sessionStartFiredFor,
-      );
-    }
     if (self.history.length > 0) {
-      self.deps.memoryManager.saveSession(self.sessionId, self.history.getMessages()).catch((err: unknown) => {
+      self.deps.memoryManager.saveSession(outgoingSessionId, self.history.getMessages()).catch((err: unknown) => {
         log.warn("newConversation saveSession failed: %s", (err as Error).message);
       });
     }
     // Do not mutate session identity or session-scoped state until broker
     // cleanup has a terminal, resource-zero proof.
-    await settleOutgoingSession(self);
-    self.deps.closeRationaleSession?.(self.sessionId);
+    await settleOutgoingSession(self, lease);
+    self.deps.closeRationaleSession?.(outgoingSessionId);
     // C2(c): drop the previous session's loaded skills so a fresh chat
     // starts with a clean overlay. Tests / stubs without overlay omit self.
-    self.deps.skillOverlay?.clear(self.sessionId);
+    self.deps.skillOverlay?.clear(outgoingSessionId);
     // Clear the OLD session's on-demand plugin activations BEFORE reassigning
     // sessionId. Clearing after the reassignment would key on the NEW id and
     // orphan the OLD session's Map entry.
-    self.deps.pluginRuntime?.clearSessionActivated?.(self.sessionId);
+    self.deps.pluginRuntime?.clearSessionActivated?.(outgoingSessionId);
+    // Emit only after cleanup is proven and all fallible retirement work has
+    // succeeded, immediately before committing the new generation.
+    if (leavingStartFiredFor !== null) {
+      void self.fireLifecycleEvent(
+        "SessionEnd",
+        { reason: "new-conversation", sessionMeta: leavingSessionMeta },
+        leavingStartFiredFor,
+      );
+    }
     applyFreshSessionState(self, kind, project);
   }
 
-export async function loadSession(self: ConversationLoop, sessionId: string): Promise<boolean> {
+export async function loadSession(
+  self: ConversationLoop,
+  sessionId: string,
+  lease?: SessionTransitionLease,
+): Promise<boolean> {
+    if (lease === undefined) throw new Error("conversation-loop:session-transition-lease-required");
+    self.assertSessionTransitionLease(lease);
+    const outgoingSessionId = lease.sessionId;
+    const leavingStartFiredFor = self.sessionStartFiredFor;
+    const leavingSessionMeta = self.sessionMetaForLifecycle();
     if (!isValidSessionId(sessionId)) {
       log.warn({ sessionId }, "loadSession rejected unsafe sessionId");
       return false;
@@ -251,19 +269,8 @@ export async function loadSession(self: ConversationLoop, sessionId: string): Pr
     const messages = self.deps.memoryManager.loadSession(sessionId);
     if (!messages) return false;
 
-    // SessionEnd (#811) — load succeeded, so the outgoing session is being left
-    // for `sessionId`. Observe-only + fire-and-forget; guard + override as above.
-    if (self.sessionStartFiredFor !== null) {
-      void self.fireLifecycleEvent(
-        "SessionEnd",
-        { reason: "load-session", sessionMeta: self.sessionMetaForLifecycle() },
-        self.sessionStartFiredFor,
-      );
-    }
-
-
     if (self.history.length > 0) {
-      self.deps.memoryManager.saveSession(self.sessionId, self.history.getMessages()).catch((err: unknown) => {
+      self.deps.memoryManager.saveSession(outgoingSessionId, self.history.getMessages()).catch((err: unknown) => {
         log.warn("loadSession saveSession failed: %s", (err as Error).message);
       });
     }
@@ -277,13 +284,20 @@ export async function loadSession(self: ConversationLoop, sessionId: string): Pr
         log.warn("loadSession repair saveSession failed: %s", (err as Error).message);
       });
     }
-    await settleOutgoingSession(self);
-    self.deps.closeRationaleSession?.(self.sessionId);
+    await settleOutgoingSession(self, lease);
+    self.deps.closeRationaleSession?.(outgoingSessionId);
 
     // Clear the OLD session's on-demand plugin activations BEFORE reassigning
     // sessionId. Clearing after the reassignment would key on the NEW id and
     // orphan the OLD session's Map entry.
-    self.deps.pluginRuntime?.clearSessionActivated?.(self.sessionId);
+    self.deps.pluginRuntime?.clearSessionActivated?.(outgoingSessionId);
+    if (leavingStartFiredFor !== null) {
+      void self.fireLifecycleEvent(
+        "SessionEnd",
+        { reason: "load-session", sessionMeta: leavingSessionMeta },
+        leavingStartFiredFor,
+      );
+    }
     self.sessionId = sessionId;
     self.sessionEpoch += 1;
     // #811 m2 — switched-into session ⇒ SessionStart re-fires on its next turn.
@@ -327,13 +341,17 @@ export async function loadSession(self: ConversationLoop, sessionId: string): Pr
     return true;
   }
 
-export async function resetAndResume(self: ConversationLoop, sessionId: string): Promise<{
+export async function resetAndResume(
+  self: ConversationLoop,
+  sessionId: string,
+  lease?: SessionTransitionLease,
+): Promise<{
     ok: boolean;
     compacted: boolean;
     compactedAt: string | null;
     removedMessageCount: number;
   }> {
-    const loaded = await loadSession(self, sessionId);
+    const loaded = await loadSession(self, sessionId, lease);
     if (!loaded) {
       return { ok: false, compacted: false, compactedAt: null, removedMessageCount: 0 };
     }
@@ -358,9 +376,15 @@ export async function resetAndResume(self: ConversationLoop, sessionId: string):
     };
   }
 
-export async function startRoutineConversation(self: ConversationLoop, routineId: string, routineTitle: string, routineFiredAt?: string): Promise<string> {
+export async function startRoutineConversation(
+  self: ConversationLoop,
+  routineId: string,
+  routineTitle: string,
+  routineFiredAt?: string,
+  lease?: SessionTransitionLease,
+): Promise<string> {
     const project = currentProjectContext(self);
-    await newConversation(self, "routine", project);
+    await newConversation(self, "routine", project, lease);
     self.sessionRoutineId = routineId;
     self.sessionRoutineTitle = routineTitle;
     await self.deps.memoryManager.saveSession(self.sessionId, []);

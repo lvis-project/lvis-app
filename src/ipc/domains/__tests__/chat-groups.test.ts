@@ -74,6 +74,8 @@ type FakeLoop = {
   abortCurrentTurn: ReturnType<typeof vi.fn>;
   newConversation: ReturnType<typeof vi.fn>;
   cleanupSession: ReturnType<typeof vi.fn>;
+  runSessionTransition: ReturnType<typeof vi.fn>;
+  isSessionTransitioning: () => boolean;
   getSessionId: () => string;
   getSessionKind: () => "main";
   hasActiveTurn: () => boolean;
@@ -91,6 +93,7 @@ function fakeLoop(id: string, seed: unknown[] = []): FakeLoop {
   // Truncation really removes rows here: a no-op would let a handler that cuts
   // the WRONG tile's conversation still look correct.
   let messages = [...seed];
+  let transitioning = false;
   const loop: FakeLoop = {
     id,
     sessionId: sessionUuid(`session-of-${id}`),
@@ -98,6 +101,16 @@ function fakeLoop(id: string, seed: unknown[] = []): FakeLoop {
     abortCurrentTurn: vi.fn(),
     newConversation: vi.fn(async () => undefined),
     cleanupSession: vi.fn(async () => undefined),
+    runSessionTransition: vi.fn(async (_reason: string, operation: (lease: object) => unknown) => {
+      if (transitioning) throw new Error("conversation-loop:session-transition-in-progress");
+      transitioning = true;
+      try {
+        return await operation({});
+      } finally {
+        transitioning = false;
+      }
+    }),
+    isSessionTransitioning: vi.fn(() => transitioning),
     getSessionId: () => loop.sessionId,
     getSessionKind: () => "main",
     hasActiveTurn: () => false,
@@ -353,6 +366,7 @@ describe("lvis:chat:* with chat groups", () => {
     expect(lease).not.toBeNull();
     let settled = false;
     const release = (invoke(CHANNELS.chat.groupRelease, "group-2") as Promise<unknown>).then((r) => { settled = true; return r; });
+    expect(groups.get("group-2")!.isSessionTransitioning()).toBe(true);
     await Promise.resolve();
     expect(groups.get("group-2")!.abortCurrentTurn).toHaveBeenCalledTimes(1);
     expect(settled).toBe(false); // still waiting on the turn's lease

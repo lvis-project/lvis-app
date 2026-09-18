@@ -188,9 +188,11 @@ export function registerSideChatHandlers(deps: IpcDeps): void {
     if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.sidechat.new, e); return UNAUTHORIZED_FRAME; }
     // Abort any in-flight turn first so its remaining frames never leak into the
     // fresh session (mirrors abort handler; contrast the prior unguarded call).
-    await abortActiveSideTurn();
-    await loop.newConversation();
-    return { ok: true as const, sessionId: loop.getSessionId() };
+    return loop.runSessionTransition("sidechat-new", async (lease) => {
+      await abortActiveSideTurn();
+      await loop.newConversation("main", undefined, lease);
+      return { ok: true as const, sessionId: loop.getSessionId() };
+    });
   });
 
   ipcMain.handle(CHANNELS.sidechat.load, async (e, sessionId: unknown) => {
@@ -200,17 +202,19 @@ export function registerSideChatHandlers(deps: IpcDeps): void {
     }
     // Abort any in-flight turn first so its remaining frames never leak into the
     // loaded session's transcript (same concurrency hazard as `new`).
-    await abortActiveSideTurn();
-    const loaded = await loop.loadSession(sessionId);
-    if (!loaded) {
-      return { ok: false as const, error: "session-not-found", messages: [] };
-    }
-    const messages = loop.getHistory().getMessages() as GenericMessage[];
-    return {
-      ok: true as const,
-      sessionId: loop.getSessionId(),
-      messages: messages.map(serializeHistoryMessage),
-    };
+    return loop.runSessionTransition("sidechat-load", async (lease) => {
+      await abortActiveSideTurn();
+      const loaded = await loop.loadSession(sessionId, lease);
+      if (!loaded) {
+        return { ok: false as const, error: "session-not-found", messages: [] };
+      }
+      const messages = loop.getHistory().getMessages() as GenericMessage[];
+      return {
+        ok: true as const,
+        sessionId: loop.getSessionId(),
+        messages: messages.map(serializeHistoryMessage),
+      };
+    });
   });
 
   ipcMain.handle(CHANNELS.sidechat.abort, async (e) => {

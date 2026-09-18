@@ -307,6 +307,13 @@ describe("RequestAnchor and rationale provenance host wiring", () => {
     const transition = fixture.loop.newConversation();
     await Promise.resolve();
     expect(fixture.loop.getSessionId()).toBe(originalSessionId);
+    await expect(fixture.loop.newConversation()).rejects.toThrow(
+      "conversation-loop:session-transition-in-progress",
+    );
+    await expect(fixture.loop.runTurn("must not enter")).rejects.toThrow(
+      "conversation-loop:session-transition-in-progress",
+    );
+    expect(fixture.loop.queueGuidance("must not queue")).toBe("session-transition");
     finishCleanup();
     await transition;
     expect(fixture.loop.getSessionId()).not.toBe(originalSessionId);
@@ -316,6 +323,8 @@ describe("RequestAnchor and rationale provenance host wiring", () => {
   it("refuses a session transition and retains identity when cleanup is unproven", async () => {
     const fixture = makeHarness([], false, vi.fn());
     const originalSessionId = fixture.loop.getSessionId();
+    fixture.loop.sessionStartFiredFor = originalSessionId;
+    const fireLifecycleEvent = vi.spyOn(fixture.loop, "fireLifecycleEvent");
     const settle = vi.spyOn(backgroundShellManager, "settleSessionCleanup")
       .mockResolvedValueOnce({
         sessionId: originalSessionId,
@@ -331,6 +340,11 @@ describe("RequestAnchor and rationale provenance host wiring", () => {
       "workload-broker:session-cleanup-unproven",
     );
     expect(fixture.loop.getSessionId()).toBe(originalSessionId);
+    expect(fireLifecycleEvent).not.toHaveBeenCalledWith(
+      "SessionEnd",
+      expect.anything(),
+      expect.anything(),
+    );
     settle.mockRestore();
   });
 

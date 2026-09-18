@@ -102,6 +102,12 @@ export interface GuidanceQueueEntry {
    */
   subAgentTitle?: string;
 }
+
+export interface SessionTransitionLease {
+  readonly sessionId: string;
+  readonly sessionEpoch: number;
+  readonly reason: string;
+}
 type GuidanceDisposition = Pick<
   GuidanceQueueEntry,
   "onInjected" | "onDropped" | "approvalReasonPrefix" | "a2aCausalContext" | "subAgentTitle"
@@ -247,6 +253,7 @@ export class ConversationLoop {
    * unreachable guidance.
    */
   private readonly turnSettledListeners = new Set<(sessionId: string) => void>();
+  private activeSessionTransition: SessionTransitionLease | null = null;
 
   constructor(deps: ConversationLoopDeps) {
     this.deps = deps;
@@ -318,7 +325,7 @@ export class ConversationLoop {
    *   - `"too-long"` if `text` exceeds `GUIDE_MAX_CHARS` after trim
    *   - `"empty"` if `text` is empty after trim (no-op, returned for parity)
    */
-  queueGuidance(text: string): "queued" | "no-active-turn" | "queue-full" | "too-long" | "empty" {
+  queueGuidance(text: string): "queued" | "no-active-turn" | "queue-full" | "too-long" | "empty" | "session-transition" {
     return this.enqueueGuidance(text);
   }
 
@@ -333,14 +340,15 @@ export class ConversationLoop {
   queueGuidanceWithDisposition(
     text: string,
     disposition: GuidanceDisposition,
-  ): "queued" | "no-active-turn" | "queue-full" | "too-long" | "empty" {
+  ): "queued" | "no-active-turn" | "queue-full" | "too-long" | "empty" | "session-transition" {
     return this.enqueueGuidance(text, disposition);
   }
 
   private enqueueGuidance(
     text: string,
     disposition: GuidanceDisposition = {},
-  ): "queued" | "no-active-turn" | "queue-full" | "too-long" | "empty" {
+  ): "queued" | "no-active-turn" | "queue-full" | "too-long" | "empty" | "session-transition" {
+    if (this.activeSessionTransition !== null) return "session-transition";
     const trimmed = text.trim();
     if (trimmed.length === 0) return "empty";
     if (trimmed.length > GUIDE_MAX_CHARS) return "too-long";
@@ -538,8 +546,55 @@ export class ConversationLoop {
   }
 
 
-  newConversation(kind: SessionKind = "main", project?: SessionProjectContext): Promise<void> {
-    return newConversation(this, kind, project ?? (kind === "main" ? this.deps.getDefaultProject?.() : undefined));
+  beginSessionTransition(reason: string): SessionTransitionLease {
+    if (this.activeSessionTransition !== null) {
+      throw new Error("conversation-loop:session-transition-in-progress");
+    }
+    const lease = Object.freeze({
+      sessionId: this.sessionId,
+      sessionEpoch: this.sessionEpoch,
+      reason,
+    });
+    this.activeSessionTransition = lease;
+    return lease;
+  }
+
+  assertSessionTransitionLease(lease: SessionTransitionLease): void {
+    if (this.activeSessionTransition !== lease) {
+      throw new Error("conversation-loop:invalid-session-transition-lease");
+    }
+    if (this.sessionId !== lease.sessionId || this.sessionEpoch !== lease.sessionEpoch) {
+      throw new Error("conversation-loop:session-generation-changed");
+    }
+  }
+
+  async runSessionTransition<T>(
+    reason: string,
+    operation: (lease: SessionTransitionLease) => Promise<T> | T,
+  ): Promise<T> {
+    const lease = this.beginSessionTransition(reason);
+    try {
+      return await operation(lease);
+    } finally {
+      if (this.activeSessionTransition === lease) this.activeSessionTransition = null;
+    }
+  }
+
+  isSessionTransitioning(): boolean {
+    return this.activeSessionTransition !== null;
+  }
+
+  newConversation(
+    kind: SessionKind = "main",
+    project?: SessionProjectContext,
+    lease?: SessionTransitionLease,
+  ): Promise<void> {
+    const targetProject = project ?? (kind === "main" ? this.deps.getDefaultProject?.() : undefined);
+    if (lease !== undefined) return newConversation(this, kind, targetProject, lease);
+    return this.runSessionTransition(
+      "new-conversation",
+      (ownedLease) => newConversation(this, kind, targetProject, ownedLease),
+    );
   }
 
   /** Initialize a newly constructed loop without an outgoing session to clean. */
@@ -598,17 +653,20 @@ export class ConversationLoop {
    * `clearSessionActivated(this.sessionId)` — this method covers the
    * routine-fire path where the loop is discarded without a resetSession.
    */
-  async cleanupSession(): Promise<void> {
-    const sessionId = this.sessionId;
-    backgroundShellManager.disposeSession(sessionId);
-    const report = await backgroundShellManager.settleSessionCleanup(sessionId);
-    if (report?.state === "cleanup-unproven") {
-      throw new Error("workload-broker:session-cleanup-unproven");
-    }
-    this.deps.closeRationaleSession?.(this.sessionId);
-    this.deps.pluginRuntime?.clearSessionActivated?.(this.sessionId);
-    // Kill + drop any background shells this session started (bash
-    // run_in_background) so they do not outlive the session.
+  cleanupSession(lease?: SessionTransitionLease): Promise<void> {
+    const cleanup = async (ownedLease: SessionTransitionLease): Promise<void> => {
+      this.assertSessionTransitionLease(ownedLease);
+      backgroundShellManager.disposeSession(ownedLease.sessionId);
+      const report = await backgroundShellManager.settleSessionCleanup(ownedLease.sessionId);
+      this.assertSessionTransitionLease(ownedLease);
+      if (report?.state === "cleanup-unproven") {
+        throw new Error("workload-broker:session-cleanup-unproven");
+      }
+      this.deps.closeRationaleSession?.(ownedLease.sessionId);
+      this.deps.pluginRuntime?.clearSessionActivated?.(ownedLease.sessionId);
+    };
+    if (lease !== undefined) return cleanup(lease);
+    return this.runSessionTransition("session-cleanup", cleanup);
   }
 
   readToolResultForChunk(toolUseId: string): ReadableToolResult | null {
@@ -837,25 +895,36 @@ export class ConversationLoop {
   }
 
 
-  loadSession(sessionId: string): Promise<boolean> {
-    return loadSession(this, sessionId);
+  loadSession(sessionId: string, lease?: SessionTransitionLease): Promise<boolean> {
+    if (lease !== undefined) return loadSession(this, sessionId, lease);
+    return this.runSessionTransition(
+      "load-session",
+      (ownedLease) => loadSession(this, sessionId, ownedLease),
+    );
   }
 
   async startRoutineConversation(routineId: string, routineTitle: string, routineFiredAt?: string): Promise<string> {
-    return startRoutineConversation(this, routineId, routineTitle, routineFiredAt);
+    return this.runSessionTransition(
+      "start-routine-conversation",
+      (lease) => startRoutineConversation(this, routineId, routineTitle, routineFiredAt, lease),
+    );
   }
 
   /**
    * §4.5.2 B1 — Session resume with full state reset.
    * Unlike loadSession (raw swap), also triggers auto-compact check.
    */
-  resetAndResume(sessionId: string): Promise<{
+  resetAndResume(sessionId: string, lease?: SessionTransitionLease): Promise<{
     ok: boolean;
     compacted: boolean;
     compactedAt: string | null;
     removedMessageCount: number;
   }> {
-    return resetAndResume(this, sessionId);
+    if (lease !== undefined) return resetAndResume(this, sessionId, lease);
+    return this.runSessionTransition(
+      "reset-and-resume",
+      (ownedLease) => resetAndResume(this, sessionId, ownedLease),
+    );
   }
 
 
@@ -879,6 +948,9 @@ export class ConversationLoop {
     abortSignal?: AbortSignal,
     options?: RunTurnOptions,
   ): Promise<TurnResult> {
+    if (this.activeSessionTransition !== null) {
+      throw new Error("conversation-loop:session-transition-in-progress");
+    }
     return turnExtensionPolicyContext.run(
       resolveTurnExtensionPolicy(options?.remoteControllerAuthority),
       () => runTurn(this, input, callbacks, abortSignal, options),
