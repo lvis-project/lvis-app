@@ -63,23 +63,28 @@ test "\${LVIS_HOME}" = "/preserved/lvis-home"
 printf '%s\\n' "$*"
 `);
   chmodSync(join(root, "bin/node"), 0o755);
-  const result = spawnSync(join(root, "lvis"), [`--verify-permission-audit=${"a".repeat(64)}`], {
-    encoding: "utf8",
-    env: {
-      ...process.env,
-      ELECTRON_NO_ASAR: "1",
-      ELECTRON_RUN_AS_NODE: "1",
-      NODE_CHANNEL_FD: "9",
-      NODE_CHANNEL_SERIALIZATION_MODE: "advanced",
-      NODE_OPTIONS: "--require=/untrusted/preload.cjs",
-      NODE_PATH: "/untrusted/modules",
-      NODE_UNIQUE_ID: "worker-role",
-      LVIS_HOME: "/preserved/lvis-home",
-    },
-  });
-  expect(result.status, result.stderr).toBe(0);
-  expect(result.stdout).toContain("--disable-warning=UNDICI-EHPA");
-  expect(result.stdout).toContain(`--verify-permission-audit=${"a".repeat(64)}`);
+  for (const command of [
+    `--verify-permission-audit=${"a".repeat(64)}`,
+    `--create-permission-audit-self-test=${"b".repeat(64)}`,
+  ]) {
+    const result = spawnSync(join(root, "lvis"), [command], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        ELECTRON_NO_ASAR: "1",
+        ELECTRON_RUN_AS_NODE: "1",
+        NODE_CHANNEL_FD: "9",
+        NODE_CHANNEL_SERIALIZATION_MODE: "advanced",
+        NODE_OPTIONS: "--require=/untrusted/preload.cjs",
+        NODE_PATH: "/untrusted/modules",
+        NODE_UNIQUE_ID: "worker-role",
+        LVIS_HOME: "/preserved/lvis-home",
+      },
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("--disable-warning=UNDICI-EHPA");
+    expect(result.stdout).toContain(command);
+  }
 });
 
 function runNode(args: string[]) {
