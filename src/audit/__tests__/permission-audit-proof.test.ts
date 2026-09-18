@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import {
   chmodSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
@@ -19,8 +20,11 @@ import { createHostSecretStore } from "../host-secret-store.js";
 import { ensureAuditSecret, sealKeyName } from "../hmac-chain.js";
 import {
   createPermissionAuditProof,
+  createPermissionAuditSelfTest,
   parsePermissionAuditProofCommand,
+  parsePermissionAuditSelfTestCommand,
   PERMISSION_AUDIT_PROOF_SCHEMA,
+  PERMISSION_AUDIT_SELF_TEST_SCHEMA,
 } from "../permission-audit-proof.js";
 
 const DATE = "2026-09-18";
@@ -172,5 +176,57 @@ describe("permission audit proof CLI contract", () => {
     { argv: [`--verify-permission-audit=${CHALLENGE}`, "--user-data-dir="] },
   ])("rejects invalid or mixed argv: $argv", ({ argv }) => {
     expect(() => parsePermissionAuditProofCommand(argv)).toThrow();
+  });
+});
+
+describe("packaged permission audit self-test", () => {
+  beforeEach(() => {
+    const proofHome = join(home, "proof-home");
+    mkdirSync(proofHome, { mode: 0o700 });
+    const externalKey = join(home, "proof-external.key");
+    writeFileSync(externalKey, randomBytes(32), { mode: 0o600 });
+    vi.stubEnv("LVIS_HOME", proofHome);
+    vi.stubEnv("LVIS_SECRET_KEY_FILE", externalKey);
+  });
+
+  it("creates and verifies exactly one challenge-bound row", async () => {
+    const receipt = await createPermissionAuditSelfTest(CHALLENGE, () => NOW);
+    const auditPath = join(home, "proof-home", "audit", receipt.file.name);
+    const raw = readFileSync(auditPath);
+    const row = JSON.parse(readFileSync(auditPath, "utf8")) as {
+      auditId: string; toolUseId: string;
+      workloadBrokerCorrelation: { grant: { identity: string; effectDigest: string } };
+    };
+    expect(receipt).toEqual({
+      schema: PERMISSION_AUDIT_SELF_TEST_SCHEMA, challenge: CHALLENGE,
+      createdAt: NOW.toISOString(),
+      file: { name: `${DATE}.permission-audit.jsonl`, date: DATE,
+        sha256: createHash("sha256").update(raw).digest("hex"), bytes: raw.byteLength, entries: 1 },
+    });
+    expect(row.auditId).toContain(CHALLENGE);
+    expect(row.toolUseId).toContain(CHALLENGE);
+    expect(row.workloadBrokerCorrelation.grant).toEqual({
+      identity: CHALLENGE, effectDigest: CHALLENGE, action: "builtin-tool", planIdentity: null,
+    });
+    expect(JSON.stringify(receipt)).not.toContain(home);
+  });
+
+  it("rejects a reused profile before creating audit authority", async () => {
+    writeFileSync(join(process.env.LVIS_HOME!, "existing"), "occupied", { mode: 0o600 });
+    await expect(createPermissionAuditSelfTest(CHALLENGE)).rejects.toThrow(/fresh LVIS_HOME/);
+    expect(readdirSync(process.env.LVIS_HOME!)).toEqual(["existing"]);
+  });
+
+  it("parses only a valid isolated self-test command", () => {
+    expect(parsePermissionAuditSelfTestCommand([
+      `--create-permission-audit-self-test=${CHALLENGE}`,
+      "--user-data-dir=/tmp/lvis-self-test",
+    ])).toEqual({ challenge: CHALLENGE });
+    expect(() => parsePermissionAuditSelfTestCommand([
+      `--create-permission-audit-self-test=${CHALLENGE}`, "--runtime-check",
+    ])).toThrow();
+    expect(() => parsePermissionAuditSelfTestCommand([
+      `--create-permission-audit-self-test=${"A".repeat(64)}`,
+    ])).toThrow();
   });
 });

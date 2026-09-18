@@ -1,8 +1,13 @@
 const PERMISSION_AUDIT_PROOF_FLAG = "--verify-permission-audit";
+const PERMISSION_AUDIT_SELF_TEST_FLAG = "--create-permission-audit-self-test";
 
 /** Reserve every proof-looking form so malformed input cannot boot the host. */
 export function isPermissionAuditProofArg(arg) {
   return arg.startsWith(PERMISSION_AUDIT_PROOF_FLAG);
+}
+
+export function isPermissionAuditSelfTestArg(arg) {
+  return arg.startsWith(PERMISSION_AUDIT_SELF_TEST_FLAG);
 }
 
 export function permissionAuditProofFailureCode(verificationStarted) {
@@ -20,7 +25,7 @@ export function headlessLaunchArgs(args) {
     arg === "--exec-workload-capability" || arg.startsWith("--exec-workload-capability=") ||
     arg === "--set-secret" || arg.startsWith("--set-secret=") ||
     arg === "--serve" || arg === "--runtime-check" ||
-    isPermissionAuditProofArg(arg));
+    isPermissionAuditProofArg(arg) || isPermissionAuditSelfTestArg(arg));
   if (!nativeCommand) return null;
   // The desktop wrapper accepts its main module as the first positional arg.
   return args.filter((arg, index) => !(index === 0 && !arg.startsWith("--")));

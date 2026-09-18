@@ -14,6 +14,7 @@ const repository = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 export const HEADLESS_RUNTIME_CONTRACTS = Object.freeze({
   workloadBrokerCorrelation: "lvis-workload-correlation/v1",
   permissionAuditProof: "lvis-permission-audit-proof/v1",
+  permissionAuditSelfTest: "lvis-permission-audit-self-test/v1",
   launcherEnvironment: "lvis-headless-launch-environment/v1",
 });
 export const HEADLESS_FORBIDDEN_INHERITED_ENV = Object.freeze([

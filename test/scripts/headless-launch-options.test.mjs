@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   headlessLaunchArgs,
   isPermissionAuditProofArg,
+  isPermissionAuditSelfTestArg,
   permissionAuditProofFailureCode,
 } from "../../scripts/lib/headless-launch-options.mjs";
 
@@ -14,6 +15,7 @@ test("routes supported native command forms with their values intact", () => {
     ["--verify-permission-audit=" + "a".repeat(64)],
     ["--verify-permission-audit"],
     ["--verify-permission-audit=" + "b".repeat(64), "--user-data-dir=/tmp/lvis-proof"],
+    ["--create-permission-audit-self-test=" + "c".repeat(64)],
     ["--exec=hello", "--exec-operator-attestation=/run/lvis/attestation.json"],
     ["--exec-operator-attestation=/run/lvis/attestation.json"],
     [
@@ -25,6 +27,12 @@ test("routes supported native command forms with their values intact", () => {
     assert.deepEqual(headlessLaunchArgs(args), args);
     assert.deepEqual(headlessLaunchArgs(["dist/src/main/main.js", ...args]), args);
   }
+});
+
+test("reserves malformed permission audit self-test forms", () => {
+  assert.equal(isPermissionAuditSelfTestArg("--create-permission-audit-self-test"), true);
+  assert.equal(isPermissionAuditSelfTestArg("--create-permission-audit-self-test=BAD"), true);
+  assert.deepEqual(headlessLaunchArgs(["--create-permission-audit-self-test=BAD"]), ["--create-permission-audit-self-test=BAD"]);
 });
 
 test("reserves malformed proof forms and exposes only stable failure codes", () => {

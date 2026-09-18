@@ -11,9 +11,12 @@ import {
 } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import { createNodeSecretEncryption } from "../data/node-secret-encryption.js";
+import { AuditLogger } from "./audit-logger.js";
+import { createHostSecretStore } from "./host-secret-store.js";
 import { iterateJsonlLinesFromFd } from "./jsonl-reader.js";
 import {
   GENESIS_MARKER,
+  ensureAuditSecret,
   readExistingAuditSecret,
   SafeStorageSecretStore,
   sealKeyName,
@@ -23,6 +26,7 @@ import {
 
 export const PERMISSION_AUDIT_PROOF_SCHEMA = "lvis-permission-audit-proof/v1";
 const PROOF_FLAG = "--verify-permission-audit=";
+const SELF_TEST_FLAG = "--create-permission-audit-self-test=";
 const USER_DATA_FLAG = "--user-data-dir=";
 const CHALLENGE = /^[a-f0-9]{64}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
@@ -49,6 +53,15 @@ export interface PermissionAuditProofCommand {
   readonly challenge: string;
 }
 
+export const PERMISSION_AUDIT_SELF_TEST_SCHEMA = "lvis-permission-audit-self-test/v1";
+
+export interface PermissionAuditSelfTestReceipt {
+  readonly schema: typeof PERMISSION_AUDIT_SELF_TEST_SCHEMA;
+  readonly challenge: string;
+  readonly createdAt: string;
+  readonly file: PermissionAuditProofFile;
+}
+
 /** Parse the proof command before the ordinary host boot path runs. */
 export function parsePermissionAuditProofCommand(
   argv: readonly string[],
@@ -65,6 +78,71 @@ export function parsePermissionAuditProofCommand(
     throw new Error("permission audit proof challenge must be 64 lowercase hexadecimal characters");
   }
   return { challenge };
+}
+
+export function parsePermissionAuditSelfTestCommand(
+  argv: readonly string[],
+): PermissionAuditProofCommand | null {
+  const selfTestArgs = argv.filter((arg) => arg.startsWith(SELF_TEST_FLAG));
+  if (selfTestArgs.length === 0) return null;
+  const permitted = argv.every((arg) => arg.startsWith(SELF_TEST_FLAG) || arg.startsWith(USER_DATA_FLAG));
+  const userDataArgs = argv.filter((arg) => arg.startsWith(USER_DATA_FLAG));
+  if (!permitted || selfTestArgs.length !== 1 || userDataArgs.length > 1 || userDataArgs.some((arg) => arg.length === USER_DATA_FLAG.length)) {
+    throw new Error("--create-permission-audit-self-test must be used alone except for one non-empty --user-data-dir");
+  }
+  const challenge = selfTestArgs[0]!.slice(SELF_TEST_FLAG.length);
+  if (!CHALLENGE.test(challenge)) {
+    throw new Error("permission audit self-test challenge must be 64 lowercase hexadecimal characters");
+  }
+  return { challenge };
+}
+
+/** Create one challenge-bound row using only the packaged audit implementation. */
+export async function createPermissionAuditSelfTest(
+  challenge: string,
+  now: () => Date = () => new Date(),
+): Promise<PermissionAuditSelfTestReceipt> {
+  if (!CHALLENGE.test(challenge)) throw new Error("permission audit self-test challenge is invalid");
+  const home = exactAbsoluteEnvironmentPath("LVIS_HOME");
+  const keyFile = exactAbsoluteEnvironmentPath("LVIS_SECRET_KEY_FILE");
+  const homeBefore = directoryAuthorityIdentity(home);
+  const keyBefore = protectedKeyIdentity(keyFile);
+  if (readdirSync(home).length !== 0) throw new Error("permission audit self-test requires a fresh LVIS_HOME");
+  const timestamp = now();
+  const seals = createHostSecretStore(createNodeSecretEncryption(keyFile), join(home, "secrets"));
+  const logger = new AuditLogger(join(home, "audit"), { now: () => timestamp });
+  try {
+    await logger.setupPermissionAuditChain(ensureAuditSecret(seals), seals);
+    await logger.appendPermissionAuditEntry({
+      decision: "allow", auditId: `self-test-${challenge}`, ts: timestamp.toISOString(),
+      trustOrigin: "user-keyboard", toolUseId: `self-test-${challenge}`,
+      workloadBrokerCorrelation: {
+        version: "lvis-workload-correlation/v1", kind: "tool-invocation",
+        toolUseId: `self-test-${challenge}`, toolName: "read_file", operation: "file.read",
+        grant: { identity: challenge, effectDigest: challenge, action: "builtin-tool", planIdentity: null },
+      },
+      tool: "read_file", source: "builtin", category: "read",
+      directory: "/packaged-self-test", directoryAllowed: true, layer: 6,
+    });
+  } finally {
+    await logger.close();
+  }
+  const proof = await createPermissionAuditProof(challenge, () => timestamp);
+  if (proof.files.length !== 1 || proof.files[0]!.entries !== 1) {
+    throw new Error("permission audit self-test did not create exactly one row");
+  }
+  const homeAfter = directoryAuthorityIdentity(home);
+  if (homeBefore.dev !== homeAfter.dev || homeBefore.ino !== homeAfter.ino ||
+      !sameIdentity(keyBefore, protectedKeyIdentity(keyFile))) {
+    throw new Error("permission audit self-test authority changed");
+  }
+  return { schema: PERMISSION_AUDIT_SELF_TEST_SCHEMA, challenge,
+    createdAt: timestamp.toISOString(), file: proof.files[0]! };
+}
+
+function directoryAuthorityIdentity(path: string): Pick<PrivateIdentity, "dev" | "ino"> {
+  const identity = assertPrivateIdentity(lstatSync(path, { bigint: true }), "LVIS_HOME", "directory");
+  return { dev: identity.dev, ino: identity.ino };
 }
 
 function exactAbsoluteEnvironmentPath(name: "LVIS_HOME" | "LVIS_SECRET_KEY_FILE"): string {

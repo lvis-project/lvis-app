@@ -18,7 +18,7 @@ const packager = pathToFileURL(resolve("scripts/package-headless-runtime.mjs")).
 const selectedBinding = "node_modules/better-sqlite3/prebuilds/linux-x64.node";
 const foreignBinding = "node_modules/better-sqlite3/prebuilds/win32-x64.node";
 
-it("advertises the terminal permission-audit proof contract", async () => {
+it("advertises the packaged permission-audit contracts", async () => {
   const module = await import(packager) as {
     HEADLESS_RUNTIME_CONTRACTS: Record<string, string>;
     HEADLESS_FORBIDDEN_INHERITED_ENV: readonly string[];
@@ -27,6 +27,7 @@ it("advertises the terminal permission-audit proof contract", async () => {
   expect(module.HEADLESS_RUNTIME_CONTRACTS).toEqual({
     workloadBrokerCorrelation: "lvis-workload-correlation/v1",
     permissionAuditProof: "lvis-permission-audit-proof/v1",
+    permissionAuditSelfTest: "lvis-permission-audit-self-test/v1",
     launcherEnvironment: "lvis-headless-launch-environment/v1",
   });
   expect(module.HEADLESS_FORBIDDEN_INHERITED_ENV).toEqual([
