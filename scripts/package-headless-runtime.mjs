@@ -9,6 +9,12 @@ import { isDeepStrictEqual } from "node:util";
 import * as asar from "@electron/asar";
 import { readBuildSourceIdentity } from "./lib/build-source-identity.mjs";
 import { headlessPackagedMarkerPath } from "./lib/headless-packaged-marker.mjs";
+import {
+  HEADLESS_FORBIDDEN_INHERITED_ENV,
+  prepareHeadlessLaunchEnv,
+} from "./lib/headless-launch-options.mjs";
+
+export { HEADLESS_FORBIDDEN_INHERITED_ENV };
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 export const HEADLESS_RUNTIME_CONTRACTS = Object.freeze({
@@ -17,15 +23,6 @@ export const HEADLESS_RUNTIME_CONTRACTS = Object.freeze({
   permissionAuditSelfTest: "lvis-permission-audit-self-test/v1",
   launcherEnvironment: "lvis-headless-launch-environment/v1",
 });
-export const HEADLESS_FORBIDDEN_INHERITED_ENV = Object.freeze([
-  "ELECTRON_NO_ASAR",
-  "ELECTRON_RUN_AS_NODE",
-  "NODE_CHANNEL_FD",
-  "NODE_CHANNEL_SERIALIZATION_MODE",
-  "NODE_OPTIONS",
-  "NODE_PATH",
-  "NODE_UNIQUE_ID",
-]);
 export const HEADLESS_LAUNCHER = `#!/bin/sh
 set -eu
 lvis_runtime_root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -126,7 +123,8 @@ function main() {
   const nodeBinding = binding(options.node);
   const licenseBinding = binding(options["node-license"]);
   const sourceIdentity = readBuildSourceIdentity(repository);
-  const runtime = JSON.parse(execFileSync(options.node, ["-p", "JSON.stringify({version:process.version,platform:process.platform,arch:process.arch,modules:process.versions.modules,napi:process.versions.napi,electron:process.versions.electron??null})"], { encoding: "utf8" }));
+  const runtimeEnv = prepareHeadlessLaunchEnv({ ...process.env });
+  const runtime = JSON.parse(execFileSync(options.node, ["-p", "JSON.stringify({version:process.version,platform:process.platform,arch:process.arch,modules:process.versions.modules,napi:process.versions.napi,electron:process.versions.electron??null})"], { encoding: "utf8", env: runtimeEnv }));
   if (runtime.electron !== null || runtime.platform !== "linux" || !runtime.version.startsWith("v22.")) {
     throw new Error("The server artifact requires the standalone Linux 22.x runtime");
   }
@@ -187,7 +185,7 @@ function main() {
       ...process.env, NODE_ENV: "production", LVIS_RESOURCES_DIR: resources,
       LVIS_HOME: join(probeProfile, "home"), LVIS_USER_DATA_DIR: join(probeProfile, "user-data"),
     };
-    for (const name of HEADLESS_FORBIDDEN_INHERITED_ENV) delete probeEnv[name];
+    prepareHeadlessLaunchEnv(probeEnv);
     delete probeEnv.LVIS_SECRET_KEY_FILE;
     const addonProbe = execFileSync(join(options.out, "bin/node"), [join(repository, "scripts/headless-runtime-smoke.mjs"), app], { encoding: "utf8", cwd: options.out, env: probeEnv, timeout: 60_000 });
     nativeRuntime = JSON.parse(addonProbe.trim());

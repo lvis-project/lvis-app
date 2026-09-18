@@ -1,6 +1,22 @@
 const PERMISSION_AUDIT_PROOF_FLAG = "--verify-permission-audit";
 const PERMISSION_AUDIT_SELF_TEST_FLAG = "--create-permission-audit-self-test";
 
+export const HEADLESS_FORBIDDEN_INHERITED_ENV = Object.freeze([
+  "ELECTRON_NO_ASAR",
+  "ELECTRON_RUN_AS_NODE",
+  "NODE_CHANNEL_FD",
+  "NODE_CHANNEL_SERIALIZATION_MODE",
+  "NODE_OPTIONS",
+  "NODE_PATH",
+  "NODE_UNIQUE_ID",
+]);
+
+/** Remove process-role and module-loader inputs before starting native code. */
+export function prepareHeadlessLaunchEnv(env) {
+  for (const name of HEADLESS_FORBIDDEN_INHERITED_ENV) delete env[name];
+  return env;
+}
+
 /** Reserve every proof-looking form so malformed input cannot boot the host. */
 export function isPermissionAuditProofArg(arg) {
   return arg.startsWith(PERMISSION_AUDIT_PROOF_FLAG);
