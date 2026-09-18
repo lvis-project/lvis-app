@@ -131,6 +131,18 @@ function fakeLoop(id: string, seed: unknown[] = []): FakeLoop {
   return loop;
 }
 
+function runFakeTransition<T>(
+  loop: FakeLoop,
+  reason: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const run = loop.runSessionTransition as unknown as (
+    transitionReason: string,
+    body: (lease: object) => Promise<T>,
+  ) => Promise<T>;
+  return run(reason, operation);
+}
+
 type RendererEvents = Record<string, ((...args: unknown[]) => void)[]>;
 
 async function registerWithGroups(
@@ -386,7 +398,8 @@ describe("lvis:chat:* with chat groups", () => {
     expect(lease).not.toBeNull();
     let settled = false;
     const release = (invoke(CHANNELS.chat.groupRelease, "group-2") as Promise<unknown>).then((r) => { settled = true; return r; });
-    expect(groups.get("group-2")!.isSessionTransitioning()).toBe(true);
+    expect(groupRuntime.activity.isBusy()).toBe(true);
+    expect(groups.get("group-2")!.isSessionTransitioning()).toBe(false);
     await Promise.resolve();
     expect(groups.get("group-2")!.abortCurrentTurn).toHaveBeenCalledTimes(1);
     expect(settled).toBe(false); // still waiting on the turn's lease
@@ -407,7 +420,7 @@ describe("lvis:chat:* with chat groups", () => {
       userActivation: true,
     }, "group-2")).toEqual({ error: "streaming-active" });
     await expect(invoke(CHANNELS.chat.groupRelease, "group-2")).rejects.toThrow(
-      "conversation-loop:session-transition-in-progress",
+      "conversation-activity:session-transition-in-progress",
     );
     await sessionGoalStore.set(sessionUuid("session-of-group-2"), "finish safely");
     await Promise.resolve();
@@ -431,14 +444,75 @@ describe("lvis:chat:* with chat groups", () => {
     expect(mutation).not.toBeNull();
 
     const release = invoke(CHANNELS.chat.groupRelease, "group-2") as Promise<unknown>;
-    expect(groups.get("group-2")!.isSessionTransitioning()).toBe(true);
     expect(groupRuntime.activity.isBusy()).toBe(true);
+    expect(groups.get("group-2")!.isSessionTransitioning()).toBe(false);
     await Promise.resolve();
     expect(groups.get("group-2")!.cleanupSession).not.toHaveBeenCalled();
 
     finishMutation();
     await expect(release).resolves.toEqual({ ok: true, released: true });
     expect(groups.get("group-2")).toBeUndefined();
+  });
+
+  it("drains a real chat.new transition owner before releasing the group", async () => {
+    const { invoke, groups } = await registerWithGroups();
+    invoke(CHANNELS.chat.hasProvider, "group-2");
+    const group = groups.get("group-2")!;
+    const groupRuntime = runtimes[1]!;
+    let enteredNew!: () => void;
+    let finishNew!: () => void;
+    const newEntered = new Promise<void>((resolve) => { enteredNew = resolve; });
+    group.newConversation.mockImplementationOnce(async () =>
+      runFakeTransition(group, "new-conversation", async () => {
+        enteredNew();
+        await new Promise<void>((resolve) => { finishNew = resolve; });
+      }));
+
+    const starting = invoke(CHANNELS.chat.new, undefined, "group-2") as Promise<unknown>;
+    await newEntered;
+    expect(group.isSessionTransitioning()).toBe(true);
+    const releasing = invoke(CHANNELS.chat.groupRelease, "group-2") as Promise<unknown>;
+    expect(groupRuntime.activity.isBusy()).toBe(true);
+    await Promise.resolve();
+    expect(group.cleanupSession).not.toHaveBeenCalled();
+
+    finishNew();
+    await expect(starting).resolves.toEqual({ ok: true });
+    await expect(releasing).resolves.toEqual({ ok: true, released: true });
+    expect(group.cleanupSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("renderer-lifetime release drains a real sessionResume transition instead of orphaning the group", async () => {
+    const { window, events } = fakeRenderer();
+    const { invoke, groups, releaseChatGroupLoop } = await registerWithGroups(window);
+    invoke(CHANNELS.chat.hasProvider, "group-2");
+    const group = groups.get("group-2")!;
+    let enteredResume!: () => void;
+    let finishResume!: () => void;
+    const resumeEntered = new Promise<void>((resolve) => { enteredResume = resolve; });
+    group.resetAndResume.mockImplementationOnce(async (sessionId: string) =>
+      runFakeTransition(group, "reset-and-resume", async () => {
+        enteredResume();
+        await new Promise<void>((resolve) => { finishResume = resolve; });
+        group.sessionId = sessionId;
+        return { ok: true, compacted: false, compactedAt: null, removedMessageCount: 0 };
+      }));
+
+    const resume = invoke(
+      CHANNELS.chat.sessionResume,
+      sessionUuid("session-renderer-race"),
+      "group-2",
+    ) as Promise<unknown>;
+    await resumeEntered;
+    events["did-start-navigation"]![0]!({ isMainFrame: true, isSameDocument: false });
+    await Promise.resolve();
+    expect(releaseChatGroupLoop).not.toHaveBeenCalledWith("group-2");
+    expect(group.cleanupSession).not.toHaveBeenCalled();
+
+    finishResume();
+    await expect(resume).resolves.toMatchObject({ ok: true });
+    await vi.waitFor(() => expect(releaseChatGroupLoop).toHaveBeenCalledWith("group-2"));
+    expect(group.cleanupSession).toHaveBeenCalledTimes(1);
   });
 
   it("lets every group go when the renderer navigates — a reload numbers its tiles from the start", async () => {

@@ -20,6 +20,29 @@ describe("ConversationActivityCoordinator", () => {
     await expect(coordinator.trackTurn(async () => "entered")).resolves.toBe("entered");
   });
 
+  it("seals admission atomically while exposing the owner that must drain", async () => {
+    const coordinator = createConversationActivityCoordinator();
+    let finishOwner!: () => void;
+    const owner = coordinator.trackMutation(
+      () => new Promise<void>((resolve) => { finishOwner = resolve; }),
+    );
+    expect(owner).not.toBeNull();
+
+    const admission = coordinator.beginSessionTransitionAdmission();
+    expect(admission?.owner).toBe(owner);
+    expect(coordinator.isBusy()).toBe(true);
+    expect(coordinator.tryTrackTurn(async () => undefined)).toBeNull();
+    expect(coordinator.trackMutation(async () => undefined)).toBeNull();
+    expect(coordinator.beginSessionTransitionAdmission()).toBeNull();
+
+    await Promise.resolve();
+    finishOwner();
+    await admission?.owner;
+    expect(coordinator.isBusy()).toBe(true);
+    admission?.release();
+    expect(coordinator.isBusy()).toBe(false);
+  });
+
   it("uses one turn lease across all callers and releases it after completion", async () => {
     const coordinator = createConversationActivityCoordinator();
     let release!: () => void;

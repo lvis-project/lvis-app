@@ -893,10 +893,15 @@ export function registerChatHandlers(deps: IpcDeps): void {
    * `reason` is what the stopped turn — and an approval it was parked on —
    * records; it names the host's action, not the user's.
    */
-  const quiesce = async (context: ChatGroupContext, reason: string): Promise<void> => {
+  const quiesce = async (
+    context: ChatGroupContext,
+    reason: string,
+    capturedOwner?: Promise<unknown> | null,
+  ): Promise<void> => {
     context.loop.abortCurrentTurn(new Error(reason));
-    const active = context.surfaceRuntime.activity.activeTurn()
-      ?? context.surfaceRuntime.activity.activeMutation();
+    const active = capturedOwner === undefined
+      ? context.surfaceRuntime.activity.activeTurn() ?? context.surfaceRuntime.activity.activeMutation()
+      : capturedOwner;
     if (!active) return;
     try {
       await active;
@@ -908,14 +913,20 @@ export function registerChatHandlers(deps: IpcDeps): void {
   const releaseGroup = async (id: string, reason: string): Promise<boolean> => {
     const context = groupContexts.get(id);
     if (!context) return false;
-    return context.loop.runSessionTransition("chat-group-release", async (lease) => {
-      await quiesce(context, reason);
-      await context.loop.cleanupSession(lease);
-      context.unsubscribeStream();
-      groupContexts.delete(id);
-      deps.releaseChatGroupLoop?.(id);
-      return true;
-    });
+    const admission = context.surfaceRuntime.activity.beginSessionTransitionAdmission();
+    if (admission === null) throw new Error("conversation-activity:session-transition-in-progress");
+    try {
+      await quiesce(context, reason, admission.owner);
+      return await context.loop.runSessionTransition("chat-group-release", async (lease) => {
+        await context.loop.cleanupSession(lease);
+        context.unsubscribeStream();
+        groupContexts.delete(id);
+        deps.releaseChatGroupLoop?.(id);
+        return true;
+      });
+    } finally {
+      admission.release();
+    }
   };
 
   /**
@@ -968,12 +979,18 @@ export function registerChatHandlers(deps: IpcDeps): void {
       // window-active pointer cleared so the next launch does not bring the
       // closed conversation back — so no other tile is refused that session
       // by a tile that no longer exists.
-      return mainGroup.loop.runSessionTransition("primary-chat-group-release", async (lease) => {
-        await quiesce(mainGroup, "tile closed");
-        await mainGroup.loop.newConversation("main", undefined, lease);
-        await memoryManager.markMainActiveFresh();
-        return { ok: true, released: true };
-      });
+      const admission = mainGroup.surfaceRuntime.activity.beginSessionTransitionAdmission();
+      if (admission === null) throw new Error("conversation-activity:session-transition-in-progress");
+      try {
+        await quiesce(mainGroup, "tile closed", admission.owner);
+        return await mainGroup.loop.runSessionTransition("primary-chat-group-release", async (lease) => {
+          await mainGroup.loop.newConversation("main", undefined, lease);
+          await memoryManager.markMainActiveFresh();
+          return { ok: true, released: true };
+        });
+      } finally {
+        admission.release();
+      }
     }
     return { ok: true, released: await releaseGroup(id, "tile closed") };
   });
