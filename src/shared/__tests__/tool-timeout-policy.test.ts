@@ -4,6 +4,8 @@ import {
   resolveShellTimeoutMs,
   TOOL_TIMEOUT_POLICY,
   normalizeShutdownCleanupTimeoutMs,
+  resolveWorkloadBrokerExecutorCeilingMs,
+  resolveWorkloadBrokerInvocationBudgetMs,
   resolveSubAgentCeilingMs,
 } from "../tool-timeout-policy.js";
 import {
@@ -56,10 +58,49 @@ describe("TOOL_TIMEOUT_POLICY — single source of truth invariants", () => {
     expect(TOOL_TIMEOUT_POLICY.mcpRequestMaxMs).toBe(120_000);
   });
 
-  it("executor global ceiling >= any per-surface max so the last-resort cap is never a regression", () => {
+  it("executor global ceiling covers the independently configured MCP request max", () => {
     expect(TOOL_TIMEOUT_POLICY.globalCeilingMs).toBeGreaterThanOrEqual(
       TOOL_TIMEOUT_POLICY.mcpRequestMaxMs,
     );
+  });
+
+  it("derives the broker outer ceiling from every sequential phase", () => {
+    const effectMs = TOOL_TIMEOUT_POLICY.workloadBrokerFileOperationMs;
+    const invocationMs = resolveWorkloadBrokerInvocationBudgetMs(effectMs);
+    expect(invocationMs).toBe(
+      TOOL_TIMEOUT_POLICY.workloadBrokerPreEffectHandshakeMs
+        + effectMs
+        + TOOL_TIMEOUT_POLICY.workloadBrokerTransportGraceMs,
+    );
+    expect(resolveWorkloadBrokerExecutorCeilingMs(effectMs)).toBe(
+      invocationMs + TOOL_TIMEOUT_POLICY.workloadBrokerOuterGuardMs,
+    );
+  });
+
+  it("includes image decoding after the broker terminal receipt", () => {
+    expect(resolveWorkloadBrokerExecutorCeilingMs(
+      TOOL_TIMEOUT_POLICY.workloadBrokerFileOperationMs,
+      TOOL_TIMEOUT_POLICY.imagePreparationMs,
+    )).toBe(
+      resolveWorkloadBrokerInvocationBudgetMs(
+        TOOL_TIMEOUT_POLICY.workloadBrokerFileOperationMs,
+      ) + TOOL_TIMEOUT_POLICY.imagePreparationMs
+        + TOOL_TIMEOUT_POLICY.workloadBrokerOuterGuardMs,
+    );
+  });
+
+  it("reserves all broker phases above a shell semantic timeout", () => {
+    expect(TOOL_TIMEOUT_POLICY.shellCeilingGraceMs).toBe(
+      TOOL_TIMEOUT_POLICY.workloadBrokerPreEffectHandshakeMs
+        + TOOL_TIMEOUT_POLICY.workloadBrokerTransportGraceMs
+        + TOOL_TIMEOUT_POLICY.workloadBrokerOuterGuardMs,
+    );
+  });
+
+  it("allocates a complete broker cleanup request inside the default app shutdown window", () => {
+    expect(resolveWorkloadBrokerExecutorCeilingMs(
+      TOOL_TIMEOUT_POLICY.workloadBrokerBackgroundCleanupEffectMs,
+    )).toBeLessThan(TOOL_TIMEOUT_POLICY.shutdownCleanupMs);
   });
 
   it("sub-agent ceiling exceeds the per-tool ceiling — sub-agents legitimately need more headroom", () => {

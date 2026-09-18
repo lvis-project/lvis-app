@@ -94,11 +94,18 @@ interface ExecSecretRequest {
   readonly key: string;
 }
 
+interface ExecWorkloadBrokerRequest {
+  readonly socketPath: string;
+  readonly capabilityPath: string;
+}
+
 export interface ExecRequest {
   readonly secret: ExecSecretRequest | null;
   readonly turn: ExecTurnRequest | null;
   /** Absolute signed evidence path; only valid for a turn and verified before boot. */
   readonly operatorAttestationPath?: string;
+  /** Exclusive controller-to-workload transport, verified before the host boots. */
+  readonly workloadBroker?: ExecWorkloadBrokerRequest;
 }
 
 export interface ExecDeps {
@@ -138,6 +145,10 @@ export function execModeRequested(argv: readonly string[]): boolean {
       || arg.startsWith("--exec=")
       || arg === "--exec-operator-attestation"
       || arg.startsWith("--exec-operator-attestation=")
+      || arg === "--exec-workload-broker"
+      || arg.startsWith("--exec-workload-broker=")
+      || arg === "--exec-workload-capability"
+      || arg.startsWith("--exec-workload-capability=")
       || arg === "--set-secret"
       || arg.startsWith("--set-secret="),
   );
@@ -172,10 +183,15 @@ function parseMaxRounds(raw: string): number | { error: string } {
  * A relative `--exec-cwd` is the caller's, so it resolves against the launch
  * directory — never against wherever the process has been re-anchored to.
  */
-function parseCwd(raw: string, launchCwd: string | null): string | { error: string } {
+function parseCwd(
+  raw: string,
+  launchCwd: string | null,
+  requireLocalDirectory: boolean,
+): string | { error: string } {
   if (raw.length === 0) return usageError("--exec-cwd must name a directory");
   if (launchCwd === null) return usageError("--exec-cwd needs --exec");
   const path = resolve(launchCwd, raw);
+  if (!requireLocalDirectory) return path;
   try {
     if (!statSync(path).isDirectory()) {
       return usageError(`--exec-cwd is not a directory: ${path}`);
@@ -203,13 +219,15 @@ export function parseExecFlags(
 ): ExecRequest | { error: string } | null {
   let execRequested = false;
   let prompt: string | null = null;
-  let cwd: string | null = null;
+  let cwdArgument: string | null = null;
   let approveMode: Extract<ExecutionMode, "default" | "allow"> = "default";
   let output: ExecOutputFormat = "stream-json";
   let maxRounds: number | undefined;
   let keepAlive = false;
   let secretKey: string | null = null;
   let operatorAttestationPath: string | null = null;
+  let workloadBrokerPath: string | null = null;
+  let workloadCapabilityPath: string | null = null;
 
   for (const arg of argv) {
     if (arg === "--exec" || arg === "--exec=-") {
@@ -225,9 +243,7 @@ export function parseExecFlags(
       continue;
     }
     if (arg.startsWith("--exec-cwd=")) {
-      const parsed = parseCwd(arg.slice("--exec-cwd=".length), launchCwd);
-      if (typeof parsed !== "string") return parsed;
-      cwd = parsed;
+      cwdArgument = arg.slice("--exec-cwd=".length);
       continue;
     }
     if (arg.startsWith("--exec-approve=")) {
@@ -275,6 +291,38 @@ export function parseExecFlags(
       operatorAttestationPath = value;
       continue;
     }
+    if (arg === "--exec-workload-broker") {
+      return usageError(
+        "--exec-workload-broker needs an absolute Unix socket path, as --exec-workload-broker=<path>",
+      );
+    }
+    if (arg.startsWith("--exec-workload-broker=")) {
+      const value = arg.slice("--exec-workload-broker=".length);
+      if (!value) return usageError("--exec-workload-broker was given an empty path");
+      if (!isAbsolute(value)) return usageError("--exec-workload-broker must be an absolute path");
+      if (workloadBrokerPath !== null) {
+        return usageError("--exec-workload-broker may be specified only once");
+      }
+      workloadBrokerPath = value;
+      continue;
+    }
+    if (arg === "--exec-workload-capability") {
+      return usageError(
+        "--exec-workload-capability needs an absolute file path, as --exec-workload-capability=<path>",
+      );
+    }
+    if (arg.startsWith("--exec-workload-capability=")) {
+      const value = arg.slice("--exec-workload-capability=".length);
+      if (!value) return usageError("--exec-workload-capability was given an empty path");
+      if (!isAbsolute(value)) {
+        return usageError("--exec-workload-capability must be an absolute path");
+      }
+      if (workloadCapabilityPath !== null) {
+        return usageError("--exec-workload-capability may be specified only once");
+      }
+      workloadCapabilityPath = value;
+      continue;
+    }
     if (arg === "--set-secret") {
       return usageError("--set-secret needs a key, as --set-secret=<key>");
     }
@@ -298,6 +346,23 @@ export function parseExecFlags(
   if (operatorAttestationPath !== null && secretKey !== null) {
     return usageError("--exec-operator-attestation cannot be combined with --set-secret");
   }
+  const workloadBrokerRequested = workloadBrokerPath !== null || workloadCapabilityPath !== null;
+  if (workloadBrokerRequested && (workloadBrokerPath === null || workloadCapabilityPath === null)) {
+    return usageError(
+      "--exec-workload-broker and --exec-workload-capability must be specified together",
+    );
+  }
+  if (workloadBrokerRequested && !execRequested) {
+    return usageError("workload broker flags require --exec");
+  }
+  if (workloadBrokerRequested && secretKey !== null) {
+    return usageError("workload broker flags cannot be combined with --set-secret");
+  }
+  if (workloadBrokerRequested && operatorAttestationPath !== null) {
+    return usageError(
+      "workload broker flags cannot be combined with --exec-operator-attestation",
+    );
+  }
   if (!execRequested && secretKey === null) return null;
   // Both requests read the WHOLE of stdin, so a run that combines them has to
   // give the prompt inline. Refusing here beats consuming stdin for the secret
@@ -306,6 +371,10 @@ export function parseExecFlags(
     return usageError("--set-secret consumes stdin, so --exec needs an inline prompt");
   }
 
+  const cwd = cwdArgument === null
+    ? null
+    : parseCwd(cwdArgument, launchCwd, !workloadBrokerRequested);
+  if (cwd !== null && typeof cwd !== "string") return cwd;
   const sessionRoot = cwd ?? launchCwd;
   if (execRequested && sessionRoot === null) {
     return usageError("the launch directory was not captured for this run");
@@ -324,6 +393,14 @@ export function parseExecFlags(
       }
       : null,
     ...(operatorAttestationPath === null ? {} : { operatorAttestationPath }),
+    ...(workloadBrokerPath === null || workloadCapabilityPath === null
+      ? {}
+      : {
+        workloadBroker: {
+          socketPath: workloadBrokerPath,
+          capabilityPath: workloadCapabilityPath,
+        },
+      }),
   };
 }
 

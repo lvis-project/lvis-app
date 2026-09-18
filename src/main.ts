@@ -82,6 +82,11 @@ import {
 } from "./main/exec-mode.js";
 import { isAuthorizedWorkspaceProjectRoot } from "./main/project-root-authorization.js";
 import {
+  initializeWorkloadBroker,
+  isActiveWorkloadBrokerCwd,
+  isWorkloadBrokerActive,
+} from "./workload/runtime.js";
+import {
   getMainWindow,
   getPendingLvisUri,
   getServices,
@@ -148,6 +153,12 @@ async function main() {
     process.exitCode = EXEC_USAGE_EXIT_CODE;
     app.quit();
     return;
+  }
+  if (execRequest?.workloadBroker) {
+    await initializeWorkloadBroker(execRequest.workloadBroker);
+    if (!execRequest.turn || !isActiveWorkloadBrokerCwd(execRequest.turn.cwd)) {
+      throw new Error("workload-broker:cwd-binding-mismatch");
+    }
   }
   let windowManager!: WindowManager;
   const startDesktop = async () => {
@@ -230,7 +241,9 @@ async function main() {
         stdout: process.stdout,
         stderr: process.stderr,
         readStdin: readAllStdin,
-        isAuthorizedProjectRoot: isAuthorizedWorkspaceProjectRoot,
+        isAuthorizedProjectRoot: (root) => isWorkloadBrokerActive()
+          ? isActiveWorkloadBrokerCwd(root)
+          : isAuthorizedWorkspaceProjectRoot(root),
         waitForRelease: waitForExecRelease,
         flushTelemetry: services.flushTracing,
       },

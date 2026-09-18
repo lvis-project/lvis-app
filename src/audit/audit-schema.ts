@@ -21,6 +21,10 @@ import type { ExecutionMode } from "../shared/permission-mode.js";
 import type { HookTrustOrigin, ScriptHookType } from "../hooks/script-hook-types.js";
 import type { HostShellExecutionPlanAuditProjection } from "../permissions/host-shell-execution-plan.js";
 import type { ExecutionPlanAuditProjection } from "../permissions/execution-router.js";
+import type {
+  WorkloadBrokerOperation,
+  WorkloadExecutionGrantProjection,
+} from "../workload/protocol.js";
 import type { DeferredApprovalSource, DeferredGrantScope, RiskLevel } from "../shared/permission-review-status.js";
 
 
@@ -137,6 +141,7 @@ export interface AuditCommon {
    */
   prevHash: string;
   entryHash?: string;
+  readonly workloadBrokerCorrelation?: ToolExecutionAuditMetadata["workloadBrokerCorrelation"];
 }
 
 /**
@@ -147,6 +152,14 @@ export interface ToolExecutionAuditMetadata {
   readonly toolUseId?: string;
   readonly executionPlan?: HostShellExecutionPlanAuditProjection;
   readonly executionRoute?: ExecutionPlanAuditProjection;
+  readonly workloadBrokerCorrelation?: Readonly<{
+    version: "lvis-workload-correlation/v1";
+    kind: "tool-invocation";
+    toolUseId: string;
+    toolName: string;
+    operation: Exclude<WorkloadBrokerOperation, "handshake">;
+    grant: WorkloadExecutionGrantProjection;
+  }>;
   /**
    * Host-only snapshot of the operation-governance state captured when the
    * invocation resolved its Tool. `null` means the governed discriminant was

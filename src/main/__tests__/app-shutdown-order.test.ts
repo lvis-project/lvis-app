@@ -46,6 +46,20 @@ const forceKillAllTerminalsForShutdown = vi.fn(async () => {
   calls.push("forceKillTerminals");
   return 1;
 });
+let brokerCleanupReports: Array<{
+  state: "complete" | "cleanup-unproven";
+  outcomes: Array<{ requiresExternalRelease: boolean }>;
+}> = [];
+let brokerShutdownSignal: AbortSignal | undefined;
+const disposeAllBrokerShells = vi.fn((signal?: AbortSignal) => {
+  calls.push("disposeBrokerShells");
+  brokerShutdownSignal = signal;
+  return 0;
+});
+const waitForAllBrokerCleanup = vi.fn(async () => {
+  calls.push("waitBrokerCleanup");
+  return brokerCleanupReports;
+});
 
 vi.mock("electron", () => ({ app: { exit: vi.fn() } }));
 vi.mock("../../lib/logger.js", () => ({
@@ -77,6 +91,12 @@ vi.mock("../managed-child-processes.js", () => ({
 }));
 vi.mock("../terminal/pty-manager.js", () => ({
   forceKillAllTerminalsForShutdown: () => forceKillAllTerminalsForShutdown(),
+}));
+vi.mock("../../tools/shell-tools.js", () => ({
+  backgroundShellManager: {
+    disposeAllBrokerShells: (signal?: AbortSignal) => disposeAllBrokerShells(signal),
+    waitForAllBrokerCleanup: () => waitForAllBrokerCleanup(),
+  },
 }));
 // A test that exercises the timed-out branch flips this; the body is not run
 // then, exactly as a real deadline abandons a cleanup that never settles.
@@ -128,6 +148,8 @@ function makeServices() {
 
 beforeEach(() => {
   calls.length = 0;
+  brokerCleanupReports = [];
+  brokerShutdownSignal = undefined;
   shutdownCompleted = false;
   vi.clearAllMocks();
 });
@@ -227,12 +249,59 @@ describe("runAppShutdownCleanup ordering (critic M1)", () => {
     expect(calls.indexOf("pluginShutdownHandlers")).toBeLessThan(calls.indexOf("shutdownRoutines"));
     expect(calls.indexOf("shutdownRoutines")).toBeLessThan(calls.indexOf("stopSubscriptionRuntimes"));
     expect(calls.indexOf("stopSubscriptionRuntimes")).toBeLessThan(calls.indexOf("servicesShutdown"));
+    expect(calls.indexOf("servicesShutdown")).toBeLessThan(calls.indexOf("disposeBrokerShells"));
+    expect(calls.indexOf("disposeBrokerShells")).toBeLessThan(calls.indexOf("waitBrokerCleanup"));
+    expect(calls.indexOf("waitBrokerCleanup")).toBeLessThan(calls.indexOf("forceKillTerminals"));
     expect(calls.indexOf("servicesShutdown")).toBeLessThan(calls.indexOf("forceKillTerminals"));
     expect(calls.indexOf("forceKillTerminals")).toBeLessThan(calls.indexOf("stopPluginRuntime"));
     expect(calls.indexOf("stopPluginRuntime")).toBeLessThan(calls.indexOf("drainManagedChildren"));
     expect(forceKillAndDrainManagedChildProcesses)
       .toHaveBeenCalledWith("before-quit graceful shutdown");
     expect(calls.indexOf("stopRemoteReceiver")).toBeLessThan(calls.indexOf("stopSubscriptionRuntimes"));
+  });
+
+  it("waits for proven broker cleanup after service shutdown", async () => {
+    brokerCleanupReports = [{
+      state: "complete",
+      outcomes: [{ requiresExternalRelease: false }],
+    }];
+    getServices.mockReturnValue(makeServices());
+    vi.resetModules();
+    const { runAppShutdownCleanup } = await configuredShutdown();
+
+    await expect(runAppShutdownCleanup({ reason: "before-quit", exitOnTimeout: false }))
+      .resolves.toBe("completed");
+
+    expect(calls.indexOf("servicesShutdown")).toBeLessThan(calls.indexOf("disposeBrokerShells"));
+    expect(calls.indexOf("disposeBrokerShells")).toBeLessThan(calls.indexOf("waitBrokerCleanup"));
+    expect(calls.indexOf("waitBrokerCleanup")).toBeLessThan(calls.indexOf("stopPluginRuntime"));
+    expect(brokerShutdownSignal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("fails shutdown when broker cleanup still requires external release", async () => {
+    brokerCleanupReports = [{
+      state: "cleanup-unproven",
+      outcomes: [{ requiresExternalRelease: true }],
+    }];
+    const services = makeServices();
+    getServices.mockReturnValue(services);
+    vi.resetModules();
+    const { runAppShutdownCleanup } = await configuredShutdown();
+
+    await expect(runAppShutdownCleanup({ reason: "before-quit", exitOnTimeout: false }))
+      .resolves.toBe("failed");
+
+    expect(services.shutdown).toHaveBeenCalledOnce();
+    expect(waitForAllBrokerCleanup).toHaveBeenCalledOnce();
+    expect(services.pluginRuntime.stopAll).not.toHaveBeenCalled();
+    expect(forceKillManagedChildProcesses)
+      .toHaveBeenCalledWith("before-quit cleanup failed");
+    expect(logError).toHaveBeenCalledWith(
+      { killedChildCount: 1 },
+      "%s: shutdown cleanup failed: %s",
+      "before-quit",
+      "workload-broker:shutdown-cleanup-unproven:1",
+    );
   });
 
   it("stops subscription runtimes and preserves a plugin failure when its fallback stop also fails", async () => {

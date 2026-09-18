@@ -2,14 +2,21 @@ import { prepareShellInvocation, preparedShellFacts, bindPreparedShellExecutable
 import { resolveHostShellWorkingDirectory } from "../permissions/host-shell-execution-permit.js";
 import { randomUUID } from "node:crypto";
 import { statSync } from "node:fs";
+import { sha256Hex } from "../lib/hex-digest-equal.js";
 import type { Tool } from "./base.js";
 import type { HookRunner } from "../hooks/hook-runner.js";
 import { isModelExposedTool } from "./base.js";
 import {
   isCanonicalBashTool,
+  isCanonicalBrokerLifecycleTool,
   isCanonicalPowerShellTool,
   findPowerShellCommandPathViolation,
+  validatePowerShellCommandStructure,
 } from "./shell-tools.js";
+import {
+  isCanonicalFileTool,
+  normalizeCanonicalFileToolInput,
+} from "./file-tools.js";
 import { extractShellCommands } from "../shared/shell-command-fields.js";
 import type { ShellPathPolicyViolation } from "./shell-path-policy.js";
 // Effective invocation-origin SoT (AsyncLocalStorage). The plugin-surface executor
@@ -62,7 +69,14 @@ import {
   requiresExplicitHostShellApproval,
   type HostShellExecutionPlanAuditProjection,
 } from "../permissions/host-shell-execution-plan.js";
-import type { ExecutionPlanAuditProjection } from "../permissions/execution-router.js";
+import {
+  isDisposablePathPolicyRelaxation,
+  getExecutionGrantCorrelationAuthority,
+  type ExecutionGrant,
+  type ExecutionPlan,
+  type ExecutionPlanAuditProjection,
+} from "../permissions/execution-router.js";
+import type { BrokeredWorkloadCapability } from "../workload/runtime.js";
 import {
   buildHostShellExecutionPermitBinding,
   type HostShellExecutionPermitBinding,
@@ -315,6 +329,15 @@ export async function runToolInvocation(
     let preparedShellInvocation: PreparedShellInvocation | undefined;
     let hostShellExecutionPlanAudit: HostShellExecutionPlanAuditProjection | undefined;
     let executionRouteAudit: ExecutionPlanAuditProjection | undefined;
+    let executionRoutePlan: ExecutionPlan | undefined;
+    let executionRouteGrant: ExecutionGrant | undefined;
+    let finalizeExecutionRouteGrant:
+      | (() => Promise<ExecutionGrant | undefined>)
+      | undefined;
+    let executionRouteRequirementKind: "dynamic-path" | "recursive-traversal" | undefined;
+    let brokeredFileRouteSelected = false;
+    let brokeredFileCapability: BrokeredWorkloadCapability | undefined;
+    let normalizedCanonicalFileInput: unknown;
     let governedTool = false;
     const withHostShellExecutionPlan = (result: ToolResult): ToolResult =>
       hostShellExecutionPlanAudit === undefined
@@ -330,6 +353,23 @@ export async function runToolInvocation(
       ...(executionRouteAudit !== undefined
         ? { executionRoute: executionRouteAudit }
         : {}),
+      ...(executionRouteGrant === undefined
+        ? {}
+        : (() => {
+            const authority = getExecutionGrantCorrelationAuthority(executionRouteGrant);
+            return authority === undefined
+              ? {}
+              : {
+                  workloadBrokerCorrelation: Object.freeze({
+                    version: "lvis-workload-correlation/v1" as const,
+                    kind: "tool-invocation" as const,
+                    toolUseId: authority.toolUseId,
+                    toolName: authority.toolName,
+                    operation: authority.operation,
+                    grant: authority.grant,
+                  }),
+                };
+          })()),
       ...(governedTool
         ? {
             governedOperation:
@@ -863,9 +903,6 @@ export async function runToolInvocation(
       hostShellInput !== undefined
         ? getHostShellExecutionPlan(hostShellInput.executionMode)
         : undefined;
-    const hostShellRequiresExplicitApproval =
-      hostShellExecutionPlan !== undefined &&
-      requiresExplicitHostShellApproval(hostShellExecutionPlan);
     hostShellExecutionPlanAudit = hostShellExecutionPlan === undefined
       ? undefined
       : getHostShellExecutionPlanAuditProjection(hostShellExecutionPlan);
@@ -873,7 +910,21 @@ export async function runToolInvocation(
       // Reuse the exact immutable safe projection for tool lifecycle events.
       meta.executionPlan = hostShellExecutionPlanAudit;
     }
-    const updateExecutionRouteShadow = async (
+    const canonicalFileTool =
+      toolUse.name === tool.name && isCanonicalFileTool(tool)
+        ? tool
+        : undefined;
+    const canonicalBrokerLifecycleTool =
+      toolUse.name === tool.name && isCanonicalBrokerLifecycleTool(tool)
+        ? tool
+        : undefined;
+    const acquireConfiguredBrokerCapability = async () => {
+      const runtime = await import("../workload/runtime.js");
+      return runtime.isWorkloadBrokerActive()
+        ? await runtime.acquireBrokeredWorkloadCapability(abortSignal)
+        : null;
+    };
+    const updateExecutionRoute = async (
       unresolvedRequirementKind?: "dynamic-path" | "recursive-traversal",
     ): Promise<void> => {
       if (
@@ -883,10 +934,16 @@ export async function runToolInvocation(
       ) {
         return;
       }
-      // Keep this observational foundation out of the startup graph. Shell
-      // calls load it on first use; the module remains cached after that.
+      // Keep the route and operator evidence modules out of the startup graph.
+      // Shell calls load them on first use; both remain cached after that.
       const router = await import("../permissions/execution-router.js");
-      executionRouteAudit = router.buildHostShellExecutionRouteProjection({
+      const brokeredWorkloadCapability = await acquireConfiguredBrokerCapability();
+      const operatorAcquisition = brokeredWorkloadCapability === null
+        ? await (await import("../permissions/operator-container-attestation.js"))
+            .acquirePublishedOperatorContainerCapabilityForGrant()
+        : null;
+      const disposableCapability = operatorAcquisition?.capability ?? null;
+      const route = router.buildHostShellExecutionRoute({
         legacyPlan: hostShellExecutionPlan,
         toolName: hostShellToolName,
         command: hostShellInput.command,
@@ -894,9 +951,77 @@ export async function runToolInvocation(
         unresolvedRequirementKind,
         timeoutSeconds: hostShellInput.timeoutSeconds,
         background: hostShellInput.runInBackground,
+        ...(disposableCapability === null ? {} : { disposableCapability }),
+        ...(operatorAcquisition === null
+          ? {}
+          : { disposableRevalidationLease: operatorAcquisition.revalidationLease }),
+        ...(brokeredWorkloadCapability === null
+          ? {}
+          : { brokeredWorkloadCapability }),
+      });
+      executionRouteRequirementKind = unresolvedRequirementKind;
+      executionRoutePlan = route.plan;
+      executionRouteAudit = route.audit;
+    };
+    const returnExecutionRouteFailure = async (error: unknown): Promise<ToolResult> => {
+      const reason = `Execution route unavailable: ${errorMessage(error)}`;
+      const durationMs = Date.now() - startTime;
+      emitToolStart(callbacks, toolUse.name, finalInput, meta);
+      callbacks?.onToolEnd?.(toolUse.name, reason, true, meta, undefined, durationMs);
+      await auditCurrentToolCall(
+        sessionId,
+        toolUse.name,
+        source,
+        trust,
+        finalInput,
+        reason,
+        true,
+        startTime,
+        { decision: "deny", reason, layer: 0 },
+        Infinity,
+        permissionContext,
+        invocationCategory,
+        executionCwd,
+      );
+      return withHostShellExecutionPlan({
+        tool_use_id: toolUse.id,
+        content: reason,
+        is_error: true,
+        durationMs,
       });
     };
-    await updateExecutionRouteShadow();
+    try {
+      await updateExecutionRoute();
+      if (canonicalFileTool !== undefined) {
+        const capability = await acquireConfiguredBrokerCapability();
+        if (capability !== null) {
+          normalizedCanonicalFileInput = normalizeCanonicalFileToolInput(
+            canonicalFileTool,
+            finalInput,
+          );
+          brokeredFileCapability = capability;
+          brokeredFileRouteSelected = true;
+        }
+      }
+      if (canonicalBrokerLifecycleTool !== undefined) {
+        const capability = await acquireConfiguredBrokerCapability();
+        if (capability !== null) {
+          brokeredFileCapability = capability;
+          brokeredFileRouteSelected = true;
+          normalizedCanonicalFileInput = finalInput;
+        }
+      }
+    } catch (error) {
+      return await returnExecutionRouteFailure(error);
+    }
+    const brokeredHostShellRouteSelected = (): boolean =>
+      hostShellToolName !== undefined &&
+      executionRoutePlan?.route === "disposable-container" &&
+      executionRoutePlan.disposableCapability?.kind === "workload-broker";
+    const hostShellRequiresExplicitApproval =
+      hostShellExecutionPlan !== undefined &&
+      requiresExplicitHostShellApproval(hostShellExecutionPlan) &&
+      executionRoutePlan?.route !== "disposable-container";
     // The cache key is an authority boundary too: derive it only after the
     // canonical host shell substrate is sealed, then reuse its exact public
     // projection through reviewer, modal, rationale, result, and audit paths.
@@ -915,12 +1040,17 @@ export async function runToolInvocation(
     // its input takes this path, not just bash.
     let approvalCacheKey: string | undefined;
     try {
-      approvalCacheKey = approvalCacheKeyFor(
-        tool,
-        finalInput,
-        executionCwd,
-        hostShellExecutionPlanAudit,
-      );
+      approvalCacheKey = brokeredFileRouteSelected && brokeredFileCapability !== undefined
+        ? `${tool.name}:workload:${sha256Hex(canonicalStringify({
+            input: normalizedCanonicalFileInput,
+            workload: brokeredFileCapability.workload,
+          }))}`
+        : approvalCacheKeyFor(
+            tool,
+            finalInput,
+            executionCwd,
+            hostShellExecutionPlanAudit,
+          );
       // Let the tool's schema identify malformed fields before checking the
       // internal plan contract. An input error must remain self-correctable.
       if (hostShellToolName !== undefined && hostShellInput === undefined) {
@@ -962,7 +1092,8 @@ export async function runToolInvocation(
       });
     }
     // Refuse unavailable host approval before even a prerequisite directory ask.
-    if (hostShellExecutionPlan?.executionRequest === "host" &&
+    if (hostShellRequiresExplicitApproval &&
+      hostShellExecutionPlan?.executionRequest === "host" &&
       (permissionContext.headless === true || permissionContext.remoteControllerAuthority !== undefined)) {
       const reason = "Explicit host execution requires a local desktop approval and is unavailable to headless or remote-controller requests";
       const msg = t("be_executor.permBlockDeny", { name: toolUse.name, source, trust, reason });
@@ -1558,7 +1689,15 @@ export async function runToolInvocation(
       emitGrantAudit("always");
     };
 
-    if (hostShellToolName === "bash" && hostShellExecutionPlan && typeof finalInput.command === "string") {
+    // A broker capability names a Linux guest namespace. Host shell discovery,
+    // environment snapshots, and temporary-home preparation describe the
+    // controller process instead, so they cannot qualify or reject this route.
+    if (
+      hostShellToolName === "bash" &&
+      hostShellExecutionPlan &&
+      typeof finalInput.command === "string" &&
+      !brokeredHostShellRouteSelected()
+    ) {
       try {
         if (finalInput.cwd !== undefined && typeof finalInput.cwd !== "string") throw new Error("Shell cwd must be a string");
         preparedShellInvocation = prepareShellInvocation({
@@ -1586,7 +1725,11 @@ export async function runToolInvocation(
     // unoverridable.
     // Session-control calls carry a shell handle rather than a command; their
     // shell category still requires authorization, but has no paths to parse.
-    if (hasShellCommandArgument(finalInput)) {
+    // Broker requests carry guest paths. Reinterpreting them through host path
+    // containment would turn valid /git, /tmp, or /logs operands into desktop
+    // directory prompts. The exact one-shot grant and broker protocol schema
+    // validate the guest request at execution time.
+    if (hasShellCommandArgument(finalInput) && !brokeredHostShellRouteSelected()) {
       while (true) {
         let shellPathViolation: ShellPathPolicyViolation | null = null;
         if (hostShellToolName === "powershell") {
@@ -1607,9 +1750,25 @@ export async function runToolInvocation(
           shellPathViolation.kind === "dynamic-path" ||
           shellPathViolation.kind === "recursive-traversal"
         ) {
-          // Shadow-only in this slice: retain today's exact denial below while
-          // recording that the future router must not select host by default.
-          await updateExecutionRouteShadow(shellPathViolation.kind);
+          try {
+            await updateExecutionRoute(shellPathViolation.kind);
+          } catch (error) {
+            return await returnExecutionRouteFailure(error);
+          }
+        }
+
+        if (
+          executionRoutePlan?.route === "disposable-container" &&
+          isDisposablePathPolicyRelaxation(shellPathViolation.kind) &&
+          (
+            shellPathViolation.kind !== "sensitive-path" ||
+            executionRoutePlan.disposableCapability?.kind === "workload-broker"
+          )
+        ) {
+          // The current process is the revalidated v1 disposable guest. Only
+          // guest namespace scope and analysis uncertainty may defer to its
+          // outer confinement. Sensitive and invalid paths remain hard blocks.
+          break;
         }
 
         if (shellPathViolation.kind === "sandbox-boundary" && shellPathViolation.path) {
@@ -1693,9 +1852,26 @@ export async function runToolInvocation(
       await auditCurrentToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { decision: "deny", reason: auditReason, layer: 0 }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
       return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs });
     };
+    if (
+      isCanonicalPowerShellTool(tool) &&
+      executionRoutePlan?.route === "disposable-container" &&
+      typeof finalInput.command === "string"
+    ) {
+      const structuralReason = await validatePowerShellCommandStructure(finalInput.command);
+      if (structuralReason !== null) {
+        return await denyStructuralShellCommand(
+          `PowerShell command blocked: ${structuralReason}`,
+          structuralReason,
+        );
+      }
+    }
     // Boolean, not the type guard: narrowing `tool` to `PowerShellTool` here
     // would widen it to a union for the rest of the function.
-    if (!isCanonicalPowerShellTool(tool) && services.bashAstValidator) {
+    if (
+      !isCanonicalPowerShellTool(tool) &&
+      services.bashAstValidator &&
+      executionRoutePlan?.disposableCapability?.kind !== "workload-broker"
+    ) {
       const bashResult = services.bashAstValidator.validate(toolUse.name, finalInput, preparedShellInvocation ? { cwd: executionCwd, facts: preparedShellFacts(preparedShellInvocation) } : undefined);
       if (bashResult.decision === "deny") {
         const msg = t("be_executor.bashAstBlock", { reason: bashResult.reason ?? "", patternId: bashResult.patternId ?? "" })
@@ -1719,7 +1895,9 @@ export async function runToolInvocation(
       bindPreparedShellExecutableReadPaths(preparedShellInvocation);
     }
 
-    const targetFilePaths = extractTargetFilePaths(tool, finalInput, executionCwd);
+    const targetFilePaths = brokeredFileRouteSelected
+      ? []
+      : extractTargetFilePaths(tool, finalInput, executionCwd);
     // Frozen-canonical contract: canonicalize once here and reuse the same
     // string for Layer 0 (sensitive-path) + Layer 1
     // (allowed-directories) checks below. No layer re-resolves the path.
@@ -1740,12 +1918,18 @@ export async function runToolInvocation(
     // containment. Only `read` maps to a read effect; `write`, `shell`,
     // `network` and `meta` are all write-equivalent here.
     const pathEffect = requiredTier(invocationCategory);
-    const sensitiveTarget = PermissionManager.checkPathScope({
-      canonicalTargets,
-      allowedDirectories: invocationAllowedScope.directories,
-      effect: pathEffect,
-      blockReadsOutsideWorkingDirectories,
-    }).sensitiveHit;
+    // A brokered canonical file tool targets the disposable guest namespace.
+    // Host sensitive-path and allowed-directory policy must not reinterpret
+    // `/git`, `/var`, `/root`, etc. as controller paths. The exact branded
+    // grant and protocol's clean POSIX path schema remain mandatory at execute.
+    const sensitiveTarget = brokeredFileRouteSelected
+      ? undefined
+      : PermissionManager.checkPathScope({
+          canonicalTargets,
+          allowedDirectories: invocationAllowedScope.directories,
+          effect: pathEffect,
+          blockReadsOutsideWorkingDirectories,
+        }).sensitiveHit;
     const targetFilePath = canonicalTargets[0]?.filePath;
     const sensitivePathPattern = sensitiveTarget?.pattern ?? null;
 
@@ -1811,7 +1995,7 @@ export async function runToolInvocation(
     // host tools and plugin tools both declare
     // path-bearing arguments on Tool.pathFields; plugin entries are copied
     // from SDK manifest authority metadata by plugin-tool-adapter.
-    if (canonicalTargets.length > 0) {
+    if (canonicalTargets.length > 0 && !brokeredFileRouteSelected) {
       while (true) {
         // Re-run the Layer 1 predicate each iteration: applyApprovedDirectory
         // widens `invocationAllowedScope` after a grant, so the scope must be
@@ -1942,6 +2126,63 @@ export async function runToolInvocation(
     permissionResult = authorization.permissionResult;
     hostShellApprovalDecision = authorization.hostShellApprovalDecision;
 
+    if (brokeredFileRouteSelected &&
+        (canonicalFileTool !== undefined || canonicalBrokerLifecycleTool !== undefined)) {
+      try {
+        const capability = await acquireConfiguredBrokerCapability();
+        if (capability === null) {
+          throw new Error("workload broker is no longer available");
+        }
+        normalizedCanonicalFileInput = canonicalFileTool === undefined
+          ? finalInput
+          : normalizeCanonicalFileToolInput(canonicalFileTool, finalInput);
+        const router = await import("../permissions/execution-router.js");
+        executionRouteGrant = router.issueBrokeredToolExecutionGrant({
+          capability,
+          toolName: (canonicalFileTool ?? canonicalBrokerLifecycleTool)!.name,
+          toolUseId: toolUse.id,
+          normalizedInput: normalizedCanonicalFileInput,
+          cwd: executionCwd,
+        });
+      } catch (error) {
+        return await returnExecutionRouteFailure(error);
+      }
+    } else if (executionRoutePlan?.route === "disposable-container") {
+      if (executionRoutePlan.disposableCapability?.kind === "workload-broker") {
+        try {
+          await updateExecutionRoute(executionRouteRequirementKind);
+          if (executionRoutePlan?.route !== "disposable-container" ||
+              executionRoutePlan.disposableCapability?.kind !== "workload-broker") {
+            throw new Error("brokered workload capability is no longer available");
+          }
+          const router = await import("../permissions/execution-router.js");
+          executionRouteGrant = router.issueExecutionGrant(executionRoutePlan, {
+            toolUseId: toolUse.id,
+            toolName: hostShellToolName!,
+          });
+        } catch (error) {
+          return await returnExecutionRouteFailure(error);
+        }
+      } else {
+        finalizeExecutionRouteGrant = async () => {
+          // Hooks, admission, and audit readiness may await arbitrary work.
+          // Re-observe confinement after all of them, then mint the one-shot
+          // grant at the final handler boundary without a local fallback.
+          await updateExecutionRoute(executionRouteRequirementKind);
+          if (executionRoutePlan?.route !== "disposable-container" ||
+              executionRoutePlan.disposableCapability?.kind !== "operator-container") {
+            throw new Error("disposable execution capability is no longer available");
+          }
+          const router = await import("../permissions/execution-router.js");
+          executionRouteGrant = router.issueExecutionGrant(executionRoutePlan, {
+            toolUseId: toolUse.id,
+            toolName: hostShellToolName!,
+          });
+          return executionRouteGrant;
+        };
+      }
+    }
+
     return await executeAuthorizedToolInvocation({
       services,
       tool,
@@ -1968,6 +2209,8 @@ export async function runToolInvocation(
       hostShellApprovalDecision,
       hostShellExecutionPlan,
       hostShellRequiresExplicitApproval,
+      executionRouteGrant,
+      finalizeExecutionRouteGrant,
       preparedShellInvocation,
       invocationRuntimeAllowedDirectories,
       supportsA2AParentDelivery,

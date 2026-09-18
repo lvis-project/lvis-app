@@ -42,8 +42,9 @@ test('the cleanup window round-trips through the real settings service', async (
     )
     .toBe(30000);
 
-  // Back to the shipped default: the control has to be able to offer it again,
-  // which is the reason the option list is derived from the timeout policy.
+  // A shorter operator-selected window remains available. Broker cleanup
+  // inherits the app deadline and becomes explicit cleanup-unproven when this
+  // reserve is exhausted; external workload release remains the backstop.
   await select.selectOption('15000');
   await expect
     .poll(async () =>

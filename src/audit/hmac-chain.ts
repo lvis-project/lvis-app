@@ -106,6 +106,7 @@ export function readStableRegularFileUtf8(
   filePath: string,
   maxBytes: number,
   label: string,
+  requirePrivateOwnerFile = false,
 ): string | null {
   const flags = constants.O_RDONLY |
     (platform === "win32" ? 0 : constants.O_NOFOLLOW);
@@ -122,6 +123,15 @@ export function readStableRegularFileUtf8(
     if (!before.isFile() || pathAtOpen.isSymbolicLink() ||
         !pathAtOpen.isFile() || !sameSecretFileIdentity(pathAtOpen, before)) {
       throw new Error(`${label} path is not a stable regular file`);
+    }
+    if (requirePrivateOwnerFile) {
+      if (platform === "win32" || typeof process.geteuid !== "function") {
+        throw new Error(`${label} private ownership cannot be verified on this platform`);
+      }
+      const mode = Number(before.mode & 0o7777n);
+      if (before.uid !== BigInt(process.geteuid()) || before.nlink !== 1n || mode !== 0o600) {
+        throw new Error(`${label} must be an owner-only single-link file`);
+      }
     }
     const size = Number(before.size);
     if (!Number.isSafeInteger(size) || size < 0 || size > maxBytes) {
@@ -153,6 +163,15 @@ export function readStableRegularFileUtf8(
   } finally {
     if (fd !== undefined) closeSync(fd);
   }
+}
+
+/** Stable-read an existing POSIX owner-only 0600 authority file. */
+function readStablePrivateRegularFileUtf8(
+  filePath: string,
+  maxBytes: number,
+  label: string,
+): string | null {
+  return readStableRegularFileUtf8(filePath, maxBytes, label, true);
 }
 
 function readSecretFileUtf8Bounded(
@@ -245,9 +264,10 @@ export class SafeStorageSecretStore implements SecretStore {
     private readonly safeStorage: SafeStorageLike,
     dir?: string,
     private readonly unreadablePolicy: "quarantine" | "reject" = "quarantine",
+    private readonly access: "read-write" | "existing-read-only" = "read-write",
   ) {
     this.dir = dir ?? join(lvisHome(), "secrets");
-    hardenSecretDirectory(this.dir);
+    if (this.access === "read-write") hardenSecretDirectory(this.dir);
   }
 
   private path(name: string): string {
@@ -313,10 +333,13 @@ export class SafeStorageSecretStore implements SecretStore {
     this.assertAvailable();
     assertSecretReadLimit(maxBytes);
     const p = this.path(name);
-    const encrypted = readSecretFileUtf8Bounded(
-      p,
-      safeStorageFileLimit(maxBytes),
-    );
+    const encrypted = this.access === "existing-read-only"
+      ? readStablePrivateRegularFileUtf8(
+        p,
+        safeStorageFileLimit(maxBytes),
+        "secret authority",
+      )?.replace(/\n$/, "") ?? null
+      : readSecretFileUtf8Bounded(p, safeStorageFileLimit(maxBytes));
     if (encrypted === null) return null;
     if (!encrypted.startsWith(SAFE_STORAGE_SECRET_PREFIX)) {
       if (this.unreadablePolicy === "reject") throw new Error("Secret ciphertext has an unsupported encryption format");
@@ -342,6 +365,9 @@ export class SafeStorageSecretStore implements SecretStore {
   }
 
   write(name: string, value: string): void {
+    if (this.access === "existing-read-only") {
+      throw new Error("secret authority store is read-only");
+    }
     this.assertAvailable();
     const p = this.path(name);
     if (this.unreadablePolicy === "reject") this.read(name);
@@ -386,6 +412,15 @@ export function ensureAuditSecret(store: SecretStore): string {
   const generated = randomBytes(32).toString("hex");
   store.write(AUDIT_HMAC_SECRET_NAME, generated);
   return generated;
+}
+
+/** Read the existing audit authority without minting or replacing it. */
+export function readExistingAuditSecret(store: SecretStore): string {
+  const existing = store.read(AUDIT_HMAC_SECRET_NAME, SECRET_AUTHORITY_MAX_BYTES);
+  if (!existing || existing.length < 32) {
+    throw new Error("existing audit HMAC secret is unavailable");
+  }
+  return existing;
 }
 
 /**

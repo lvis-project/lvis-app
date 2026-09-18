@@ -24,6 +24,7 @@ import { finished } from "node:stream/promises";
 import { z } from "zod";
 
 import type { PathEffect } from "../permissions/allowed-directories.js";
+import { consumeExecutionGrantForBuiltinToolInvocation } from "../permissions/execution-router.js";
 import {
   MAX_TEXT_FILE_BYTES,
   isBinaryFile,
@@ -44,13 +45,35 @@ import {
   type ToolExecutionResult,
 } from "./base.js";
 import { sleep } from "../shared/abortable-deadline.js";
-import { prepareImageFile } from "./image-preparation.js";
-import { ImagePreparationOptionsSchema } from "../shared/image-preparation-policy.js";
+import {
+  TOOL_TIMEOUT_POLICY,
+  resolveWorkloadBrokerExecutorCeilingMs,
+} from "../shared/tool-timeout-policy.js";
+import { prepareImageBytes, prepareImageFile } from "./image-preparation.js";
+import {
+  IMAGE_PREPARATION_POLICY,
+  ImagePreparationOptionsSchema,
+} from "../shared/image-preparation-policy.js";
 import { errorMessage } from "../shared/error-message.js";
 import { RENAME_FILE_LOCK_CODES, transientFsLockDelayMs } from "../lib/transient-fs-lock-retry.js";
+import type {
+  BrokeredWorkloadCapability,
+  WorkloadToolCorrelationAuthority,
+} from "../workload/runtime.js";
 
 type ToolErrorResult = ToolExecutionResult & { isError: true };
 type Result<T> = { ok: true; value: T } | { ok: false; error: ToolErrorResult };
+type WorkloadRuntime = typeof import("../workload/runtime.js");
+
+type FileExecutionTransport =
+  | { readonly kind: "local" }
+  | {
+      readonly kind: "broker";
+      readonly runtime: WorkloadRuntime;
+      readonly capability: BrokeredWorkloadCapability;
+      readonly correlationAuthority: WorkloadToolCorrelationAuthority;
+    }
+  | { readonly kind: "failure"; readonly result: ToolErrorResult };
 
 const DEFAULT_LINE_LIMIT = 2_000;
 const MAX_LINE_LIMIT = 5_000;
@@ -70,6 +93,76 @@ const DEFAULT_SKIP_DIRS = new Set([
   ".turbo",
   ".cache",
 ]);
+
+/**
+ * Object-identity boundary for the host's built-in file tools. A plugin or MCP
+ * tool can copy a name/schema, but it cannot insert itself into this set.
+ */
+const canonicalFileTools = new WeakSet<object>();
+
+/**
+ * Canonical brokered file operations inherit the same host-owned wall-clock
+ * budget as their executor invocation. Supplying it in every request prevents
+ * either side of the broker protocol from inventing a shorter implicit
+ * deadline (the former Python and transport defaults were 30 seconds).
+ */
+function brokerFilePayload<T extends object>(payload: T): T & { readonly timeoutMs: number } {
+  return { ...payload, timeoutMs: TOOL_TIMEOUT_POLICY.workloadBrokerFileOperationMs };
+}
+
+function brokerFailureResult(reason: string): ToolErrorResult {
+  return {
+    output: `Workload broker refused file execution (${reason}).`,
+    isError: true,
+    metadata: {
+      source: "workload-broker",
+      executionTransport: "workload-broker",
+      sandboxed: true,
+      isolation: "disposable-container",
+    },
+  };
+}
+
+async function resolveFileExecutionTransport(
+  tool: Pick<Tool, "name">,
+  normalizedInput: unknown,
+  ctx: ToolExecutionContext,
+): Promise<FileExecutionTransport> {
+  const runtime = await import("../workload/runtime.js");
+  const requestedGrant = ctx.executionRouteGrant;
+  const authority = consumeExecutionGrantForBuiltinToolInvocation({
+    grant: requestedGrant,
+    toolName: tool.name,
+    normalizedInput,
+    cwd: ctx.cwd,
+  });
+  if (requestedGrant !== undefined && authority === null) {
+    return { kind: "failure", result: brokerFailureResult("broker-bound execution grant unavailable") };
+  }
+  if (!runtime.isWorkloadBrokerActive()) {
+    if (authority !== null) {
+      return { kind: "failure", result: brokerFailureResult("broker became inactive") };
+    }
+    return { kind: "local" };
+  }
+  if (
+    authority?.route !== "disposable-container" ||
+    authority.disposableAuthority !== "workload-broker" ||
+    authority.brokeredWorkloadCapability === undefined ||
+    authority.workloadCorrelationAuthority === undefined
+  ) {
+    return { kind: "failure", result: brokerFailureResult("broker-bound execution grant required") };
+  }
+  if (!runtime.isActiveWorkloadBrokerCwd(ctx.cwd)) {
+    return { kind: "failure", result: brokerFailureResult("cwd binding mismatch") };
+  }
+  return {
+    kind: "broker",
+    runtime,
+    capability: authority.brokeredWorkloadCapability,
+    correlationAuthority: authority.workloadCorrelationAuthority!,
+  };
+}
 
 const FilePathSchema = z.object({
   path: z.string().min(1).describe("Absolute path or path relative to the session cwd."),
@@ -140,12 +233,48 @@ export const ExtractArchiveInputSchema = z.object({
 export const DeleteFileInputSchema = FilePathSchema.extend({});
 
 abstract class FileTool<TSchema extends z.ZodTypeAny> extends ZodTool<TSchema> {
+  constructor() {
+    super();
+    if (canonicalFileToolConstructors.has(new.target)) canonicalFileTools.add(this);
+  }
+
   override readonly source = "builtin" as const;
+  readonly resolveHostCeilingMs = () =>
+    resolveWorkloadBrokerExecutorCeilingMs(
+      TOOL_TIMEOUT_POLICY.workloadBrokerFileOperationMs,
+    );
   readonly pathFields: readonly string[] = ["path"];
+
+  protected executionTransport(
+    input: z.infer<TSchema>,
+    ctx: ToolExecutionContext,
+  ): Promise<FileExecutionTransport> {
+    return resolveFileExecutionTransport(this, input, ctx);
+  }
 
   protected resolvePath(inputPath: string, ctx: ToolExecutionContext): string {
     const expanded = expandLeadingTilde(inputPath);
     return isAbsolute(expanded) ? pathResolve(expanded) : pathResolve(ctx.cwd, expanded);
+  }
+
+  protected resolveExecutionPath(
+    inputPath: string,
+    ctx: ToolExecutionContext,
+    transport: Exclude<FileExecutionTransport, { readonly kind: "failure" }>,
+  ): Result<string> {
+    try {
+      return {
+        ok: true,
+        value: transport.kind === "broker"
+          ? transport.runtime.resolveBrokeredWorkloadPath(transport.capability, inputPath)
+          : this.resolvePath(inputPath, ctx),
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        error: brokerFailureResult(errorMessage(error)),
+      };
+    }
   }
 
   /**
@@ -202,7 +331,20 @@ export class ReadFileTool extends FileTool<typeof ReadFileInputSchema> {
     input: z.infer<typeof ReadFileInputSchema>,
     ctx: ToolExecutionContext,
   ): Promise<ToolExecutionResult> {
-    const target = this.resolvePath(input.path, ctx);
+    const transport = await this.executionTransport(input, ctx);
+    if (transport.kind === "failure") return transport.result;
+    const resolved = this.resolveExecutionPath(input.path, ctx, transport);
+    if (!resolved.ok) return resolved.error;
+    const target = resolved.value;
+    if (transport.kind === "broker") {
+      return transport.runtime.executeBrokeredWorkloadRequest(
+        transport.capability,
+        "file.read",
+        brokerFilePayload({ path: target, offset: input.offset, limit: input.limit }),
+        transport.correlationAuthority,
+        ctx.abortSignal,
+      );
+    }
     const blocked = this.ensureAllowed(target, ctx, "read");
     if (blocked) return blocked;
 
@@ -255,6 +397,11 @@ export class ViewImageTool extends FileTool<typeof ViewImageInputSchema> {
     "Optional maxBytes and maxDimension request a smaller result after a transport size error. " +
     "Other formats must first be converted with an available image conversion tool.";
   readonly inputSchema = ViewImageInputSchema;
+  override readonly resolveHostCeilingMs = () =>
+    resolveWorkloadBrokerExecutorCeilingMs(
+      TOOL_TIMEOUT_POLICY.workloadBrokerFileOperationMs,
+      TOOL_TIMEOUT_POLICY.imagePreparationMs,
+    );
   override readonly category: ToolCategory = "read";
 
   override isReadOnly(): boolean {
@@ -265,7 +412,45 @@ export class ViewImageTool extends FileTool<typeof ViewImageInputSchema> {
     input: z.infer<typeof ViewImageInputSchema>,
     ctx: ToolExecutionContext,
   ): Promise<ToolExecutionResult> {
-    const target = this.resolvePath(input.path, ctx);
+    const transport = await this.executionTransport(input, ctx);
+    if (transport.kind === "failure") return transport.result;
+    const resolved = this.resolveExecutionPath(input.path, ctx, transport);
+    if (!resolved.ok) return resolved.error;
+    const target = resolved.value;
+    if (transport.kind === "broker") {
+      const binary = await transport.runtime.executeBrokeredWorkloadRequest(
+        transport.capability,
+        "file.read_binary",
+        brokerFilePayload({ path: target, maxBytes: IMAGE_PREPARATION_POLICY.maxInputBytes }),
+        transport.correlationAuthority,
+        ctx.abortSignal,
+      );
+      if (binary.isError) return binary;
+      if (!("data" in binary)) {
+        return brokerFailureResult("binary response was missing validated image bytes");
+      }
+      try {
+        const prepared = await prepareImageBytes(
+          Buffer.from(binary.data, "base64"),
+          { maxBytes: input.maxBytes, maxDimension: input.maxDimension },
+          ctx.abortSignal,
+        );
+        const { data, ...details } = prepared;
+        return {
+          output: JSON.stringify({ path: target, ...details, loaded: true }),
+          isError: false,
+          image: {
+            data,
+            mimeType: prepared.mimeType,
+            bytes: prepared.bytes,
+            width: prepared.width,
+            height: prepared.height,
+          },
+        };
+      } catch (error) {
+        return toolError(`view_image: ${errorMessage(error)}`);
+      }
+    }
     const blocked = this.ensureAllowed(target, ctx, "read");
     if (blocked) return blocked;
 
@@ -301,7 +486,20 @@ export class ListFilesTool extends FileTool<typeof ListFilesInputSchema> {
     input: z.infer<typeof ListFilesInputSchema>,
     ctx: ToolExecutionContext,
   ): Promise<ToolExecutionResult> {
-    const root = this.resolvePath(input.path, ctx);
+    const transport = await this.executionTransport(input, ctx);
+    if (transport.kind === "failure") return transport.result;
+    const resolved = this.resolveExecutionPath(input.path, ctx, transport);
+    if (!resolved.ok) return resolved.error;
+    const root = resolved.value;
+    if (transport.kind === "broker") {
+      return transport.runtime.executeBrokeredWorkloadRequest(
+        transport.capability,
+        "file.list",
+        brokerFilePayload({ path: root, depth: input.depth, limit: input.limit }),
+        transport.correlationAuthority,
+        ctx.abortSignal,
+      );
+    }
     const blocked = this.ensureAllowed(root, ctx, "read");
     if (blocked) return blocked;
 
@@ -334,7 +532,20 @@ export class GlobFilesTool extends FileTool<typeof GlobFilesInputSchema> {
     input: z.infer<typeof GlobFilesInputSchema>,
     ctx: ToolExecutionContext,
   ): Promise<ToolExecutionResult> {
-    const root = this.resolvePath(input.path ?? ".", ctx);
+    const transport = await this.executionTransport(input, ctx);
+    if (transport.kind === "failure") return transport.result;
+    const resolved = this.resolveExecutionPath(input.path ?? ".", ctx, transport);
+    if (!resolved.ok) return resolved.error;
+    const root = resolved.value;
+    if (transport.kind === "broker") {
+      return transport.runtime.executeBrokeredWorkloadRequest(
+        transport.capability,
+        "file.glob",
+        brokerFilePayload({ path: root, pattern: input.pattern, limit: input.limit }),
+        transport.correlationAuthority,
+        ctx.abortSignal,
+      );
+    }
     const blocked = this.ensureAllowed(root, ctx, "read");
     if (blocked) return blocked;
 
@@ -373,7 +584,26 @@ export class GrepFilesTool extends FileTool<typeof GrepFilesInputSchema> {
     input: z.infer<typeof GrepFilesInputSchema>,
     ctx: ToolExecutionContext,
   ): Promise<ToolExecutionResult> {
-    const root = this.resolvePath(input.path ?? ".", ctx);
+    const transport = await this.executionTransport(input, ctx);
+    if (transport.kind === "failure") return transport.result;
+    const resolved = this.resolveExecutionPath(input.path ?? ".", ctx, transport);
+    if (!resolved.ok) return resolved.error;
+    const root = resolved.value;
+    if (transport.kind === "broker") {
+      return transport.runtime.executeBrokeredWorkloadRequest(
+        transport.capability,
+        "file.grep",
+        brokerFilePayload({
+          path: root,
+          pattern: input.pattern,
+          ...(input.include === undefined ? {} : { include: input.include }),
+          caseSensitive: input.caseSensitive,
+          limit: input.limit,
+        }),
+        transport.correlationAuthority,
+        ctx.abortSignal,
+      );
+    }
     const blocked = this.ensureAllowed(root, ctx, "read");
     if (blocked) return blocked;
 
@@ -426,7 +656,20 @@ export class WriteFileTool extends FileTool<typeof WriteFileInputSchema> {
     input: z.infer<typeof WriteFileInputSchema>,
     ctx: ToolExecutionContext,
   ): Promise<ToolExecutionResult> {
-    const target = this.resolvePath(input.path, ctx);
+    const transport = await this.executionTransport(input, ctx);
+    if (transport.kind === "failure") return transport.result;
+    const resolved = this.resolveExecutionPath(input.path, ctx, transport);
+    if (!resolved.ok) return resolved.error;
+    const target = resolved.value;
+    if (transport.kind === "broker") {
+      return transport.runtime.executeBrokeredWorkloadRequest(
+        transport.capability,
+        "file.write",
+        brokerFilePayload({ path: target, content: input.content }),
+        transport.correlationAuthority,
+        ctx.abortSignal,
+      );
+    }
     const blocked = this.ensureAllowed(target, ctx, "write");
     if (blocked) return blocked;
 
@@ -511,7 +754,25 @@ export class EditFileTool extends FileTool<typeof EditFileInputSchema> {
     input: z.infer<typeof EditFileInputSchema>,
     ctx: ToolExecutionContext,
   ): Promise<ToolExecutionResult> {
-    const target = this.resolvePath(input.path, ctx);
+    const transport = await this.executionTransport(input, ctx);
+    if (transport.kind === "failure") return transport.result;
+    const resolved = this.resolveExecutionPath(input.path, ctx, transport);
+    if (!resolved.ok) return resolved.error;
+    const target = resolved.value;
+    if (transport.kind === "broker") {
+      return transport.runtime.executeBrokeredWorkloadRequest(
+        transport.capability,
+        "file.edit",
+        brokerFilePayload({
+          path: target,
+          oldText: input.oldText,
+          newText: input.newText,
+          replaceAll: input.replaceAll,
+        }),
+        transport.correlationAuthority,
+        ctx.abortSignal,
+      );
+    }
     const blocked = this.ensureAllowed(target, ctx, "write");
     if (blocked) return blocked;
 
@@ -566,7 +827,20 @@ export class ApplyPatchTool extends FileTool<typeof ApplyPatchInputSchema> {
     input: z.infer<typeof ApplyPatchInputSchema>,
     ctx: ToolExecutionContext,
   ): Promise<ToolExecutionResult> {
-    const target = this.resolvePath(input.path, ctx);
+    const transport = await this.executionTransport(input, ctx);
+    if (transport.kind === "failure") return transport.result;
+    const resolved = this.resolveExecutionPath(input.path, ctx, transport);
+    if (!resolved.ok) return resolved.error;
+    const target = resolved.value;
+    if (transport.kind === "broker") {
+      return transport.runtime.executeBrokeredWorkloadRequest(
+        transport.capability,
+        "file.patch",
+        brokerFilePayload({ path: target, replacements: input.replacements }),
+        transport.correlationAuthority,
+        ctx.abortSignal,
+      );
+    }
     const blocked = this.ensureAllowed(target, ctx, "write");
     if (blocked) return blocked;
 
@@ -627,8 +901,27 @@ export class MoveFileTool extends FileTool<typeof MoveFileInputSchema> {
     input: z.infer<typeof MoveFileInputSchema>,
     ctx: ToolExecutionContext,
   ): Promise<ToolExecutionResult> {
-    const source = this.resolvePath(input.sourcePath, ctx);
-    const destination = this.resolvePath(input.destinationPath, ctx);
+    const transport = await this.executionTransport(input, ctx);
+    if (transport.kind === "failure") return transport.result;
+    const resolvedSource = this.resolveExecutionPath(input.sourcePath, ctx, transport);
+    if (!resolvedSource.ok) return resolvedSource.error;
+    const resolvedDestination = this.resolveExecutionPath(input.destinationPath, ctx, transport);
+    if (!resolvedDestination.ok) return resolvedDestination.error;
+    const source = resolvedSource.value;
+    const destination = resolvedDestination.value;
+    if (transport.kind === "broker") {
+      return transport.runtime.executeBrokeredWorkloadRequest(
+        transport.capability,
+        "file.move",
+        brokerFilePayload({
+          sourcePath: source,
+          destinationPath: destination,
+          overwrite: input.overwrite,
+        }),
+        transport.correlationAuthority,
+        ctx.abortSignal,
+      );
+    }
     const sourceBlocked = this.ensureAllowed(source, ctx, "write");
     if (sourceBlocked) return sourceBlocked;
     const destinationBlocked = this.ensureAllowed(destination, ctx, "write");
@@ -680,9 +973,26 @@ export class CopyPathTool extends FileTool<typeof CopyPathInputSchema> {
     input: z.infer<typeof CopyPathInputSchema>,
     ctx: ToolExecutionContext,
   ): Promise<ToolExecutionResult> {
+    const transport = await this.executionTransport(input, ctx);
+    if (transport.kind === "failure") return transport.result;
+    const resolvedSource = this.resolveExecutionPath(input.sourcePath, ctx, transport);
+    if (!resolvedSource.ok) return resolvedSource.error;
+    const resolvedDestination = this.resolveExecutionPath(input.destinationPath, ctx, transport);
+    if (!resolvedDestination.ok) return resolvedDestination.error;
+    const sourcePath = resolvedSource.value;
+    const destinationPath = resolvedDestination.value;
+    if (transport.kind === "broker") {
+      return transport.runtime.executeBrokeredWorkloadRequest(
+        transport.capability,
+        "file.copy",
+        brokerFilePayload({ sourcePath, destinationPath }),
+        transport.correlationAuthority,
+        ctx.abortSignal,
+      );
+    }
     return fileTransferExecutionResult(await copyPath({
-      sourcePath: this.resolvePath(input.sourcePath, ctx),
-      destinationPath: this.resolvePath(input.destinationPath, ctx),
+      sourcePath,
+      destinationPath,
     }, ctx));
   }
 }
@@ -709,10 +1019,27 @@ export class ExtractArchiveTool extends FileTool<typeof ExtractArchiveInputSchem
     input: z.infer<typeof ExtractArchiveInputSchema>,
     ctx: ToolExecutionContext,
   ): Promise<ToolExecutionResult> {
+    const transport = await this.executionTransport(input, ctx);
+    if (transport.kind === "failure") return transport.result;
+    const resolvedArchive = this.resolveExecutionPath(input.archivePath, ctx, transport);
+    if (!resolvedArchive.ok) return resolvedArchive.error;
+    const resolvedDestination = this.resolveExecutionPath(input.destinationPath, ctx, transport);
+    if (!resolvedDestination.ok) return resolvedDestination.error;
+    const archivePath = resolvedArchive.value;
+    const destinationPath = resolvedDestination.value;
+    if (transport.kind === "broker") {
+      return transport.runtime.executeBrokeredWorkloadRequest(
+        transport.capability,
+        "file.extract",
+        brokerFilePayload({ archivePath, destinationPath }),
+        transport.correlationAuthority,
+        ctx.abortSignal,
+      );
+    }
     let archiveFormat: ArchiveFormat | undefined;
     const result = await runOwnedTransfer({
-      sourcePath: this.resolvePath(input.archivePath, ctx),
-      destinationPath: this.resolvePath(input.destinationPath, ctx),
+      sourcePath: archivePath,
+      destinationPath,
       destinationKind: "directory",
     }, ctx, async (session) => {
       const source = await session.openSourceFile(session.sourcePath);
@@ -757,7 +1084,20 @@ export class DeleteFileTool extends FileTool<typeof DeleteFileInputSchema> {
     input: z.infer<typeof DeleteFileInputSchema>,
     ctx: ToolExecutionContext,
   ): Promise<ToolExecutionResult> {
-    const target = this.resolvePath(input.path, ctx);
+    const transport = await this.executionTransport(input, ctx);
+    if (transport.kind === "failure") return transport.result;
+    const resolved = this.resolveExecutionPath(input.path, ctx, transport);
+    if (!resolved.ok) return resolved.error;
+    const target = resolved.value;
+    if (transport.kind === "broker") {
+      return transport.runtime.executeBrokeredWorkloadRequest(
+        transport.capability,
+        "file.delete",
+        brokerFilePayload({ path: target }),
+        transport.correlationAuthority,
+        ctx.abortSignal,
+      );
+    }
     const blocked = this.ensureAllowed(target, ctx, "write");
     if (blocked) return blocked;
 
@@ -775,6 +1115,21 @@ export class DeleteFileTool extends FileTool<typeof DeleteFileInputSchema> {
   }
 }
 
+const canonicalFileToolConstructors = new Set<Function>([
+  ReadFileTool,
+  ViewImageTool,
+  ListFilesTool,
+  GlobFilesTool,
+  GrepFilesTool,
+  WriteFileTool,
+  EditFileTool,
+  ApplyPatchTool,
+  CopyPathTool,
+  ExtractArchiveTool,
+  MoveFileTool,
+  DeleteFileTool,
+]);
+
 export function createFileTools(): Tool[] {
   return [
     new ReadFileTool(),
@@ -790,6 +1145,37 @@ export function createFileTools(): Tool[] {
     new MoveFileTool(),
     new DeleteFileTool(),
   ];
+}
+
+export type CanonicalFileTool =
+  | ReadFileTool
+  | ViewImageTool
+  | ListFilesTool
+  | GlobFilesTool
+  | GrepFilesTool
+  | WriteFileTool
+  | EditFileTool
+  | ApplyPatchTool
+  | CopyPathTool
+  | ExtractArchiveTool
+  | MoveFileTool
+  | DeleteFileTool;
+
+/** Exact host-created identity check; tool names are deliberately irrelevant. */
+export function isCanonicalFileTool(tool: unknown): tool is CanonicalFileTool {
+  return typeof tool === "object" && tool !== null && canonicalFileTools.has(tool);
+}
+
+/**
+ * Normalize authority-bound input through the exact canonical instance schema.
+ * The caller must use the returned value when hashing/minting an execution
+ * grant so Zod defaults and unknown-key behavior match the eventual execute.
+ */
+export function normalizeCanonicalFileToolInput(tool: unknown, rawInput: unknown): unknown {
+  if (!isCanonicalFileTool(tool)) {
+    throw new Error("Canonical file tool input requires a host-created file tool");
+  }
+  return tool.inputSchema.parse(rawInput);
 }
 
 async function statFile(path: string): Promise<Result<Stats>> {

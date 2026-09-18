@@ -34,6 +34,13 @@ the artifact's qualification record.
 The launcher supplies production mode and its own resource directory. From the
 artifact directory, run this resource diagnostic before host setup:
 
+Before it starts the bundled Node process, the launcher removes inherited
+`NODE_OPTIONS`, `NODE_PATH`, Electron role flags, and Node child/cluster role
+variables covered by `lvis-headless-launch-environment/v1`. These variables
+cannot preload code or change the native process role before a proof or normal
+runtime command. Operator inputs such as `LVIS_HOME` and
+`LVIS_SECRET_KEY_FILE` remain available to the application.
+
 ```sh
 ./lvis --runtime-check
 ```
@@ -41,6 +48,32 @@ artifact directory, run this resource diagnostic before host setup:
 This command runs alone. It checks the packaged UV executable and MCP `uvx`
 resolution using a temporary cache before normal boot, key loading, or profile
 locking. It does not run a conversation or prove every server feature works.
+
+To produce a public terminal receipt for the stopped host's permission audit,
+run the proof command with a fresh 64-character lowercase hexadecimal
+challenge:
+
+```sh
+./lvis --verify-permission-audit="$CHALLENGE"
+```
+
+The command requires explicit absolute `LVIS_HOME` and
+`LVIS_SECRET_KEY_FILE` values. It runs before normal host boot and accepts no
+other command, apart from one optional `--user-data-dir=<directory>`. It opens
+the existing encrypted audit authority read-only, verifies every canonical
+`YYYY-MM-DD.permission-audit.jsonl` HMAC chain and every nonempty file's daily
+seal, and prints one `lvis-permission-audit-proof/v1` JSON receipt. The receipt
+contains only the supplied challenge, verification time, and each file's
+basename, date, SHA-256, byte count, and entry count. It never prints secret
+material, seals, paths, or audit rows. Missing or changed authority, unexpected
+permission-audit names, linked or non-private files, chain tampering, and
+missing or mismatched seals fail without producing a receipt.
+Proof errors use only the stable codes
+`permission-audit-proof:invalid-arguments` and
+`permission-audit-proof:verification-failed`; filesystem paths and underlying
+provider messages are not written to stderr. Bare, malformed, or duplicate
+proof flags are reserved by the native dispatcher and fail as proof usage
+instead of falling through to normal host boot.
 
 ## Select a profile and external key
 
@@ -135,6 +168,9 @@ workspace is also allowed; choosing another path does not grant access to it.
 printf '%s' "$PROMPT" | ./lvis --exec --exec-cwd="$PROJECT_DIR" --exec-output=json
 ./lvis --exec="Run the task." \
   --exec-operator-attestation=/run/lvis/operator-attestation.json
+./lvis --exec="Run the brokered task." --exec-cwd=/app \
+  --exec-workload-broker=/run/user/1000/lvis-broker/broker.sock \
+  --exec-workload-capability=/var/lib/lvis-broker/capability.json
 ./lvis --serve
 ```
 
@@ -159,9 +195,47 @@ with `--set-secret`, and fails closed on other operating systems. The host does
 not infer this authority from an environment variable, a container marker, or
 the presence of a container runtime. See the
 [operator attestation contract](../architecture/permission-policy-design.md#headless-operator-container-attestation)
-for the signed schema and trust-root requirements. This evidence is currently
-published for later execution routing; it does not by itself relax a tool rule
-or select a disposable execution backend.
+for the signed schema and trust-root requirements. Each builtin shell invocation
+revalidates the published process capability. The router then prefers an active
+workspace sandbox, otherwise the verified disposable guest, before considering
+an unconfined host. Normal tool authorization and structural command checks
+still apply; a missing or changed capability never degrades to host execution.
+
+`--exec-workload-broker` and `--exec-workload-capability` select the separate
+host-native workload-broker route. Both values must be absolute and both flags
+must appear together with `--exec`. They cannot be combined with `--set-secret`
+or `--exec-operator-attestation`. The example paths illustrate the required
+shape; the launcher must pass the exact socket and capability paths it created.
+The capability's guest cwd must equal `--exec-cwd`.
+
+The capability is a bounded, owner-owned mode `0400` regular file beneath a
+real, owner-owned mode `0700` directory. The Unix socket is mode `0600` beneath
+an owner-owned mode `0700` directory. At boot the host holds and rechecks the
+capability directory and file identities across the read, then checks capability
+expiry, the exact Docker workload identity and an authenticated handshake before
+constructing host and tool services. The workload does not receive either path,
+the bearer token, Docker socket,
+controller profile, provider secret, receipts or controller logs.
+
+This route is intended for a launcher that has already created one hardened
+Linux Docker Compose `main` service without host binds, devices, Compose
+secrets/configs, added capabilities, host namespaces or inherited controller
+environment. The broker binds the container ID, immutable image ID, start
+identity, Compose labels, guest cwd/HOME, finite memory/swap/PID limits and
+private cgroup. It revalidates those facts before each effect. Builtin Bash and
+canonical file tools then execute only through the guest broker. A broken
+socket, expired or changed capability, mismatched cwd/identity, replayed grant
+or broker error fails the call; LVIS does not retry it on the host. PowerShell
+is not supported by this Linux broker route.
+
+The normal authorization, reviewer and audit paths still apply. The brokered
+route skips host filesystem policy and Bash structural reinterpretation because
+guest paths and commands cannot reach host mounts, host devices or controller
+secrets. See the
+[host-native workload broker contract](../architecture/permission-policy-design.md#host-native-workload-broker)
+for the exact identity, grant, receipt and teardown rules. These flags configure
+the native runtime boundary; they do not by themselves demonstrate benchmark
+quality or correctness.
 
 `--set-secret=<key>` accepts a valid settings-secret name in `SECRET_NAME` and
 reads its value from stdin, never from an argument. The example uses an

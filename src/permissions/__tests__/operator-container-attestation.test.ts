@@ -7,6 +7,7 @@ import {
   OPERATOR_ATTESTATION_VERSION,
   acquirePublishedOperatorContainerCapability,
   getOperatorContainerCapabilityAuditProjection,
+  isOperatorContainerCapabilityWithinSignedLifetime,
   isIssuedOperatorContainerCapability,
   revalidateOperatorContainerAttestationEvidence,
   verifyOperatorContainerAttestationEvidence,
@@ -318,6 +319,24 @@ function fixture() {
 }
 
 describe("operator container attestation", () => {
+  it("treats the signed v1 expiry as an exact authority deadline", () => {
+    const capability = {
+      version: "operator-container-capability/v1" as const,
+      id: "a".repeat(64),
+      generation: "generation",
+      expiresAt: NOW + 120,
+      fingerprints: {
+        attestation: "b".repeat(64),
+        process: "c".repeat(64),
+        key: "d".repeat(64),
+      },
+    };
+    expect(isOperatorContainerCapabilityWithinSignedLifetime(capability, NOW + 119)).toBe(true);
+    expect(isOperatorContainerCapabilityWithinSignedLifetime(capability, NOW + 120)).toBe(false);
+    expect(isOperatorContainerCapabilityWithinSignedLifetime(capability, NOW + 121)).toBe(false);
+    expect(isOperatorContainerCapabilityWithinSignedLifetime(capability, Number.NaN)).toBe(false);
+  });
+
   it("publishes no authority when production verification has not run", async () => {
     await expect(acquirePublishedOperatorContainerCapability()).resolves.toBeNull();
   });

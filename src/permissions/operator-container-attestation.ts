@@ -18,6 +18,7 @@ export const OPERATOR_ATTESTATION_AUDIENCE = "lvis-headless-exec" as const;
 const OPERATOR_TRUST_ROOT = "/etc/lvis/operator-trust.d" as const;
 
 const CAPABILITY_VERSION = "operator-container-capability/v1" as const;
+const REVALIDATION_LEASE_VERSION = "operator-container-revalidation-lease/v1" as const;
 const EVIDENCE_VERSION = "operator-container-attestation-evidence/v1" as const;
 const MAX_ATTESTATION_BYTES = 64 * 1_024;
 const MAX_PUBLIC_KEY_BYTES = 16 * 1_024;
@@ -103,13 +104,35 @@ interface OperatorContainerCapabilityFingerprints {
   readonly key: string;
 }
 
-/** Host-issued evidence only. A route or execution grant must still consume it explicitly. */
+/**
+ * Host-issued short-lived authority. `expiresAt` retains the meaning signed by
+ * the v1 operator attestation: no new execution authority may be acquired or
+ * consumed at or after that instant. Process confinement is revalidated in
+ * addition to, rather than instead of, this signed lifetime.
+ */
 export interface OperatorContainerCapability {
   readonly version: typeof CAPABILITY_VERSION;
   readonly id: string;
   readonly generation: string;
   readonly expiresAt: number;
   readonly fingerprints: Readonly<OperatorContainerCapabilityFingerprints>;
+}
+
+declare const operatorContainerRevalidationLeaseBrand: unique symbol;
+/**
+ * Host-issued, one-shot proof that the exact published capability passed a
+ * fresh process/confinement observation. Structural lookalikes have no power.
+ */
+export interface OperatorContainerRevalidationLease {
+  readonly [operatorContainerRevalidationLeaseBrand]: true;
+  readonly version: typeof REVALIDATION_LEASE_VERSION;
+  readonly capabilityId: string;
+  readonly capabilityGeneration: string;
+}
+
+export interface AcquiredOperatorContainerCapability {
+  readonly capability: OperatorContainerCapability;
+  readonly revalidationLease: OperatorContainerRevalidationLease;
 }
 
 export interface OperatorContainerCapabilityAuditProjection {
@@ -244,6 +267,11 @@ interface EvidenceState {
 
 const issuedCapabilities = new WeakSet<OperatorContainerCapability>();
 const capabilityStates = new WeakMap<OperatorContainerCapability, CapabilityState>();
+const issuedRevalidationLeases = new WeakMap<
+  OperatorContainerRevalidationLease,
+  OperatorContainerCapability
+>();
+const consumedRevalidationLeases = new WeakSet<OperatorContainerRevalidationLease>();
 const verifiedEvidenceStates = new WeakMap<OperatorContainerAttestationEvidence, EvidenceState>();
 let publishedCapability: OperatorContainerCapability | undefined;
 
@@ -1376,26 +1404,38 @@ export function getOperatorContainerCapabilityAuditProjection(
   return state.audit;
 }
 
-/** Re-read process identity and confinement facts before a future route consumes this evidence. */
+export function isOperatorContainerCapabilityWithinSignedLifetime(
+  capability: OperatorContainerCapability,
+  now: number,
+): boolean {
+  return Number.isSafeInteger(now) && now >= 0 && now < capability.expiresAt;
+}
+
+function capabilityIsCurrent(
+  capability: OperatorContainerCapability,
+  state: CapabilityState,
+): boolean {
+  return isOperatorContainerCapabilityWithinSignedLifetime(capability, state.deps.now());
+}
+
+/**
+ * Re-read both the v1 signed lifetime and process/confinement facts before a
+ * route consumes this capability. A future renewable authority must use a new
+ * signed contract/version; v1 expiry is never reinterpreted after publication.
+ */
 async function revalidateOperatorContainerCapability(
   capability: OperatorContainerCapability,
 ): Promise<OperatorContainerCapability> {
   if (!issuedCapabilities.has(capability)) fail("capability-not-issued");
   const state = capabilityStates.get(capability);
   if (!state) return fail("capability-state-missing");
-  const now = state.deps.now();
-  if (!Number.isSafeInteger(now) || now < 0 || now >= capability.expiresAt) {
-    fail("capability-expired");
-  }
+  if (!capabilityIsCurrent(capability, state)) fail("capability-expired");
   const facts = await collectCurrentFacts(state.deps);
   if (facts.procIdentity !== state.procIdentity ||
       !timingSafeEqualHexDigest(facts.processFingerprint, state.processFingerprint)) {
     fail("capability-process-changed");
   }
-  const finalNow = state.deps.now();
-  if (!Number.isSafeInteger(finalNow) || finalNow < 0 || finalNow >= capability.expiresAt) {
-    fail("capability-expired");
-  }
+  if (!capabilityIsCurrent(capability, state)) fail("capability-expired");
   return capability;
 }
 
@@ -1415,6 +1455,59 @@ export async function acquirePublishedOperatorContainerCapability(): Promise<
 > {
   if (!publishedCapability) return null;
   return revalidateOperatorContainerCapability(publishedCapability);
+}
+
+/**
+ * Grant-minting acquire path. The returned lease is nominal, exact-capability
+ * bound, and consumable once by execution-grant issuance.
+ */
+export async function acquirePublishedOperatorContainerCapabilityForGrant(): Promise<
+  AcquiredOperatorContainerCapability | null
+> {
+  if (!publishedCapability) return null;
+  const capability = await revalidateOperatorContainerCapability(publishedCapability);
+  const revalidationLease = Object.freeze({
+    version: REVALIDATION_LEASE_VERSION,
+    capabilityId: capability.id,
+    capabilityGeneration: capability.generation,
+  }) as OperatorContainerRevalidationLease;
+  issuedRevalidationLeases.set(revalidationLease, capability);
+  return Object.freeze({ capability, revalidationLease });
+}
+
+/** Consume an exact fresh-observation lease. Failure never consumes another lease. */
+export function consumeOperatorContainerRevalidationLease(
+  capability: OperatorContainerCapability,
+  lease: OperatorContainerRevalidationLease,
+): boolean {
+  const state = capabilityStates.get(capability);
+  if (consumedRevalidationLeases.has(lease) ||
+      issuedRevalidationLeases.get(lease) !== capability ||
+      publishedCapability !== capability ||
+      !issuedCapabilities.has(capability) ||
+      state === undefined ||
+      !capabilityIsCurrent(capability, state) ||
+      lease.capabilityId !== capability.id ||
+      lease.capabilityGeneration !== capability.generation) {
+    return false;
+  }
+  consumedRevalidationLeases.add(lease);
+  return true;
+}
+
+/**
+ * Synchronous identity check for a capability that was already revalidated by
+ * {@link acquirePublishedOperatorContainerCapabilityForGrant} in the same invocation.
+ * It never substitutes for acquire-time process observation.
+ */
+export function isCurrentPublishedOperatorContainerCapability(
+  capability: OperatorContainerCapability,
+): boolean {
+  const state = capabilityStates.get(capability);
+  return issuedCapabilities.has(capability) &&
+    publishedCapability === capability &&
+    state !== undefined &&
+    capabilityIsCurrent(capability, state);
 }
 
 export async function verifyAndPublishOperatorContainerAttestation(

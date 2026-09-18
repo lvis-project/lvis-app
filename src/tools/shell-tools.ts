@@ -1,4 +1,7 @@
-import type { ToolOutputCapture } from "../shared/tool-output-artifact.js";
+import type {
+  ToolOutputArtifactInfo,
+  ToolOutputCapture,
+} from "../shared/tool-output-artifact.js";
 /**
  * Host shell tool family: the `bash` and `powershell` execution tools, the
  * session-scoped background-shell registry, and the `bash_output` /
@@ -33,11 +36,14 @@ import { buildHostShellChildEnv, buildSafeChildEnv, buildSandboxedChildEnv } fro
 import { prepareShellInvocation, matchesPreparedShellInvocation, preparedShellFacts, preparedShellCommand, bindPreparedShellExecutableReadPaths, preparedShellExecutableReadPaths, preparedSandboxBootstrap, preparedSandboxEnvironment, disposePreparedShellInvocation, claimPreparedShellInvocation, transferPreparedShellInvocation, type PreparedShellInvocation } from "./prepared-shell-invocation.js";
 import { POWER_SHELL_AST_PARSER, normalizePowerShellAstSummary, type PowerShellArgument, type PowerShellAstSummary } from "./powershell-ast.js";
 import { resolveShellFilesystemPath } from "../shared/shell-filesystem-path.js";
-import { findResolvedShellPathViolation, type ShellPathPolicyViolation } from "./shell-path-policy.js";
+import {
+  findResolvedShellPathViolation,
+  findShellPathPolicyViolation,
+  type ShellPathPolicyViolation,
+} from "./shell-path-policy.js";
 export type { PowerShellAstSummary } from "./powershell-ast.js";
 import { createSandboxProcessHome } from "../permissions/sandbox-process-home.js";
 import {
-  validateShellCommandPathPolicy,
   validateShellWorkingDirectory,
 } from "./shell-path-policy.js";
 import {
@@ -53,7 +59,13 @@ import {
 import {
   getHostShellExecutionPlanAuditProjection,
   requiresExplicitHostShellApproval,
+  type HostShellExecutionPlan,
 } from "../permissions/host-shell-execution-plan.js";
+import {
+  consumeExecutionGrantForBuiltinToolInvocation,
+  consumeExecutionGrantForShellInvocation,
+  disposableGrantRelaxesPathPolicy,
+} from "../permissions/execution-router.js";
 import {
   canonicalizeHostShellAllowedDirectories,
   consumeHostShellExecutionPermit,
@@ -67,6 +79,18 @@ import {
   trackManagedChildProcess,
 } from "../main/managed-child-processes.js";
 import { sha256Hex } from "../lib/hex-digest-equal.js";
+import type {
+  BrokeredWorkloadCapability,
+  BrokeredWorkloadExecutionResult,
+  WorkloadBackgroundActor,
+  WorkloadBackgroundParent,
+  WorkloadToolCorrelationAuthority,
+} from "../workload/runtime.js";
+import { isWorkloadBrokerActive } from "../workload/runtime.js";
+import {
+  WORKLOAD_BROKER_LIMITS,
+  type WorkloadBrokerSuccessResults,
+} from "../workload/protocol.js";
 
 type PipedChild = ChildProcessByStdio<null, Readable, Readable>;
 
@@ -84,6 +108,83 @@ function formatOutput(raw: string, captureTruncated = false): string {
 interface ShellCompletion {
   code: number | null;
   signal: NodeJS.Signals | null;
+}
+
+function consumeShellExecutionRoute(input: {
+  context: ToolExecutionContext;
+  legacyPlan: HostShellExecutionPlan;
+  toolName: "bash" | "powershell";
+  command: string;
+  cwd: string;
+  timeoutSeconds: number;
+  background: boolean;
+}) {
+  if (input.context.executionRouteGrant === undefined) return null;
+  return consumeExecutionGrantForShellInvocation({
+    grant: input.context.executionRouteGrant,
+    legacyPlan: input.legacyPlan,
+    toolName: input.toolName,
+    command: input.command,
+    cwd: input.cwd,
+    timeoutSeconds: input.timeoutSeconds,
+    background: input.background,
+  });
+}
+
+type WorkloadRuntime = typeof import("../workload/runtime.js");
+
+interface BrokeredShellAuthority {
+  readonly runtime: WorkloadRuntime;
+  readonly capability: BrokeredWorkloadCapability;
+  readonly correlationAuthority: WorkloadToolCorrelationAuthority;
+}
+
+/**
+ * An active broker launch is exclusive. Once configured, a missing disposable
+ * grant, a cwd binding mismatch, or handshake failure must never degrade to a
+ * local child on the host that owns the broker socket.
+ */
+async function acquireBrokeredShellAuthority(
+  executionAuthority: ReturnType<typeof consumeShellExecutionRoute>,
+  requestedGrant: ToolExecutionContext["executionRouteGrant"],
+): Promise<BrokeredShellAuthority | null> {
+  const runtime = await import("../workload/runtime.js");
+  if (executionAuthority?.disposableAuthority === "workload-broker") {
+    if (
+      executionAuthority.route !== "disposable-container" ||
+      executionAuthority.brokeredWorkloadCapability === undefined ||
+      executionAuthority.workloadCorrelationAuthority === undefined ||
+      !runtime.isWorkloadBrokerActive()
+    ) {
+      throw new Error("workload-broker:grant-binding-unavailable");
+    }
+    return Object.freeze({
+      runtime,
+      capability: executionAuthority.brokeredWorkloadCapability,
+      correlationAuthority: executionAuthority.workloadCorrelationAuthority!,
+    });
+  }
+  if (
+    runtime.isWorkloadBrokerActive() ||
+    requestedGrant?.disposableAuthority === "workload-broker"
+  ) {
+    throw new Error("workload-broker:disposable-grant-required");
+  }
+  return null;
+}
+
+function brokerFailureResult(error: unknown): ToolExecutionResult {
+  const reason = error instanceof Error ? error.message : "workload-broker:unexpected-failure";
+  return {
+    output: `Workload broker refused execution (${reason}).`,
+    isError: true,
+    metadata: {
+      source: "workload-broker",
+      executionTransport: "workload-broker",
+      sandboxed: true,
+      isolation: "disposable-container",
+    },
+  };
 }
 
 /** Termination belongs in shell content, which every provider receives. */
@@ -210,7 +311,8 @@ const shellTimeoutSchema = z.number().int().min(1)
   .describe(
     "Seconds to wait before the command is killed. Positive integer; defaults to " +
     `${TOOL_TIMEOUT_POLICY.shellDefaultMs / 1000}. Start with the default and only pass a ` +
-    "larger value when a previous call timed out.",
+    "larger value when a previous call timed out. Brokered disposable workloads accept at most " +
+    `${WORKLOAD_BROKER_LIMITS.maximumTimeoutMs / 1000} seconds; local execution has no schema maximum.`,
   );
 
 /**
@@ -231,6 +333,18 @@ const shellTimeoutSchema = z.number().int().min(1)
  * incremental reads stay correct.
  */
 export const MAX_OUTPUT_CHARS = 200_000;
+const BROKER_BACKGROUND_KILL_TIMEOUT_MS =
+  TOOL_TIMEOUT_POLICY.workloadBrokerBackgroundCleanupEffectMs;
+/**
+ * A background command must reach its broker-owned deadline while the exact
+ * capability is still live, with enough time left for a fresh handshake and
+ * a bounded terminal cleanup request. This prevents an accepted command from
+ * predictably outliving the only authority that can terminate it.
+ */
+const BROKER_BACKGROUND_LIFETIME_GUARD_MS =
+  (2 * WORKLOAD_BROKER_LIMITS.handshakeTimeoutMs) +
+  BROKER_BACKGROUND_KILL_TIMEOUT_MS +
+  TOOL_TIMEOUT_POLICY.workloadBrokerTransportGraceMs;
 /** Terminal statuses a background shell can settle into. */
 type BackgroundShellStatus = "running" | "exited" | "killed" | "failed";
 type BackgroundShellWaitFor = z.infer<typeof backgroundOutputWaitForSchema>;
@@ -256,12 +370,65 @@ interface BackgroundShellReadResult {
   shellId: string;
   status: BackgroundShellStatus;
   exitCode: number | null;
-  signal: NodeJS.Signals | null;
+  signal: string | null;
   /** New output since the previous read (advances the cursor). */
   output: string;
   /** True once total output hit the cap and later bytes were dropped. */
   truncated: boolean;
   command: string;
+  workloadStatus?: WorkloadBrokerSuccessResults["shell.kill"]["status"] | "running";
+  completion?: string;
+  isError?: boolean;
+  metadata?: Record<string, unknown>;
+}
+
+interface BrokerBackgroundShellEntry {
+  readonly shellId: string;
+  readonly sessionId: string;
+  readonly command: string;
+  readonly executionId: string;
+  readonly capability: BrokeredWorkloadCapability;
+  readonly parent: WorkloadBackgroundParent;
+  offset: number;
+  status: BackgroundShellStatus;
+  exitCode: number | null;
+  signal: string | null;
+  truncated: boolean;
+  capturedChars: number;
+  terminalReceipt?: Record<string, unknown>;
+  workloadStatus?: WorkloadBrokerSuccessResults["shell.kill"]["status"];
+  completion?: string;
+  isError?: boolean;
+}
+
+type BrokerSessionCleanupState = "pending" | "complete" | "cleanup-unproven";
+
+interface BrokerBackgroundCleanupOutcome {
+  readonly shellId: string;
+  readonly executionId: string;
+  readonly state: Exclude<BrokerSessionCleanupState, "pending">;
+  readonly ownedResourcesZero: boolean;
+  readonly requiresExternalRelease: boolean;
+  readonly workloadStatus?: WorkloadBrokerSuccessResults["shell.kill"]["status"];
+  readonly receipt?: Readonly<Record<string, unknown>>;
+  readonly failure?: string;
+}
+
+interface BrokerSessionCleanupReport {
+  readonly sessionId: string;
+  readonly state: BrokerSessionCleanupState;
+  readonly requested: number;
+  readonly settled: number;
+  readonly pending: number;
+  readonly cleanupUnproven: number;
+  readonly outcomes: readonly BrokerBackgroundCleanupOutcome[];
+}
+
+interface MutableBrokerSessionCleanup {
+  readonly sessionId: string;
+  requested: number;
+  readonly pending: Map<string, Promise<void>>;
+  readonly outcomes: Map<string, BrokerBackgroundCleanupOutcome>;
 }
 
 export interface BackgroundShellManager {
@@ -273,18 +440,363 @@ export interface BackgroundShellManager {
     /** True only when this child was spawned as a detached POSIX group leader. */
     killProcessGroup?: boolean;
   }): string;
+  registerBroker(input: {
+    sessionId: string;
+    command: string;
+    executionId: string;
+    capability: BrokeredWorkloadCapability;
+    parent: WorkloadBackgroundParent;
+    offset: number;
+  }): string;
+  isBrokerShell(sessionId: string, shellId: string): boolean;
+  readBroker(
+    sessionId: string,
+    shellId: string,
+    waitMs: number,
+    actor: WorkloadBackgroundActor,
+    signal?: AbortSignal,
+    waitFor?: BackgroundShellWaitFor,
+  ): Promise<BackgroundShellReadResult | ToolExecutionResult | undefined>;
+  killBroker(
+    sessionId: string,
+    shellId: string,
+    actor: WorkloadBackgroundActor,
+    signal?: AbortSignal,
+  ): Promise<BackgroundShellReadResult | ToolExecutionResult | undefined>;
   read(sessionId: string, shellId: string): BackgroundShellReadResult | undefined;
   waitForOutput(sessionId: string, shellId: string, waitMs: number, signal?: AbortSignal, waitFor?: BackgroundShellWaitFor): Promise<void>;
   kill(sessionId: string, shellId: string): BackgroundShellReadResult | undefined;
   /** Kill + drop every shell owned by a session (call on session end). */
   disposeSession(sessionId: string): number;
+  /** Begin cleanup for every still-live broker shell during process shutdown. */
+  disposeAllBrokerShells(signal?: AbortSignal): number;
+  /** Observe cleanup without treating fire-and-forget transport as success. */
+  getBrokerCleanupReport(sessionId: string): BrokerSessionCleanupReport | undefined;
+  /** Resolve once every broker cleanup request for this session has settled. */
+  waitForBrokerCleanup(sessionId: string): Promise<BrokerSessionCleanupReport | undefined>;
+  /** Wait for every tracked broker cleanup and return its final release proof. */
+  waitForAllBrokerCleanup(): Promise<readonly BrokerSessionCleanupReport[]>;
   /** Test-only reset. */
   _resetForTest(): void;
   _size(): number;
 }
 
+function isBrokerTransportToolResult<K extends "shell.start" | "shell.read" | "shell.kill">(
+  result: BrokeredWorkloadExecutionResult<K>,
+): result is ToolExecutionResult {
+  return !("executionId" in result);
+}
+
+function brokerTerminalStatus(
+  status: WorkloadBrokerSuccessResults["shell.read"]["status"] |
+    WorkloadBrokerSuccessResults["shell.kill"]["status"],
+): BackgroundShellStatus {
+  if (status === "running") return "running";
+  if (status === "exited") return "exited";
+  if (status === "transport-failed" || status === "cleanup-unproven") return "failed";
+  return "killed";
+}
+
+function brokerTerminalReceipt(
+  result: WorkloadBrokerSuccessResults["shell.read"] |
+    WorkloadBrokerSuccessResults["shell.kill"],
+): Record<string, unknown> | undefined {
+  if (result.status === "running") return undefined;
+  return {
+    status: result.status,
+    exitCode: result.exitCode,
+    signal: result.signal,
+    timedOut: result.timedOut,
+    cancelled: result.cancelled,
+    oomDelta: result.oomDelta,
+    ownedResourcesZero: result.ownedResourcesZero,
+    receiptDigest: result.receiptDigest,
+  };
+}
+
+function workloadCompletionSentence(input: {
+  status: WorkloadBrokerSuccessResults["shell.run"]["status"];
+  exitCode: number | null;
+  signal: string | null;
+  oomDelta: number;
+  ownedResourcesZero: boolean;
+}): string | undefined {
+  switch (input.status) {
+    case "exited":
+      return input.exitCode === 0
+        ? undefined
+        : `Workload shell exited with code ${input.exitCode ?? "unknown"}.`;
+    case "signaled":
+      return `Workload shell was terminated by signal ${input.signal ?? "unknown"}.`;
+    case "timed-out":
+      return "Workload shell timed out and the broker completed its termination sequence.";
+    case "cancelled":
+      return "Workload shell was cancelled and the broker completed its termination sequence.";
+    case "oom-killed":
+      return `Workload shell was OOM-killed (cgroup OOM delta ${input.oomDelta}).`;
+    case "transport-failed":
+      return "Workload shell transport failed before a successful completion was proven.";
+    case "cleanup-unproven":
+      return `Workload shell cleanup was not proven (owned resources zero: ${input.ownedResourcesZero}).`;
+  }
+}
+
+function workloadTerminalIsError(input: {
+  status: WorkloadBrokerSuccessResults["shell.run"]["status"];
+  exitCode: number | null;
+  isError: boolean;
+  ownedResourcesZero: boolean;
+}): boolean {
+  return input.isError || input.status !== "exited" || input.exitCode !== 0 ||
+    !input.ownedResourcesZero;
+}
+
+function brokerBackgroundSnapshot(
+  entry: BrokerBackgroundShellEntry,
+  output: string,
+): BackgroundShellReadResult {
+  return {
+    shellId: entry.shellId,
+    status: entry.status,
+    exitCode: entry.exitCode,
+    signal: entry.signal,
+    output,
+    truncated: entry.truncated,
+    command: entry.command,
+    ...(entry.workloadStatus === undefined ? {} : { workloadStatus: entry.workloadStatus }),
+    ...(entry.completion === undefined ? {} : { completion: entry.completion }),
+    ...(entry.isError === undefined ? {} : { isError: entry.isError }),
+    metadata: {
+      source: "workload-broker",
+      executionTransport: "workload-broker",
+      ...(entry.terminalReceipt === undefined
+        ? {}
+        : { workloadReceipt: entry.terminalReceipt }),
+    },
+  };
+}
+
+function captureBrokerBackgroundOutput(
+  entry: BrokerBackgroundShellEntry,
+  raw: string,
+): string {
+  const remaining = Math.max(0, MAX_OUTPUT_CHARS - entry.capturedChars);
+  const output = raw.slice(0, remaining);
+  entry.capturedChars += output.length;
+  if (raw.length > remaining) entry.truncated = true;
+  return output;
+}
+
+function isWellFormedUnicode(value: string): boolean {
+  return Buffer.from(value, "utf8").toString("utf8") === value;
+}
+
+function isExactBrokerReadRange(input: {
+  offset: number;
+  nextOffset: number;
+  output: string;
+  maxBytes: number;
+}): boolean {
+  if (!isWellFormedUnicode(input.output)) return false;
+  const outputBytes = Buffer.byteLength(input.output, "utf8");
+  return outputBytes <= input.maxBytes &&
+    input.nextOffset === input.offset + outputBytes;
+}
+
+/**
+ * shell.kill returns the complete retained transcript. Split it at the last
+ * consumed UTF-8 byte cursor so the user sees only unread output.
+ */
+function brokerKillUnreadSuffix(
+  output: string,
+  consumedBytes: number,
+  nextOffset: number,
+): string | null {
+  if (!isWellFormedUnicode(output)) return null;
+  const encoded = Buffer.from(output, "utf8");
+  if (nextOffset !== encoded.byteLength || consumedBytes > nextOffset) return null;
+  const consumed = encoded.subarray(0, consumedBytes);
+  const unread = encoded.subarray(consumedBytes);
+  const consumedText = consumed.toString("utf8");
+  const unreadText = unread.toString("utf8");
+  if (!Buffer.from(consumedText, "utf8").equals(consumed) ||
+      !Buffer.from(unreadText, "utf8").equals(unread)) {
+    return null;
+  }
+  return unreadText;
+}
+
+function withBrokerTransportMetadata(result: ToolExecutionResult): ToolExecutionResult {
+  return {
+    ...result,
+    metadata: {
+      ...(result.metadata ?? {}),
+      source: "workload-broker",
+      executionTransport: "workload-broker",
+      sandboxed: true,
+      isolation: "disposable-container",
+    },
+  };
+}
+
 function createManager(): BackgroundShellManager {
   const shells = new Map<string, BackgroundShellEntry>();
+  const brokerShells = new Map<string, BrokerBackgroundShellEntry>();
+  const brokerCleanup = new Map<string, MutableBrokerSessionCleanup>();
+  let brokerRuntimeImport: Promise<typeof import("../workload/runtime.js")> | undefined;
+  const loadBrokerRuntime = () =>
+    brokerRuntimeImport ??= import("../workload/runtime.js");
+
+  const cleanupReport = (
+    cleanup: MutableBrokerSessionCleanup,
+  ): BrokerSessionCleanupReport => {
+    const outcomes = [...cleanup.outcomes.values()];
+    const cleanupUnproven = outcomes.filter(
+      (outcome) => outcome.state === "cleanup-unproven",
+    ).length;
+    return Object.freeze({
+      sessionId: cleanup.sessionId,
+      state: cleanup.pending.size > 0
+        ? "pending"
+        : cleanupUnproven > 0
+          ? "cleanup-unproven"
+          : "complete",
+      requested: cleanup.requested,
+      settled: outcomes.length,
+      pending: cleanup.pending.size,
+      cleanupUnproven,
+      outcomes: Object.freeze(outcomes),
+    });
+  };
+
+  const unprovenCleanup = (
+    entry: BrokerBackgroundShellEntry,
+    failure: string,
+  ): BrokerBackgroundCleanupOutcome => Object.freeze({
+    shellId: entry.shellId,
+    executionId: entry.executionId,
+    state: "cleanup-unproven" as const,
+    ownedResourcesZero: false,
+    requiresExternalRelease: true,
+    failure,
+  });
+
+  const cleanTerminalOutcome = (
+    entry: BrokerBackgroundShellEntry,
+    result: WorkloadBrokerSuccessResults["shell.kill"],
+  ): BrokerBackgroundCleanupOutcome => {
+    const receipt = brokerTerminalReceipt(result);
+    return Object.freeze({
+      shellId: entry.shellId,
+      executionId: entry.executionId,
+      state: result.ownedResourcesZero ? "complete" as const : "cleanup-unproven" as const,
+      ownedResourcesZero: result.ownedResourcesZero,
+      requiresExternalRelease: !result.ownedResourcesZero,
+      workloadStatus: result.status,
+      ...(receipt === undefined ? {} : { receipt: Object.freeze(receipt) }),
+      ...(!result.ownedResourcesZero
+        ? { failure: "workload-broker:cleanup-unproven" }
+        : {}),
+    });
+  };
+
+  const cleanupBrokerEntry = async (
+    entry: BrokerBackgroundShellEntry,
+    reason: "session-disposal" | "application-shutdown",
+    signal?: AbortSignal,
+  ): Promise<BrokerBackgroundCleanupOutcome> => {
+    if (entry.terminalReceipt?.ownedResourcesZero === true) {
+      return Object.freeze({
+        shellId: entry.shellId,
+        executionId: entry.executionId,
+        state: "complete" as const,
+        ownedResourcesZero: true,
+        requiresExternalRelease: false,
+        ...(entry.workloadStatus === undefined
+          ? {}
+          : { workloadStatus: entry.workloadStatus }),
+        receipt: Object.freeze({ ...entry.terminalReceipt }),
+      });
+    }
+    try {
+      const runtime = await loadBrokerRuntime();
+      const result = await runtime.executeBrokeredWorkloadRequest(
+        entry.capability,
+        "shell.kill",
+        {
+          executionId: entry.executionId,
+          signal: "SIGKILL",
+          timeoutMs: BROKER_BACKGROUND_KILL_TIMEOUT_MS,
+        },
+        { parent: entry.parent, actor: { kind: "host-cleanup", reason } },
+        signal,
+      );
+      // Runtime transport/capability failures resolve as ToolExecutionResult;
+      // they are not promise rejections and must remain cleanup-unproven.
+      if (isBrokerTransportToolResult(result)) {
+        const code = typeof result.metadata?.code === "string"
+          ? result.metadata.code
+          : undefined;
+        return unprovenCleanup(
+          entry,
+          code === undefined ? result.output : `workload-broker:${code}`,
+        );
+      }
+      if (result.executionId !== entry.executionId ||
+          brokerKillUnreadSuffix(result.output, entry.offset, result.nextOffset) === null) {
+        return unprovenCleanup(entry, "workload-broker:background-binding-mismatch");
+      }
+      return cleanTerminalOutcome(entry, result);
+    } catch (error) {
+      return unprovenCleanup(
+        entry,
+        error instanceof Error ? error.message : "workload-broker:unexpected-failure",
+      );
+    }
+  };
+
+  const trackBrokerCleanup = (
+    cleanup: MutableBrokerSessionCleanup,
+    entry: BrokerBackgroundShellEntry,
+    reason: "session-disposal" | "application-shutdown",
+    signal?: AbortSignal,
+  ): void => {
+    const request = cleanupBrokerEntry(entry, reason, signal).then((outcome) => {
+      // Test reset or a future lifecycle owner may replace the report. A late
+      // request must not mutate a different session generation's evidence.
+      if (brokerCleanup.get(cleanup.sessionId) !== cleanup) return;
+      cleanup.outcomes.set(entry.shellId, outcome);
+      cleanup.pending.delete(entry.shellId);
+    });
+    cleanup.pending.set(entry.shellId, request);
+    void request;
+  };
+
+  const disposeBrokerSession = (
+    sessionId: string,
+    reason: "session-disposal" | "application-shutdown",
+    signal?: AbortSignal,
+  ): number => {
+    let disposed = 0;
+    for (const entry of [...brokerShells.values()]) {
+      if (entry.sessionId !== sessionId) continue;
+      brokerShells.delete(entry.shellId);
+      disposed += 1;
+      let cleanup = brokerCleanup.get(sessionId);
+      if (cleanup === undefined) {
+        cleanup = {
+          sessionId,
+          requested: 0,
+          pending: new Map(),
+          outcomes: new Map(),
+        };
+        brokerCleanup.set(sessionId, cleanup);
+      }
+      cleanup.requested += 1;
+      trackBrokerCleanup(cleanup, entry, reason, signal);
+    }
+    return disposed;
+  };
 
   const notify = (entry: BackgroundShellEntry): void => {
     for (const wake of [...entry.waiters]) wake();
@@ -324,6 +836,32 @@ function createManager(): BackgroundShellManager {
     const entry = shells.get(shellId);
     if (!entry || entry.sessionId !== sessionId) return undefined;
     return entry;
+  };
+
+  const ownedBroker = (
+    sessionId: string,
+    shellId: string,
+  ): BrokerBackgroundShellEntry | undefined => {
+    const entry = brokerShells.get(shellId);
+    return entry?.sessionId === sessionId ? entry : undefined;
+  };
+
+  const applyBrokerTerminal = (
+    entry: BrokerBackgroundShellEntry,
+    result: WorkloadBrokerSuccessResults["shell.read"] |
+      WorkloadBrokerSuccessResults["shell.kill"],
+  ): void => {
+    entry.offset = result.nextOffset;
+    entry.truncated ||= result.truncated;
+    entry.status = brokerTerminalStatus(result.status);
+    if (result.status !== "running") {
+      entry.exitCode = result.exitCode;
+      entry.signal = result.signal;
+      entry.terminalReceipt = brokerTerminalReceipt(result);
+      entry.workloadStatus = result.status;
+      entry.completion = workloadCompletionSentence(result);
+      entry.isError = workloadTerminalIsError(result);
+    }
   };
 
   return {
@@ -403,6 +941,115 @@ function createManager(): BackgroundShellManager {
       return shellId;
     },
 
+    registerBroker({ sessionId, command, executionId, capability, parent, offset }): string {
+      for (const entry of [...brokerShells.values()]) {
+        if (
+          entry.sessionId === sessionId &&
+          entry.status !== "running" &&
+          entry.terminalReceipt?.ownedResourcesZero === true
+        ) {
+          brokerShells.delete(entry.shellId);
+        }
+      }
+      const shellId = randomUUID();
+      brokerShells.set(shellId, {
+        shellId,
+        sessionId,
+        command,
+        executionId,
+        capability,
+        parent,
+        offset,
+        status: "running",
+        exitCode: null,
+        signal: null,
+        truncated: false,
+        capturedChars: 0,
+      });
+      return shellId;
+    },
+
+    isBrokerShell(sessionId, shellId): boolean {
+      return ownedBroker(sessionId, shellId) !== undefined;
+    },
+
+    async readBroker(sessionId, shellId, waitMs, actor, signal, waitFor) {
+      const entry = ownedBroker(sessionId, shellId);
+      if (!entry) return undefined;
+      signal?.throwIfAborted();
+      const condition = backgroundOutputWaitForSchema.parse(waitFor);
+      const boundedWaitMs = backgroundOutputWaitSchema.parse(waitMs);
+      let output = "";
+      if (entry.status === "running") {
+        const maximumReadBytes = MAX_OUTPUT_CHARS * 4;
+        const runtime = await loadBrokerRuntime();
+        const result = await runtime.executeBrokeredWorkloadRequest(
+          entry.capability,
+          "shell.read",
+          {
+            executionId: entry.executionId,
+            offset: entry.offset,
+            maxBytes: maximumReadBytes,
+            waitMs: boundedWaitMs,
+            waitFor: condition,
+          },
+          { parent: entry.parent, actor },
+          signal,
+        );
+        if (isBrokerTransportToolResult(result)) {
+          return withBrokerTransportMetadata(result);
+        }
+        if (
+          result.executionId !== entry.executionId ||
+          result.offset !== entry.offset ||
+          !isExactBrokerReadRange({
+            offset: result.offset,
+            nextOffset: result.nextOffset,
+            output: result.output,
+            maxBytes: maximumReadBytes,
+          })
+        ) {
+          return brokerFailureResult(new Error("workload-broker:background-binding-mismatch"));
+        }
+        applyBrokerTerminal(entry, result);
+        output += captureBrokerBackgroundOutput(entry, result.output);
+      }
+      return brokerBackgroundSnapshot(entry, output);
+    },
+
+    async killBroker(sessionId, shellId, actor, signal) {
+      const entry = ownedBroker(sessionId, shellId);
+      if (!entry) return undefined;
+      const runtime = await loadBrokerRuntime();
+      const result = await runtime.executeBrokeredWorkloadRequest(
+        entry.capability,
+        "shell.kill",
+        {
+          executionId: entry.executionId,
+          signal: "SIGKILL",
+          timeoutMs: BROKER_BACKGROUND_KILL_TIMEOUT_MS,
+        },
+        { parent: entry.parent, actor },
+        signal,
+      );
+      if (isBrokerTransportToolResult(result)) {
+        return withBrokerTransportMetadata(result);
+      }
+      const unreadOutput = brokerKillUnreadSuffix(
+        result.output,
+        entry.offset,
+        result.nextOffset,
+      );
+      if (result.executionId !== entry.executionId || unreadOutput === null) {
+        return brokerFailureResult(new Error("workload-broker:background-binding-mismatch"));
+      }
+      applyBrokerTerminal(entry, result);
+      return brokerBackgroundSnapshot(
+        entry,
+        captureBrokerBackgroundOutput(entry, unreadOutput),
+      );
+    },
+
     read(sessionId, shellId): BackgroundShellReadResult | undefined {
       const entry = owned(sessionId, shellId);
       return entry ? snapshot(entry) : undefined;
@@ -460,7 +1107,48 @@ function createManager(): BackgroundShellManager {
         notify(entry);
         disposed += 1;
       }
+      return disposed + disposeBrokerSession(sessionId, "session-disposal");
+    },
+
+    disposeAllBrokerShells(signal?: AbortSignal): number {
+      const sessionIds = new Set(
+        [...brokerShells.values()].map((entry) => entry.sessionId),
+      );
+      let disposed = 0;
+      for (const sessionId of sessionIds) {
+        disposed += disposeBrokerSession(sessionId, "application-shutdown", signal);
+      }
       return disposed;
+    },
+
+    getBrokerCleanupReport(sessionId): BrokerSessionCleanupReport | undefined {
+      const cleanup = brokerCleanup.get(sessionId);
+      return cleanup === undefined ? undefined : cleanupReport(cleanup);
+    },
+
+    async waitForBrokerCleanup(sessionId): Promise<BrokerSessionCleanupReport | undefined> {
+      const cleanup = brokerCleanup.get(sessionId);
+      if (cleanup === undefined) return undefined;
+      while (cleanup.pending.size > 0) {
+        await Promise.all([...cleanup.pending.values()]);
+      }
+      return cleanupReport(cleanup);
+    },
+
+    async waitForAllBrokerCleanup(): Promise<readonly BrokerSessionCleanupReport[]> {
+      // Admission is sealed before app shutdown calls this method, but loop in
+      // case a session-dispose microtask registered cleanup immediately before
+      // the seal became visible to its caller.
+      while (true) {
+        const pending = [...brokerCleanup.values()].flatMap(
+          (cleanup) => [...cleanup.pending.values()],
+        );
+        if (pending.length === 0) break;
+        await Promise.all(pending);
+      }
+      return Object.freeze(
+        [...brokerCleanup.values()].map((cleanup) => cleanupReport(cleanup)),
+      );
     },
 
     _resetForTest(): void {
@@ -469,10 +1157,12 @@ function createManager(): BackgroundShellManager {
       }
       const entries = [...shells.values()];
       shells.clear();
+      brokerShells.clear();
+      brokerCleanup.clear();
       for (const entry of entries) notify(entry);
     },
     _size(): number {
-      return shells.size;
+      return shells.size + brokerShells.size;
     },
   };
 }
@@ -518,8 +1208,9 @@ export const BashToolInputSchema = z.object({
   command: z.string().min(1).describe("Shell command to execute"),
   cwd: z.string().optional().describe("Working directory override"),
   // Optional-but-defaulted and strictly positive: a command always has a
-  // deadline, so nothing waits forever. No upper bound — a timeout is a clean,
-  // retryable error whose retry exists precisely to name a LARGER budget.
+  // deadline, so nothing waits forever. Local execution has no upper bound;
+  // the brokered workload protocol has the model-visible maximum documented
+  // below because its capability lifetime is bounded.
   timeoutSeconds: shellTimeoutSchema,
   run_in_background: z
     .boolean()
@@ -527,11 +1218,12 @@ export const BashToolInputSchema = z.object({
     .describe(
       "Run the command in the background and return a shellId immediately instead of waiting. " +
         "Read incremental output with bash_output and stop it with bash_kill. `timeoutSeconds` " +
-        "does not apply to a background shell. The shell is bound to this session and is " +
+        "is the maximum lifetime in a brokered disposable workload (up to 3600 seconds); " +
+        "plain local background shells instead live until stopped or the session ends. The shell is bound to this session and is " +
         "terminated when the session ends, so it is for work you will read back during this " +
         "session -- not for leaving a server, daemon or worker running for something that " +
-        "inspects it afterwards. Only available on the plain host-shell path: under " +
-        "the OS sandbox (ASRT) the command runs synchronously and the result is flagged " +
+        "inspects it afterwards. Available on plain host and brokered disposable routes. Under " +
+        "the OS sandbox (ASRT), the command runs synchronously and the result is flagged " +
         "backgroundUnavailable, because the sandbox cannot safely run concurrent commands.",
     ),
 }).superRefine(validateHostShellExecutionRequest);
@@ -601,12 +1293,7 @@ export class BashTool extends ZodTool<typeof BashToolInputSchema> {
       };
     }
 
-    // Sandbox path check on cwd (if overridden).
     const resolvedCwd = resolveHostShellWorkingDirectory(ctx.cwd, input.cwd);
-    const cwdViolation = validateShellWorkingDirectory(resolvedCwd, ctx.cwd, ctx.extraAllowedDirectories);
-    if (cwdViolation) {
-      return { output: cwdViolation, isError: true };
-    }
     // §691: the executor seals the host-shell substrate before permission
     // routing. The supplied plan must come from the live host provider; a
     // structural lookalike cannot downgrade an active ASRT route to plain spawn.
@@ -625,11 +1312,60 @@ export class BashTool extends ZodTool<typeof BashToolInputSchema> {
     if (hostShellPlan.executionRequest !== (input.executionMode ?? "default")) {
       return { output: "Shell execution request does not match the host plan.", isError: true };
     }
-    if (requiresExplicitHostShellApproval(hostShellPlan) && !ctx.hostShellExecutionPermit) {
-      return { output: "spawn failed: this host shell execution requires a one-shot host approval permit.", isError: true, metadata: { sandboxed: false, isolation: "none" } };
+    const executionAuthority = consumeShellExecutionRoute({
+      context: ctx,
+      legacyPlan: hostShellPlan,
+      toolName: "bash",
+      command: input.command,
+      cwd: resolvedCwd,
+      timeoutSeconds: input.timeoutSeconds,
+      background: input.run_in_background ?? false,
+    });
+    const disposableExecution = executionAuthority?.route === "disposable-container";
+    let brokeredAuthority: BrokeredShellAuthority | null;
+    try {
+      brokeredAuthority = await acquireBrokeredShellAuthority(
+        executionAuthority,
+        ctx.executionRouteGrant,
+      );
+    } catch (error) {
+      return brokerFailureResult(error);
     }
     const identity = { command: input.command, requestedCwd: input.cwd, executionCwd: ctx.cwd, resolvedCwd,
       toolUseId: typeof ctx.metadata.toolUseId === "string" ? ctx.metadata.toolUseId : undefined, plan: hostShellPlan };
+    if (brokeredAuthority !== null) {
+      if (ctx.preparedShellInvocation !== undefined) {
+        disposePreparedShellInvocation(ctx.preparedShellInvocation);
+        return brokerFailureResult(new Error("workload-broker:unexpected-host-shell-preparation"));
+      }
+      try {
+        return input.run_in_background === true
+          ? await startBrokeredBash(brokeredAuthority, input, resolvedCwd, ctx)
+          : await runBrokeredBash(brokeredAuthority, input, resolvedCwd, ctx);
+      } catch (error) {
+        return brokerFailureResult(error);
+      }
+    }
+    const cwdViolation = validateShellWorkingDirectory(
+      resolvedCwd,
+      ctx.cwd,
+      ctx.extraAllowedDirectories,
+    );
+    if (cwdViolation) {
+      const kind = cwdViolation.startsWith("Sensitive")
+        ? "sensitive-path"
+        : "sandbox-boundary";
+      if (!disposableGrantRelaxesPathPolicy(executionAuthority, kind)) {
+        return { output: cwdViolation, isError: true };
+      }
+    }
+    if (
+      !disposableExecution &&
+      requiresExplicitHostShellApproval(hostShellPlan) &&
+      !ctx.hostShellExecutionPermit
+    ) {
+      return { output: "spawn failed: this host shell execution requires a one-shot host approval permit.", isError: true, metadata: { sandboxed: false, isolation: "none" } };
+    }
     let prepared: PreparedShellInvocation;
     try { prepared = ctx.preparedShellInvocation ?? prepareShellInvocation(identity, ctx.abortSignal); }
     catch (error) {
@@ -641,7 +1377,7 @@ export class BashTool extends ZodTool<typeof BashToolInputSchema> {
       return { output: "spawn failed: shell preparation does not match this invocation.", isError: true };
     }
     try {
-    const commandPathViolation = validateShellCommandPathPolicy(
+    const commandPathViolation = findShellPathPolicyViolation(
       input.command,
       resolvedCwd,
       ctx.cwd,
@@ -649,15 +1385,18 @@ export class BashTool extends ZodTool<typeof BashToolInputSchema> {
       ctx.blockReadsOutsideWorkingDirectories === true,
       preparedShellFacts(prepared),
     );
-    if (commandPathViolation) {
-      return { output: commandPathViolation, isError: true };
+    if (
+      commandPathViolation &&
+      !disposableGrantRelaxesPathPolicy(executionAuthority, commandPathViolation.kind)
+    ) {
+      return { output: commandPathViolation.reason, isError: true };
     }
 
 
     // Explicit host requests and sandbox fallbacks both select a plain host child.
     // Its opaque permit exists only after an allow-once approval for this exact
     // command/cwd/tool-use tuple and is consumed before spawn.
-    if (requiresExplicitHostShellApproval(hostShellPlan)) {
+    if (!disposableExecution && requiresExplicitHostShellApproval(hostShellPlan)) {
       const permitAccepted = consumeHostShellExecutionPermit({
         permit: ctx.hostShellExecutionPermit,
         plan: hostShellPlan,
@@ -684,7 +1423,7 @@ export class BashTool extends ZodTool<typeof BashToolInputSchema> {
         };
       }
     }
-    if (hostShellPlan.mode === "blocked") {
+    if (!disposableExecution && hostShellPlan.mode === "blocked") {
       return {
         output:
           "spawn failed: ASRT shell tools require filesystem and process isolation; " +
@@ -723,11 +1462,21 @@ export class BashTool extends ZodTool<typeof BashToolInputSchema> {
     // confined to the unsandboxed plain path, and the requested-sandbox
     // approval-fallback (requiresExplicitUserApproval) is excluded so a
     // one-shot-approved command cannot outlive its approval.
-    if (input.run_in_background === true && !hostShellPlan.requiresExplicitUserApproval) {
-      return spawnBackground(input.command, resolvedCwd, sessionIdFromContext(ctx), prepared);
+    if (
+      input.run_in_background === true &&
+      (!hostShellPlan.requiresExplicitUserApproval || disposableExecution)
+    ) {
+      const result = spawnBackground(input.command, resolvedCwd, sessionIdFromContext(ctx), prepared);
+      return disposableExecution ? withDisposableExecutionMetadata(result) : result;
     }
 
     const plainResult = await spawnWithTimeout(input.command, resolvedCwd, input.timeoutSeconds, prepared, ctx.abortSignal, captureFactoryFromContext(ctx));
+    if (disposableExecution) {
+      return withBackgroundUnavailable(
+        withDisposableExecutionMetadata(plainResult),
+        input.run_in_background === true,
+      );
+    }
     if (!hostShellPlan.requiresExplicitUserApproval) {
       return withBackgroundUnavailable(plainResult, input.run_in_background === true);
     }
@@ -765,6 +1514,180 @@ function sessionIdFromContext(ctx: ToolExecutionContext): string {
 function withBackgroundUnavailable(result: SpawnResult, requested: boolean): SpawnResult {
   if (!requested) return result;
   return { ...result, metadata: { ...result.metadata, backgroundUnavailable: true } };
+}
+
+function withDisposableExecutionMetadata<
+  T extends { readonly metadata?: Record<string, unknown> },
+>(result: T): T & { metadata: Record<string, unknown> } {
+  return {
+    ...result,
+    metadata: {
+      ...(result.metadata ?? {}),
+      sandboxed: true,
+      isolation: "disposable-container",
+    },
+  };
+}
+
+async function captureBrokerForegroundOutput(
+  raw: string,
+  ctx: ToolExecutionContext,
+): Promise<{ output: string; outputArtifact?: ToolOutputArtifactInfo }> {
+  const truncated = raw.replace(/\r\n/g, "\n").trim().length > OUTPUT_CAP;
+  if (!truncated) return { output: formatOutput(raw) };
+  const factory = captureFactoryFromContext(ctx);
+  if (!factory) return { output: formatOutput(raw) };
+  const capture = factory();
+  const bytes = Buffer.from(raw, "utf8");
+  if (!capture.append(bytes)) await capture.waitForDrain();
+  return {
+    output: formatOutput(raw, true),
+    outputArtifact: await capture.finish(false),
+  };
+}
+
+function workloadTerminalReceipt(
+  result: WorkloadBrokerSuccessResults["shell.run"],
+): Record<string, unknown> {
+  return {
+    status: result.status,
+    exitCode: result.exitCode,
+    signal: result.signal,
+    timedOut: result.timedOut,
+    cancelled: result.cancelled,
+    oomDelta: result.oomDelta,
+    ownedResourcesZero: result.ownedResourcesZero,
+    receiptDigest: result.receiptDigest,
+  };
+}
+
+async function runBrokeredBash(
+  authority: BrokeredShellAuthority,
+  input: z.infer<typeof BashToolInputSchema>,
+  resolvedCwd: string,
+  ctx: ToolExecutionContext,
+): Promise<ToolExecutionResult> {
+  const timeoutMs = resolveShellTimeoutMs(input.timeoutSeconds);
+  if (timeoutMs > WORKLOAD_BROKER_LIMITS.maximumTimeoutMs) {
+    return brokerFailureResult(new Error(
+      `workload-broker:timeout-limit: brokered execution accepts at most ${WORKLOAD_BROKER_LIMITS.maximumTimeoutMs / 1000} seconds; retry with a smaller timeoutSeconds`,
+    ));
+  }
+  const result = await authority.runtime.executeBrokeredWorkloadRequest(
+    authority.capability,
+    "shell.run",
+    {
+      command: input.command,
+      cwd: resolvedCwd,
+      timeoutMs,
+    },
+    authority.correlationAuthority,
+    ctx.abortSignal,
+  );
+  if (!("status" in result)) return withBrokerTransportMetadata(result);
+  const captured = await captureBrokerForegroundOutput(result.output, ctx);
+  const completion = workloadCompletionSentence(result);
+  const output = completion === undefined
+    ? captured.output
+    : captured.output === "(no output)"
+      ? completion
+      : `${captured.output}\n${completion}`;
+  return {
+    output,
+    isError: workloadTerminalIsError(result),
+    metadata: {
+      source: "workload-broker",
+      executionTransport: "workload-broker",
+      sandboxed: true,
+      isolation: "disposable-container",
+      workloadReceipt: workloadTerminalReceipt(result),
+      returncode: result.exitCode,
+      ...(result.timedOut ? { timedOut: true } : {}),
+      ...(result.cancelled ? { aborted: true } : {}),
+      ...(captured.outputArtifact === undefined
+        ? {}
+        : { outputArtifact: captured.outputArtifact }),
+    },
+  };
+}
+
+async function startBrokeredBash(
+  authority: BrokeredShellAuthority,
+  input: z.infer<typeof BashToolInputSchema>,
+  resolvedCwd: string,
+  ctx: ToolExecutionContext,
+): Promise<ToolExecutionResult> {
+  const timeoutMs = resolveShellTimeoutMs(input.timeoutSeconds);
+  const capabilityExpiresAt = Date.parse(authority.capability.expiresAt);
+  const requiredOperations = ["shell.start", "shell.read", "shell.kill"] as const;
+  if (requiredOperations.some(
+    (operation) => !authority.capability.allowedOperations.includes(operation),
+  )) {
+    return brokerFailureResult(
+      new Error("workload-broker:background-lifecycle-operations-unavailable"),
+    );
+  }
+  if (
+    timeoutMs > WORKLOAD_BROKER_LIMITS.maximumTimeoutMs
+  ) {
+    return brokerFailureResult(new Error(
+      `workload-broker:timeout-limit: brokered execution accepts at most ${WORKLOAD_BROKER_LIMITS.maximumTimeoutMs / 1000} seconds; retry with a smaller timeoutSeconds`,
+    ));
+  }
+  if (
+    !Number.isFinite(capabilityExpiresAt) ||
+    capabilityExpiresAt - Date.now() < timeoutMs + BROKER_BACKGROUND_LIFETIME_GUARD_MS
+  ) {
+    return brokerFailureResult(
+      new Error("workload-broker:background-capability-lifetime-insufficient"),
+    );
+  }
+  const result = await authority.runtime.executeBrokeredWorkloadRequest(
+    authority.capability,
+    "shell.start",
+    {
+      command: input.command,
+      cwd: resolvedCwd,
+      timeoutMs,
+    },
+    authority.correlationAuthority,
+    ctx.abortSignal,
+  );
+  if (isBrokerTransportToolResult(result)) return withBrokerTransportMetadata(result);
+  if (result.isError) {
+    return withBrokerTransportMetadata({ output: result.output, isError: true });
+  }
+  const brokerReceipt = authority.runtime.getWorkloadBrokerResponseReceipt(result);
+  if (brokerReceipt === undefined) {
+    return brokerFailureResult(new Error("workload-broker:start-correlation-receipt-missing"));
+  }
+  const shellId = backgroundShellManager.registerBroker({
+    sessionId: sessionIdFromContext(ctx),
+    command: input.command,
+    executionId: result.executionId,
+    capability: authority.capability,
+    parent: authority.runtime.issueWorkloadBackgroundParent(result),
+    offset: result.offset,
+  });
+  return {
+    output: JSON.stringify({
+      backgrounded: true,
+      shellId,
+      status: "running",
+      hint:
+        "Read output with bash_output({ shellId }); stop it with bash_kill({ shellId }). " +
+        "This shell is managed by the session and is stopped when the session ends.",
+    }),
+    isError: false,
+    metadata: {
+      backgrounded: true,
+      shellId,
+      source: "workload-broker",
+      executionTransport: "workload-broker",
+      sandboxed: true,
+      isolation: "disposable-container",
+    },
+  };
 }
 
 /**
@@ -1162,7 +2085,7 @@ function shellIdOf(rawInput: unknown): string {
   return typeof args.shellId === "string" ? args.shellId.trim() : "";
 }
 
-function present(result: BackgroundShellReadResult): { output: string; isError: boolean } {
+function present(result: BackgroundShellReadResult): ToolExecutionResult {
   return {
     output: JSON.stringify({
       shellId: result.shellId,
@@ -1172,13 +2095,46 @@ function present(result: BackgroundShellReadResult): { output: string; isError: 
       signal: result.signal,
       output: result.output,
       truncated: result.truncated,
+      ...(result.workloadStatus === undefined
+        ? {}
+        : { workloadStatus: result.workloadStatus }),
+      ...(result.completion === undefined
+        ? {}
+        : { completion: result.completion }),
     }),
-    isError: false,
+    isError: result.isError ?? false,
+    ...(result.metadata === undefined ? {} : { metadata: result.metadata }),
   };
 }
 
 const NOT_FOUND =
   "no background shell with that id is running in this session (it may have already been reaped, or belongs to another session)";
+
+const canonicalBrokerLifecycleTools = new WeakSet<object>();
+
+export function isCanonicalBrokerLifecycleTool(tool: unknown): tool is Tool {
+  return typeof tool === "object" && tool !== null && canonicalBrokerLifecycleTools.has(tool);
+}
+
+function consumeBrokerLifecycleActor(
+  toolName: "bash_output" | "bash_kill",
+  rawInput: unknown,
+  ctx: ToolExecutionContext,
+): WorkloadBackgroundActor | null {
+  const authority = consumeExecutionGrantForBuiltinToolInvocation({
+    grant: ctx.executionRouteGrant,
+    toolName,
+    normalizedInput: rawInput,
+    cwd: ctx.cwd,
+  });
+  return authority?.disposableAuthority === "workload-broker" &&
+    authority.workloadCorrelationAuthority !== undefined
+    ? Object.freeze({
+        kind: "tool-invocation" as const,
+        authority: authority.workloadCorrelationAuthority,
+      })
+    : null;
+}
 
 // Leave room for the executor to deliver the result before its existing ceiling.
 const backgroundOutputWaitSchema = z.number().int().min(0)
@@ -1198,7 +2154,7 @@ const backgroundOutputWaitForSchema = z.enum(["output", "completion"])
 export function createBashOutputTool(
   manager: BackgroundShellManager = backgroundShellManager,
 ): Tool {
-  return createDynamicTool({
+  const tool = createDynamicTool({
     name: "bash_output",
     description:
       "Read output produced since your last check from a background shell started by `bash` " +
@@ -1231,6 +2187,33 @@ export function createBashOutputTool(
       if (!waitFor.success) {
         return { output: `bash_output: invalid waitFor: ${waitFor.error.message}`, isError: true };
       }
+      const brokerGrantPresented = ctx.executionRouteGrant?.disposableAuthority === "workload-broker";
+      const actor = consumeBrokerLifecycleActor("bash_output", rawInput, ctx);
+      if (brokerGrantPresented || isWorkloadBrokerActive()) {
+        try {
+          if (actor === null) {
+            return brokerFailureResult(new Error("workload-broker:disposable-grant-required"));
+          }
+          if (!manager.isBrokerShell(sessionIdOf(ctx), shellId)) {
+            return brokerFailureResult(new Error("workload-broker:background-handle-not-found"));
+          }
+          const result = await manager.readBroker(
+            sessionIdOf(ctx),
+            shellId,
+            wait.data,
+            actor,
+            ctx?.abortSignal,
+            waitFor.data,
+          );
+          if (!result) return { output: `bash_output: ${NOT_FOUND}.`, isError: true };
+          return "shellId" in result ? present(result) : result;
+        } catch (error) {
+          if (ctx?.abortSignal?.aborted) {
+            return { output: "bash_output: wait cancelled.", isError: true, metadata: { aborted: true } };
+          }
+          return brokerFailureResult(error);
+        }
+      }
       try {
         await manager.waitForOutput(sessionIdOf(ctx), shellId, wait.data, ctx?.abortSignal, waitFor.data);
         ctx?.abortSignal?.throwIfAborted();
@@ -1245,6 +2228,8 @@ export function createBashOutputTool(
       return present(result);
     },
   });
+  canonicalBrokerLifecycleTools.add(tool);
+  return tool;
 }
 
 /**
@@ -1255,7 +2240,7 @@ export function createBashOutputTool(
 export function createBashKillTool(
   manager: BackgroundShellManager = backgroundShellManager,
 ): Tool {
-  return createDynamicTool({
+  const tool = createDynamicTool({
     name: "bash_kill",
     description:
       "Terminate a background shell started by `bash` with run_in_background: true, by its shell id. " +
@@ -1275,6 +2260,28 @@ export function createBashKillTool(
       if (shellId === "") {
         return { output: "bash_kill: `shellId` is required.", isError: true };
       }
+      const brokerGrantPresented = ctx.executionRouteGrant?.disposableAuthority === "workload-broker";
+      const actor = consumeBrokerLifecycleActor("bash_kill", rawInput, ctx);
+      if (brokerGrantPresented || isWorkloadBrokerActive()) {
+        try {
+          if (actor === null) {
+            return brokerFailureResult(new Error("workload-broker:disposable-grant-required"));
+          }
+          if (!manager.isBrokerShell(sessionIdOf(ctx), shellId)) {
+            return brokerFailureResult(new Error("workload-broker:background-handle-not-found"));
+          }
+          const result = await manager.killBroker(
+            sessionIdOf(ctx),
+            shellId,
+            actor,
+            ctx?.abortSignal,
+          );
+          if (!result) return { output: `bash_kill: ${NOT_FOUND}.`, isError: true };
+          return "shellId" in result ? present(result) : result;
+        } catch (error) {
+          return brokerFailureResult(error);
+        }
+      }
       const result = manager.kill(sessionIdOf(ctx), shellId);
       if (!result) {
         return { output: `bash_kill: ${NOT_FOUND}.`, isError: true };
@@ -1282,6 +2289,8 @@ export function createBashKillTool(
       return present(result);
     },
   });
+  canonicalBrokerLifecycleTools.add(tool);
+  return tool;
 }
 
 /**
@@ -1415,12 +2424,6 @@ export class PowerShellTool extends ZodTool<typeof PowerShellToolInputSchema> {
   ): Promise<ToolExecutionResult> {
     ctx.abortSignal?.throwIfAborted();
     const resolvedCwd = resolveHostShellWorkingDirectory(ctx.cwd, input.cwd);
-    const cwdViolation = validateShellWorkingDirectory(resolvedCwd, ctx.cwd, ctx.extraAllowedDirectories);
-    if (cwdViolation) {
-      return { output: cwdViolation, isError: true };
-    }
-
-
     // §691: the executor seals the host-shell substrate before permission
     // routing. The supplied plan must come from the live host provider; a
     // structural lookalike cannot downgrade an active ASRT route to plain spawn.
@@ -1439,23 +2442,69 @@ export class PowerShellTool extends ZodTool<typeof PowerShellToolInputSchema> {
     if (hostShellPlan.executionRequest !== (input.executionMode ?? "default")) {
       return { output: "Shell execution request does not match the host plan.", isError: true };
     }
-    if (requiresExplicitHostShellApproval(hostShellPlan) && !ctx.hostShellExecutionPermit) {
+    const executionAuthority = consumeShellExecutionRoute({
+      context: ctx,
+      legacyPlan: hostShellPlan,
+      toolName: "powershell",
+      command: input.command,
+      cwd: resolvedCwd,
+      timeoutSeconds: input.timeoutSeconds,
+      background: input.run_in_background ?? false,
+    });
+    const disposableExecution = executionAuthority?.route === "disposable-container";
+    try {
+      const brokeredAuthority = await acquireBrokeredShellAuthority(
+        executionAuthority,
+        ctx.executionRouteGrant,
+      );
+      if (brokeredAuthority !== null) {
+        return brokerFailureResult(new Error("workload-broker:powershell-unsupported"));
+      }
+    } catch (error) {
+      return brokerFailureResult(error);
+    }
+    const cwdViolation = validateShellWorkingDirectory(
+      resolvedCwd,
+      ctx.cwd,
+      ctx.extraAllowedDirectories,
+    );
+    if (cwdViolation) {
+      const kind = cwdViolation.startsWith("Sensitive")
+        ? "sensitive-path"
+        : "sandbox-boundary";
+      if (!disposableGrantRelaxesPathPolicy(executionAuthority, kind)) {
+        return { output: cwdViolation, isError: true };
+      }
+    }
+    if (
+      !disposableExecution &&
+      requiresExplicitHostShellApproval(hostShellPlan) &&
+      !ctx.hostShellExecutionPermit
+    ) {
       return { output: "PowerShell spawn failed: this host shell execution requires a one-shot host approval permit.", isError: true, metadata: { sandboxed: false, isolation: "none" } };
     }
-    const commandPathViolation = await findPowerShellCommandPathViolation(
-      input.command,
+    const commandAst = await parsePowerShellAst(input.command);
+    const structuralViolation = validatePowerShellAstStructure(commandAst);
+    if (structuralViolation !== null) {
+      return { output: `PowerShell command blocked: ${structuralViolation}`, isError: true };
+    }
+    const commandPathViolation = findPowerShellAstPathViolation(
+      commandAst,
       resolvedCwd,
       ctx.cwd,
       ctx.extraAllowedDirectories,
       ctx.blockReadsOutsideWorkingDirectories === true,
     );
-    if (commandPathViolation) {
+    if (
+      commandPathViolation &&
+      !disposableGrantRelaxesPathPolicy(executionAuthority, commandPathViolation.kind)
+    ) {
       return { output: commandPathViolation.reason, isError: true };
     }
     // Explicit host requests and sandbox fallbacks both select a plain host child.
     // Its opaque permit exists only after an allow-once approval for this exact
     // command/cwd/tool-use tuple and is consumed before spawn.
-    if (requiresExplicitHostShellApproval(hostShellPlan)) {
+    if (!disposableExecution && requiresExplicitHostShellApproval(hostShellPlan)) {
       const permitAccepted = consumeHostShellExecutionPermit({
         permit: ctx.hostShellExecutionPermit,
         plan: hostShellPlan,
@@ -1484,7 +2533,7 @@ export class PowerShellTool extends ZodTool<typeof PowerShellToolInputSchema> {
     }
     // Native AST admission above also covers direct callers. It precedes the
     // one-shot permit consumption, so a refused command never spends approval.
-    if (hostShellPlan.mode === "blocked") {
+    if (!disposableExecution && hostShellPlan.mode === "blocked") {
       return {
         output:
           "PowerShell spawn failed: ASRT shell tools require filesystem and process isolation; " +
@@ -1511,6 +2560,7 @@ export class PowerShellTool extends ZodTool<typeof PowerShellToolInputSchema> {
     }
 
     const plainResult = await spawnPowerShell(input.command, resolvedCwd, input.timeoutSeconds, ctx.abortSignal, captureFactoryFromContext(ctx));
+    if (disposableExecution) return withDisposableExecutionMetadata(plainResult);
     if (!hostShellPlan.requiresExplicitUserApproval) return plainResult;
     return {
       ...plainResult,
@@ -1533,7 +2583,14 @@ export async function validatePowerShellCommand(
   return astError ? `PowerShell command blocked: ${astError}` : null;
 }
 
-export function validatePowerShellAst(ast: PowerShellAstSummary): string | null {
+export async function validatePowerShellCommandStructure(
+  command: string,
+  parser: PowerShellParser = parsePowerShellAst,
+): Promise<string | null> {
+  return validatePowerShellAstStructure(await parser(command));
+}
+
+export function validatePowerShellAstStructure(ast: PowerShellAstSummary): string | null {
   if (ast.errors.length > 0) {
     return `parse error: ${ast.errors[0]}`;
   }
@@ -1554,18 +2611,25 @@ export function validatePowerShellAst(ast: PowerShellAstSummary): string | null 
       && parameters.some((parameter) => isPowerShellSwitchEnabled(parameter, FORCE_FLAGS))) {
       return "recursive forced deletion is not allowed";
     }
-    if (FILESYSTEM_COMMANDS.has(name)) {
-      if (parameters.some((parameter) => isPowerShellSwitchEnabled(parameter, RECURSE_FLAGS))) {
-        return "recursive shell filesystem traversal is not allowed";
-      }
-      const dynamic = command.arguments.slice(1).find((argument) => argument.kind === "dynamic"
-        || (argument.kind === "parameter" && argument.argument?.kind === "dynamic"));
-      if (dynamic) {
-        return `dynamic path argument is not allowed: ${dynamic.text}`;
-      }
-    }
   }
   if (ast.unsupported.length) return `unsupported PowerShell execution state: ${ast.unsupported[0]}`;
+  return null;
+}
+
+export function validatePowerShellAst(ast: PowerShellAstSummary): string | null {
+  const structural = validatePowerShellAstStructure(ast);
+  if (structural) return structural;
+  for (const command of ast.commands) {
+    const name = canonicalPowerShellCommandName(command.name?.trim().toLowerCase() ?? "");
+    if (!FILESYSTEM_COMMANDS.has(name)) continue;
+    const parameters = command.arguments.filter((argument) => argument.kind === "parameter");
+    if (parameters.some((parameter) => isPowerShellSwitchEnabled(parameter, RECURSE_FLAGS))) {
+      return "recursive shell filesystem traversal is not allowed";
+    }
+    const dynamic = command.arguments.slice(1).find((argument) => argument.kind === "dynamic"
+      || (argument.kind === "parameter" && argument.argument?.kind === "dynamic"));
+    if (dynamic) return `dynamic path argument is not allowed: ${dynamic.text}`;
+  }
   return null;
 }
 

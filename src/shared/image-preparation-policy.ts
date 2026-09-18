@@ -38,7 +38,19 @@ export const ImagePreparationRequestSchema = z.object({
   options: ImagePreparationOptionsSchema,
   scope: ImageReadScopeSchema,
 }).strict();
-export type ImagePreparationRequest = z.infer<typeof ImagePreparationRequestSchema>;
+type ImagePreparationRequest = z.infer<typeof ImagePreparationRequestSchema>;
+
+/**
+ * Controller-validated request for an already-read image. The source bytes are
+ * carried on the child stdin rather than serialized into argv or JSON.
+ */
+export const ImagePreparationBytesRequestSchema = z.object({
+  source: z.literal("stdin"),
+  inputBytes: z.number().int().positive().max(IMAGE_PREPARATION_POLICY.maxInputBytes),
+  options: ImagePreparationOptionsSchema,
+}).strict();
+type ImagePreparationBytesRequest = z.infer<typeof ImagePreparationBytesRequestSchema>;
+export type ImagePreparationChildRequest = ImagePreparationRequest | ImagePreparationBytesRequest;
 
 export const PreparedImageSchema = z.object({
   data: z.string().max(4 * Math.ceil(IMAGE_PREPARATION_POLICY.maxOutputBytes / 3)),

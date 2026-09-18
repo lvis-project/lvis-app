@@ -27,6 +27,7 @@ import { resolvePluginWritableRoot } from "../plugins/plugin-storage-layout.js";
 import type { Tool } from "./base.js";
 import type { HookRunner } from "../hooks/hook-runner.js";
 import type { HostShellExecutionPlan } from "../permissions/host-shell-execution-plan.js";
+import type { ExecutionGrant } from "../permissions/execution-router.js";
 import type {
   ToolCategory,
   ToolExecutionContext,
@@ -152,6 +153,8 @@ export interface ExecutionStageContext {
   hostShellExecutionPermitBinding: HostShellExecutionPermitBinding | undefined;
   hostShellApprovalDecision: ApprovalDecision | undefined;
   hostShellExecutionPlan: HostShellExecutionPlan | undefined;
+  executionRouteGrant?: ExecutionGrant;
+  finalizeExecutionRouteGrant?: () => Promise<ExecutionGrant | undefined>;
   preparedShellInvocation?: import("./prepared-shell-invocation.js").PreparedShellInvocation;
   hostShellRequiresExplicitApproval: boolean;
   invocationRuntimeAllowedDirectories: string[];
@@ -198,6 +201,8 @@ export async function executeAuthorizedToolInvocation(
     hostShellExecutionPermitBinding,
     hostShellApprovalDecision,
     hostShellExecutionPlan,
+    executionRouteGrant,
+    finalizeExecutionRouteGrant,
     preparedShellInvocation,
     hostShellRequiresExplicitApproval,
     invocationRuntimeAllowedDirectories,
@@ -681,6 +686,7 @@ export async function executeAuthorizedToolInvocation(
       ? { ownerPluginSandboxRoot: resolvePluginWritableRoot(tool.pluginId) }
       : {}),
     ...(hostShellExecutionPlan ? { hostShellExecutionPlan } : {}),
+    ...(executionRouteGrant ? { executionRouteGrant } : {}),
     ...(preparedShellInvocation ? { preparedShellInvocation } : {}),
     ...(hostShellExecutionPermit ? { hostShellExecutionPermit } : {}),
     metadata: {
@@ -747,7 +753,19 @@ export async function executeAuthorizedToolInvocation(
   }
   const outcome = await runWithCeiling(
     async (signal) => {
-      const ctx: ToolExecutionContext = { ...executionContext, abortSignal: signal };
+      // Operator confinement is re-observed here, after every async pre-hook,
+      // admission, rate, and audit gate. No await separates this one-shot grant
+      // from the synchronous handler-entry checks below.
+      const finalExecutionRouteGrant = finalizeExecutionRouteGrant === undefined
+        ? executionRouteGrant
+        : await finalizeExecutionRouteGrant();
+      const ctx: ToolExecutionContext = {
+        ...executionContext,
+        ...(finalExecutionRouteGrant === undefined
+          ? {}
+          : { executionRouteGrant: finalExecutionRouteGrant }),
+        abortSignal: signal,
+      };
       // Bind the per-invocation effect ledger for the async chain of this
       // execution so the in-process plugin hostApi closures record onto it.
       // AsyncLocalStorage propagates through the loopback transport (the same

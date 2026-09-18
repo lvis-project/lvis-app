@@ -19,7 +19,7 @@ vi.mock("../../main/main-paths.js", async (original) => ({
   ...await original<typeof import("../../main/main-paths.js")>(),
   get mainDir() { return runtime.directory; },
 }));
-import { prepareImageFile } from "../image-preparation.js";
+import { prepareImageBytes, prepareImageFile } from "../image-preparation.js";
 import { normalizeImage } from "../image-preparation-core.js";
 
 function prepareFixtureImage(path: string, options: Partial<ImagePreparationOptions> = {}, signal?: AbortSignal) {
@@ -49,6 +49,33 @@ afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); runtime.directory = 
 afterAll(async () => { await cleanupTmpDir(directory); });
 
 describe("bounded image preparation", () => {
+  it("normalizes broker-returned bytes through the isolated decoder stdin", async () => {
+    for (const format of ["png", "jpeg", "gif", "webp"]) {
+      const source = await readFile(imageFixturePath(`grid.${format}`));
+      const result = await prepareImageBytes(source, { maxDimension: 4 });
+      expect(result).toMatchObject({
+        originalFormat: format,
+        width: 4,
+        height: 2,
+        inputBytes: source.byteLength,
+      });
+      expect((await sharp(Buffer.from(result.data, "base64")).metadata()).format).toBe("png");
+    }
+  });
+
+  it("copies broker-returned bytes before admission and rejects oversized input before spawning", async () => {
+    const source = await readFile(imageFixturePath("grid.png"));
+    const expectedBytes = source.byteLength;
+    const prepared = prepareImageBytes(source, { maxDimension: 2 });
+    source.fill(0);
+    expect(await prepared).toMatchObject({ width: 2, inputBytes: expectedBytes });
+
+    const spawn = vi.spyOn(managed, "spawnManaged");
+    await expect(prepareImageBytes(Buffer.alloc(IMAGE_PREPARATION_POLICY.maxInputBytes + 1)))
+      .rejects.toThrow("image-input-limit");
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
   it("fully decodes each supported source format in a child and preserves transparency", async () => {
     for (const format of ["png", "jpeg", "gif", "webp"]) {
       const result = await prepareFixtureImage(imageFixturePath(`grid.${format}`), { maxDimension: 4 });

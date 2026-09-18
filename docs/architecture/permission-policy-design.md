@@ -183,7 +183,7 @@ possible substrates:
 | Route | Intended boundary | Current availability |
 | --- | --- | --- |
 | `workspace-sandbox` | OS-enforced workspace-scoped shell | Mapped from a full ASRT shell plan. |
-| `disposable-container` | Per-invocation disposable filesystem/process boundary | **Unavailable.** No backend advertises or consumes this route in this slice. |
+| `disposable-container` | Disposable Linux guest | Available through either strict same-process operator attestation or the host-native workload broker. These are distinct authorities. |
 | `host` | Current-user host shell | Mapped from a legacy plain-shell plan. Existing approval rules remain authoritative. |
 
 The Host hashes the normalized request into an immutable `EffectEnvelope`,
@@ -202,27 +202,43 @@ generation is captured with the legacy plan at issuance and must match the
 route capability. A later sandbox generation cannot be paired with that stale
 plan, and a grant cannot be issued after its generation becomes stale.
 
-This first slice is observational. The legacy `HostShellExecutionPlan`, normal
-permission checks, approvals, permit consumption and spawn path still decide
-whether execution occurs. The route plan is recorded as shadow metadata and
-must not be interpreted as proof that a command was authorized or started.
-`ExecutionGrant` is defined for the later cutover, but the current shell path
-does not consume it.
+The legacy `HostShellExecutionPlan` still supplies workspace-sandbox and
+plain-child mechanics. Without a workload broker, the router orders a full
+workspace sandbox first, a live operator-attested disposable guest second, and
+an unconfined host last. An active workload broker is exclusive: it advertises
+only `disposable-container`, so a broker outage or rejected capability cannot
+become local execution.
+
+After normal authorization, each disposable invocation receives an immutable
+one-shot `ExecutionGrant`. A shell grant binds the final command, resolved cwd,
+runtime limits, legacy plan and capability generations. A canonical-file grant
+binds the exact host-created tool instance, schema-normalized input, guest cwd,
+broker identity and generation. The consumer checks object identity, route,
+effect digest and current generations, then consumes the grant once. Missing,
+forged, replayed, mismatched, expired or stale grants fail closed. Audit metadata
+records the chosen route and a public-safe capability projection.
 
 Shell path results distinguish a hard policy boundary from an
-`analysis-uncertain` requirement. Dynamic paths and recursive traversal retain
-their current exact fail-closed result, while the shadow router records that
-the effect needs another decision. An uncertain default request may not select
-the host route automatically. A future slice may satisfy that requirement by
-improving analysis, routing to a disposable container, or obtaining explicit
-user authorization. Until a disposable backend exists and truthfully advertises
-its generation-bound capability, it is never selected as a fallback.
+`analysis-uncertain` requirement. An uncertain default request may not select
+the host route automatically. The same-process operator-attested route can
+satisfy dynamic, recursive and guest path-boundary uncertainty, but it retains
+the host shell grammar, structural and sensitive-path checks before spawning in
+that already-confined process.
+
+The host-native broker route has a different boundary. The controller cannot
+open the workload filesystem directly, and the workload is created without
+host binds, devices, Compose secrets/configs, added Linux capabilities or
+controller environment. The executor therefore does not canonicalize guest
+paths against the host filesystem and does not run the host Bash structural
+parser on a command that the broker executes inside the guest. Guest paths are
+normalized with POSIX semantics against the capability-bound guest cwd or HOME.
+Normal tool authorization, reviewer policy, audit, request bounds and deadlines
+remain mandatory. PowerShell has no broker backend and fails closed.
 
 The [Linux workload resource controller](linux-workload-resource-controller.md)
-does not change that status. Its cgroup-v2 leaf limits and OOM evidence are a
-resource boundary only; they do not establish the filesystem, network, or
-credential confinement required by `disposable-container`, and no current spawn
-path consumes them.
+is a separate unwired foundation. Its cgroup-v2 leaf limits and OOM evidence do
+not issue either disposable authority. The Docker broker independently binds
+and revalidates the exact container cgroup's `memory.events` for OOM evidence.
 
 Execution location, configuration, authentication and OS identity are separate
 properties. ASRT launches processes on the current host with a temporary HOME
@@ -236,10 +252,10 @@ Bash and PowerShell accept `executionMode: "default" | "host"` and an optional
 `justification`. Omission keeps the default route. An explicit host request
 requires a nonblank justification and foreground execution. The host selects
 the final plan after input hooks and before environment capture and path
-analysis. Host mode selects plain execution without OS confinement and requires
-a fresh exact-action `allow-once`, including in allow mode or when sandboxing
-was already disabled. Sensitive-path, directory, command and dynamic-syntax
-checks remain mandatory.
+analysis. Outside an operator-attested guest, host mode selects plain execution
+without OS confinement and requires a fresh exact-action `allow-once`, including
+in allow mode or when sandboxing was already disabled. Sensitive-path,
+directory, command and dynamic-syntax checks remain mandatory on that route.
 
 Only a response from the verified local desktop renderer can authorize this
 explicit request. The approval displays the exact command, cwd and justification
@@ -253,6 +269,13 @@ replayed permits fail closed. The parser and plan in
 the [approval gate](../../src/permissions/approval-gate.ts) and
 [execution permit](../../src/permissions/host-shell-execution-permit.ts) own this
 contract.
+
+Inside a live operator-attested disposable one-shot, `executionMode: "host"`
+means the strongest shell authority reachable by that process, which is still
+the disposable guest. The router therefore selects `disposable-container` and
+does not present or require an approval for an unconfined host it cannot reach.
+If reacquisition fails or the capability changes before grant issuance, the
+invocation fails closed instead of degrading to a plain host child.
 
 Every plain-shell call requiring one-shot consent exposes its complete command
 and resolved working directory before the decision. If sensitive-data masking
@@ -439,13 +462,127 @@ inert evidence and cannot invoke the private capability issuer. Public and
 audit projections contain only an ID, generation, expiry, fingerprints, the
 four boolean isolation assertions, and resource limits. They contain no
 signature, public-key bytes, process fields, namespace links, paths, or mount
-inventory. A consumer must reacquire the capability through the revalidation
-API, which checks expiry, process identity, namespaces, cgroup, mounts, status,
-and limits again. Production performs that full revalidation and a final expiry
-check immediately before the private issuer publishes the boot capability.
-This capability is evidence for a later router integration;
-it is not a permission, execution grant, shell-policy exception, or active
-disposable backend.
+inventory. The signed v1 expiry remains an authority deadline: production
+checks it before publication, at every acquire, again after the asynchronous
+process/confinement observation, and synchronously when a one-shot lease is
+consumed. Every acquire also re-reads and matches the exact process identity,
+namespaces, cgroup, mounts, status and limits. A long-lived operator must obtain
+a newly signed attestation; renewal semantics must use an explicit new contract
+if they differ from v1. Each
+grant-minting acquire returns a nominal lease bound to that exact capability
+generation, and execution-grant issuance consumes the lease once. A forged,
+replayed, or stale lease cannot mint a grant. Controller termination revokes
+the in-memory capability and all leases; attested-process termination changes
+the observed process identity and makes the next acquire fail. These lifecycle
+events and the signed expiry are the v1 revocation boundaries.
+The grant-minting acquire runs after asynchronous PreToolUse hooks, plugin
+admission, rate checks, and audit-readiness checks. The handler receives the
+grant at the final effect boundary, with no intervening await that could make
+the observed confinement stale before dispatch.
+
+The execution router consumes this capability only for builtin shell work in
+the same attested Linux one-shot. The capability does not itself authorize a
+tool,
+skip structural command checks, alter reviewer outcomes, or make a non-attested
+process disposable. The v1 profile remains strict: the four isolation claims,
+including no host mounts and no inherited secrets, are all mandatory. Workloads
+that need a bounded artifact mount or a different capability set require a
+separately specified profile/version and cannot weaken v1 by convention.
+The benchmark Docker `main` process therefore uses the separate broker contract
+below rather than presenting itself as this attested process.
+
+### Terminal permission-audit proof
+
+The native runtime exposes one internal pre-boot command,
+`--verify-permission-audit=<challenge>`, for a stopped host. The 64-lowercase-
+hex challenge binds a public `lvis-permission-audit-proof/v1` receipt to its
+collector. The verifier requires explicit absolute `LVIS_HOME` and protected
+`LVIS_SECRET_KEY_FILE` inputs, opens the existing encrypted audit HMAC secret
+read-only, and never creates, repairs, or replaces audit authority.
+
+Every permission-audit-looking directory entry must have the canonical
+`YYYY-MM-DD.permission-audit.jsonl` name. The verifier stable-opens each
+owner-only 0600 regular single-link file, verifies its complete HMAC chain and
+the separately stored daily seal for every nonempty file, and rejects directory
+or file changes during the read. Success writes exactly one public JSON receipt
+with basename/date/SHA-256/byte/entry metadata. Secret material, stored seals,
+paths, rows, and entry fields never cross this boundary. `AuditLogger.close()`
+stops new permission appends and drains the accepted append tail before this
+proof may freeze the files.
+
+The packaged launcher removes the inherited Node preload/module-search and
+Node/Electron process-role variables named by
+`lvis-headless-launch-environment/v1` before starting the runtime. The native
+dispatcher reserves bare, malformed, and duplicate proof forms, so none can
+fall through into normal host boot. Failure output is one stable public error
+code (`invalid-arguments` before verification or `verification-failed` after
+it starts); raw filesystem and decryption errors remain inside the process.
+
+### Host-native workload broker
+
+The brokered Linux route keeps the LVIS controller, controller profile,
+encrypted provider secret, external key, broker credential, receipts and logs
+on the host. Harbor's incoming mounts and persistent controller environment are
+discarded. Task files and role logs cross later through Docker copy; `main`
+receives no host bind, Docker socket, capability file, Unix socket, receipt or
+controller environment.
+
+The environment binds the route to exactly one Docker Compose service
+`main` container. The published workload identity contains the 64-hex container
+ID, `sha256:` image ID, fresh generation, boundary fingerprint, guest cwd and
+guest HOME. The broker's host-only binding additionally pins Docker `StartedAt`,
+the trial ID and Compose project/service/container-number labels. Startup
+rejects effective Compose configuration with host binds,
+devices, device rules, `cap_add`, Compose secrets/configs, privileged mode,
+host PID/IPC/UTS/network/user namespaces or controller transport environment.
+Before every effect, the broker rechecks the exact container and image,
+`StartedAt`, labels, running state, no binds or devices, private cgroup
+namespace, finite memory/swap/PID limits, `no-new-privileges`, non-host
+namespaces and no-restart policy. It also pins the container's cgroup-v2
+`memory.events` device/inode and `memory.max`.
+
+The host publishes `lvis-workload-broker-capability/v1` only after Docker event
+monitoring and identity evidence are live. The document contains the absolute
+socket path, a random bearer token of at least 32 bytes, UTC expiry, exact
+workload identity, ordered allowed operations and request/response byte limits.
+It is one owner-owned mode `0400` regular file in a host-only mode `0700`
+control directory. The socket is mode `0600` in a separate owner-owned mode
+`0700` directory. LVIS rejects symlinks, changed inode metadata, wrong owners or
+modes, an unbound socket path, expiry and handshake field/order mismatches before
+constructing host services. The capability read holds its real parent directory
+open and rechecks both the directory and file path bindings before accepting the
+document. It repeats the exact handshake before every operation.
+
+Only host-created builtin Bash and canonical file-tool instances can receive
+broker grants. Canonical file operations are `read`, binary read, list, glob,
+grep, write, edit, patch, move, copy, extract and delete. Background Bash start,
+read and kill retain the same broker capability and session ownership. A plugin
+or MCP tool that copies a builtin name or schema is not canonical and receives
+no grant. Once broker mode is active, missing or invalid authority returns a
+typed broker error and never calls a host shell, host path resolver or local
+file implementation.
+
+Foreground and background shell terminals use the closed statuses `exited`,
+`signaled`, `timed-out`, `cancelled`, `oom-killed`, `transport-failed` and
+`cleanup-unproven`. A terminal result carries exit code, signal, timeout and
+cancellation flags, cgroup OOM delta, `ownedResourcesZero` and the hash-chained
+receipt digest. `oom-killed` requires an increased cgroup-v2 OOM counter; exit
+137 or `SIGKILL` alone is insufficient. Timeout, cancellation, transport
+failure or unproven identity triggers fail-closed removal when the broker cannot
+otherwise prove the Docker exec is gone. `cleanup-unproven` is the only terminal
+status allowed to report `ownedResourcesZero=false`.
+
+The host controller runs under a separate Linux child subreaper. After the turn,
+the supervisor terminates and reaps the controller process group and adopted
+descendants, and publishes its own zero-resource receipt. Broker release then
+stops accepting requests, proves that broker-owned exec handles are zero,
+removes the bearer capability and socket, and records `broker_released` while
+retaining the exact running `main` container for the shared verifier. If that
+proof fails, the broker removes `main` and verification is suppressed. Final
+environment teardown force-removes the exact container, proves its absence,
+records `cleanup_completed` and `broker_stopped`, and then removes remaining
+Compose resources. These receipts validate lifecycle ownership; they do not
+claim a benchmark score or task correctness.
 
 ## Reviewer Failure
 

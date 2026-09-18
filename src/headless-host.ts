@@ -21,6 +21,11 @@ import {
   runExecTurn,
   waitForExecRelease,
 } from "./main/exec-mode.js";
+import {
+  initializeWorkloadBroker,
+  isActiveWorkloadBrokerCwd,
+  isWorkloadBrokerActive,
+} from "./workload/runtime.js";
 
 function userDataPath(argv: readonly string[]): string {
   const argument = argv.find((value) => value.startsWith("--user-data-dir="));
@@ -57,6 +62,12 @@ async function main(): Promise<number> {
   if (invalidServeArguments || (serve && request !== null) || (!serve && request === null) || (request && "error" in request)) {
     process.stderr.write(`${request && "error" in request ? request.error : "Use --exec, --set-secret, or --serve"}\n`);
     return EXEC_USAGE_EXIT_CODE;
+  }
+  if (request?.workloadBroker) {
+    await initializeWorkloadBroker(request.workloadBroker);
+    if (!request.turn || !isActiveWorkloadBrokerCwd(request.turn.cwd)) {
+      throw new Error("workload-broker:cwd-binding-mismatch");
+    }
   }
   const profile = userDataPath(argv);
   ensureWorkspaceCwd();
@@ -126,7 +137,9 @@ async function main(): Promise<number> {
       stdout: process.stdout,
       stderr: process.stderr,
       readStdin: readAllStdin,
-      isAuthorizedProjectRoot: isAuthorizedWorkspaceProjectRoot,
+      isAuthorizedProjectRoot: (root) => isWorkloadBrokerActive()
+        ? isActiveWorkloadBrokerCwd(root)
+        : isAuthorizedWorkspaceProjectRoot(root),
       waitForRelease: () => interrupted ? Promise.resolve() : waitForExecRelease(),
       flushTelemetry: services.flushTracing,
     }, request);
