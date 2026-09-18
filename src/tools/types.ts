@@ -19,6 +19,7 @@ import type { ToolCategory, ToolSource } from "../shared/permission-review-statu
 export type { ToolCategory, ToolSource };
 import type { HostShellExecutionPlan } from "../permissions/host-shell-execution-plan.js";
 import type { HostShellExecutionPermit } from "../permissions/host-shell-execution-permit.js";
+import type { ExecutionGrant } from "../permissions/execution-router.js";
 export type TrustLevel = "high" | "medium" | "low";
 
 /**
@@ -129,6 +130,12 @@ export interface ToolExecutionContext {
    * Tool code must use this plan rather than recomputing a late fallback.
    */
   hostShellExecutionPlan?: HostShellExecutionPlan;
+  /**
+   * Host-private, immutable, one-shot proof of the route selected for this
+   * exact shell action. It is created after authorization and never originates
+   * in model input, plugin arguments, renderer payloads, or persisted state.
+   */
+  executionRouteGrant?: ExecutionGrant;
   preparedShellInvocation?: import("./prepared-shell-invocation.js").PreparedShellInvocation;
   /**
    * Opaque one-shot approval proof for a requested-sandbox plain-shell fallback.

@@ -6,7 +6,7 @@
  * lists live TOGETHER here so the two hand-maintained lists cannot drift.
  * Free functions over a `self: ConversationLoop` this-shaped param.
  */
-import type { ConversationLoop } from "../conversation-loop.js";
+import type { ConversationLoop, SessionTransitionLease } from "../conversation-loop.js";
 import { isValidSessionId, type SessionKind } from "../../memory/memory-manager.js";
 import type { GenericMessage } from "../llm/types.js";
 import type { WorkspaceRootRevocationOptions } from "./types.js";
@@ -76,6 +76,51 @@ export interface WorkspaceRootRevocationResult {
   sessionDirectoriesRemoved: number;
   turnDirectoriesRemoved: number;
   projectRebound: boolean;
+}
+
+async function settleOutgoingSession(
+  self: ConversationLoop,
+  lease: SessionTransitionLease,
+): Promise<void> {
+  self.assertSessionTransitionLease(lease);
+  backgroundShellManager.disposeSession(lease.sessionId);
+  const report = await backgroundShellManager.settleSessionCleanup(lease.sessionId);
+  self.assertSessionTransitionLease(lease);
+  if (report?.state === "cleanup-unproven") {
+    throw new Error("workload-broker:session-cleanup-unproven");
+  }
+}
+
+function applyFreshSessionState(
+  self: ConversationLoop,
+  kind: SessionKind,
+  project?: SessionProjectContext,
+): void {
+  self.sessionId = createDlpSafeUuid();
+  self.sessionEpoch += 1;
+  self.sessionKind = kind;
+  self.sessionRoutineId = null;
+  self.sessionRoutineTitle = null;
+  self.sessionAdditionalDirectories = [];
+  applyProjectContext(self, project);
+  self.sessionStartFiredFor = null;
+  self.turnAdditionalDirectories = [];
+  self.history.clear();
+  self.cumulativeUsage = { inputTokens: 0, outputTokens: 0 };
+  self.lastRoundProviderInputTokens = 0;
+  self.lastReportedSubscriptionContextWindow = null;
+  self.lastRoundInputProjection = null;
+  self.lastContextInputTokens = 0;
+  self.lastContextInputProjectionTokens = 0;
+  self.sessionPluginExpansions = 0;
+  self.sessionToolSearches = 0;
+  self.sessionActivatedPluginIds.clear();
+  self.lastTurnScope = null;
+  self.lastTurnToolNames = null;
+  self.compactNum = 0;
+  self.rateLimitRecoveryAttempted = false;
+  self.tracer = createTracer(self.sessionId);
+  self.deps.systemPromptBuilder.setSummaryPreamble?.(null);
 }
 
 
@@ -152,67 +197,67 @@ export function revokeWorkspaceRoot(
   return { sessionDirectoriesRemoved, turnDirectoriesRemoved, projectRebound };
 }
 
-export function newConversation(
+export function initializeConversation(
   self: ConversationLoop,
   kind: SessionKind = "main",
   project?: SessionProjectContext,
 ): void {
+  if (self.sessionEpoch !== 0 || self.history.length !== 0 || self.sessionStartFiredFor !== null) {
+    throw new Error("conversation-loop:initialization-requires-pristine-session");
+  }
+  applyFreshSessionState(self, kind, project);
+}
+
+export async function newConversation(
+  self: ConversationLoop,
+  kind: SessionKind = "main",
+  project?: SessionProjectContext,
+  lease?: SessionTransitionLease,
+): Promise<void> {
+    if (lease === undefined) throw new Error("conversation-loop:session-transition-lease-required");
+    self.assertSessionTransitionLease(lease);
+    const outgoingSessionId = lease.sessionId;
+    const leavingStartFiredFor = self.sessionStartFiredFor;
+    const leavingSessionMeta = self.sessionMetaForLifecycle();
     // SessionEnd (#811) — the outgoing session is being left for a new one.
-    // Observe-only + fire-and-forget (this is a sync path); the override pins it
-    // to the leaving session id, and the guard skips startup (no session has run
-    // a turn yet, so no symmetric SessionStart fired).
-    if (self.sessionStartFiredFor !== null) {
-      void self.fireLifecycleEvent(
-        "SessionEnd",
-        { reason: "new-conversation", sessionMeta: self.sessionMetaForLifecycle() },
-        self.sessionStartFiredFor,
-      );
-    }
     if (self.history.length > 0) {
-      self.deps.memoryManager.saveSession(self.sessionId, self.history.getMessages()).catch((err: unknown) => {
+      self.deps.memoryManager.saveSession(outgoingSessionId, self.history.getMessages()).catch((err: unknown) => {
         log.warn("newConversation saveSession failed: %s", (err as Error).message);
       });
     }
-    self.deps.closeRationaleSession?.(self.sessionId);
-    // Kill + drop the OLD session's background shells (bash run_in_background).
-    backgroundShellManager.disposeSession(self.sessionId);
+    // Do not mutate session identity or session-scoped state until broker
+    // cleanup has a terminal, resource-zero proof.
+    await settleOutgoingSession(self, lease);
+    self.deps.closeRationaleSession?.(outgoingSessionId);
     // C2(c): drop the previous session's loaded skills so a fresh chat
     // starts with a clean overlay. Tests / stubs without overlay omit self.
-    self.deps.skillOverlay?.clear(self.sessionId);
+    self.deps.skillOverlay?.clear(outgoingSessionId);
     // Clear the OLD session's on-demand plugin activations BEFORE reassigning
     // sessionId. Clearing after the reassignment would key on the NEW id and
     // orphan the OLD session's Map entry.
-    self.deps.pluginRuntime?.clearSessionActivated?.(self.sessionId);
-    self.sessionId = createDlpSafeUuid();
-    self.sessionEpoch += 1;
-    self.sessionKind = kind;
-    self.sessionRoutineId = null;
-    self.sessionRoutineTitle = null;
-    self.sessionAdditionalDirectories = [];
-    applyProjectContext(self, project);
-    // #811 m2 — new session ⇒ SessionStart must re-fire on the next turn.
-    self.sessionStartFiredFor = null;
-    self.turnAdditionalDirectories = [];
-    self.history.clear();
-    self.cumulativeUsage = { inputTokens: 0, outputTokens: 0 };
-    self.lastRoundProviderInputTokens = 0;
-    self.lastReportedSubscriptionContextWindow = null;
-    self.lastRoundInputProjection = null;
-    self.lastContextInputTokens = 0;
-    self.lastContextInputProjectionTokens = 0;
-    self.sessionPluginExpansions = 0;
-    self.sessionToolSearches = 0;
-    self.sessionActivatedPluginIds.clear();
-    self.lastTurnScope = null;
-    self.lastTurnToolNames = null;
-    self.compactNum = 0;
-    self.rateLimitRecoveryAttempted = false;
-    self.tracer = createTracer(self.sessionId);
-    // Clear rolling summary preamble for fresh session.
-    self.deps.systemPromptBuilder.setSummaryPreamble?.(null);
+    self.deps.pluginRuntime?.clearSessionActivated?.(outgoingSessionId);
+    // Emit only after cleanup is proven and all fallible retirement work has
+    // succeeded, immediately before committing the new generation.
+    if (leavingStartFiredFor !== null) {
+      void self.fireLifecycleEvent(
+        "SessionEnd",
+        { reason: "new-conversation", sessionMeta: leavingSessionMeta },
+        leavingStartFiredFor,
+      );
+    }
+    applyFreshSessionState(self, kind, project);
   }
 
-export function loadSession(self: ConversationLoop, sessionId: string): boolean {
+export async function loadSession(
+  self: ConversationLoop,
+  sessionId: string,
+  lease?: SessionTransitionLease,
+): Promise<boolean> {
+    if (lease === undefined) throw new Error("conversation-loop:session-transition-lease-required");
+    self.assertSessionTransitionLease(lease);
+    const outgoingSessionId = lease.sessionId;
+    const leavingStartFiredFor = self.sessionStartFiredFor;
+    const leavingSessionMeta = self.sessionMetaForLifecycle();
     if (!isValidSessionId(sessionId)) {
       log.warn({ sessionId }, "loadSession rejected unsafe sessionId");
       return false;
@@ -224,19 +269,8 @@ export function loadSession(self: ConversationLoop, sessionId: string): boolean 
     const messages = self.deps.memoryManager.loadSession(sessionId);
     if (!messages) return false;
 
-    // SessionEnd (#811) — load succeeded, so the outgoing session is being left
-    // for `sessionId`. Observe-only + fire-and-forget; guard + override as above.
-    if (self.sessionStartFiredFor !== null) {
-      void self.fireLifecycleEvent(
-        "SessionEnd",
-        { reason: "load-session", sessionMeta: self.sessionMetaForLifecycle() },
-        self.sessionStartFiredFor,
-      );
-    }
-
-
     if (self.history.length > 0) {
-      self.deps.memoryManager.saveSession(self.sessionId, self.history.getMessages()).catch((err: unknown) => {
+      self.deps.memoryManager.saveSession(outgoingSessionId, self.history.getMessages()).catch((err: unknown) => {
         log.warn("loadSession saveSession failed: %s", (err as Error).message);
       });
     }
@@ -250,14 +284,20 @@ export function loadSession(self: ConversationLoop, sessionId: string): boolean 
         log.warn("loadSession repair saveSession failed: %s", (err as Error).message);
       });
     }
-    self.deps.closeRationaleSession?.(self.sessionId);
-    // Kill + drop the OLD session's background shells (bash run_in_background).
-    backgroundShellManager.disposeSession(self.sessionId);
+    await settleOutgoingSession(self, lease);
+    self.deps.closeRationaleSession?.(outgoingSessionId);
 
     // Clear the OLD session's on-demand plugin activations BEFORE reassigning
     // sessionId. Clearing after the reassignment would key on the NEW id and
     // orphan the OLD session's Map entry.
-    self.deps.pluginRuntime?.clearSessionActivated?.(self.sessionId);
+    self.deps.pluginRuntime?.clearSessionActivated?.(outgoingSessionId);
+    if (leavingStartFiredFor !== null) {
+      void self.fireLifecycleEvent(
+        "SessionEnd",
+        { reason: "load-session", sessionMeta: leavingSessionMeta },
+        leavingStartFiredFor,
+      );
+    }
     self.sessionId = sessionId;
     self.sessionEpoch += 1;
     // #811 m2 — switched-into session ⇒ SessionStart re-fires on its next turn.
@@ -301,13 +341,17 @@ export function loadSession(self: ConversationLoop, sessionId: string): boolean 
     return true;
   }
 
-export function resetAndResume(self: ConversationLoop, sessionId: string): {
+export async function resetAndResume(
+  self: ConversationLoop,
+  sessionId: string,
+  lease?: SessionTransitionLease,
+): Promise<{
     ok: boolean;
     compacted: boolean;
     compactedAt: string | null;
     removedMessageCount: number;
-  } {
-    const loaded = loadSession(self, sessionId);
+  }> {
+    const loaded = await loadSession(self, sessionId, lease);
     if (!loaded) {
       return { ok: false, compacted: false, compactedAt: null, removedMessageCount: 0 };
     }
@@ -332,9 +376,15 @@ export function resetAndResume(self: ConversationLoop, sessionId: string): {
     };
   }
 
-export async function startRoutineConversation(self: ConversationLoop, routineId: string, routineTitle: string, routineFiredAt?: string): Promise<string> {
+export async function startRoutineConversation(
+  self: ConversationLoop,
+  routineId: string,
+  routineTitle: string,
+  routineFiredAt?: string,
+  lease?: SessionTransitionLease,
+): Promise<string> {
     const project = currentProjectContext(self);
-    newConversation(self, "routine", project);
+    await newConversation(self, "routine", project, lease);
     self.sessionRoutineId = routineId;
     self.sessionRoutineTitle = routineTitle;
     await self.deps.memoryManager.saveSession(self.sessionId, []);

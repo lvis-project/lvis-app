@@ -105,13 +105,27 @@ sandbox cleanup waits for confirmed root termination. Output display keeps a
 bounded prefix. Foreground capture also retains the original stdout/stderr bytes
 in observed event order in a session artifact owned by `MemoryManager`.
 
+The native headless workload-broker route keeps the LVIS controller, encrypted
+provider secret and controller logs on the host. At boot, the host binds an
+owner-only Unix socket and capability file to one exact running Docker `main`
+container. While that route is active, builtin Bash and the canonical file tools
+can reach the task only through the broker; transport, binding, expiry and grant
+failures never select a local shell or filesystem path. Normal authorization,
+reviewer and audit processing still run before the host issues a one-shot grant.
+The broker owns Docker identity revalidation, operation deadlines,
+cancellation, cgroup-v2 OOM evidence and terminal cleanup receipts. The
+[permission policy](permission-policy-design.md#host-native-workload-broker)
+defines the full route and lifecycle contract.
+
 The [Linux workload resource controller](linux-workload-resource-controller.md)
 is an unwired cgroup-v2 foundation for keeping the host controller outside
 per-invocation memory/PID bounds and explicit swap/CPU settings. It is not a
-security sandbox and does not make the disposable-container route available.
-Runtime integration remains blocked until the workload cannot see or write a
-parent cgroup hierarchy and the resource capability and limits are bound into
-the execution grant.
+security sandbox and does not itself advertise the disposable-container route.
+It remains distinct from both implemented routes: strict operator attestation
+for a controller already inside the disposable guest, and the host-native
+Docker workload broker. Runtime integration of this controller remains blocked
+until the workload cannot see or write a parent cgroup hierarchy and the
+resource capability and limits are bound into the execution grant.
 
 Each foreground capture artifact is limited to 5,000,000 bytes. Retained captures
 plus active reservations are limited to 20,000,000 bytes per session. Capture

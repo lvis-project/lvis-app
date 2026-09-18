@@ -669,7 +669,7 @@ export interface SystemSettings {
   /**
    * How long the app may spend on its quit-time cleanup chain (stopping
    * routines, plugins, and child processes, then flushing window state) before
-   * it stops waiting and exits anyway. Milliseconds; default 15_000, from
+   * it stops waiting and exits anyway. Milliseconds; default 60_000, from
    * `TOOL_TIMEOUT_POLICY.shutdownCleanupMs`.
    *
    * Raising it buys a slow plugin or a large unsaved workspace more time to

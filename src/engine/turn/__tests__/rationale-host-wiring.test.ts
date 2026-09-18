@@ -16,6 +16,7 @@ import type {
 } from "../../../tools/pipeline/rationale-control.js";
 import { createRequestAnchor } from "../../../tools/pipeline/rationale-control.js";
 import { ToolRegistry } from "../../../tools/registry.js";
+import { backgroundShellManager } from "../../../tools/shell-tools.js";
 
 class RecordingProvider implements LLMProvider {
   readonly vendor = "openai" as const;
@@ -253,22 +254,22 @@ describe("RequestAnchor and rationale provenance host wiring", () => {
       "rationaleProvenance",
     );
   });
-  it("invalidates host rationale state before replacing or cleaning up a session", () => {
+  it("invalidates host rationale state before replacing or cleaning up a session", async () => {
     const closeRationaleSession = vi.fn();
     const fixture = makeHarness([], false, closeRationaleSession);
     const originalSessionId = fixture.loop.getSessionId();
 
-    fixture.loop.newConversation();
+    await fixture.loop.newConversation();
 
     expect(closeRationaleSession).toHaveBeenCalledWith(originalSessionId);
     expect(fixture.loop.getSessionId()).not.toBe(originalSessionId);
 
     const currentSessionId = fixture.loop.getSessionId();
-    fixture.loop.cleanupSession();
+    await fixture.loop.cleanupSession();
     expect(closeRationaleSession).toHaveBeenLastCalledWith(currentSessionId);
   });
 
-  it("keeps the old session bound when rationale invalidation fails", () => {
+  it("keeps the old session bound when rationale invalidation fails", async () => {
     const closeError = new Error("rationale close failed");
     const closeRationaleSession = vi.fn(() => {
       throw closeError;
@@ -276,12 +277,75 @@ describe("RequestAnchor and rationale provenance host wiring", () => {
     const fixture = makeHarness([], false, closeRationaleSession);
     const originalSessionId = fixture.loop.getSessionId();
 
-    expect(() => fixture.loop.newConversation()).toThrow(closeError);
+    await expect(fixture.loop.newConversation()).rejects.toThrow(closeError);
     expect(fixture.loop.getSessionId()).toBe(originalSessionId);
 
-    expect(() => fixture.loop.loadSession("d373c881-0d44-4fc3-8456-f52a702c8481")).toThrow(closeError);
+    await expect(fixture.loop.loadSession("d373c881-0d44-4fc3-8456-f52a702c8481")).rejects.toThrow(closeError);
     expect(fixture.loop.getSessionId()).toBe(originalSessionId);
     expect(closeRationaleSession).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the outgoing session bound until broker cleanup settles", async () => {
+    const fixture = makeHarness([], false, vi.fn());
+    const originalSessionId = fixture.loop.getSessionId();
+    let finishCleanup!: () => void;
+    const cleanupGate = new Promise<void>((resolve) => { finishCleanup = resolve; });
+    const settle = vi.spyOn(backgroundShellManager, "settleSessionCleanup")
+      .mockImplementationOnce(async () => {
+        await cleanupGate;
+        return {
+          sessionId: originalSessionId,
+          state: "complete",
+          requested: 1,
+          settled: 1,
+          pending: 0,
+          cleanupUnproven: 0,
+          outcomes: [],
+        };
+      });
+
+    const transition = fixture.loop.newConversation();
+    await Promise.resolve();
+    expect(fixture.loop.getSessionId()).toBe(originalSessionId);
+    await expect(fixture.loop.newConversation()).rejects.toThrow(
+      "conversation-loop:session-transition-in-progress",
+    );
+    await expect(fixture.loop.runTurn("must not enter")).rejects.toThrow(
+      "conversation-loop:session-transition-in-progress",
+    );
+    expect(fixture.loop.queueGuidance("must not queue")).toBe("session-transition");
+    finishCleanup();
+    await transition;
+    expect(fixture.loop.getSessionId()).not.toBe(originalSessionId);
+    settle.mockRestore();
+  });
+
+  it("refuses a session transition and retains identity when cleanup is unproven", async () => {
+    const fixture = makeHarness([], false, vi.fn());
+    const originalSessionId = fixture.loop.getSessionId();
+    fixture.loop.sessionStartFiredFor = originalSessionId;
+    const fireLifecycleEvent = vi.spyOn(fixture.loop, "fireLifecycleEvent");
+    const settle = vi.spyOn(backgroundShellManager, "settleSessionCleanup")
+      .mockResolvedValueOnce({
+        sessionId: originalSessionId,
+        state: "cleanup-unproven",
+        requested: 1,
+        settled: 1,
+        pending: 0,
+        cleanupUnproven: 1,
+        outcomes: [],
+      });
+
+    await expect(fixture.loop.newConversation()).rejects.toThrow(
+      "workload-broker:session-cleanup-unproven",
+    );
+    expect(fixture.loop.getSessionId()).toBe(originalSessionId);
+    expect(fireLifecycleEvent).not.toHaveBeenCalledWith(
+      "SessionEnd",
+      expect.anything(),
+      expect.anything(),
+    );
+    settle.mockRestore();
   });
 
 

@@ -2,6 +2,47 @@ import { describe, expect, it } from "vitest";
 import { createConversationActivityCoordinator } from "../conversation-activity-coordinator.js";
 
 describe("ConversationActivityCoordinator", () => {
+  it("treats a session transition as busy before deferred surface work can enter", async () => {
+    const coordinator = createConversationActivityCoordinator();
+    let transitioning = true;
+    coordinator.bindSessionTransitionGuard(() => transitioning);
+    let turnEntered = false;
+    let mutationEntered = false;
+
+    expect(coordinator.isBusy()).toBe(true);
+    expect(coordinator.tryTrackTurn(async () => { turnEntered = true; })).toBeNull();
+    expect(coordinator.trackMutation(async () => { mutationEntered = true; })).toBeNull();
+    await expect(coordinator.trackTurn(async () => { turnEntered = true; })).rejects.toThrow("streaming-active");
+    expect(turnEntered).toBe(false);
+    expect(mutationEntered).toBe(false);
+
+    transitioning = false;
+    await expect(coordinator.trackTurn(async () => "entered")).resolves.toBe("entered");
+  });
+
+  it("seals admission atomically while exposing the owner that must drain", async () => {
+    const coordinator = createConversationActivityCoordinator();
+    let finishOwner!: () => void;
+    const owner = coordinator.trackMutation(
+      () => new Promise<void>((resolve) => { finishOwner = resolve; }),
+    );
+    expect(owner).not.toBeNull();
+
+    const admission = coordinator.beginSessionTransitionAdmission();
+    expect(admission?.owner).toBe(owner);
+    expect(coordinator.isBusy()).toBe(true);
+    expect(coordinator.tryTrackTurn(async () => undefined)).toBeNull();
+    expect(coordinator.trackMutation(async () => undefined)).toBeNull();
+    expect(coordinator.beginSessionTransitionAdmission()).toBeNull();
+
+    await Promise.resolve();
+    finishOwner();
+    await admission?.owner;
+    expect(coordinator.isBusy()).toBe(true);
+    admission?.release();
+    expect(coordinator.isBusy()).toBe(false);
+  });
+
   it("uses one turn lease across all callers and releases it after completion", async () => {
     const coordinator = createConversationActivityCoordinator();
     let release!: () => void;

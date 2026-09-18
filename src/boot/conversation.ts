@@ -563,7 +563,7 @@ export function createConversationLoop(deps: ConversationDeps,
     subscriptionProviderFactory: deps.subscriptionProviderFactory,
     sessionHeldElsewhere: deps.sessionHeldElsewhere,
   });
-  loop.newConversation("main");
+  loop.initializeConversation("main");
   return loop;
 }
 

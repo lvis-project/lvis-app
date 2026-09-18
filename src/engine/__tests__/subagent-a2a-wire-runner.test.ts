@@ -602,14 +602,14 @@ describe("SubAgentRunner A2A wire security contract", () => {
       projectRoot: join(tmpHome, "default-project"),
       projectName: "Default Project",
     }));
-    const originalNewConversation = ConversationLoop.prototype.newConversation;
-    const newConversation = vi
-      .spyOn(ConversationLoop.prototype, "newConversation")
+    const originalInitializeConversation = ConversationLoop.prototype.initializeConversation;
+    const initializeConversation = vi
+      .spyOn(ConversationLoop.prototype, "initializeConversation")
       .mockImplementation(function (
         this: ConversationLoop,
-        ...args: Parameters<typeof originalNewConversation>
+        ...args: Parameters<typeof originalInitializeConversation>
       ) {
-        return originalNewConversation.apply(this, args);
+        return originalInitializeConversation.apply(this, args);
       });
     vi.spyOn(ConversationLoop.prototype, "runTurn").mockResolvedValue(
       COMPLETED_TURN,
@@ -628,7 +628,7 @@ describe("SubAgentRunner A2A wire security contract", () => {
     );
 
     expect(result.ok).toBe(true);
-    expect(newConversation).toHaveBeenCalledWith("subagent", {
+    expect(initializeConversation).toHaveBeenCalledWith("subagent", {
       projectRoot: binding.project.root,
       projectName: binding.project.name,
     });

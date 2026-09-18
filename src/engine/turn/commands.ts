@@ -43,7 +43,7 @@ export async function handleCommand(
 
     switch (command) {
       case "new":
-        self.newConversation();
+        await self.newConversation();
         result = t("be_conversationLoop.cmdNewConversation");
         break;
       case "remember": {
@@ -99,7 +99,7 @@ export async function handleCommand(
         const sessions = self.listSessions();
         const match = findSessionByIdPrefix(sessions, targetId);
         if (!match) { result = t("be_conversationLoop.cmdLoadNotFound", { id: targetId }); break; }
-        const loaded = self.loadSession(match.id);
+        const loaded = await self.loadSession(match.id);
         result = loaded
           ? t("be_conversationLoop.cmdLoadSuccess", { id: match.id.slice(0, 8), count: self.history.length })
           : t("be_conversationLoop.cmdLoadFailed", { id: match.id });

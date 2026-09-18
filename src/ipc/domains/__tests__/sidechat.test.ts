@@ -47,7 +47,8 @@ function ev(url?: string): IpcMainInvokeEvent {
 }
 
 function makeSideLoop() {
-  return {
+  let transitioning = false;
+  const loop = {
     // runTurn emits one text delta + a done frame through the injected callbacks
     // so the stream sink is exercised, then resolves the TurnResult.
     runTurn: vi.fn(async (_input: string, callbacks: Record<string, (...a: unknown[]) => void>) => {
@@ -60,7 +61,18 @@ function makeSideLoop() {
     getHistory: vi.fn(() => ({ getMessages: vi.fn(() => []) })),
     listSessions: vi.fn(() => []),
     abortCurrentTurn: vi.fn(),
+    isSessionTransitioning: vi.fn(() => transitioning),
+    runSessionTransition: vi.fn(async (_reason: string, operation: (lease: object) => unknown) => {
+      if (transitioning) throw new Error("conversation-loop:session-transition-in-progress");
+      transitioning = true;
+      try {
+        return await operation({});
+      } finally {
+        transitioning = false;
+      }
+    }),
   };
+  return loop;
 }
 
 function makeMainLoop() {
@@ -222,7 +234,9 @@ describe("side-chat IPC domain", () => {
 
     // While it streams, request a new session.
     const newHandler = handlers.get(CHANNELS.sidechat.new)!;
-    const result = await newHandler(ev("file:///index.html"));
+    const newRequest = newHandler(ev("file:///index.html"));
+    expect(side.isSessionTransitioning()).toBe(true);
+    const result = await newRequest;
 
     expect(result).toEqual({ ok: true, sessionId: "34fd6270-309d-4e47-878b-75c0742a6ac2" });
     // The in-flight turn was aborted + awaited BEFORE the loop was mutated —
@@ -259,7 +273,9 @@ describe("side-chat IPC domain", () => {
     const sendPromise = sendHandler(ev("file:///index.html"), { input: "long turn" });
 
     const loadHandler = handlers.get(CHANNELS.sidechat.load)!;
-    const result = await loadHandler(ev("file:///index.html"), "a17050c7-bb84-4fde-8554-b9ef7a678a92");
+    const loadRequest = loadHandler(ev("file:///index.html"), "a17050c7-bb84-4fde-8554-b9ef7a678a92");
+    expect(side.isSessionTransitioning()).toBe(true);
+    const result = await loadRequest;
 
     expect(result).toMatchObject({ ok: true });
     expect(order).toEqual(["abort", "turn-settled", "loadSession"]);

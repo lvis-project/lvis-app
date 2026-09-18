@@ -21,7 +21,12 @@ describe("resolveEffectiveCeilingMs — per-invocation ceiling", () => {
       command: "echo hi",
       timeoutSeconds: TOOL_TIMEOUT_POLICY.shellDefaultMs / 1000,
     });
-    expect(ceiling).toBeGreaterThan(TOOL_TIMEOUT_POLICY.shellDefaultMs);
+    expect(ceiling).toBe(
+      TOOL_TIMEOUT_POLICY.shellDefaultMs +
+        TOOL_TIMEOUT_POLICY.workloadBrokerPreEffectHandshakeMs +
+        TOOL_TIMEOUT_POLICY.workloadBrokerTransportGraceMs +
+        TOOL_TIMEOUT_POLICY.workloadBrokerOuterGuardMs,
+    );
   });
 
   it("uses a builtin's own host-derived ceiling when it declares one", () => {

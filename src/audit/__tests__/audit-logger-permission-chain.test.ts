@@ -88,6 +88,31 @@ function createAuditLogger(...args: ConstructorParameters<typeof AuditLogger>): 
 }
 
 describe("AuditLogger permission audit chain", () => {
+  it("close drains accepted permission appends and rejects late appends", async () => {
+    const logger = createAuditLogger();
+    await logger.setupPermissionAuditChain(SECRET);
+    const input = (auditId: string) => ({
+      decision: "allow" as const,
+      auditId,
+      ts: "2026-05-09T00:00:00.000Z",
+      trustOrigin: "user-keyboard" as const,
+      tool: "fs_read",
+      source: "builtin" as const,
+      category: "read" as const,
+      layer: 1,
+    });
+    const accepted = [
+      logger.appendPermissionAuditEntry(input("before-close-a")),
+      logger.appendPermissionAuditEntry(input("before-close-b")),
+    ];
+    const closing = logger.close();
+    await expect(logger.appendPermissionAuditEntry(input("after-close")))
+      .rejects.toThrow(/closed/);
+    await expect(Promise.all(accepted)).resolves.toHaveLength(2);
+    await closing;
+    expect(readPermissionAuditLines(logger.getPermissionAuditLogFile())).toHaveLength(2);
+  });
+
   it("isPermissionAuditChainReady is false before setupPermissionAuditChain", () => {
     const logger = createAuditLogger();
     expect(logger.isPermissionAuditChainReady()).toBe(false);
@@ -201,6 +226,51 @@ describe("AuditLogger permission audit chain", () => {
     const lines = readPermissionAuditLines(logger.getPermissionAuditLogFile());
     expect(lines.length).toBe(2);
     expect(verifyChain(SECRET, lines)).toEqual({ ok: true });
+  });
+
+  it("preserves the exact workload broker correlation in the chained permission row", async () => {
+    const logger = createAuditLogger();
+    await logger.setupPermissionAuditChain(SECRET);
+    const workloadBrokerCorrelation = {
+      version: "lvis-workload-correlation/v1" as const,
+      kind: "tool-invocation" as const,
+      toolUseId: "tool-use-broker-read",
+      toolName: "read_file",
+      operation: "file.read" as const,
+      grant: {
+        identity: "1".repeat(64),
+        effectDigest: "2".repeat(64),
+        action: "builtin-tool" as const,
+        planIdentity: null,
+      },
+    };
+
+    await logger.appendPermissionAuditEntry({
+      decision: "allow",
+      auditId: "broker-correlated-allow",
+      ts: "2026-05-09T00:00:00.000Z",
+      trustOrigin: "user-keyboard",
+      toolUseId: workloadBrokerCorrelation.toolUseId,
+      workloadBrokerCorrelation,
+      tool: "read_file",
+      source: "builtin",
+      category: "read",
+      directory: "/app",
+      directoryAllowed: true,
+      layer: 6,
+    });
+
+    const lines = readPermissionAuditLines(logger.getPermissionAuditLogFile());
+    expect(lines).toHaveLength(1);
+    expect(verifyChain(SECRET, lines)).toEqual({ ok: true });
+    const persisted = JSON.parse(lines[0]!) as { workloadBrokerCorrelation?: unknown };
+    expect(persisted.workloadBrokerCorrelation).toEqual(workloadBrokerCorrelation);
+
+    const tampered = JSON.parse(lines[0]!) as {
+      workloadBrokerCorrelation: { operation: string };
+    };
+    tampered.workloadBrokerCorrelation.operation = "file.write";
+    expect(verifyChain(SECRET, [JSON.stringify(tampered)])).toMatchObject({ ok: false });
   });
 
   it("chains the allowlist-only Plan-B projection without leaking its capability reason", async () => {

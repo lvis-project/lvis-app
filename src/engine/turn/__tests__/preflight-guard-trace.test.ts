@@ -64,7 +64,7 @@ describe("PREFLIGHT_GUARD trace step — fired path", () => {
     const loop = new ConversationLoop(
       makeDeps({ settingsService: settings, memoryManager: mem, memoryReviewer }),
     );
-    loop.resetAndResume("691e64c5-38fd-48cc-89cd-d247f6245aca");
+    await loop.resetAndResume("691e64c5-38fd-48cc-89cd-d247f6245aca");
     const rec = new RecordingTracer();
     loop.setTracer(rec);
 
@@ -151,7 +151,7 @@ describe("PREFLIGHT_GUARD trace step — fired path", () => {
         memoryReviewer: makeMemoryReviewer(),
       }),
     );
-    loop.resetAndResume(sessionId);
+    await loop.resetAndResume(sessionId);
     const rec = new RecordingTracer();
     loop.setTracer(rec);
     const fakeProvider = makeTurnProvider();
@@ -206,7 +206,7 @@ describe("PREFLIGHT_GUARD trace step — fired path", () => {
         memoryReviewer: makeMemoryReviewer(),
       }),
     );
-    loop.resetAndResume("4b0e2f6a-9d2e-4a55-9d6b-4d5a6c8f2a11");
+    await loop.resetAndResume("4b0e2f6a-9d2e-4a55-9d6b-4d5a6c8f2a11");
     const rec = new RecordingTracer();
     loop.setTracer(rec);
     const fakeProvider = makeTurnProvider();
@@ -231,7 +231,7 @@ describe("PREFLIGHT_GUARD trace step — fired path", () => {
     const loop = new ConversationLoop(
       makeDeps({ settingsService: settings, memoryManager: mem, memoryReviewer }),
     );
-    loop.resetAndResume("8a2099ef-3b22-46a7-84ec-1c42b6fc0f00");
+    await loop.resetAndResume("8a2099ef-3b22-46a7-84ec-1c42b6fc0f00");
     const rec = new RecordingTracer();
     loop.setTracer(rec);
 
@@ -264,7 +264,7 @@ describe("PREFLIGHT_GUARD trace step — skipped / not-reached paths", () => {
 
     const mem = makeMemoryManager(history, "050713c0-1d80-4e8f-8897-3c571585ddc5");
     const loop = new ConversationLoop(makeDeps({ settingsService: settings, memoryManager: mem }));
-    loop.resetAndResume("050713c0-1d80-4e8f-8897-3c571585ddc5");
+    await loop.resetAndResume("050713c0-1d80-4e8f-8897-3c571585ddc5");
     const rec = new RecordingTracer();
     loop.setTracer(rec);
 
@@ -292,7 +292,7 @@ describe("PREFLIGHT_GUARD trace step — skipped / not-reached paths", () => {
 
     const mem = makeMemoryManager(history, "7e4a73fc-74db-42d9-824a-1d79359e927f");
     const loop = new ConversationLoop(makeDeps({ settingsService: settings, memoryManager: mem }));
-    loop.resetAndResume("7e4a73fc-74db-42d9-824a-1d79359e927f");
+    await loop.resetAndResume("7e4a73fc-74db-42d9-824a-1d79359e927f");
     const rec = new RecordingTracer();
     loop.setTracer(rec);
 

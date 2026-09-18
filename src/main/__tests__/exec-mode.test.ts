@@ -233,6 +233,8 @@ describe("execModeRequested", () => {
     ["--exec=say hi"],
     ["--exec=-"],
     ["--exec-operator-attestation=/run/lvis/attestation.json"],
+    ["--exec-workload-broker=/run/lvis/workload.sock"],
+    ["--exec-workload-capability=/run/lvis/capability.json"],
     ["--set-secret"],
     ["--set-secret=llm.apiKey.claude"],
   ])("is true for %s", (flag) => {
@@ -322,6 +324,20 @@ describe("parseExecFlags", () => {
     expect(request.turn?.prompt).toBe("hi");
   });
 
+  it("accepts a paired workload broker and defers guest cwd host stat", () => {
+    const request = expectRequest(parseExecFlags([
+      "--exec=hi",
+      "--exec-cwd=/app",
+      "--exec-workload-broker=/run/lvis/workload.sock",
+      "--exec-workload-capability=/run/lvis/capability.json",
+    ], LAUNCH_CWD));
+    expect(request.turn?.cwd).toBe("/app");
+    expect(request.workloadBroker).toEqual({
+      socketPath: "/run/lvis/workload.sock",
+      capabilityPath: "/run/lvis/capability.json",
+    });
+  });
+
   it("resolves a relative --exec-cwd against the launch directory, not the process cwd", async () => {
     const launch = mkdtempSync(join(tmpdir(), "exec-launch-"));
     const sub = join(launch, "project");
@@ -372,6 +388,29 @@ describe("parseExecFlags", () => {
     [["--exec=hi", "--exec-operator-attestation=relative.json"], "absolute path"],
     [["--exec-operator-attestation=/run/lvis/attestation.json"], "requires --exec"],
     [["--exec=hi", "--set-secret=k", "--exec-operator-attestation=/run/lvis/attestation.json"], "cannot be combined"],
+    [["--exec=hi", "--exec-workload-broker=/run/lvis/workload.sock"], "must be specified together"],
+    [["--exec=hi", "--exec-workload-capability=/run/lvis/capability.json"], "must be specified together"],
+    [[
+      "--exec-workload-broker=/run/lvis/workload.sock",
+      "--exec-workload-capability=/run/lvis/capability.json",
+    ], "require --exec"],
+    [[
+      "--exec=hi",
+      "--set-secret=k",
+      "--exec-workload-broker=/run/lvis/workload.sock",
+      "--exec-workload-capability=/run/lvis/capability.json",
+    ], "cannot be combined"],
+    [[
+      "--exec=hi",
+      "--exec-operator-attestation=/run/lvis/attestation.json",
+      "--exec-workload-broker=/run/lvis/workload.sock",
+      "--exec-workload-capability=/run/lvis/capability.json",
+    ], "cannot be combined"],
+    [[
+      "--exec=hi",
+      "--exec-workload-broker=relative.sock",
+      "--exec-workload-capability=/run/lvis/capability.json",
+    ], "absolute path"],
     [[
       "--exec=hi",
       "--exec-operator-attestation=/run/lvis/one.json",

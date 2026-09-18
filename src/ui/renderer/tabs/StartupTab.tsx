@@ -33,10 +33,10 @@ import { useSettingsSnapshot } from "../hooks/use-settings-snapshot.js";
  * rather than restated.
  */
 const SHUTDOWN_CLEANUP_TIMEOUT_CHOICES_MS: readonly number[] = Object.freeze([
-  5_000,
-  TOOL_TIMEOUT_POLICY.shutdownCleanupMs,
+  15_000,
   30_000,
-  60_000,
+  TOOL_TIMEOUT_POLICY.shutdownCleanupMs,
+  120_000,
 ]);
 
 /**

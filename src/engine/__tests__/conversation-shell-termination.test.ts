@@ -68,7 +68,7 @@ describe.skipIf(process.platform === "win32")("conversation shell termination de
         : null,
     }));
     loop.provider = provider;
-    loop.newConversation("main", { projectRoot });
+    await loop.newConversation("main", { projectRoot });
     const onToolEnd = vi.fn();
 
     const result = await loop.runTurn(

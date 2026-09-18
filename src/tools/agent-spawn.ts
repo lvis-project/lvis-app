@@ -403,6 +403,10 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
         ...promptPayload,
       });
       try {
+        let markSetupReady!: () => void;
+        const setupReady = new Promise<void>((resolve) => {
+          markSetupReady = resolve;
+        });
         const callbacks = {
           onLinked: ({ childSessionId }: { childSessionId: string }) => {
             linkedChildSessionId = childSessionId;
@@ -426,6 +430,7 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
               ...promptPayload,
               ...linkedPayload(),
             }),
+          onReady: () => markSetupReady(),
           // `onError` is diagnostic and may precede a structurally returned
           // INPUT_REQUIRED/REJECTED result. Only `onTerminal` below may emit a
           // terminal renderer event for this spawnId.
@@ -533,7 +538,17 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
             });
           };
 
-          void run().then(terminalize, terminalizeRejection);
+          const backgroundRun = run();
+          void backgroundRun.then(terminalize, terminalizeRejection);
+          // A resumed run must publish a handle only after it owns the active
+          // child lease and the tracked/durable state is WORKING. Otherwise an
+          // async session load lets this snapshot return the prior WAITING row.
+          if (resumeId) {
+            await Promise.race([
+              setupReady,
+              backgroundRun.then(() => undefined, () => undefined),
+            ]);
+          }
           const handleTaskState = originSessionId
             && typeof runner.getRunStatus === "function"
             ? runner.getRunStatus(spawnId, originSessionId)?.taskState ?? initialTaskState

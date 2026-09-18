@@ -69,32 +69,32 @@ function createRememberCommandLoop(captureExplicit: CaptureExplicit, args = "ret
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe("ConversationLoop.resetAndResume", () => {
-  it("refuses a session the host reports as held by another loop", () => {
+  it("refuses a session the host reports as held by another loop", async () => {
     const mem = resumeMemory([{ role: "user", content: "hello" }]);
     const readSession = vi.spyOn(mem, "loadSession");
     const held = vi.fn((sessionId: string) => sessionId === RESUME_SESSION_ID);
     const loop = new ConversationLoop(resumeDeps({ memoryManager: mem, sessionHeldElsewhere: held }));
 
     // Both entry points — the IPC resume and the engine `/load` command.
-    expect(loop.resetAndResume(RESUME_SESSION_ID).ok).toBe(false);
-    expect(loop.loadSession(RESUME_SESSION_ID)).toBe(false);
+    expect((await loop.resetAndResume(RESUME_SESSION_ID)).ok).toBe(false);
+    expect(await loop.loadSession(RESUME_SESSION_ID)).toBe(false);
     expect(readSession).not.toHaveBeenCalled();
 
     held.mockReturnValue(false);
-    expect(loop.loadSession(RESUME_SESSION_ID)).toBe(true);
+    expect(await loop.loadSession(RESUME_SESSION_ID)).toBe(true);
   });
 
-  it("returns ok:false for unknown session", () => {
+  it("returns ok:false for unknown session", async () => {
     const loop = new ConversationLoop(resumeDeps({ memoryManager: resumeMemory(null) }),
     );
-    const result = loop.resetAndResume("afeff8fc-a07a-452d-8ab3-5457c56ee572");
+    const result = await loop.resetAndResume("afeff8fc-a07a-452d-8ab3-5457c56ee572");
     expect(result.ok).toBe(false);
     expect(result.compacted).toBe(false);
     expect(result.compactedAt).toBeNull();
     expect(result.removedMessageCount).toBe(0);
   });
 
-  it("loads history and resets cumulativeUsage", () => {
+  it("loads history and resets cumulativeUsage", async () => {
     const history: GenericMessage[] = [
       { role: "user", content: "hello" },
       { role: "assistant", content: "world" },
@@ -103,7 +103,7 @@ describe("ConversationLoop.resetAndResume", () => {
     const loop = new ConversationLoop(resumeDeps({ memoryManager: mem }));
 
     // Simulate prior usage so we can confirm reset
-    const result = loop.resetAndResume("08001f8f-a6f5-4bb9-820d-df1e8366af93");
+    const result = await loop.resetAndResume("08001f8f-a6f5-4bb9-820d-df1e8366af93");
 
     expect(result.ok).toBe(true);
     expect(loop.getHistory().length).toBe(2);
@@ -113,7 +113,7 @@ describe("ConversationLoop.resetAndResume", () => {
     expect(loop.getCumulativeUsage().outputTokens).toBe(0);
   });
 
-  it("does NOT compact short history even with autoCompact enabled", () => {
+  it("does NOT compact short history even with autoCompact enabled", async () => {
     const history: GenericMessage[] = [
       { role: "user", content: "hi" },
       { role: "assistant", content: "hello" },
@@ -121,7 +121,7 @@ describe("ConversationLoop.resetAndResume", () => {
     const mem = resumeMemory(history);
     const loop = new ConversationLoop(resumeDeps({ memoryManager: mem }));
 
-    const result = loop.resetAndResume("08001f8f-a6f5-4bb9-820d-df1e8366af93");
+    const result = await loop.resetAndResume("08001f8f-a6f5-4bb9-820d-df1e8366af93");
 
     expect(result.ok).toBe(true);
     expect(result.compacted).toBe(false);
@@ -129,29 +129,29 @@ describe("ConversationLoop.resetAndResume", () => {
     expect(result.removedMessageCount).toBe(0);
   });
 
-  it("does NOT compact when autoCompact is disabled", () => {
+  it("does NOT compact when autoCompact is disabled", async () => {
     const history = makeConversationLoopLongHistory(20);
     const mem = resumeMemory(history);
     const settings = makeConversationLoopSettings(false, "gpt-4o", "openai");
     const loop = new ConversationLoop(resumeDeps({ memoryManager: mem, settingsService: settings }),
     );
 
-    const result = loop.resetAndResume("08001f8f-a6f5-4bb9-820d-df1e8366af93");
+    const result = await loop.resetAndResume("08001f8f-a6f5-4bb9-820d-df1e8366af93");
 
     expect(result.ok).toBe(true);
     expect(result.compacted).toBe(false);
   });
 
-  it("session-id is updated to the resumed session", () => {
+  it("session-id is updated to the resumed session", async () => {
     const history: GenericMessage[] = [{ role: "user", content: "resume me" }];
     const mem = resumeMemory(history);
     const loop = new ConversationLoop(resumeDeps({ memoryManager: mem }));
 
-    loop.resetAndResume("08001f8f-a6f5-4bb9-820d-df1e8366af93");
+    await loop.resetAndResume("08001f8f-a6f5-4bb9-820d-df1e8366af93");
     expect(loop.getSessionId()).toBe("08001f8f-a6f5-4bb9-820d-df1e8366af93");
   });
 
-  it("advances the session epoch for A → B → A, even when the session id repeats", () => {
+  it("advances the session epoch for A → B → A, even when the session id repeats", async () => {
     const history: GenericMessage[] = [{ role: "user", content: "resume me" }];
     const loop = new ConversationLoop(resumeDeps({
       memoryManager: {
@@ -163,17 +163,17 @@ describe("ConversationLoop.resetAndResume", () => {
 
     expect(initialEpoch).toBe(0);
 
-    expect(loop.loadSession("08001f8f-a6f5-4bb9-820d-df1e8366af93")).toBe(true);
+    expect(await loop.loadSession("08001f8f-a6f5-4bb9-820d-df1e8366af93")).toBe(true);
     expect(loop.getSessionEpoch()).toBe(initialEpoch + 1);
 
-    loop.newConversation();
+    await loop.newConversation();
     expect(loop.getSessionEpoch()).toBe(initialEpoch + 2);
 
-    expect(loop.loadSession("08001f8f-a6f5-4bb9-820d-df1e8366af93")).toBe(true);
+    expect(await loop.loadSession("08001f8f-a6f5-4bb9-820d-df1e8366af93")).toBe(true);
     expect(loop.getSessionEpoch()).toBe(initialEpoch + 3);
   });
 
-  it("clears prior carried-forward plugin scope when loading or creating a session", () => {
+  it("clears prior carried-forward plugin scope when loading or creating a session", async () => {
     const history: GenericMessage[] = [{ role: "user", content: "resume me" }];
     const loop = new ConversationLoop(resumeDeps({
       memoryManager: {
@@ -184,15 +184,15 @@ describe("ConversationLoop.resetAndResume", () => {
     const state = loop as unknown as { lastTurnScope: Set<string> | null };
 
     state.lastTurnScope = new Set(["previous-plugin"]);
-    expect(loop.loadSession("08001f8f-a6f5-4bb9-820d-df1e8366af93")).toBe(true);
+    expect(await loop.loadSession("08001f8f-a6f5-4bb9-820d-df1e8366af93")).toBe(true);
     expect(state.lastTurnScope).toBeNull();
 
     state.lastTurnScope = new Set(["loaded-plugin"]);
-    loop.newConversation();
+    await loop.newConversation();
     expect(state.lastTurnScope).toBeNull();
   });
 
-  it("does not load or merge parent transcript when resuming a child session", () => {
+  it("does not load or merge parent transcript when resuming a child session", async () => {
     const childHistory: GenericMessage[] = [{ role: "user", content: "child only" },
     ];
     const parentHistory: GenericMessage[] = [{ role: "user", content: "parent should not load" },
@@ -222,7 +222,7 @@ describe("ConversationLoop.resetAndResume", () => {
     const loop = new ConversationLoop(resumeDeps({ memoryManager: mem, systemPromptBuilder }),
     );
 
-    const result = loop.resetAndResume("3e323a73-28d0-4dce-8229-3b0eca68d32a");
+    const result = await loop.resetAndResume("3e323a73-28d0-4dce-8229-3b0eca68d32a");
 
     expect(result.ok).toBe(true);
     expect(mem.loadSession).toHaveBeenCalledTimes(1);
@@ -236,7 +236,7 @@ describe("ConversationLoop.resetAndResume", () => {
     );
   });
 
-  it("sets cumulativeUsage estimate on resume for the next token preflight", () => {
+  it("sets cumulativeUsage estimate on resume for the next token preflight", async () => {
     // Long synthetic history → estimateMessagesTokens > 0. Token preflight 가
     // next user turn 진입 시 이 값을 사용하여 임계 평가.
     const msgs: GenericMessage[] = [];
@@ -247,7 +247,7 @@ describe("ConversationLoop.resetAndResume", () => {
     const mem = resumeMemory(msgs);
     const loop = new ConversationLoop(resumeDeps({ memoryManager: mem }));
 
-    const result = loop.resetAndResume("08001f8f-a6f5-4bb9-820d-df1e8366af93");
+    const result = await loop.resetAndResume("08001f8f-a6f5-4bb9-820d-df1e8366af93");
     expect(result.ok).toBe(true);
     // cumulativeUsage 가 estimate 로 set 됐는지 — token preflight 가 정확한 ratio 평가 가능
     expect(loop.getCumulativeUsage().inputTokens).toBe(estimateMessagesTokens(msgs),
@@ -256,7 +256,7 @@ describe("ConversationLoop.resetAndResume", () => {
     expect(result.compacted).toBe(false);
   });
 
-  it("hydrates the context-fill SOT from the latest persisted turnSummary on resume", () => {
+  it("hydrates the context-fill SOT from the latest persisted turnSummary on resume", async () => {
     const msgs: GenericMessage[] = [
       { role: "user", content: "old question" },
       {
@@ -277,7 +277,7 @@ describe("ConversationLoop.resetAndResume", () => {
     const mem = resumeMemory(msgs);
     const loop = new ConversationLoop(resumeDeps({ memoryManager: mem }));
 
-    const result = loop.resetAndResume("08001f8f-a6f5-4bb9-820d-df1e8366af93");
+    const result = await loop.resetAndResume("08001f8f-a6f5-4bb9-820d-df1e8366af93");
 
     expect(result.ok).toBe(true);
     expect((loop as unknown as { lastContextInputTokens: number }).lastContextInputTokens,
@@ -286,7 +286,7 @@ describe("ConversationLoop.resetAndResume", () => {
     ).toBe(0);
   });
 
-  it("hydrates post-compact context SOT ahead of preserved pre-compact turnSummary", () => {
+  it("hydrates post-compact context SOT ahead of preserved pre-compact turnSummary", async () => {
     const msgs: GenericMessage[] = [
       {
         role: "user",
@@ -319,14 +319,14 @@ describe("ConversationLoop.resetAndResume", () => {
     const mem = resumeMemory(msgs);
     const loop = new ConversationLoop(resumeDeps({ memoryManager: mem }));
 
-    const result = loop.resetAndResume("08001f8f-a6f5-4bb9-820d-df1e8366af93");
+    const result = await loop.resetAndResume("08001f8f-a6f5-4bb9-820d-df1e8366af93");
 
     expect(result.ok).toBe(true);
     expect((loop as unknown as { lastContextInputTokens: number }).lastContextInputTokens,
     ).toBe(40_000);
   });
 
-  it("hydrates newer post-compact turnSummary ahead of an older checkpoint carrier", () => {
+  it("hydrates newer post-compact turnSummary ahead of an older checkpoint carrier", async () => {
     const msgs: GenericMessage[] = [
       {
         role: "user",
@@ -361,7 +361,7 @@ describe("ConversationLoop.resetAndResume", () => {
     const mem = resumeMemory(msgs);
     const loop = new ConversationLoop(resumeDeps({ memoryManager: mem }));
 
-    const result = loop.resetAndResume("08001f8f-a6f5-4bb9-820d-df1e8366af93");
+    const result = await loop.resetAndResume("08001f8f-a6f5-4bb9-820d-df1e8366af93");
 
     expect(result.ok).toBe(true);
     expect((loop as unknown as { lastContextInputTokens: number }).lastContextInputTokens,
@@ -399,7 +399,7 @@ describe("ConversationLoop.resetAndResume", () => {
     };
     (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
 
-    expect(loop.resetAndResume("08001f8f-a6f5-4bb9-820d-df1e8366af93").ok).toBe(true);
+    expect((await loop.resetAndResume("08001f8f-a6f5-4bb9-820d-df1e8366af93")).ok).toBe(true);
     await loop.runTurn("new question", undefined, undefined, { inputOrigin: "user-keyboard",
     });
 
@@ -456,7 +456,7 @@ describe("ConversationLoop.manualCompact — Major Fix callbacks", () => {
     const mem = resumeMemory(longHistory);
 
     const loop = new ConversationLoop(resumeDeps({ memoryManager: mem }));
-    loop.resetAndResume("08001f8f-a6f5-4bb9-820d-df1e8366af93");
+    await loop.resetAndResume("08001f8f-a6f5-4bb9-820d-df1e8366af93");
 
     // Inject a fake provider that returns a valid 12-section summary
     const fakeSummary = [

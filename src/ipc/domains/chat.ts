@@ -787,6 +787,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
     const surfaceRuntime = isMain
       ? deps.conversationSurfaceRuntime ?? createConversationSurfaceRuntime()
       : createConversationSurfaceRuntime();
+    surfaceRuntime.activity.bindSessionTransitionGuard(() => loop.isSessionTransitioning?.() ?? false);
     const commandPort = isMain
       ? deps.conversationCommandPort ?? createConversationCommandPort(groupDeps, surfaceRuntime)
       : createConversationCommandPort(groupDeps, surfaceRuntime);
@@ -892,10 +893,15 @@ export function registerChatHandlers(deps: IpcDeps): void {
    * `reason` is what the stopped turn — and an approval it was parked on —
    * records; it names the host's action, not the user's.
    */
-  const quiesce = async (context: ChatGroupContext, reason: string): Promise<void> => {
+  const quiesce = async (
+    context: ChatGroupContext,
+    reason: string,
+    capturedOwner?: Promise<unknown> | null,
+  ): Promise<void> => {
     context.loop.abortCurrentTurn(new Error(reason));
-    const active = context.surfaceRuntime.activity.activeTurn()
-      ?? context.surfaceRuntime.activity.activeMutation();
+    const active = capturedOwner === undefined
+      ? context.surfaceRuntime.activity.activeTurn() ?? context.surfaceRuntime.activity.activeMutation()
+      : capturedOwner;
     if (!active) return;
     try {
       await active;
@@ -907,11 +913,20 @@ export function registerChatHandlers(deps: IpcDeps): void {
   const releaseGroup = async (id: string, reason: string): Promise<boolean> => {
     const context = groupContexts.get(id);
     if (!context) return false;
-    await quiesce(context, reason);
-    context.unsubscribeStream();
-    groupContexts.delete(id);
-    deps.releaseChatGroupLoop?.(id);
-    return true;
+    const admission = context.surfaceRuntime.activity.beginSessionTransitionAdmission();
+    if (admission === null) throw new Error("conversation-activity:session-transition-in-progress");
+    try {
+      await quiesce(context, reason, admission.owner);
+      return await context.loop.runSessionTransition("chat-group-release", async (lease) => {
+        await context.loop.cleanupSession(lease);
+        context.unsubscribeStream();
+        groupContexts.delete(id);
+        deps.releaseChatGroupLoop?.(id);
+        return true;
+      });
+    } finally {
+      admission.release();
+    }
   };
 
   /**
@@ -930,7 +945,11 @@ export function registerChatHandlers(deps: IpcDeps): void {
     watchedRenderers.add(contents);
     const releaseAll = (reason: string) => {
       for (const id of [...groupContexts.keys()]) {
-        if (id !== MAIN_CHAT_GROUP_ID) void releaseGroup(id, reason);
+        if (id !== MAIN_CHAT_GROUP_ID) {
+          void releaseGroup(id, reason).catch((error: unknown) => {
+            log.warn("chat group release failed (%s): %s", id, (error as Error).message);
+          });
+        }
       }
     };
     contents.on("did-start-navigation", (event) => {
@@ -960,10 +979,18 @@ export function registerChatHandlers(deps: IpcDeps): void {
       // window-active pointer cleared so the next launch does not bring the
       // closed conversation back — so no other tile is refused that session
       // by a tile that no longer exists.
-      await quiesce(mainGroup, "tile closed");
-      mainGroup.loop.newConversation();
-      await memoryManager.markMainActiveFresh();
-      return { ok: true, released: true };
+      const admission = mainGroup.surfaceRuntime.activity.beginSessionTransitionAdmission();
+      if (admission === null) throw new Error("conversation-activity:session-transition-in-progress");
+      try {
+        await quiesce(mainGroup, "tile closed", admission.owner);
+        return await mainGroup.loop.runSessionTransition("primary-chat-group-release", async (lease) => {
+          await mainGroup.loop.newConversation("main", undefined, lease);
+          await memoryManager.markMainActiveFresh();
+          return { ok: true, released: true };
+        });
+      } finally {
+        admission.release();
+      }
     }
     return { ok: true, released: await releaseGroup(id, "tile closed") };
   });
@@ -1186,7 +1213,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
       const resolved = resolveAuthorizedWorkspaceProject(parsed.projectRoot, parsed.projectName);
       if (!resolved.authorized || !resolved.project) return PROJECT_NOT_ALLOWED;
       const { project } = resolved;
-      conversationLoop.newConversation("main", project);
+      await conversationLoop.newConversation("main", project);
       // Persist the resolved project identity to the new session's metadata at
       // creation — mirroring startRoutineConversation — but ONLY when the user
       // explicitly selected a real (non-default) project. A session created
@@ -1277,7 +1304,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
       };
     }
     const mutation = group.turns.trackSessionMutation(async () => {
-      const result = conversationLoop.resetAndResume(sessionId);
+      const result = await conversationLoop.resetAndResume(sessionId);
       if (result.ok && conversationLoop.getSessionKind() === "main" && isPrimaryGroup(group)) {
         await memoryManager.markMainActiveResume(sessionId).catch((err: unknown) => {
           log.warn("session-resume markMainActiveResume failed: %s", (err as Error).message);
@@ -1453,7 +1480,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
         ...(currentMeta?.projectName ? { projectName: currentMeta.projectName } : {}),
         ...(currentMeta?.summaryPreamble ? { summaryPreamble: currentMeta.summaryPreamble } : {}),
       });
-      const loaded = conversationLoop.loadSession(newId);
+      const loaded = await conversationLoop.loadSession(newId);
       if (loaded && conversationLoop.getSessionKind() === "main" && isPrimaryGroup(group)) {
         await memoryManager.markMainActiveResume(newId).catch((err: unknown) => {
           log.warn("chat:fork markMainActiveResume failed: %s", (err as Error).message);

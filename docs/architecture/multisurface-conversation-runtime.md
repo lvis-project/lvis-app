@@ -419,9 +419,10 @@ Implementation anchors:
 
 ## Headless one-shot CLI
 
-The main process accepts two one-shot flags. Each boots the ordinary host
-service graph and performs exactly one action. Both quit by default. Neither opens a
-workspace, and neither is a second conversation runtime: `--exec` runs the same
+The main process accepts one-shot execution and secret-write actions, plus
+optional execution-boundary flags. Each action boots the ordinary host service
+graph and performs exactly one action. Both actions quit by default. Neither
+opens a workspace, and neither is a second conversation runtime: `--exec` runs the same
 `runStreamedTurn` producer the desktop window runs and reads the same closed
 event union, with a sink that serialises instead of projecting to a renderer.
 
@@ -440,6 +441,10 @@ lvis --exec="<prompt>"              prompt inline; `--exec` or `--exec=-` reads 
      [--exec-operator-attestation=<absolute-path>]
                                     verify Linux launcher isolation evidence
                                     before host services start
+     [--exec-workload-broker=<absolute-socket-path>
+      --exec-workload-capability=<absolute-file-path>]
+                                    bind this turn to one host-brokered Linux
+                                    workload; the two flags are inseparable
      [--exec-keep-alive]            retain a successful streamed session until
                                     SIGTERM or SIGINT from its caller
 lvis --set-secret=<key>             secret VALUE is read from stdin, never argv
@@ -465,8 +470,31 @@ shutdown and descendant cleanup. Unsuccessful turns exit without retention.
 with `--set-secret`. It is a fail-closed Linux-only boot input. The
 [permission policy](permission-policy-design.md#headless-operator-container-attestation)
 owns its signature, trust-root, process-fact, capability, and revalidation
-contract. Verification only publishes evidence for a later execution router;
-it does not relax current permission or shell policy.
+contract. A builtin shell invocation reacquires that exact process capability
+and consumes a one-shot execution grant for the disposable route. This changes
+only guest-internal path admission that would otherwise require an unavailable
+UI; it does not relax structural shell checks or normal tool authorization.
+
+The workload-broker flags select a different route. The controller remains a
+host process and connects through an owner-only Unix socket to a host broker
+bound to one exact Docker `main` identity. Both absolute paths are required;
+the pair requires `--exec` and cannot be combined with `--set-secret` or
+`--exec-operator-attestation`. The capability file is an owner-owned mode
+`0400` regular file in a real, owner-owned mode `0700` directory; the socket is
+mode `0600` in an owner-owned mode `0700` directory. Before host services start,
+LVIS pins and rechecks the capability directory and file identities across the
+bounded read, verifies expiry and workload identity, checks the socket, completes
+an exact handshake, and requires `--exec-cwd` to equal the capability's guest cwd.
+
+In this mode the host-native controller, encrypted provider secret, broker
+credential, receipts and controller logs remain outside `main`; `main` receives
+no host bind, Docker socket or controller environment. Builtin Bash and
+canonical file operations route only through the broker. The route deliberately
+does not reinterpret a guest path as a host path or run the host Bash structural
+parser: the bound workload has no host mounts, devices or secrets to expose.
+The ordinary permission decision, reviewer, audit and deadline layers still
+run. PowerShell is unsupported on this Linux broker route and fails closed.
+See the [host-native workload broker policy](permission-policy-design.md#host-native-workload-broker).
 
 Exit codes are `0` completed, `1` the turn failed or the secret could not be
 stored, `2` the turn ended asking for input, `64` a malformed command line,

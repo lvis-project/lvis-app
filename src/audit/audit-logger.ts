@@ -632,6 +632,7 @@ export class AuditLogger {
   private permissionAuditEpochTransition: Promise<void> | null = null;
   private permissionAuditAppendTail: Promise<void> = Promise.resolve();
   private permissionAuditAppendActive = 0;
+  private acceptingPermissionAuditWrites = true;
 
   constructor(auditDirOverride?: string, options: AuditLoggerOptions = {}) {
     this.auditDir = auditDirOverride ?? join(lvisHome(), "audit");
@@ -781,7 +782,9 @@ export class AuditLogger {
   /** Stop accepting plain telemetry and drain the bounded writer queue. */
   async close(): Promise<void> {
     this.acceptingPlainWrites = false;
-    await this.flush();
+    this.acceptingPermissionAuditWrites = false;
+    await Promise.all([this.flush(), this.permissionAuditAppendTail]);
+    if (this.permissionAuditEpochTransition) await this.permissionAuditEpochTransition;
   }
 
   /** Queue state exposed for deterministic saturation and shutdown tests. */
@@ -1142,6 +1145,9 @@ export class AuditLogger {
    * line without O(n) full-file scans on every append.
    */
   appendPermissionAuditEntry(entry: PermissionAuditEntryInput): Promise<PermissionAuditEntry> {
+    if (!this.acceptingPermissionAuditWrites) {
+      return Promise.reject(new Error("permission audit logger is closed"));
+    }
     this.permissionAuditAppendActive += 1;
     const operation = this.permissionAuditAppendTail.then(
       () => this.appendPermissionAuditEntrySerialized(entry),

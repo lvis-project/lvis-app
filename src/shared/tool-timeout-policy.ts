@@ -14,10 +14,11 @@
  *
  * Shell timeout semantics: a timeout ALWAYS exists (the field is optional but
  * defaulted, and non-positive / non-finite values are rejected), so no call
- * can wait forever. There is deliberately NO upper bound: expiry is a clean,
- * retryable tool error, and the retry's whole point is to name a LARGER
- * budget. A cap would make that retry impossible and would fail input
- * validation for the entire turn rather than for the one tool call.
+ * can wait forever. Local execution deliberately has no upper bound: expiry
+ * is a clean, retryable tool error, and the retry's whole point is to name a
+ * LARGER budget. Brokered execution advertises its protocol maximum in the
+ * tool description because the signed workload capability has a bounded
+ * lifetime.
  *
  * Surfaces:
  *  - Built-in shell tools (bash/powershell) — `shellDefaultMs` is exposed to
@@ -30,6 +31,11 @@
  *    own `timeoutSeconds` exceeds that ceiling raises it for that invocation
  *    (`resolveEffectiveCeilingMs`), so the tool's own retryable timeout — not
  *    an opaque ceiling abort — is what the model sees.
+ *  - Canonical file tools use `resolveWorkloadBrokerExecutorCeilingMs` so an
+ *    active broker route can complete identity admission, its semantic file
+ *    effect, and terminal receipt. `view_image` additionally reserves its
+ *    bounded decoder phase. Local execution inherits the longer last-resort
+ *    timer, while its own filesystem/image limits remain unchanged.
  *  - Plugin-owned UI and MCP tool execution routes through the same executor
  *    and inherits `globalCeilingMs` — there is no separate plugin timeout
  *    key (single SoT).
@@ -95,8 +101,31 @@ export function resolveShellTimeoutMs(timeoutSeconds: number): number {
 
 export const TOOL_TIMEOUT_POLICY = {
   shellDefaultMs: 120_000,
-  shellCeilingGraceMs: 10_000,
+  // A brokered shell spends this headroom outside the command's semantic
+  // timeout: exact-identity handshake, terminal/cleanup receipt delivery, and
+  // one small outer-timer guard. Local shells inherit the same host-owned
+  // margin so the executor policy remains route-independent.
+  shellCeilingGraceMs: 31_000,
   globalCeilingMs: 120_000,
+  // Pre-effect exact workload/Docker identity proof. This is also the
+  // protocol handshake timeout; keep it here so the protocol and executor do
+  // not maintain independent copies of the same phase budget.
+  workloadBrokerPreEffectHandshakeMs: 15_000,
+  // Extra transport-only time for a workload broker response to carry the
+  // operation's terminal receipt after its host-owned deadline fires. This
+  // does not extend the tool operation itself.
+  workloadBrokerTransportGraceMs: 15_000,
+  // Semantic/effect time for canonical file operations. Protocol handshake
+  // and terminal-receipt phases are additive and the canonical tool's
+  // resolveHostCeilingMs derives the complete executor ceiling below.
+  workloadBrokerFileOperationMs: 105_000,
+  // Broker-owned SIGKILL/descendant drain window for a background execution.
+  // The complete cleanup request also includes handshake and receipt phases;
+  // derive that total with resolveWorkloadBrokerInvocationBudgetMs.
+  workloadBrokerBackgroundCleanupEffectMs: 5_000,
+  // Ensures the executor timer is strictly later than the complete broker
+  // phase budget instead of racing a response at the same millisecond.
+  workloadBrokerOuterGuardMs: 1_000,
   // Includes admission, source reading and decoder process lifetime.
   imagePreparationMs: 30_000,
   pluginImportMs: 10_000,
@@ -159,7 +188,11 @@ export const TOOL_TIMEOUT_POLICY = {
   //  windowManager.persistAll). On expiry the host force-kills tracked
   //  child processes and calls `app.exit(0)`. Override via env
   //  `LVIS_SHUTDOWN_CLEANUP_TIMEOUT_MS`.
-  shutdownCleanupMs: 15_000,
+  // Must be longer than a complete background broker cleanup request. The
+  // app-wide signal is threaded into that request; if earlier shutdown stages
+  // consume the reserve, it aborts as cleanup-unproven and external workload
+  // release remains authoritative.
+  shutdownCleanupMs: 60_000,
   // Inner timeout for `forceKillProcessTree` between SIGTERM and SIGKILL on
   // a single tracked child. Bounded so shutdown never hangs on a stubborn
   // grandchild while still giving graceful exits a window.
@@ -170,6 +203,39 @@ export const TOOL_TIMEOUT_POLICY = {
   // a termination request. This never expires cancellation/shutdown ownership.
   processGroupRetentionWarningMs: 5 * 60 * 1000,
 } as const;
+
+/**
+ * Complete wall-clock budget for one brokered effect as observed by the tool.
+ *
+ * The effect timeout is model/operation semantic time. The handshake and
+ * terminal receipt phases are host protocol work and therefore add to it;
+ * postEffectMs accounts for host work after the receipt (image decoding).
+ */
+export function resolveWorkloadBrokerInvocationBudgetMs(
+  effectMs: number,
+  postEffectMs = 0,
+): number {
+  if (!Number.isFinite(effectMs) || effectMs <= 0
+      || !Number.isFinite(postEffectMs) || postEffectMs < 0) {
+    throw new Error("Workload broker phase budgets must be finite and non-negative");
+  }
+  return TOOL_TIMEOUT_POLICY.workloadBrokerPreEffectHandshakeMs
+    + effectMs
+    + TOOL_TIMEOUT_POLICY.workloadBrokerTransportGraceMs
+    + postEffectMs;
+}
+
+/** Executor ceiling that strictly contains every broker phase. */
+export function resolveWorkloadBrokerExecutorCeilingMs(
+  effectMs: number,
+  postEffectMs = 0,
+): number {
+  return Math.min(
+    MAX_TIMER_DELAY_MS,
+    resolveWorkloadBrokerInvocationBudgetMs(effectMs, postEffectMs)
+      + TOOL_TIMEOUT_POLICY.workloadBrokerOuterGuardMs,
+  );
+}
 
 /**
  * The one rule for what counts as a usable shutdown cleanup window.
@@ -249,5 +315,34 @@ if (
       + `(${SUBAGENT_MAX_ROUNDS_DEFAULT}) must equal subAgentCeilingFloorMs `
       + `(${TOOL_TIMEOUT_POLICY.subAgentCeilingFloorMs}) — the per-round allowance is derived `
       + "from that pair, so the scaled ceiling must agree with the floor at the default budget.",
+  );
+}
+
+if (
+  resolveWorkloadBrokerExecutorCeilingMs(
+    TOOL_TIMEOUT_POLICY.workloadBrokerBackgroundCleanupEffectMs,
+  ) >= TOOL_TIMEOUT_POLICY.shutdownCleanupMs
+) {
+  throw new Error(
+    "The default shutdown window must strictly contain a complete broker background cleanup request.",
+  );
+}
+
+if (resolveWorkloadBrokerInvocationBudgetMs(
+  TOOL_TIMEOUT_POLICY.workloadBrokerFileOperationMs,
+) <= TOOL_TIMEOUT_POLICY.globalCeilingMs) {
+  throw new Error(
+    "The workload broker invocation budget must include protocol phases outside the global effect ceiling.",
+  );
+}
+
+if (
+  TOOL_TIMEOUT_POLICY.workloadBrokerPreEffectHandshakeMs
+    + TOOL_TIMEOUT_POLICY.workloadBrokerTransportGraceMs
+    + TOOL_TIMEOUT_POLICY.workloadBrokerOuterGuardMs
+  !== TOOL_TIMEOUT_POLICY.shellCeilingGraceMs
+) {
+  throw new Error(
+    "The shell ceiling grace must equal all host-owned broker phases plus the outer guard.",
   );
 }

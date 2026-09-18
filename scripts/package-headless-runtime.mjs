@@ -11,6 +11,29 @@ import { readBuildSourceIdentity } from "./lib/build-source-identity.mjs";
 import { headlessPackagedMarkerPath } from "./lib/headless-packaged-marker.mjs";
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+export const HEADLESS_RUNTIME_CONTRACTS = Object.freeze({
+  workloadBrokerCorrelation: "lvis-workload-correlation/v1",
+  permissionAuditProof: "lvis-permission-audit-proof/v1",
+  permissionAuditSelfTest: "lvis-permission-audit-self-test/v1",
+  launcherEnvironment: "lvis-headless-launch-environment/v1",
+});
+export const HEADLESS_FORBIDDEN_INHERITED_ENV = Object.freeze([
+  "ELECTRON_NO_ASAR",
+  "ELECTRON_RUN_AS_NODE",
+  "NODE_CHANNEL_FD",
+  "NODE_CHANNEL_SERIALIZATION_MODE",
+  "NODE_OPTIONS",
+  "NODE_PATH",
+  "NODE_UNIQUE_ID",
+]);
+export const HEADLESS_LAUNCHER = `#!/bin/sh
+set -eu
+lvis_runtime_root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+unset ${HEADLESS_FORBIDDEN_INHERITED_ENV.join(" ")}
+export NODE_ENV=production
+export LVIS_RESOURCES_DIR="$lvis_runtime_root/resources"
+exec "$lvis_runtime_root/bin/node" --disable-warning=UNDICI-EHPA "$lvis_runtime_root/app/dist/src/main/headless.js" "$@"
+`;
 
 function parseArguments(argv) {
   const options = {};
@@ -154,7 +177,7 @@ function main() {
   cpSync(options["node-license"], join(options.out, "licenses/node-LICENSE"));
   // Keep NODE_ENV for downstream compatibility; the app-root marker below is
   // the only input that establishes the native runtime's packaged identity.
-  writeFileSync(join(options.out, "lvis"), '#!/bin/sh\nset -eu\nlvis_runtime_root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\nexport NODE_ENV=production\nexport LVIS_RESOURCES_DIR="$lvis_runtime_root/resources"\nexec "$lvis_runtime_root/bin/node" "$lvis_runtime_root/app/dist/src/main/headless.js" "$@"\n', { mode: 0o755 });
+  writeFileSync(join(options.out, "lvis"), HEADLESS_LAUNCHER, { mode: 0o755 });
   const packagedMarker = writePackagedRuntimeMarker(app);
 
   const probeProfile = mkdtempSync(join(tmpdir(), "lvis-package-runtime-"));
@@ -164,9 +187,7 @@ function main() {
       ...process.env, NODE_ENV: "production", LVIS_RESOURCES_DIR: resources,
       LVIS_HOME: join(probeProfile, "home"), LVIS_USER_DATA_DIR: join(probeProfile, "user-data"),
     };
-    delete probeEnv.NODE_OPTIONS;
-    delete probeEnv.NODE_PATH;
-    delete probeEnv.ELECTRON_RUN_AS_NODE;
+    for (const name of HEADLESS_FORBIDDEN_INHERITED_ENV) delete probeEnv[name];
     delete probeEnv.LVIS_SECRET_KEY_FILE;
     const addonProbe = execFileSync(join(options.out, "bin/node"), [join(repository, "scripts/headless-runtime-smoke.mjs"), app], { encoding: "utf8", cwd: options.out, env: probeEnv, timeout: 60_000 });
     nativeRuntime = JSON.parse(addonProbe.trim());
@@ -176,6 +197,7 @@ function main() {
   if (nativeRuntime.database !== "ok" || nativeRuntime.terminal !== "ok") throw new Error("Native runtime qualification did not complete");
   const manifest = {
     schema: "lvis-headless-runtime/v1",
+    contracts: HEADLESS_RUNTIME_CONTRACTS,
     version: sourcePackage.version,
     source: boundary.source,
     producer: { commit: sourceIdentity.commit, tree: sourceIdentity.tree, script: binding(fileURLToPath(import.meta.url)) },

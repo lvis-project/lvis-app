@@ -3,10 +3,10 @@ import type { BootHost } from "../boot/host-runtime.js";
  * App shutdown cleanup pipeline.
  *
  * Runs the ordered teardown (persist window state → plugin shutdown handlers →
- * v2 shutdown routines → services shutdown → plugin runtime stopAll) under a
- * hard timeout so `app.quit()` can never hang indefinitely on a wedged
- * subsystem. Invoked from the `before-quit` orchestration that stays in
- * `src/main.ts`.
+ * v2 shutdown routines → services shutdown → broker-shell cleanup barrier →
+ * plugin runtime stopAll) under a hard timeout so `app.quit()` can never hang
+ * indefinitely on a wedged subsystem. Invoked from the `before-quit`
+ * orchestration that stays in `src/main.ts`.
  *
  * It also owns the shutdown-hook registry that same orchestration drains
  * first: teardown with no ordering requirement, collected here so no subsystem
@@ -256,6 +256,26 @@ export async function runAppShutdownCleanup(options: {
       subscriptionRuntimesStopped = true;
       if (signal.aborted) return;
       await svc.shutdown?.();
+      if (signal.aborted) return;
+      // Service shutdown aborts active turns, after which no new background
+      // shell may be admitted. Broker shells are not local child processes,
+      // so the managed-child drain below cannot prove their termination. Start
+      // cleanup for every remaining broker handle, then hold this stage, which
+      // already has a hard deadline, until each broker returns terminal
+      // ownership evidence. A capability/transport failure is an explicit
+      // failed shutdown, so external workload release remains the final backstop.
+      const { backgroundShellManager } = await import("../tools/shell-tools.js");
+      backgroundShellManager.disposeAllBrokerShells(signal);
+      const brokerCleanupReports = await backgroundShellManager.waitForAllBrokerCleanup();
+      const unprovenBrokerCleanup = brokerCleanupReports.filter((report) =>
+        report.state !== "complete" ||
+        report.outcomes.some((outcome) => outcome.requiresExternalRelease),
+      );
+      if (unprovenBrokerCleanup.length > 0) {
+        throw new Error(
+          `workload-broker:shutdown-cleanup-unproven:${unprovenBrokerCleanup.length}`,
+        );
+      }
       if (signal.aborted) return;
       // Kill any live interactive PTY terminals (#1444). The pty children are
       // NOT in the managed-child tracker (node-pty's IPty is not a

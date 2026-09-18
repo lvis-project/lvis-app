@@ -17,7 +17,7 @@ function makeLoop(sessionGoalStore?: SessionGoalStore): ConversationLoop {
   const loop = new ConversationLoop(
     makeConversationLoopDeps(sessionGoalStore ? { sessionGoalStore } : {}),
   );
-  loop.newConversation("main");
+  loop.initializeConversation("main");
   return loop;
 }
 

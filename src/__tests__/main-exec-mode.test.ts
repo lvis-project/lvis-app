@@ -62,8 +62,10 @@ describe("main.ts — headless exec branch", () => {
     expect(anchor).toBeGreaterThan(capture);
   });
 
-  it("hands the runner the workspace project authorization the app uses everywhere", () => {
-    expect(mainSource).toContain("isAuthorizedProjectRoot: isAuthorizedWorkspaceProjectRoot,");
+  it("hands ordinary runs the workspace authorization and broker runs the exact guest cwd", () => {
+    expect(mainSource).toMatch(
+      /isAuthorizedProjectRoot:\s*\(root\)\s*=>\s*isWorkloadBrokerActive\(\)\s*\?\s*isActiveWorkloadBrokerCwd\(root\)\s*:\s*isAuthorizedWorkspaceProjectRoot\(root\)/,
+    );
     expect(mainSource).toContain("waitForRelease: waitForExecRelease,");
     expect(mainSource).toContain("flushTelemetry: services.flushTracing,");
   });

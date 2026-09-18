@@ -12,6 +12,13 @@
  * honest representation of the runtime's concurrency model.
  */
 
+interface ConversationActivityTransitionLease {
+  /** Owner active at the instant surface admission closed. */
+  readonly owner: Promise<unknown> | null;
+  /** Reopen surface admission after cleanup and session commit finish. */
+  release(): void;
+}
+
 export interface ConversationActivityCoordinator {
   /** Allocate a process-wide stream correlation id for legacy render adapters. */
   allocateStreamId(): number;
@@ -21,6 +28,21 @@ export interface ConversationActivityCoordinator {
   activeTurn(): Promise<unknown> | null;
   /** The current session-mutation lease, when one exists. */
   activeMutation(): Promise<unknown> | null;
+  /**
+   * Bind the synchronous session-transition admission guard for this runtime.
+   *
+   * ConversationLoop owns the generation boundary while this coordinator
+   * owns surface turns and mutations. Binding the loop's transition state
+   * here gives both paths one admission decision: once a transition begins,
+   * every surface observes busy before any cleanup await can yield.
+   */
+  bindSessionTransitionGuard(guard: () => boolean): () => void;
+  /**
+   * Synchronously close surface admission and capture the existing owner.
+   * The caller aborts when appropriate, drains `owner`, then acquires the
+   * ConversationLoop transition lease. Returns null if already sealed.
+   */
+  beginSessionTransitionAdmission(): ConversationActivityTransitionLease | null;
   /**
    * Acquire the exclusive turn lease before running `factory`.
    *
@@ -62,13 +84,20 @@ export function createConversationActivityCoordinator(
   let nextStreamId = 0;
   let activeTurn: Promise<unknown> | null = null;
   let activeMutation: Promise<unknown> | null = null;
+  let activeSessionTransitionAdmission: object | null = null;
+  let sessionTransitionGuard: (() => boolean) | null = null;
   const turnSettledListeners = new Set<() => void>();
 
   const notifyTurnSettled = (): void => {
     for (const listener of turnSettledListeners) listener();
   };
 
-  const isBusy = () => activeTurn !== null || activeMutation !== null;
+  const isSessionTransitioning = (): boolean => sessionTransitionGuard?.() ?? false;
+
+  const isBusy = () => activeSessionTransitionAdmission !== null
+    || isSessionTransitioning()
+    || activeTurn !== null
+    || activeMutation !== null;
 
   const allocateStreamId = () => {
     if (nextStreamId >= Number.MAX_SAFE_INTEGER) {
@@ -105,6 +134,24 @@ export function createConversationActivityCoordinator(
     isBusy,
     activeTurn: () => activeTurn,
     activeMutation: () => activeMutation,
+    bindSessionTransitionGuard: (guard: () => boolean) => {
+      sessionTransitionGuard = guard;
+      return () => {
+        if (sessionTransitionGuard === guard) sessionTransitionGuard = null;
+      };
+    },
+    beginSessionTransitionAdmission: () => {
+      if (activeSessionTransitionAdmission !== null) return null;
+      const token = Object.freeze({});
+      const owner = activeTurn ?? activeMutation;
+      activeSessionTransitionAdmission = token;
+      return Object.freeze({
+        owner,
+        release: () => {
+          if (activeSessionTransitionAdmission === token) activeSessionTransitionAdmission = null;
+        },
+      });
+    },
     trackTurn,
     tryTrackTurn,
     trackMutation,
