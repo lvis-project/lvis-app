@@ -32,7 +32,7 @@ function capability(): WorkloadBrokerCapabilityDocument {
       boundaryFingerprint: "b".repeat(64),
       imageDigest: `sha256:${"c".repeat(64)}`,
       cwd: "/workspace",
-      home: "/home/agent",
+      home: "/home/example",
       platform: "linux",
     },
     allowedOperations: ["handshake", "file.copy"],

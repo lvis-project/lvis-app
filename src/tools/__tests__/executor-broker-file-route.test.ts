@@ -20,7 +20,7 @@ const broker = vi.hoisted(() => {
       boundaryFingerprint: seed.toUpperCase().repeat(64),
       imageDigest: `sha256:${seed.repeat(64)}`,
       cwd: "/git",
-      home: "/home/workload",
+      home: "/home/example",
       platform: "linux" as const,
     }),
     expiresAt: "2099-01-01T00:00:00.000Z",

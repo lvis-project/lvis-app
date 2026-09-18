@@ -15,7 +15,7 @@ const WORKLOAD = {
   boundaryFingerprint: "b".repeat(64),
   imageDigest: `sha256:${"c".repeat(64)}`,
   cwd: "/app",
-  home: "/home/agent",
+  home: "/home/example",
   platform: "linux" as const,
 };
 

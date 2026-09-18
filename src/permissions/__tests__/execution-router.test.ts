@@ -163,7 +163,7 @@ function issuedBrokeredWorkloadCapability(
       boundaryFingerprint: "f".repeat(64),
       imageDigest: `sha256:${"1".repeat(64)}`,
       cwd: "/workspace",
-      home: "/home/agent",
+      home: "/home/example",
       platform: "linux" as const,
     }),
     expiresAt: "2999-01-01T00:00:00.000Z",
@@ -375,7 +375,7 @@ describe("execution router", () => {
     expect(route.plan.disposableCapability).toMatchObject({
       kind: "workload-broker",
       cwd: "/workspace",
-      home: "/home/agent",
+      home: "/home/example",
       platform: "linux",
     });
 
@@ -387,7 +387,7 @@ describe("execution router", () => {
     const firstGrant = issueBrokeredToolExecutionGrant({ toolUseId: "tool-use-test", capability: first, ...exactInput });
     const changedHome = Object.freeze({
       ...first,
-      workload: Object.freeze({ ...first.workload, home: "/home/other" }),
+      workload: Object.freeze({ ...first.workload, home: "/home/tester" }),
     }) as BrokeredWorkloadCapability;
     workloadCapabilities.issued.add(changedHome);
     workloadCapabilities.active = changedHome;

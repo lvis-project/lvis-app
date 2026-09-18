@@ -40,7 +40,7 @@ const WORKLOAD = {
   boundaryFingerprint: "b".repeat(64),
   imageDigest: `sha256:${"c".repeat(64)}`,
   cwd: "/app",
-  home: "/home/agent",
+  home: "/home/example",
   platform: "linux" as const,
 };
 
@@ -210,8 +210,8 @@ describe("brokered workload runtime", () => {
     expect(getActiveWorkloadBrokerProjection()).toMatchObject({ workload: WORKLOAD });
     expect(resolveBrokeredWorkloadPath(bootCapability, "notes.txt")).toBe("/app/notes.txt");
     expect(resolveBrokeredWorkloadPath(bootCapability, "~/notes.txt"))
-      .toBe("/home/agent/notes.txt");
-    expect(resolveBrokeredWorkloadPath(bootCapability, "~")).toBe("/home/agent");
+      .toBe("/home/example/notes.txt");
+    expect(resolveBrokeredWorkloadPath(bootCapability, "~")).toBe("/home/example");
     expect(resolveBrokeredWorkloadPath(bootCapability, "/tmp/../app/notes.txt"))
       .toBe("/app/notes.txt");
     expect(() => resolveBrokeredWorkloadPath(bootCapability, "~root/notes.txt"))

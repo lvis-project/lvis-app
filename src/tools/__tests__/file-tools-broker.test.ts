@@ -16,7 +16,7 @@ const broker = vi.hoisted(() => ({
       boundaryFingerprint: "b".repeat(64),
       imageDigest: `sha256:${"c".repeat(64)}`,
       cwd: "/broker/workspace",
-      home: "/home/agent",
+      home: "/home/example",
       platform: "linux",
     }),
     expiresAt: "2999-01-01T00:00:00.000Z",
@@ -124,7 +124,7 @@ describe("canonical file tool broker transport", () => {
   it.each([
     {
       tool: new ReadFileTool(), input: { path: "~/notes.txt" }, operation: "file.read",
-      payload: { path: "/home/agent/notes.txt", offset: 0, limit: 2_000 },
+      payload: { path: "/home/example/notes.txt", offset: 0, limit: 2_000 },
     },
     {
       tool: new ListFilesTool(), input: { path: ".", depth: 3, limit: 17 }, operation: "file.list",
